@@ -15,8 +15,8 @@ const Configuracoes = () => <div className="p-8 text-slate-400">Configurações 
 const TEST_USER = {
   id: 1,
   name: 'Usuário de Teste',
-  email: 'teste@financorp.com',
-  role: 'Administrador'
+  email: 'teste@epygest.com',
+  role: 'admin'
 };
 
 export default function App() {
@@ -60,7 +60,7 @@ export default function App() {
       <main className="pl-64 min-h-screen">
         <header className="h-20 bg-white/80 backdrop-blur-md border-b border-slate-100 flex items-center justify-between px-8 sticky top-0 z-40">
           <div className="flex items-center gap-2">
-            <span className="text-slate-400 text-sm font-medium">FinanCorp</span>
+            <span className="text-slate-400 text-sm font-medium">EpyGest</span>
             <span className="text-slate-300">/</span>
             <span className="text-slate-900 text-sm font-bold capitalize">{activeTab.replace('-', ' ')}</span>
           </div>

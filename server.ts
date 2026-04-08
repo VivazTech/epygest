@@ -1,12 +1,22 @@
 import express from "express";
 import { createServer as createViteServer } from "vite";
+import multer from "multer";
+import * as pdfParseModule from "pdf-parse";
+import fs from "node:fs";
+import path from "node:path";
 import db from "./src/db.ts";
+
+const pdfParse = (pdfParseModule as any).default ?? (pdfParseModule as any);
 
 async function startServer() {
   const app = express();
   const PORT = 3000;
+  const uploadDir = path.resolve("uploads");
+  if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+  const upload = multer({ dest: uploadDir });
 
   app.use(express.json());
+  app.use("/uploads", express.static(uploadDir));
 
   // --- API Routes ---
 
@@ -84,20 +94,137 @@ async function startServer() {
     res.json(invoices);
   });
 
+  app.post("/api/invoices/extract", upload.single("invoice_pdf"), async (req, res) => {
+    if (!req.file) return res.status(400).json({ error: "PDF não enviado" });
+    const normalizedPath = req.file.path.replace(/\\/g, "/");
+    try {
+      const buffer = fs.readFileSync(req.file.path);
+      const parsed = await pdfParse(buffer);
+      const text = parsed.text || "";
+
+      const clean = (value?: string | null) => value?.trim() || "";
+      const pick = (...patterns: RegExp[]) => {
+        for (const pattern of patterns) {
+          const match = text.match(pattern);
+          if (match?.[1]) return clean(match[1]);
+        }
+        return "";
+      };
+
+      const provider_name = pick(
+        /(?:Raz[aã]o\s*Social|Fornecedor)\s*[:\-]\s*([^\n\r]+)/i,
+        /Emitente\s*[:\-]\s*([^\n\r]+)/i
+      );
+      const invoice_number = pick(
+        /(?:N[úu]mero\s*da\s*NF-e|N[úu]mero\s*da\s*Nota|NF[-\s]?e?)\s*[:#\-]?\s*([A-Z0-9.\-\/]+)/i
+      );
+      const issue_dateRaw = pick(
+        /(?:Data\s*de\s*Emiss[aã]o|Emiss[aã]o)\s*[:\-]?\s*(\d{2}[\/.-]\d{2}[\/.-]\d{2,4})/i
+      );
+      const due_dateRaw = pick(
+        /(?:Data\s*de\s*Vencimento|Vencimento)\s*[:\-]?\s*(\d{2}[\/.-]\d{2}[\/.-]\d{2,4})/i
+      );
+      const amountRaw = pick(
+        /(?:Valor\s*Total|Valor\s*da\s*Nota|Total)\s*[:\-]?\s*R?\$?\s*([\d.,]+)/i
+      );
+
+      const toIsoDate = (value: string) => {
+        if (!value) return "";
+        const normalized = value.replace(/[.-]/g, "/");
+        const [d, m, y] = normalized.split("/");
+        if (!d || !m || !y) return "";
+        const yyyy = y.length === 2 ? `20${y}` : y;
+        return `${yyyy.padStart(4, "0")}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
+      };
+
+      const toAmount = (value: string) => {
+        if (!value) return "";
+        const normalized = value.replace(/\./g, "").replace(",", ".");
+        const parsedAmount = Number(normalized);
+        if (Number.isNaN(parsedAmount)) return "";
+        return parsedAmount.toFixed(2);
+      };
+
+      res.json({
+        success: true,
+        extracted: {
+          invoice_number,
+          provider_name,
+          issue_date: toIsoDate(issue_dateRaw),
+          due_date: toIsoDate(due_dateRaw),
+          amount: toAmount(amountRaw),
+        },
+        file_path: normalizedPath,
+      });
+    } catch (error) {
+      // Alguns PDFs (escaneados, protegidos, imagem pura) não têm texto extraível.
+      // Nesses casos, mantemos o upload válido e retornamos campos vazios para preenchimento manual.
+      res.json({
+        success: false,
+        warning: "PDF enviado, mas não foi possível extrair campos automaticamente. Preencha manualmente.",
+        extracted: {
+          invoice_number: "",
+          provider_name: "",
+          issue_date: "",
+          due_date: "",
+          amount: "",
+        },
+        file_path: normalizedPath,
+      });
+    }
+  });
+
   app.post("/api/invoices", (req, res) => {
-    const { invoice_number, provider_name, amount, issue_date, due_date, sector_id, user_id } = req.body;
+    const { invoice_number, provider_name, amount, issue_date, due_date, sector_id, user_id, file_path } = req.body;
     const result = db.prepare(`
-      INSERT INTO invoices (invoice_number, provider_name, amount, issue_date, due_date, sector_id, user_id, status)
-      VALUES (?, ?, ?, ?, ?, ?, ?, 'received')
-    `).run(invoice_number, provider_name, amount, issue_date, due_date, sector_id, user_id);
+      INSERT INTO invoices (invoice_number, provider_name, amount, issue_date, due_date, sector_id, user_id, file_path, status, flow_stage)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'received', 'control_pending')
+    `).run(invoice_number, provider_name, amount, issue_date, due_date, sector_id, user_id, file_path || null);
     res.json({ id: result.lastInsertRowid });
   });
 
-  app.patch("/api/invoices/:id/status", (req, res) => {
+  app.patch("/api/invoices/:id/flow", (req, res) => {
     const { id } = req.params;
-    const { status } = req.body;
-    db.prepare('UPDATE invoices SET status = ? WHERE id = ?').run(status, id);
-    res.json({ success: true });
+    const { action, actorSector, payment_receipt_path } = req.body as {
+      action?: "approve_control" | "mark_paid";
+      actorSector?: string;
+      payment_receipt_path?: string;
+    };
+
+    const invoice = db.prepare("SELECT * FROM invoices WHERE id = ?").get(id) as any;
+    if (!invoice) return res.status(404).json({ error: "Nota não encontrada" });
+
+    if (action === "approve_control") {
+      if ((invoice.flow_stage || "control_pending") !== "control_pending") {
+        return res.status(400).json({ error: "A nota não está aguardando aprovação do Controle" });
+      }
+      db.prepare(`
+        UPDATE invoices
+        SET flow_stage = 'control_approved',
+            approved_at = CURRENT_TIMESTAMP,
+            approved_by_sector = ?
+        WHERE id = ?
+      `).run(actorSector || "CONTROLE", id);
+      return res.json({ success: true });
+    }
+
+    if (action === "mark_paid") {
+      if ((invoice.flow_stage || "control_pending") !== "control_approved") {
+        return res.status(400).json({ error: "A nota precisa ser aprovada pelo Controle antes do pagamento" });
+      }
+      db.prepare(`
+        UPDATE invoices
+        SET status = 'paid',
+            flow_stage = 'paid',
+            paid_at = CURRENT_TIMESTAMP,
+            paid_by_sector = ?,
+            payment_receipt_path = ?
+        WHERE id = ?
+      `).run(actorSector || "FINANCEIRO", payment_receipt_path || null, id);
+      return res.json({ success: true });
+    }
+
+    res.status(400).json({ error: "Ação inválida" });
   });
 
   // Categories

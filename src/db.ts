@@ -1,5 +1,4 @@
 import Database from 'better-sqlite3';
-import path from 'path';
 
 const db = new Database('finance.db');
 
@@ -56,10 +55,16 @@ db.exec(`
     amount REAL NOT NULL,
     issue_date DATE NOT NULL,
     due_date DATE NOT NULL,
-    status TEXT CHECK(status IN ('received', 'paid', 'overdue')) DEFAULT 'received',
+    status TEXT CHECK(status IN ('received', 'control_pending', 'control_approved', 'paid', 'overdue')) DEFAULT 'control_pending',
+    flow_stage TEXT CHECK(flow_stage IN ('control_pending', 'control_approved', 'paid')) DEFAULT 'control_pending',
     sector_id INTEGER,
     user_id INTEGER,
     file_path TEXT,
+    approved_at DATETIME,
+    approved_by_sector TEXT,
+    paid_at DATETIME,
+    paid_by_sector TEXT,
+    payment_receipt_path TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (sector_id) REFERENCES sectors(id),
     FOREIGN KEY (user_id) REFERENCES users(id)
@@ -75,6 +80,17 @@ db.exec(`
   );
 `);
 
+// Forward-only migration for existing databases
+const tableInfo = db.prepare(`PRAGMA table_info(invoices)`).all() as Array<{ name: string }>;
+const hasColumn = (name: string) => tableInfo.some((column) => column.name === name);
+
+if (!hasColumn('approved_at')) db.exec(`ALTER TABLE invoices ADD COLUMN approved_at DATETIME`);
+if (!hasColumn('approved_by_sector')) db.exec(`ALTER TABLE invoices ADD COLUMN approved_by_sector TEXT`);
+if (!hasColumn('paid_at')) db.exec(`ALTER TABLE invoices ADD COLUMN paid_at DATETIME`);
+if (!hasColumn('paid_by_sector')) db.exec(`ALTER TABLE invoices ADD COLUMN paid_by_sector TEXT`);
+if (!hasColumn('payment_receipt_path')) db.exec(`ALTER TABLE invoices ADD COLUMN payment_receipt_path TEXT`);
+if (!hasColumn('flow_stage')) db.exec(`ALTER TABLE invoices ADD COLUMN flow_stage TEXT DEFAULT 'control_pending'`);
+
 // Seed Initial Data
 const seed = () => {
   const userCount = db.prepare('SELECT COUNT(*) as count FROM users').get() as { count: number };
@@ -89,8 +105,8 @@ const seed = () => {
 
   // Users
   const insertUser = db.prepare('INSERT INTO users (name, email, password, role, sector_id) VALUES (?, ?, ?, ?, ?)');
-  insertUser.run('Admin FinanCorp', 'admin@financorp.com', 'admin123', 'admin', null);
-  insertUser.run('Financeiro João', 'finance@financorp.com', 'finance123', 'finance', null);
+  insertUser.run('Admin EpyGest', 'admin@epygest.com', 'admin123', 'admin', null);
+  insertUser.run('Financeiro João', 'finance@epygest.com', 'finance123', 'finance', null);
   insertUser.run('Gestor Maria', 'maria@marketing.com', 'maria123', 'manager', marketingId);
 
   // Categories

@@ -3,26 +3,29 @@ import {
   Plus, 
   Search, 
   Filter, 
-  MoreHorizontal, 
   CheckCircle2, 
   Clock, 
   AlertCircle,
   FileText,
-  Upload
+  Upload,
+  BadgeCheck
 } from 'lucide-react';
 import { cn, formatCurrency, formatDate } from '../lib/utils';
 
 export const Invoices: React.FC = () => {
   const [invoices, setInvoices] = useState<any[]>([]);
   const [sectors, setSectors] = useState<any[]>([]);
+  const [actingSector, setActingSector] = useState<'requester' | 'controle' | 'financeiro'>('requester');
   const [showModal, setShowModal] = useState(false);
+  const [extractingPdf, setExtractingPdf] = useState(false);
   const [formData, setFormData] = useState({
     invoice_number: '',
     provider_name: '',
     amount: '',
     issue_date: '',
     due_date: '',
-    sector_id: ''
+    sector_id: '',
+    file_path: ''
   });
 
   useEffect(() => {
@@ -42,8 +45,44 @@ export const Invoices: React.FC = () => {
       .then(data => setSectors(data));
   };
 
+  const handlePdfUpload = async (file: File) => {
+    setExtractingPdf(true);
+    try {
+      const payload = new FormData();
+      payload.append('invoice_pdf', file);
+      const response = await fetch('/api/invoices/extract', {
+        method: 'POST',
+        body: payload
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Falha ao extrair dados do PDF');
+
+      setFormData((prev) => ({
+        ...prev,
+        invoice_number: data.extracted?.invoice_number || prev.invoice_number,
+        provider_name: data.extracted?.provider_name || prev.provider_name,
+        amount: data.extracted?.amount || prev.amount,
+        issue_date: data.extracted?.issue_date || prev.issue_date,
+        due_date: data.extracted?.due_date || prev.due_date,
+        file_path: data.file_path || prev.file_path
+      }));
+
+      if (data.warning) {
+        alert(data.warning);
+      }
+    } catch (error: any) {
+      alert(error.message || 'Não foi possível processar o PDF.');
+    } finally {
+      setExtractingPdf(false);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!formData.file_path) {
+      alert('Anexe o PDF da nota fiscal para continuar.');
+      return;
+    }
     const response = await fetch('/api/invoices', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -56,18 +95,47 @@ export const Invoices: React.FC = () => {
     });
     if (response.ok) {
       setShowModal(false);
-      setFormData({ invoice_number: '', provider_name: '', amount: '', issue_date: '', due_date: '', sector_id: '' });
+      setFormData({ invoice_number: '', provider_name: '', amount: '', issue_date: '', due_date: '', sector_id: '', file_path: '' });
       fetchInvoices();
     }
   };
 
-  const updateStatus = async (id: number, status: string) => {
-    await fetch(`/api/invoices/${id}/status`, {
+  const runFlowAction = async (id: number, action: 'approve_control' | 'mark_paid', payment_receipt_path?: string) => {
+    const response = await fetch(`/api/invoices/${id}/flow`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status })
+      body: JSON.stringify({
+        action,
+        actorSector: actingSector.toUpperCase(),
+        payment_receipt_path
+      })
     });
+    if (!response.ok) {
+      const data = await response.json();
+      alert(data.error || 'Não foi possível atualizar o fluxo da nota.');
+    }
     fetchInvoices();
+  };
+
+  const approveByControl = (id: number) => runFlowAction(id, 'approve_control');
+
+  const markAsPaid = (id: number) => {
+    const receiptPath = window.prompt('Informe o comprovante (URL/caminho/observação):');
+    if (!receiptPath) return;
+    runFlowAction(id, 'mark_paid', receiptPath);
+  };
+
+  const getStatusUI = (flowStage: string, status: string) => {
+    if (flowStage === 'paid' || status === 'paid') {
+      return { label: 'Pago', icon: CheckCircle2, classes: 'bg-emerald-100 text-emerald-700' };
+    }
+    if (flowStage === 'control_approved') {
+      return { label: 'Aprovado Controle', icon: BadgeCheck, classes: 'bg-blue-100 text-blue-700' };
+    }
+    if (status === 'overdue') {
+      return { label: 'Atrasado', icon: AlertCircle, classes: 'bg-red-100 text-red-700' };
+    }
+    return { label: 'Aguardando Controle', icon: Clock, classes: 'bg-orange-100 text-orange-700' };
   };
 
   return (
@@ -75,16 +143,27 @@ export const Invoices: React.FC = () => {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-bold text-slate-900">Controle de Notas Fiscais</h2>
-          <p className="text-slate-500 text-sm">Gerencie faturas de fornecedores e status de pagamento por setor.</p>
+          <p className="text-slate-500 text-sm">Fluxo: Setor solicitante importa → Controle aprova → Financeiro paga e anexa comprovante.</p>
         </div>
         
-        <button 
-          onClick={() => setShowModal(true)}
-          className="flex items-center gap-2 bg-[#004D40] text-white px-4 py-2.5 rounded-xl shadow-lg shadow-emerald-900/10 hover:bg-[#003d33] transition-colors"
-        >
-          <Plus className="w-4 h-4" />
-          <span className="font-bold text-sm">Nova Nota Fiscal</span>
-        </button>
+        <div className="flex items-center gap-3">
+          <select
+            value={actingSector}
+            onChange={(e) => setActingSector(e.target.value as 'requester' | 'controle' | 'financeiro')}
+            className="px-3 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-semibold text-slate-700"
+          >
+            <option value="requester">Perfil de teste: Setor Solicitante</option>
+            <option value="controle">Perfil de teste: CONTROLE</option>
+            <option value="financeiro">Perfil de teste: FINANCEIRO</option>
+          </select>
+          <button 
+            onClick={() => setShowModal(true)}
+            className="flex items-center gap-2 bg-[#004D40] text-white px-4 py-2.5 rounded-xl shadow-lg shadow-emerald-900/10 hover:bg-[#003d33] transition-colors"
+          >
+            <Plus className="w-4 h-4" />
+            <span className="font-bold text-sm">Importar Nota</span>
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -140,6 +219,7 @@ export const Invoices: React.FC = () => {
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Valor</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Vencimento</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Status</th>
+                <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Comprovante</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Ações</th>
               </tr>
             </thead>
@@ -169,33 +249,78 @@ export const Invoices: React.FC = () => {
                     <p className="text-sm text-slate-600">{formatDate(invoice.due_date)}</p>
                   </td>
                   <td className="px-6 py-4">
-                    <div className={cn(
-                      "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider",
-                      invoice.status === 'paid' ? "bg-emerald-100 text-emerald-700" :
-                      invoice.status === 'overdue' ? "bg-red-100 text-red-700" :
-                      "bg-orange-100 text-orange-700"
-                    )}>
-                      {invoice.status === 'paid' ? <CheckCircle2 className="w-3 h-3" /> :
-                       invoice.status === 'overdue' ? <AlertCircle className="w-3 h-3" /> :
-                       <Clock className="w-3 h-3" />}
-                      {invoice.status === 'paid' ? 'Pago' : 
-                       invoice.status === 'overdue' ? 'Atrasado' : 'Recebido'}
+                    {(() => {
+                      const flowStage = invoice.flow_stage || (invoice.status === 'paid' ? 'paid' : 'control_pending');
+                      const statusUI = getStatusUI(flowStage, invoice.status);
+                      const StatusIcon = statusUI.icon;
+                      return (
+                        <div className={cn(
+                          "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider",
+                          statusUI.classes
+                        )}>
+                          <StatusIcon className="w-3 h-3" />
+                          {statusUI.label}
+                        </div>
+                      );
+                    })()}
+                  </td>
+                  <td className="px-6 py-4">
+                    <div className="flex items-center gap-2">
+                      {invoice.file_path ? (
+                        <a
+                          href={invoice.file_path.startsWith('/') ? invoice.file_path : `/${invoice.file_path}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-xs font-medium text-blue-700 bg-blue-50 px-2 py-1 rounded-lg hover:bg-blue-100 transition-colors"
+                        >
+                          Ver NF
+                        </a>
+                      ) : (
+                        <span className="text-xs text-slate-400">NF --</span>
+                      )}
+                      {invoice.payment_receipt_path ? (
+                        <span className="text-xs font-medium text-emerald-700 bg-emerald-50 px-2 py-1 rounded-lg">
+                          Comp. anexado
+                        </span>
+                      ) : (
+                        <span className="text-xs text-slate-400">Comp. --</span>
+                      )}
                     </div>
                   </td>
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                      {invoice.status !== 'paid' && (
-                        <button 
-                          onClick={() => updateStatus(invoice.id, 'paid')}
-                          className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"
-                          title="Marcar como pago"
+                      {(invoice.file_path && (actingSector === 'controle' || actingSector === 'financeiro')) && (
+                        <a
+                          href={invoice.file_path.startsWith('/') ? invoice.file_path : `/${invoice.file_path}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                          title="Visualizar PDF da nota"
                         >
-                          <CheckCircle2 className="w-4 h-4" />
+                          <FileText className="w-4 h-4" />
+                        </a>
+                      )}
+                      {(actingSector === 'controle' && (invoice.flow_stage || 'control_pending') === 'control_pending') && (
+                        <button 
+                          onClick={() => approveByControl(invoice.id)}
+                          className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                          title="Aprovar no Controle"
+                        >
+                          <BadgeCheck className="w-4 h-4" />
                         </button>
                       )}
-                      <button className="p-2 text-slate-400 hover:bg-slate-100 rounded-lg transition-colors">
-                        <MoreHorizontal className="w-4 h-4" />
-                      </button>
+                      {(actingSector === 'financeiro' && (invoice.flow_stage || 'control_pending') === 'control_approved') && (
+                        <button 
+                          onClick={() => markAsPaid(invoice.id)}
+                          className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"
+                          title="Marcar como pago e anexar comprovante"
+                        >
+                          <Upload className="w-4 h-4" />
+                        </button>
+                      )}
+                      {!((actingSector === 'controle' && (invoice.flow_stage || 'control_pending') === 'control_pending') || (actingSector === 'financeiro' && (invoice.flow_stage || 'control_pending') === 'control_approved')) && (
+                        <span className="text-xs text-slate-400 px-2">Sem ação neste perfil</span>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -216,6 +341,26 @@ export const Invoices: React.FC = () => {
             </div>
             
             <form onSubmit={handleSubmit} className="p-6 space-y-4">
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">PDF da Nota Fiscal</label>
+                <label className="flex items-center justify-center gap-2 w-full px-4 py-3 bg-slate-50 border border-dashed border-slate-300 rounded-xl text-sm text-slate-600 cursor-pointer hover:bg-slate-100 transition-colors">
+                  <Upload className="w-4 h-4" />
+                  <span>{extractingPdf ? 'Lendo PDF...' : 'Selecionar PDF e preencher automaticamente'}</span>
+                  <input
+                    type="file"
+                    accept="application/pdf"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) handlePdfUpload(file);
+                    }}
+                  />
+                </label>
+                {formData.file_path && (
+                  <p className="text-[11px] text-emerald-700 font-medium">PDF processado com sucesso.</p>
+                )}
+              </div>
+
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1.5">
                   <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Número da Nota</label>

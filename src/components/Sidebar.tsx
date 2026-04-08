@@ -44,7 +44,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, user,
           F
         </div>
         <div>
-          <h1 className="font-bold text-lg leading-tight">FinanCorp</h1>
+          <h1 className="font-bold text-lg leading-tight">EpyGest</h1>
           <p className="text-[10px] opacity-60 uppercase tracking-widest">Gestão Inteligente</p>
         </div>
       </div>
