@@ -174,6 +174,20 @@ async function startServer() {
     }
   });
 
+  app.post("/api/invoices/receipt", upload.single("receipt_file"), (req, res) => {
+    if (!req.file) return res.status(400).json({ error: "Comprovante não enviado" });
+
+    const allowedTypes = ["application/pdf", "image/png", "image/jpeg", "image/jpg"];
+    if (!allowedTypes.includes(req.file.mimetype)) {
+      fs.unlinkSync(req.file.path);
+      return res.status(400).json({ error: "Formato inválido. Envie PDF, PNG ou JPG." });
+    }
+
+    res.json({
+      file_path: req.file.path.replace(/\\/g, "/"),
+    });
+  });
+
   app.post("/api/invoices", (req, res) => {
     const { invoice_number, provider_name, amount, issue_date, due_date, sector_id, user_id, file_path } = req.body;
     const result = db.prepare(`

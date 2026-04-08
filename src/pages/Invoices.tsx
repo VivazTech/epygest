@@ -17,6 +17,10 @@ export const Invoices: React.FC = () => {
   const [sectors, setSectors] = useState<any[]>([]);
   const [actingSector, setActingSector] = useState<'requester' | 'controle' | 'financeiro'>('requester');
   const [showModal, setShowModal] = useState(false);
+  const [showReceiptModal, setShowReceiptModal] = useState(false);
+  const [selectedInvoiceId, setSelectedInvoiceId] = useState<number | null>(null);
+  const [receiptFile, setReceiptFile] = useState<File | null>(null);
+  const [uploadingReceipt, setUploadingReceipt] = useState(false);
   const [extractingPdf, setExtractingPdf] = useState(false);
   const [formData, setFormData] = useState({
     invoice_number: '',
@@ -113,16 +117,52 @@ export const Invoices: React.FC = () => {
     if (!response.ok) {
       const data = await response.json();
       alert(data.error || 'Não foi possível atualizar o fluxo da nota.');
+      return false;
     }
     fetchInvoices();
+    return true;
   };
 
   const approveByControl = (id: number) => runFlowAction(id, 'approve_control');
 
   const markAsPaid = (id: number) => {
-    const receiptPath = window.prompt('Informe o comprovante (URL/caminho/observação):');
-    if (!receiptPath) return;
-    runFlowAction(id, 'mark_paid', receiptPath);
+    setSelectedInvoiceId(id);
+    setReceiptFile(null);
+    setShowReceiptModal(true);
+  };
+
+  const submitReceiptAndPay = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedInvoiceId) return;
+    if (!receiptFile) {
+      alert('Selecione o arquivo do comprovante.');
+      return;
+    }
+
+    setUploadingReceipt(true);
+    try {
+      const payload = new FormData();
+      payload.append('receipt_file', receiptFile);
+      const uploadRes = await fetch('/api/invoices/receipt', {
+        method: 'POST',
+        body: payload
+      });
+      const uploadData = await uploadRes.json();
+      if (!uploadRes.ok) {
+        throw new Error(uploadData.error || 'Falha ao enviar comprovante');
+      }
+
+      const ok = await runFlowAction(selectedInvoiceId, 'mark_paid', uploadData.file_path);
+      if (ok) {
+        setShowReceiptModal(false);
+        setSelectedInvoiceId(null);
+        setReceiptFile(null);
+      }
+    } catch (error: any) {
+      alert(error.message || 'Não foi possível concluir o pagamento.');
+    } finally {
+      setUploadingReceipt(false);
+    }
   };
 
   const getStatusUI = (flowStage: string, status: string) => {
@@ -279,9 +319,14 @@ export const Invoices: React.FC = () => {
                         <span className="text-xs text-slate-400">NF --</span>
                       )}
                       {invoice.payment_receipt_path ? (
-                        <span className="text-xs font-medium text-emerald-700 bg-emerald-50 px-2 py-1 rounded-lg">
-                          Comp. anexado
-                        </span>
+                        <a
+                          href={invoice.payment_receipt_path.startsWith('/') ? invoice.payment_receipt_path : `/${invoice.payment_receipt_path}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-xs font-medium text-emerald-700 bg-emerald-50 px-2 py-1 rounded-lg hover:bg-emerald-100 transition-colors"
+                        >
+                          Ver Comp.
+                        </a>
                       ) : (
                         <span className="text-xs text-slate-400">Comp. --</span>
                       )}
@@ -443,6 +488,57 @@ export const Invoices: React.FC = () => {
                   className="flex-1 px-4 py-3 bg-[#004D40] text-white font-bold rounded-xl hover:bg-[#003d33] shadow-lg shadow-emerald-900/10 transition-colors"
                 >
                   Salvar Nota
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {showReceiptModal && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="p-6 border-b border-slate-100 flex justify-between items-center">
+              <h3 className="text-xl font-bold text-slate-900">Anexar Comprovante</h3>
+              <button
+                onClick={() => setShowReceiptModal(false)}
+                className="text-slate-400 hover:text-slate-600 transition-colors"
+              >
+                <Plus className="w-6 h-6 rotate-45" />
+              </button>
+            </div>
+
+            <form onSubmit={submitReceiptAndPay} className="p-6 space-y-4">
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+                  Arquivo do comprovante (PDF, PNG ou JPG)
+                </label>
+                <input
+                  type="file"
+                  accept="application/pdf,image/png,image/jpeg"
+                  required
+                  onChange={(e) => setReceiptFile(e.target.files?.[0] || null)}
+                  className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+                />
+                {receiptFile && (
+                  <p className="text-[11px] text-slate-500">Selecionado: {receiptFile.name}</p>
+                )}
+              </div>
+
+              <div className="pt-2 flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => setShowReceiptModal(false)}
+                  className="flex-1 px-4 py-3 bg-slate-100 text-slate-600 font-bold rounded-xl hover:bg-slate-200 transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={uploadingReceipt}
+                  className="flex-1 px-4 py-3 bg-[#004D40] text-white font-bold rounded-xl hover:bg-[#003d33] shadow-lg shadow-emerald-900/10 transition-colors disabled:opacity-70"
+                >
+                  {uploadingReceipt ? 'Enviando...' : 'Salvar e marcar como pago'}
                 </button>
               </div>
             </form>
