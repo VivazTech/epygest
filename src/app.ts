@@ -5,9 +5,9 @@ import path from "node:path";
 import xlsx from "xlsx";
 import { supabase } from "./lib/supabase.js";
 
-// Lazy import para manter compatibilidade no ambiente serverless
+// Importa direto o parser para evitar o modo debug do index.js (que tenta abrir ./test/data/*)
 const loadPdfParse = async () => {
-  const mod = await import("pdf-parse");
+  const mod = await import("pdf-parse/lib/pdf-parse.js");
   return (mod as any).default ?? (mod as any);
 };
 
