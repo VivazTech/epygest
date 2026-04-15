@@ -8,7 +8,8 @@ import {
   Layers, 
   Users, 
   Briefcase,
-  ChevronRight
+  ChevronRight,
+  Upload
 } from 'lucide-react';
 import { cn, formatCurrency } from '../lib/utils';
 
@@ -22,13 +23,19 @@ export const CadastrosPage: React.FC = () => {
   const [newName, setNewName] = useState('');
   const [newKey, setNewKey] = useState('');
   const [newSectorId, setNewSectorId] = useState('');
+  const [editingCrdId, setEditingCrdId] = useState<number | null>(null);
+  const [editCrdForm, setEditCrdForm] = useState({ code: '', name: '', sector_id: '', active: true });
+  const [isImportingCrd, setIsImportingCrd] = useState(false);
   const [reqForm, setReqForm] = useState({ sector_id: '', date: '', amount: '', description: '' });
+
+  const refreshCrds = () => fetch('/api/crds').then(res => res.json()).then(data => setCrds(data));
+  const refreshSectors = () => fetch('/api/sectors').then(res => res.json()).then(data => setSectors(data));
 
   useEffect(() => {
     fetch('/api/categories').then(res => res.json()).then(data => setCategories(data));
-    fetch('/api/sectors').then(res => res.json()).then(data => setSectors(data));
+    refreshSectors();
     fetch('/api/payment-methods').then(res => res.json()).then(data => setPaymentMethods(data));
-    fetch('/api/crds').then(res => res.json()).then(data => setCrds(data));
+    refreshCrds();
     fetch('/api/requisitions').then(res => res.json()).then(data => setRequisitions(data));
   }, []);
 
@@ -80,7 +87,7 @@ export const CadastrosPage: React.FC = () => {
       setNewKey('');
       setNewName('');
       setNewSectorId('');
-      fetch('/api/crds').then(res => res.json()).then(data => setCrds(data));
+      refreshCrds();
     }
   };
 
@@ -106,7 +113,7 @@ export const CadastrosPage: React.FC = () => {
     }
     setReqForm({ sector_id: '', date: '', amount: '', description: '' });
     fetch('/api/requisitions').then(res => res.json()).then(data => setRequisitions(data));
-    fetch('/api/sectors').then(res => res.json()).then(data => setSectors(data));
+    refreshSectors();
   };
 
   const updateReqStatus = async (id: number, status: 'open' | 'cancelled' | 'posted') => {
@@ -116,7 +123,73 @@ export const CadastrosPage: React.FC = () => {
       body: JSON.stringify({ status })
     });
     fetch('/api/requisitions').then(res => res.json()).then(data => setRequisitions(data));
-    fetch('/api/sectors').then(res => res.json()).then(data => setSectors(data));
+    refreshSectors();
+  };
+
+  const startEditCrd = (crd: any) => {
+    setEditingCrdId(crd.id);
+    setEditCrdForm({
+      code: crd.code ?? '',
+      name: crd.name ?? '',
+      sector_id: crd.sector_id ? String(crd.sector_id) : '',
+      active: crd.active !== false,
+    });
+  };
+
+  const saveCrdEdit = async () => {
+    if (!editingCrdId) return;
+    if (!editCrdForm.code.trim() || !editCrdForm.name.trim() || !editCrdForm.sector_id) {
+      alert('Preencha código, nome e grupo.');
+      return;
+    }
+
+    const res = await fetch(`/api/crds/${editingCrdId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        code: editCrdForm.code.trim(),
+        name: editCrdForm.name.trim(),
+        sector_id: parseInt(editCrdForm.sector_id),
+        active: editCrdForm.active,
+      })
+    });
+
+    if (!res.ok) {
+      const data = await res.json();
+      alert(data.error || 'Erro ao editar CRD');
+      return;
+    }
+
+    setEditingCrdId(null);
+    refreshCrds();
+  };
+
+  const cancelCrdEdit = () => {
+    setEditingCrdId(null);
+    setEditCrdForm({ code: '', name: '', sector_id: '', active: true });
+  };
+
+  const importCrdFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setIsImportingCrd(true);
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const res = await fetch('/api/crds/import', { method: 'POST', body: formData });
+    const data = await res.json().catch(() => ({}));
+    setIsImportingCrd(false);
+    event.target.value = '';
+
+    if (!res.ok) {
+      alert(data.error || 'Erro ao importar CRDs');
+      return;
+    }
+
+    refreshSectors();
+    refreshCrds();
+    alert(`Importação concluída: ${data.imported ?? 0} CRDs em ${data.groups ?? 0} grupos.`);
   };
 
   return (
@@ -191,6 +264,22 @@ export const CadastrosPage: React.FC = () => {
               >
                 Adicionar
               </button>
+              {activeTab === 'crd' && (
+                <label className={cn(
+                  "inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-slate-200 bg-white text-sm font-bold text-slate-700 cursor-pointer hover:bg-slate-50 transition-colors",
+                  isImportingCrd && "opacity-60 cursor-not-allowed"
+                )}>
+                  <Upload className="w-4 h-4" />
+                  {isImportingCrd ? 'Importando...' : 'Importar XLS'}
+                  <input
+                    type="file"
+                    accept=".xls,.xlsx"
+                    onChange={importCrdFile}
+                    disabled={isImportingCrd}
+                    className="hidden"
+                  />
+                </label>
+              )}
             </div>
           )}
           {activeTab === 'requisicoes' && (
@@ -312,13 +401,48 @@ export const CadastrosPage: React.FC = () => {
               {activeTab === 'crd' && crds.map((c) => (
                 <tr key={c.id} className="hover:bg-slate-50/50 transition-colors group">
                   <td className="px-6 py-4">
-                    <span className="text-sm font-medium text-slate-700">{c.name}</span>
-                    <span className="ml-2 text-[10px] font-bold px-2 py-1 rounded-lg uppercase tracking-wider bg-slate-100 text-slate-500">
-                      {c.code}
-                    </span>
-                    <span className="ml-2 text-[10px] font-bold px-2 py-1 rounded-lg uppercase tracking-wider bg-blue-50 text-blue-700">
-                      {c.sector_name || 'Sem setor'}
-                    </span>
+                    {editingCrdId === c.id ? (
+                      <div className="flex flex-wrap items-center gap-2">
+                        <input
+                          value={editCrdForm.code}
+                          onChange={(e) => setEditCrdForm((p) => ({ ...p, code: e.target.value }))}
+                          className="w-28 px-2 py-1 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold"
+                          placeholder="Código"
+                        />
+                        <input
+                          value={editCrdForm.name}
+                          onChange={(e) => setEditCrdForm((p) => ({ ...p, name: e.target.value }))}
+                          className="w-72 px-2 py-1 bg-slate-50 border border-slate-200 rounded-lg text-sm"
+                          placeholder="Nome"
+                        />
+                        <select
+                          value={editCrdForm.sector_id}
+                          onChange={(e) => setEditCrdForm((p) => ({ ...p, sector_id: e.target.value }))}
+                          className="w-52 px-2 py-1 bg-slate-50 border border-slate-200 rounded-lg text-xs"
+                        >
+                          <option value="">Grupo</option>
+                          {sectors.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                        </select>
+                        <label className="inline-flex items-center gap-1 text-xs text-slate-600">
+                          <input
+                            type="checkbox"
+                            checked={editCrdForm.active}
+                            onChange={(e) => setEditCrdForm((p) => ({ ...p, active: e.target.checked }))}
+                          />
+                          Ativo
+                        </label>
+                      </div>
+                    ) : (
+                      <>
+                        <span className="text-sm font-medium text-slate-700">{c.name}</span>
+                        <span className="ml-2 text-[10px] font-bold px-2 py-1 rounded-lg uppercase tracking-wider bg-slate-100 text-slate-500">
+                          {c.code}
+                        </span>
+                        <span className="ml-2 text-[10px] font-bold px-2 py-1 rounded-lg uppercase tracking-wider bg-blue-50 text-blue-700">
+                          {c.sector_name || 'Sem setor'}
+                        </span>
+                      </>
+                    )}
                   </td>
                   <td className="px-6 py-4">
                     <span className={cn(
@@ -329,7 +453,30 @@ export const CadastrosPage: React.FC = () => {
                     </span>
                   </td>
                   <td className="px-6 py-4 text-right">
-                    <span className="text-xs text-slate-400">Em breve: editar/desativar</span>
+                    {editingCrdId === c.id ? (
+                      <div className="flex items-center justify-end gap-2">
+                        <button
+                          onClick={saveCrdEdit}
+                          className="px-3 py-1.5 text-xs font-bold rounded-lg bg-emerald-50 text-emerald-700 hover:bg-emerald-100 transition-colors"
+                        >
+                          Salvar
+                        </button>
+                        <button
+                          onClick={cancelCrdEdit}
+                          className="px-3 py-1.5 text-xs font-bold rounded-lg bg-slate-100 text-slate-700 hover:bg-slate-200 transition-colors"
+                        >
+                          Cancelar
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => startEditCrd(c)}
+                        className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold rounded-lg bg-slate-100 text-slate-700 hover:bg-slate-200 transition-colors"
+                      >
+                        <Edit2 className="w-3.5 h-3.5" />
+                        Editar
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}
