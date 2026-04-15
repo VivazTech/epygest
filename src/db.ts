@@ -56,15 +56,23 @@ db.exec(`
     issue_date DATE NOT NULL,
     due_date DATE NOT NULL,
     status TEXT CHECK(status IN ('received', 'control_pending', 'control_approved', 'paid', 'overdue')) DEFAULT 'control_pending',
-    flow_stage TEXT CHECK(flow_stage IN ('control_pending', 'control_approved', 'paid')) DEFAULT 'control_pending',
+    flow_stage TEXT CHECK(flow_stage IN ('control_pending', 'control_approved', 'paid', 'cancelled')) DEFAULT 'control_pending',
     sector_id INTEGER,
     user_id INTEGER,
     file_path TEXT,
+    boleto_file_path TEXT,
+    natureza TEXT CHECK(natureza IN ('M', 'O')) DEFAULT 'O',
+    crd TEXT,
+    payment_method TEXT CHECK(payment_method IN ('pix', 'boleto', 'cartao_credito', 'dinheiro')),
+    pix_key TEXT,
     approved_at DATETIME,
     approved_by_sector TEXT,
     paid_at DATETIME,
     paid_by_sector TEXT,
     payment_receipt_path TEXT,
+    cancelled_at DATETIME,
+    cancelled_by_sector TEXT,
+    cancel_reason TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (sector_id) REFERENCES sectors(id),
     FOREIGN KEY (user_id) REFERENCES users(id)
@@ -78,6 +86,33 @@ db.exec(`
     target_profit REAL,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
+
+  CREATE TABLE IF NOT EXISTS payment_methods (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    key TEXT UNIQUE NOT NULL,
+    name TEXT NOT NULL,
+    active BOOLEAN DEFAULT 1,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS crds (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    code TEXT UNIQUE NOT NULL,
+    name TEXT NOT NULL,
+    active BOOLEAN DEFAULT 1,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS requisitions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    sector_id INTEGER NOT NULL,
+    description TEXT,
+    amount REAL NOT NULL,
+    date DATE NOT NULL,
+    status TEXT CHECK(status IN ('open', 'cancelled', 'posted')) DEFAULT 'open',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (sector_id) REFERENCES sectors(id)
+  );
 `);
 
 // Forward-only migration for existing databases
@@ -90,6 +125,32 @@ if (!hasColumn('paid_at')) db.exec(`ALTER TABLE invoices ADD COLUMN paid_at DATE
 if (!hasColumn('paid_by_sector')) db.exec(`ALTER TABLE invoices ADD COLUMN paid_by_sector TEXT`);
 if (!hasColumn('payment_receipt_path')) db.exec(`ALTER TABLE invoices ADD COLUMN payment_receipt_path TEXT`);
 if (!hasColumn('flow_stage')) db.exec(`ALTER TABLE invoices ADD COLUMN flow_stage TEXT DEFAULT 'control_pending'`);
+if (!hasColumn('boleto_file_path')) db.exec(`ALTER TABLE invoices ADD COLUMN boleto_file_path TEXT`);
+if (!hasColumn('crd')) db.exec(`ALTER TABLE invoices ADD COLUMN crd TEXT`);
+if (!hasColumn('payment_method')) db.exec(`ALTER TABLE invoices ADD COLUMN payment_method TEXT`);
+if (!hasColumn('pix_key')) db.exec(`ALTER TABLE invoices ADD COLUMN pix_key TEXT`);
+if (!hasColumn('cancelled_at')) db.exec(`ALTER TABLE invoices ADD COLUMN cancelled_at DATETIME`);
+if (!hasColumn('cancelled_by_sector')) db.exec(`ALTER TABLE invoices ADD COLUMN cancelled_by_sector TEXT`);
+if (!hasColumn('cancel_reason')) db.exec(`ALTER TABLE invoices ADD COLUMN cancel_reason TEXT`);
+if (!hasColumn('natureza')) db.exec(`ALTER TABLE invoices ADD COLUMN natureza TEXT DEFAULT 'O'`);
+
+// Seeds de cadastros (se vazio)
+const paymentMethodCount = db.prepare('SELECT COUNT(*) as count FROM payment_methods').get() as { count: number };
+if (paymentMethodCount.count === 0) {
+  const insertPaymentMethod = db.prepare('INSERT INTO payment_methods (key, name, active) VALUES (?, ?, ?)');
+  insertPaymentMethod.run('pix', 'Pix', 1);
+  insertPaymentMethod.run('boleto', 'Boleto', 1);
+  insertPaymentMethod.run('cartao_credito', 'Cartão de crédito', 1);
+  insertPaymentMethod.run('dinheiro', 'Efetivo', 1);
+}
+
+const crdCount = db.prepare('SELECT COUNT(*) as count FROM crds').get() as { count: number };
+if (crdCount.count === 0) {
+  const insertCrd = db.prepare('INSERT INTO crds (code, name, active) VALUES (?, ?, ?)');
+  insertCrd.run('CRD1', 'CRD1', 1);
+  insertCrd.run('CRD2', 'CRD2', 1);
+  insertCrd.run('CRD3', 'CRD3', 1);
+}
 
 // Seed Initial Data
 const seed = () => {

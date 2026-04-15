@@ -76,10 +76,71 @@ async function startServer() {
   app.get("/api/sectors", (req, res) => {
     const sectors = db.prepare(`
       SELECT s.*, 
-      (SELECT SUM(amount) FROM invoices WHERE sector_id = s.id AND status != 'paid') as pending_amount
+      (
+        SELECT SUM(amount)
+        FROM invoices
+        WHERE sector_id = s.id
+          AND status != 'paid'
+          AND (flow_stage IS NULL OR flow_stage != 'cancelled')
+      ) as pending_invoices,
+      (
+        SELECT SUM(amount)
+        FROM requisitions r
+        WHERE r.sector_id = s.id
+          AND r.status = 'open'
+      ) as pending_requisitions,
+      (
+        COALESCE((
+          SELECT SUM(amount)
+          FROM invoices
+          WHERE sector_id = s.id
+            AND status != 'paid'
+            AND (flow_stage IS NULL OR flow_stage != 'cancelled')
+        ), 0)
+        +
+        COALESCE((
+          SELECT SUM(amount)
+          FROM requisitions r
+          WHERE r.sector_id = s.id
+            AND r.status = 'open'
+        ), 0)
+      ) as pending_amount
       FROM sectors s
     `).all();
     res.json(sectors);
+  });
+
+  // Requisições internas (almoxarifado)
+  app.get("/api/requisitions", (req, res) => {
+    const rows = db.prepare(`
+      SELECT r.*, s.name as sector_name
+      FROM requisitions r
+      LEFT JOIN sectors s ON r.sector_id = s.id
+      ORDER BY date DESC, id DESC
+    `).all();
+    res.json(rows);
+  });
+
+  app.post("/api/requisitions", (req, res) => {
+    const { sector_id, description, amount, date } = req.body as any;
+    if (!sector_id || !amount || !date) {
+      return res.status(400).json({ error: "sector_id, amount e date são obrigatórios" });
+    }
+    const result = db.prepare(`
+      INSERT INTO requisitions (sector_id, description, amount, date, status)
+      VALUES (?, ?, ?, ?, 'open')
+    `).run(sector_id, description || null, amount, date);
+    res.json({ id: result.lastInsertRowid });
+  });
+
+  app.patch("/api/requisitions/:id/status", (req, res) => {
+    const { id } = req.params;
+    const { status } = req.body as any;
+    if (!['open', 'cancelled', 'posted'].includes(status)) {
+      return res.status(400).json({ error: "Status inválido" });
+    }
+    db.prepare(`UPDATE requisitions SET status = ? WHERE id = ?`).run(status, id);
+    res.json({ success: true });
   });
 
   // Invoices
@@ -92,6 +153,96 @@ async function startServer() {
       ORDER BY i.due_date ASC
     `).all();
     res.json(invoices);
+  });
+
+  app.get("/api/invoices/report", (req, res) => {
+    const { from, to, payment_method } = req.query as any as {
+      from?: string;
+      to?: string;
+      payment_method?: string;
+    };
+
+    const where: string[] = [];
+    const params: any[] = [];
+
+    if (from) {
+      where.push("i.due_date >= ?");
+      params.push(from);
+    }
+    if (to) {
+      where.push("i.due_date <= ?");
+      params.push(to);
+    }
+    if (payment_method) {
+      where.push("i.payment_method = ?");
+      params.push(payment_method);
+    }
+
+    // Relatório focado em notas "para pagamento" (não canceladas)
+    where.push("(i.flow_stage IS NULL OR i.flow_stage != 'cancelled')");
+
+    const sql = `
+      SELECT
+        i.id,
+        i.invoice_number,
+        i.provider_name,
+        s.name as sector_name,
+        i.amount,
+        i.issue_date,
+        i.due_date,
+        i.payment_method,
+        i.pix_key,
+        i.flow_stage,
+        i.status,
+        i.file_path,
+        i.boleto_file_path,
+        i.natureza,
+        i.payment_receipt_path,
+        i.created_at
+      FROM invoices i
+      LEFT JOIN sectors s ON i.sector_id = s.id
+      ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
+      ORDER BY i.due_date ASC
+    `;
+
+    const rows = db.prepare(sql).all(...params) as any[];
+
+    const escapeCsv = (value: any) => {
+      const str = value === null || value === undefined ? "" : String(value);
+      const escaped = str.replace(/"/g, '""');
+      return `"${escaped}"`;
+    };
+
+    const header = [
+      "id",
+      "invoice_number",
+      "provider_name",
+      "sector_name",
+      "amount",
+      "issue_date",
+      "due_date",
+      "payment_method",
+      "pix_key",
+      "flow_stage",
+      "status",
+      "file_path",
+      "boleto_file_path",
+      "natureza",
+      "payment_receipt_path",
+      "created_at",
+    ];
+
+    const csvLines = [
+      header.join(","),
+      ...rows.map((r) =>
+        header.map((k) => escapeCsv((r as any)[k])).join(",")
+      ),
+    ];
+
+    const fileName = `relatorio-notas-${Date.now()}.csv`;
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+    res.send("\uFEFF" + csvLines.join("\n"));
   });
 
   app.post("/api/invoices/extract", upload.single("invoice_pdf"), async (req, res) => {
@@ -188,21 +339,47 @@ async function startServer() {
     });
   });
 
+  app.post("/api/invoices/boleto", upload.single("boleto_file"), (req, res) => {
+    if (!req.file) return res.status(400).json({ error: "Boleto não enviado" });
+    if (req.file.mimetype !== "application/pdf") {
+      fs.unlinkSync(req.file.path);
+      return res.status(400).json({ error: "Formato inválido. Envie o boleto em PDF." });
+    }
+    res.json({
+      file_path: req.file.path.replace(/\\/g, "/"),
+    });
+  });
+
   app.post("/api/invoices", (req, res) => {
-    const { invoice_number, provider_name, amount, issue_date, due_date, sector_id, user_id, file_path } = req.body;
+    const { invoice_number, provider_name, amount, issue_date, due_date, sector_id, user_id, file_path, boleto_file_path, natureza, crd, payment_method, pix_key } = req.body;
     const result = db.prepare(`
-      INSERT INTO invoices (invoice_number, provider_name, amount, issue_date, due_date, sector_id, user_id, file_path, status, flow_stage)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'received', 'control_pending')
-    `).run(invoice_number, provider_name, amount, issue_date, due_date, sector_id, user_id, file_path || null);
+      INSERT INTO invoices (invoice_number, provider_name, amount, issue_date, due_date, sector_id, user_id, file_path, boleto_file_path, natureza, crd, payment_method, pix_key, status, flow_stage)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'received', 'control_pending')
+    `).run(
+      invoice_number,
+      provider_name,
+      amount,
+      issue_date,
+      due_date,
+      sector_id,
+      user_id,
+      file_path || null,
+      boleto_file_path || null,
+      natureza || 'O',
+      crd || null,
+      payment_method || null,
+      pix_key || null
+    );
     res.json({ id: result.lastInsertRowid });
   });
 
   app.patch("/api/invoices/:id/flow", (req, res) => {
     const { id } = req.params;
-    const { action, actorSector, payment_receipt_path } = req.body as {
-      action?: "approve_control" | "mark_paid";
+    const { action, actorSector, payment_receipt_path, cancel_reason } = req.body as {
+      action?: "approve_control" | "mark_paid" | "cancel_request";
       actorSector?: string;
       payment_receipt_path?: string;
+      cancel_reason?: string;
     };
 
     const invoice = db.prepare("SELECT * FROM invoices WHERE id = ?").get(id) as any;
@@ -238,6 +415,24 @@ async function startServer() {
       return res.json({ success: true });
     }
 
+    if (action === "cancel_request") {
+      if (invoice.status === "paid" || (invoice.flow_stage || "control_pending") === "paid") {
+        return res.status(400).json({ error: "Não é possível cancelar uma nota já paga" });
+      }
+      if ((invoice.flow_stage || "control_pending") === "cancelled") {
+        return res.status(400).json({ error: "Esta nota já está cancelada" });
+      }
+      db.prepare(`
+        UPDATE invoices
+        SET flow_stage = 'cancelled',
+            cancelled_at = CURRENT_TIMESTAMP,
+            cancelled_by_sector = ?,
+            cancel_reason = ?
+        WHERE id = ?
+      `).run(actorSector || "SOLICITANTE", cancel_reason || null, id);
+      return res.json({ success: true });
+    }
+
     res.status(400).json({ error: "Ação inválida" });
   });
 
@@ -245,6 +440,48 @@ async function startServer() {
   app.get("/api/categories", (req, res) => {
     const categories = db.prepare('SELECT * FROM categories').all();
     res.json(categories);
+  });
+
+  // Cadastros: Formas de pagamento
+  app.get("/api/payment-methods", (req, res) => {
+    const rows = db.prepare("SELECT * FROM payment_methods ORDER BY active DESC, name ASC").all();
+    res.json(rows);
+  });
+
+  app.post("/api/payment-methods", (req, res) => {
+    const { key, name, active } = req.body as any;
+    if (!key || !name) return res.status(400).json({ error: "key e name são obrigatórios" });
+    try {
+      const result = db.prepare("INSERT INTO payment_methods (key, name, active) VALUES (?, ?, ?)").run(
+        key,
+        name,
+        active === false ? 0 : 1
+      );
+      res.json({ id: result.lastInsertRowid });
+    } catch (e: any) {
+      res.status(400).json({ error: "Não foi possível cadastrar (key duplicada?)" });
+    }
+  });
+
+  // Cadastros: CRD
+  app.get("/api/crds", (req, res) => {
+    const rows = db.prepare("SELECT * FROM crds ORDER BY active DESC, code ASC").all();
+    res.json(rows);
+  });
+
+  app.post("/api/crds", (req, res) => {
+    const { code, name, active } = req.body as any;
+    if (!code || !name) return res.status(400).json({ error: "code e name são obrigatórios" });
+    try {
+      const result = db.prepare("INSERT INTO crds (code, name, active) VALUES (?, ?, ?)").run(
+        code,
+        name,
+        active === false ? 0 : 1
+      );
+      res.json({ id: result.lastInsertRowid });
+    } catch (e: any) {
+      res.status(400).json({ error: "Não foi possível cadastrar (code duplicado?)" });
+    }
   });
 
   // Scenarios

@@ -8,13 +8,16 @@ import {
   AlertCircle,
   FileText,
   Upload,
-  BadgeCheck
+  BadgeCheck,
+  XCircle
 } from 'lucide-react';
 import { cn, formatCurrency, formatDate } from '../lib/utils';
 
 export const Invoices: React.FC = () => {
   const [invoices, setInvoices] = useState<any[]>([]);
   const [sectors, setSectors] = useState<any[]>([]);
+  const [paymentMethods, setPaymentMethods] = useState<any[]>([]);
+  const [crdOptions, setCrdOptions] = useState<any[]>([]);
   const [actingSector, setActingSector] = useState<'requester' | 'controle' | 'financeiro'>('requester');
   const [showModal, setShowModal] = useState(false);
   const [showReceiptModal, setShowReceiptModal] = useState(false);
@@ -22,6 +25,13 @@ export const Invoices: React.FC = () => {
   const [receiptFile, setReceiptFile] = useState<File | null>(null);
   const [uploadingReceipt, setUploadingReceipt] = useState(false);
   const [extractingPdf, setExtractingPdf] = useState(false);
+  const [uploadingBoleto, setUploadingBoleto] = useState(false);
+  const [showReportModal, setShowReportModal] = useState(false);
+  const [reportFilters, setReportFilters] = useState({
+    from: '',
+    to: '',
+    payment_method: ''
+  });
   const [formData, setFormData] = useState({
     invoice_number: '',
     provider_name: '',
@@ -29,12 +39,19 @@ export const Invoices: React.FC = () => {
     issue_date: '',
     due_date: '',
     sector_id: '',
-    file_path: ''
+    file_path: '',
+    boleto_file_path: '',
+    natureza: 'O',
+    crd: '',
+    payment_method: '',
+    pix_key: ''
   });
 
   useEffect(() => {
     fetchInvoices();
     fetchSectors();
+    fetch('/api/payment-methods').then(res => res.json()).then(setPaymentMethods);
+    fetch('/api/crds').then(res => res.json()).then(setCrdOptions);
   }, []);
 
   const fetchInvoices = () => {
@@ -87,6 +104,18 @@ export const Invoices: React.FC = () => {
       alert('Anexe o PDF da nota fiscal para continuar.');
       return;
     }
+    if (!formData.boleto_file_path) {
+      alert('Anexe o boleto em PDF para continuar.');
+      return;
+    }
+    if (!formData.payment_method) {
+      alert('Selecione a forma de pagamento.');
+      return;
+    }
+    if (formData.payment_method === 'pix' && !formData.pix_key) {
+      alert('Informe a chave Pix.');
+      return;
+    }
     const response = await fetch('/api/invoices', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -99,19 +128,47 @@ export const Invoices: React.FC = () => {
     });
     if (response.ok) {
       setShowModal(false);
-      setFormData({ invoice_number: '', provider_name: '', amount: '', issue_date: '', due_date: '', sector_id: '', file_path: '' });
+      setFormData({ invoice_number: '', provider_name: '', amount: '', issue_date: '', due_date: '', sector_id: '', file_path: '', boleto_file_path: '', natureza: 'O', crd: '', payment_method: '', pix_key: '' });
       fetchInvoices();
     }
   };
 
-  const runFlowAction = async (id: number, action: 'approve_control' | 'mark_paid', payment_receipt_path?: string) => {
+  const handleBoletoUpload = async (file: File) => {
+    setUploadingBoleto(true);
+    try {
+      const payload = new FormData();
+      payload.append('boleto_file', file);
+      const response = await fetch('/api/invoices/boleto', {
+        method: 'POST',
+        body: payload
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Falha ao enviar boleto');
+      setFormData((prev) => ({
+        ...prev,
+        boleto_file_path: data.file_path || prev.boleto_file_path
+      }));
+    } catch (error: any) {
+      alert(error.message || 'Não foi possível enviar o boleto.');
+    } finally {
+      setUploadingBoleto(false);
+    }
+  };
+
+  const runFlowAction = async (
+    id: number,
+    action: 'approve_control' | 'mark_paid' | 'cancel_request',
+    payment_receipt_path?: string,
+    cancel_reason?: string
+  ) => {
     const response = await fetch(`/api/invoices/${id}/flow`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         action,
         actorSector: actingSector.toUpperCase(),
-        payment_receipt_path
+        payment_receipt_path,
+        cancel_reason
       })
     });
     if (!response.ok) {
@@ -124,6 +181,10 @@ export const Invoices: React.FC = () => {
   };
 
   const approveByControl = (id: number) => runFlowAction(id, 'approve_control');
+  const cancelRequest = async (id: number) => {
+    const reason = window.prompt('Motivo do cancelamento (opcional):') || '';
+    await runFlowAction(id, 'cancel_request', undefined, reason);
+  };
 
   const markAsPaid = (id: number) => {
     setSelectedInvoiceId(id);
@@ -169,6 +230,9 @@ export const Invoices: React.FC = () => {
     if (flowStage === 'paid' || status === 'paid') {
       return { label: 'Pago', icon: CheckCircle2, classes: 'bg-emerald-100 text-emerald-700' };
     }
+    if (flowStage === 'cancelled') {
+      return { label: 'Cancelado', icon: XCircle, classes: 'bg-slate-200 text-slate-700' };
+    }
     if (flowStage === 'control_approved') {
       return { label: 'Aprovado Controle', icon: BadgeCheck, classes: 'bg-blue-100 text-blue-700' };
     }
@@ -176,6 +240,28 @@ export const Invoices: React.FC = () => {
       return { label: 'Atrasado', icon: AlertCircle, classes: 'bg-red-100 text-red-700' };
     }
     return { label: 'Aguardando Controle', icon: Clock, classes: 'bg-orange-100 text-orange-700' };
+  };
+
+  const downloadInvoiceReport = async () => {
+    const params = new URLSearchParams();
+    if (reportFilters.from) params.set('from', reportFilters.from);
+    if (reportFilters.to) params.set('to', reportFilters.to);
+    if (reportFilters.payment_method) params.set('payment_method', reportFilters.payment_method);
+
+    const response = await fetch(`/api/invoices/report?${params.toString()}`);
+    if (!response.ok) {
+      alert('Não foi possível gerar o relatório.');
+      return;
+    }
+    const blob = await response.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `relatorio-notas-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
   };
 
   return (
@@ -243,9 +329,12 @@ export const Invoices: React.FC = () => {
             />
           </div>
           <div className="flex items-center gap-2">
-            <button className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 rounded-lg transition-colors">
+            <button
+              onClick={() => setShowReportModal(true)}
+              className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 rounded-lg transition-colors"
+            >
               <Filter className="w-4 h-4" />
-              Filtrar
+              Relatório
             </button>
           </div>
         </div>
@@ -363,7 +452,23 @@ export const Invoices: React.FC = () => {
                           <Upload className="w-4 h-4" />
                         </button>
                       )}
-                      {!((actingSector === 'controle' && (invoice.flow_stage || 'control_pending') === 'control_pending') || (actingSector === 'financeiro' && (invoice.flow_stage || 'control_pending') === 'control_approved')) && (
+                      {(actingSector === 'requester' &&
+                        (invoice.flow_stage || 'control_pending') !== 'paid' &&
+                        (invoice.flow_stage || 'control_pending') !== 'cancelled' &&
+                        invoice.status !== 'paid') && (
+                        <button
+                          onClick={() => cancelRequest(invoice.id)}
+                          className="p-2 text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+                          title="Cancelar solicitação (para corrigir e lançar novamente)"
+                        >
+                          <XCircle className="w-4 h-4" />
+                        </button>
+                      )}
+                      {!(
+                        (actingSector === 'controle' && (invoice.flow_stage || 'control_pending') === 'control_pending') ||
+                        (actingSector === 'financeiro' && (invoice.flow_stage || 'control_pending') === 'control_approved') ||
+                        (actingSector === 'requester' && (invoice.flow_stage || 'control_pending') !== 'paid' && (invoice.flow_stage || 'control_pending') !== 'cancelled' && invoice.status !== 'paid')
+                      ) && (
                         <span className="text-xs text-slate-400 px-2">Sem ação neste perfil</span>
                       )}
                     </div>
@@ -405,6 +510,81 @@ export const Invoices: React.FC = () => {
                   <p className="text-[11px] text-emerald-700 font-medium">PDF processado com sucesso.</p>
                 )}
               </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Boleto (PDF)</label>
+                <label className="flex items-center justify-center gap-2 w-full px-4 py-3 bg-slate-50 border border-dashed border-slate-300 rounded-xl text-sm text-slate-600 cursor-pointer hover:bg-slate-100 transition-colors">
+                  <Upload className="w-4 h-4" />
+                  <span>{uploadingBoleto ? 'Enviando boleto...' : 'Selecionar boleto em PDF'}</span>
+                  <input
+                    type="file"
+                    accept="application/pdf"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) handleBoletoUpload(file);
+                    }}
+                  />
+                </label>
+                {formData.boleto_file_path && (
+                  <p className="text-[11px] text-emerald-700 font-medium">Boleto anexado com sucesso.</p>
+                )}
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Natureza</label>
+                  <select
+                    value={formData.natureza}
+                    onChange={(e) => setFormData({ ...formData, natureza: e.target.value })}
+                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+                  >
+                    <option value="M">M - Mensal</option>
+                    <option value="O">O - Operacional</option>
+                  </select>
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">CRD</label>
+                  <select
+                    value={formData.crd}
+                    onChange={(e) => setFormData({ ...formData, crd: e.target.value })}
+                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+                  >
+                    <option value="">Selecione</option>
+                    {crdOptions.filter((c) => c.active).map((c) => (
+                      <option key={c.id} value={c.code}>{c.name}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Forma de pagamento</label>
+                <select
+                  required
+                  value={formData.payment_method}
+                  onChange={(e) => setFormData({ ...formData, payment_method: e.target.value, pix_key: e.target.value === 'pix' ? formData.pix_key : '' })}
+                  className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+                >
+                  <option value="">Selecione</option>
+                  {paymentMethods.filter((pm) => pm.active).map((pm) => (
+                    <option key={pm.id} value={pm.key}>{pm.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              {formData.payment_method === 'pix' && (
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Chave Pix</label>
+                  <input
+                    required
+                    value={formData.pix_key}
+                    onChange={(e) => setFormData({ ...formData, pix_key: e.target.value })}
+                    placeholder="CPF/CNPJ, e-mail, telefone ou chave aleatória"
+                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+                  />
+                </div>
+              )}
 
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1.5">
@@ -542,6 +722,79 @@ export const Invoices: React.FC = () => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {showReportModal && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white w-full max-w-lg rounded-3xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="p-6 border-b border-slate-100 flex justify-between items-center">
+              <h3 className="text-xl font-bold text-slate-900">Relatório de Notas para Pagamento</h3>
+              <button
+                onClick={() => setShowReportModal(false)}
+                className="text-slate-400 hover:text-slate-600 transition-colors"
+              >
+                <Plus className="w-6 h-6 rotate-45" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Vencimento (de)</label>
+                  <input
+                    type="date"
+                    value={reportFilters.from}
+                    onChange={(e) => setReportFilters((p) => ({ ...p, from: e.target.value }))}
+                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Vencimento (até)</label>
+                  <input
+                    type="date"
+                    value={reportFilters.to}
+                    onChange={(e) => setReportFilters((p) => ({ ...p, to: e.target.value }))}
+                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Forma de pagamento</label>
+                <select
+                  value={reportFilters.payment_method}
+                  onChange={(e) => setReportFilters((p) => ({ ...p, payment_method: e.target.value }))}
+                  className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+                >
+                  <option value="">Todas</option>
+                  {paymentMethods.filter((pm) => pm.active).map((pm) => (
+                    <option key={pm.id} value={pm.key}>{pm.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="pt-2 flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => setReportFilters({ from: '', to: '', payment_method: '' })}
+                  className="flex-1 px-4 py-3 bg-slate-100 text-slate-600 font-bold rounded-xl hover:bg-slate-200 transition-colors"
+                >
+                  Limpar filtros
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    await downloadInvoiceReport();
+                    setShowReportModal(false);
+                  }}
+                  className="flex-1 px-4 py-3 bg-[#004D40] text-white font-bold rounded-xl hover:bg-[#003d33] shadow-lg shadow-emerald-900/10 transition-colors"
+                >
+                  Exportar CSV
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

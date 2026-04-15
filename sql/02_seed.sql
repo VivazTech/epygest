@@ -111,3 +111,27 @@ SELECT setval(
   pg_get_serial_sequence('public.scenarios', 'id'),
   COALESCE((SELECT MAX(id) FROM public.scenarios), 1)
 );
+
+-- Cadastros iniciais
+INSERT INTO public.payment_methods (key, name, active)
+SELECT 'pix', 'Pix', true
+WHERE NOT EXISTS (SELECT 1 FROM public.payment_methods WHERE key = 'pix');
+INSERT INTO public.payment_methods (key, name, active)
+SELECT 'boleto', 'Boleto', true
+WHERE NOT EXISTS (SELECT 1 FROM public.payment_methods WHERE key = 'boleto');
+INSERT INTO public.payment_methods (key, name, active)
+SELECT 'cartao_credito', 'Cartão de crédito', true
+WHERE NOT EXISTS (SELECT 1 FROM public.payment_methods WHERE key = 'cartao_credito');
+INSERT INTO public.payment_methods (key, name, active)
+SELECT 'dinheiro', 'Efetivo', true
+WHERE NOT EXISTS (SELECT 1 FROM public.payment_methods WHERE key = 'dinheiro');
+
+INSERT INTO public.crds (code, name, active)
+SELECT 'CRD1', 'CRD1', true
+WHERE NOT EXISTS (SELECT 1 FROM public.crds WHERE code = 'CRD1');
+INSERT INTO public.crds (code, name, active)
+SELECT 'CRD2', 'CRD2', true
+WHERE NOT EXISTS (SELECT 1 FROM public.crds WHERE code = 'CRD2');
+INSERT INTO public.crds (code, name, active)
+SELECT 'CRD3', 'CRD3', true
+WHERE NOT EXISTS (SELECT 1 FROM public.crds WHERE code = 'CRD3');

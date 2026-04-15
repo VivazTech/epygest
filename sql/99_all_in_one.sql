@@ -49,15 +49,23 @@ CREATE TABLE IF NOT EXISTS public.invoices (
   issue_date      DATE NOT NULL,
   due_date        DATE NOT NULL,
   status          TEXT NOT NULL DEFAULT 'control_pending' CHECK (status IN ('received', 'control_pending', 'control_approved', 'paid', 'overdue')),
-  flow_stage      TEXT NOT NULL DEFAULT 'control_pending' CHECK (flow_stage IN ('control_pending', 'control_approved', 'paid')),
+  flow_stage      TEXT NOT NULL DEFAULT 'control_pending' CHECK (flow_stage IN ('control_pending', 'control_approved', 'paid', 'cancelled')),
   sector_id       BIGINT REFERENCES public.sectors (id) ON DELETE SET NULL,
   user_id         BIGINT REFERENCES public.users (id) ON DELETE SET NULL,
   file_path       TEXT,
+  boleto_file_path TEXT,
+  natureza       TEXT NOT NULL DEFAULT 'O' CHECK (natureza IN ('M','O')),
+  crd            TEXT,
+  payment_method TEXT CHECK (payment_method IN ('pix', 'boleto', 'cartao_credito', 'dinheiro')),
+  pix_key        TEXT,
   approved_at     TIMESTAMPTZ,
   approved_by_sector TEXT,
   paid_at         TIMESTAMPTZ,
   paid_by_sector  TEXT,
   payment_receipt_path TEXT,
+  cancelled_at    TIMESTAMPTZ,
+  cancelled_by_sector TEXT,
+  cancel_reason   TEXT,
   created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -68,6 +76,22 @@ CREATE TABLE IF NOT EXISTS public.scenarios (
   target_revenue NUMERIC(18, 2),
   target_profit  NUMERIC(18, 2),
   created_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS public.payment_methods (
+  id BIGSERIAL PRIMARY KEY,
+  key TEXT UNIQUE NOT NULL,
+  name TEXT NOT NULL,
+  active BOOLEAN NOT NULL DEFAULT true,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS public.crds (
+  id BIGSERIAL PRIMARY KEY,
+  code TEXT UNIQUE NOT NULL,
+  name TEXT NOT NULL,
+  active BOOLEAN NOT NULL DEFAULT true,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE INDEX IF NOT EXISTS idx_financial_records_date ON public.financial_records (date DESC);
@@ -188,3 +212,26 @@ SELECT setval(
   pg_get_serial_sequence('public.scenarios', 'id'),
   COALESCE((SELECT MAX(id) FROM public.scenarios), 1)
 );
+
+INSERT INTO public.payment_methods (key, name, active)
+SELECT 'pix', 'Pix', true
+WHERE NOT EXISTS (SELECT 1 FROM public.payment_methods WHERE key = 'pix');
+INSERT INTO public.payment_methods (key, name, active)
+SELECT 'boleto', 'Boleto', true
+WHERE NOT EXISTS (SELECT 1 FROM public.payment_methods WHERE key = 'boleto');
+INSERT INTO public.payment_methods (key, name, active)
+SELECT 'cartao_credito', 'Cartão de crédito', true
+WHERE NOT EXISTS (SELECT 1 FROM public.payment_methods WHERE key = 'cartao_credito');
+INSERT INTO public.payment_methods (key, name, active)
+SELECT 'dinheiro', 'Efetivo', true
+WHERE NOT EXISTS (SELECT 1 FROM public.payment_methods WHERE key = 'dinheiro');
+
+INSERT INTO public.crds (code, name, active)
+SELECT 'CRD1', 'CRD1', true
+WHERE NOT EXISTS (SELECT 1 FROM public.crds WHERE code = 'CRD1');
+INSERT INTO public.crds (code, name, active)
+SELECT 'CRD2', 'CRD2', true
+WHERE NOT EXISTS (SELECT 1 FROM public.crds WHERE code = 'CRD2');
+INSERT INTO public.crds (code, name, active)
+SELECT 'CRD3', 'CRD3', true
+WHERE NOT EXISTS (SELECT 1 FROM public.crds WHERE code = 'CRD3');
