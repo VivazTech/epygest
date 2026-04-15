@@ -54,6 +54,14 @@ export const Invoices: React.FC = () => {
     fetch('/api/crds').then(res => res.json()).then(setCrdOptions);
   }, []);
 
+  useEffect(() => {
+    if (!formData.sector_id) {
+      fetch('/api/crds').then(res => res.json()).then(setCrdOptions);
+      return;
+    }
+    fetch(`/api/crds?sector_id=${formData.sector_id}`).then(res => res.json()).then(setCrdOptions);
+  }, [formData.sector_id]);
+
   const fetchInvoices = () => {
     fetch('/api/invoices')
       .then(res => res.json())
@@ -550,9 +558,12 @@ export const Invoices: React.FC = () => {
                     onChange={(e) => setFormData({ ...formData, crd: e.target.value })}
                     className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
                   >
-                    <option value="">Selecione</option>
+                    <option value="">{formData.sector_id ? 'Selecione' : 'Selecione um setor primeiro'}</option>
                     {crdOptions.filter((c) => c.active).map((c) => (
-                      <option key={c.id} value={c.code}>{c.name}</option>
+                      <option key={c.id} value={c.code}>
+                        {c.name}
+                        {c.sector_name ? ` (${c.sector_name})` : ''}
+                      </option>
                     ))}
                   </select>
                 </div>
@@ -647,7 +658,7 @@ export const Invoices: React.FC = () => {
                 <select 
                   required
                   value={formData.sector_id}
-                  onChange={e => setFormData({...formData, sector_id: e.target.value})}
+                  onChange={e => setFormData({...formData, sector_id: e.target.value, crd: ''})}
                   className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
                 >
                   <option value="">Selecione um setor</option>

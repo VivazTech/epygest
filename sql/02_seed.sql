@@ -126,12 +126,81 @@ INSERT INTO public.payment_methods (key, name, active)
 SELECT 'dinheiro', 'Efetivo', true
 WHERE NOT EXISTS (SELECT 1 FROM public.payment_methods WHERE key = 'dinheiro');
 
-INSERT INTO public.crds (code, name, active)
-SELECT 'CRD1', 'CRD1', true
-WHERE NOT EXISTS (SELECT 1 FROM public.crds WHERE code = 'CRD1');
-INSERT INTO public.crds (code, name, active)
-SELECT 'CRD2', 'CRD2', true
-WHERE NOT EXISTS (SELECT 1 FROM public.crds WHERE code = 'CRD2');
-INSERT INTO public.crds (code, name, active)
-SELECT 'CRD3', 'CRD3', true
-WHERE NOT EXISTS (SELECT 1 FROM public.crds WHERE code = 'CRD3');
+INSERT INTO public.crds (code, name, sector_id, active)
+SELECT '350', 'SEGURO VIDA EM GRUPO', 3, true
+WHERE NOT EXISTS (SELECT 1 FROM public.crds WHERE code = '350' AND sector_id = 3);
+INSERT INTO public.crds (code, name, sector_id, active)
+SELECT '379', 'SINDICATO HOTEIS E BARES', 3, true
+WHERE NOT EXISTS (SELECT 1 FROM public.crds WHERE code = '379' AND sector_id = 3);
+INSERT INTO public.crds (code, name, sector_id, active)
+SELECT '398', 'DESPESAS MENSAIS RH', 3, true
+WHERE NOT EXISTS (SELECT 1 FROM public.crds WHERE code = '398' AND sector_id = 3);
+INSERT INTO public.crds (code, name, sector_id, active)
+SELECT '536', 'COSTURAS ZZ', 3, true
+WHERE NOT EXISTS (SELECT 1 FROM public.crds WHERE code = '536' AND sector_id = 3);
+INSERT INTO public.crds (code, name, sector_id, active)
+SELECT '423', 'CURSOS/TREINAMENTOS/CAPACITACOES', 3, true
+WHERE NOT EXISTS (SELECT 1 FROM public.crds WHERE code = '423' AND sector_id = 3);
+INSERT INTO public.crds (code, name, sector_id, active)
+SELECT '439', 'XEROX/PLASTIFICACOES', 3, true
+WHERE NOT EXISTS (SELECT 1 FROM public.crds WHERE code = '439' AND sector_id = 3);
+INSERT INTO public.crds (code, name, sector_id, active)
+SELECT '603', 'ENDOMARKETING', 3, true
+WHERE NOT EXISTS (SELECT 1 FROM public.crds WHERE code = '603' AND sector_id = 3);
+INSERT INTO public.crds (code, name, sector_id, active)
+SELECT '664', 'COSTURAS UNIFORMES RH ZZ', 3, true
+WHERE NOT EXISTS (SELECT 1 FROM public.crds WHERE code = '664' AND sector_id = 3);
+INSERT INTO public.crds (code, name, sector_id, active)
+SELECT '337', 'TAXA PROC TRABALHISTA', 3, true
+WHERE NOT EXISTS (SELECT 1 FROM public.crds WHERE code = '337' AND sector_id = 3);
+INSERT INTO public.crds (code, name, sector_id, active)
+SELECT 'RH-RECURSOS-HUMANOS', 'RECURSOS HUMANOS', 3, true
+WHERE NOT EXISTS (SELECT 1 FROM public.crds WHERE code = 'RH-RECURSOS-HUMANOS' AND sector_id = 3);
+INSERT INTO public.crds (code, name, sector_id, active)
+SELECT 'RH-UNIFORMES-EPIS', 'UNIFORMES E EPIS', 3, true
+WHERE NOT EXISTS (SELECT 1 FROM public.crds WHERE code = 'RH-UNIFORMES-EPIS' AND sector_id = 3);
+INSERT INTO public.crds (code, name, sector_id, active)
+SELECT 'RH-FOLHA-PAGAMENTO', 'Folha de pagamento', 3, true
+WHERE NOT EXISTS (SELECT 1 FROM public.crds WHERE code = 'RH-FOLHA-PAGAMENTO' AND sector_id = 3);
+INSERT INTO public.crds (code, name, sector_id, active)
+SELECT 'RH-EXTRAS', 'Extras', 3, true
+WHERE NOT EXISTS (SELECT 1 FROM public.crds WHERE code = 'RH-EXTRAS' AND sector_id = 3);
+INSERT INTO public.crds (code, name, sector_id, active)
+SELECT 'RH-COMBUSTIVEL-FOLHA', 'COMBUSTIVEL FOLHA', 3, true
+WHERE NOT EXISTS (SELECT 1 FROM public.crds WHERE code = 'RH-COMBUSTIVEL-FOLHA' AND sector_id = 3);
+INSERT INTO public.crds (code, name, sector_id, active)
+SELECT '267', 'VALE TRANSPORTE', 3, true
+WHERE NOT EXISTS (SELECT 1 FROM public.crds WHERE code = '267' AND sector_id = 3);
+INSERT INTO public.crds (code, name, sector_id, active)
+SELECT '296', 'PROCESSO TRABALHISTA', 3, true
+WHERE NOT EXISTS (SELECT 1 FROM public.crds WHERE code = '296' AND sector_id = 3);
+INSERT INTO public.crds (code, name, sector_id, active)
+SELECT '297', 'CONVENIOS MEDICOS', 3, true
+WHERE NOT EXISTS (SELECT 1 FROM public.crds WHERE code = '297' AND sector_id = 3);
+INSERT INTO public.crds (code, name, sector_id, active)
+SELECT '299', 'CONVENIO ODONTOLOGICO', 3, true
+WHERE NOT EXISTS (SELECT 1 FROM public.crds WHERE code = '299' AND sector_id = 3);
+INSERT INTO public.crds (code, name, sector_id, active)
+SELECT '300', 'AJUDA DE CUSTO', 3, true
+WHERE NOT EXISTS (SELECT 1 FROM public.crds WHERE code = '300' AND sector_id = 3);
+INSERT INTO public.crds (code, name, sector_id, active)
+SELECT '306', 'RPA', 3, true
+WHERE NOT EXISTS (SELECT 1 FROM public.crds WHERE code = '306' AND sector_id = 3);
+INSERT INTO public.crds (code, name, sector_id, active)
+SELECT '308', 'VALE ALIMENTACAO/REFEICAO HOTEL', 3, true
+WHERE NOT EXISTS (SELECT 1 FROM public.crds WHERE code = '308' AND sector_id = 3);
+INSERT INTO public.crds (code, name, sector_id, active)
+SELECT '630', 'ASSIDUIDADE E BOAS PRATICAS', 3, true
+WHERE NOT EXISTS (SELECT 1 FROM public.crds WHERE code = '630' AND sector_id = 3);
+INSERT INTO public.crds (code, name, sector_id, active)
+SELECT '378', 'SINDICATO PATRONAL', 3, true
+WHERE NOT EXISTS (SELECT 1 FROM public.crds WHERE code = '378' AND sector_id = 3);
+INSERT INTO public.crds (code, name, sector_id, active)
+SELECT '382', 'SERV SEGURANCA TRABALHO', 3, true
+WHERE NOT EXISTS (SELECT 1 FROM public.crds WHERE code = '382' AND sector_id = 3);
+INSERT INTO public.crds (code, name, sector_id, active)
+SELECT '528', 'COMPLEMENTO FOLHA ZZ', 3, true
+WHERE NOT EXISTS (SELECT 1 FROM public.crds WHERE code = '528' AND sector_id = 3);
+INSERT INTO public.crds (code, name, sector_id, active)
+SELECT '302', 'AUTO INFRACAO MINISTERIO TRABALHO', 3, true
+WHERE NOT EXISTS (SELECT 1 FROM public.crds WHERE code = '302' AND sector_id = 3);

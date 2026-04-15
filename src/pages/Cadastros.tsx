@@ -21,6 +21,7 @@ export const CadastrosPage: React.FC = () => {
   const [requisitions, setRequisitions] = useState<any[]>([]);
   const [newName, setNewName] = useState('');
   const [newKey, setNewKey] = useState('');
+  const [newSectorId, setNewSectorId] = useState('');
   const [reqForm, setReqForm] = useState({ sector_id: '', date: '', amount: '', description: '' });
 
   useEffect(() => {
@@ -62,10 +63,14 @@ export const CadastrosPage: React.FC = () => {
       return;
     }
     if (activeTab === 'crd') {
+      if (!newSectorId) {
+        alert('Selecione o setor/grupo do CRD.');
+        return;
+      }
       const res = await fetch('/api/crds', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code: newKey.trim(), name: newName.trim(), active: true })
+        body: JSON.stringify({ code: newKey.trim(), name: newName.trim(), sector_id: parseInt(newSectorId), active: true })
       });
       if (!res.ok) {
         const data = await res.json();
@@ -74,6 +79,7 @@ export const CadastrosPage: React.FC = () => {
       }
       setNewKey('');
       setNewName('');
+      setNewSectorId('');
       fetch('/api/crds').then(res => res.json()).then(data => setCrds(data));
     }
   };
@@ -169,6 +175,16 @@ export const CadastrosPage: React.FC = () => {
                 placeholder="Nome"
                 className="w-56 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
               />
+              {activeTab === 'crd' && (
+                <select
+                  value={newSectorId}
+                  onChange={(e) => setNewSectorId(e.target.value)}
+                  className="w-44 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+                >
+                  <option value="">Setor / Grupo</option>
+                  {sectors.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                </select>
+              )}
               <button
                 onClick={createCadastro}
                 className="px-4 py-2 bg-[#004D40] text-white font-bold rounded-xl hover:bg-[#003d33] transition-colors"
@@ -299,6 +315,9 @@ export const CadastrosPage: React.FC = () => {
                     <span className="text-sm font-medium text-slate-700">{c.name}</span>
                     <span className="ml-2 text-[10px] font-bold px-2 py-1 rounded-lg uppercase tracking-wider bg-slate-100 text-slate-500">
                       {c.code}
+                    </span>
+                    <span className="ml-2 text-[10px] font-bold px-2 py-1 rounded-lg uppercase tracking-wider bg-blue-50 text-blue-700">
+                      {c.sector_name || 'Sem setor'}
                     </span>
                   </td>
                   <td className="px-6 py-4">

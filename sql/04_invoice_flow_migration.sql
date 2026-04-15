@@ -26,11 +26,19 @@ CREATE TABLE IF NOT EXISTS public.payment_methods (
 
 CREATE TABLE IF NOT EXISTS public.crds (
   id BIGSERIAL PRIMARY KEY,
-  code TEXT UNIQUE NOT NULL,
+  code TEXT NOT NULL,
   name TEXT NOT NULL,
+  sector_id BIGINT REFERENCES public.sectors (id) ON DELETE SET NULL,
   active BOOLEAN NOT NULL DEFAULT true,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (code, sector_id)
 );
+
+ALTER TABLE public.crds
+  ADD COLUMN IF NOT EXISTS sector_id BIGINT REFERENCES public.sectors (id) ON DELETE SET NULL;
+
+DROP INDEX IF EXISTS public.crds_code_key;
+CREATE UNIQUE INDEX IF NOT EXISTS ux_crds_code_sector ON public.crds (code, sector_id);
 
 ALTER TABLE public.invoices
   ADD COLUMN IF NOT EXISTS natureza TEXT;

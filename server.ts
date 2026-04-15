@@ -465,22 +465,38 @@ async function startServer() {
 
   // Cadastros: CRD
   app.get("/api/crds", (req, res) => {
-    const rows = db.prepare("SELECT * FROM crds ORDER BY active DESC, code ASC").all();
+    const { sector_id } = req.query as { sector_id?: string };
+    const hasSectorFilter = !!sector_id && Number.isFinite(Number(sector_id));
+    const rows = hasSectorFilter
+      ? db.prepare(`
+          SELECT c.*, s.name as sector_name
+          FROM crds c
+          LEFT JOIN sectors s ON s.id = c.sector_id
+          WHERE c.sector_id = ?
+          ORDER BY c.active DESC, c.code ASC
+        `).all(Number(sector_id))
+      : db.prepare(`
+          SELECT c.*, s.name as sector_name
+          FROM crds c
+          LEFT JOIN sectors s ON s.id = c.sector_id
+          ORDER BY s.name ASC, c.active DESC, c.code ASC
+        `).all();
     res.json(rows);
   });
 
   app.post("/api/crds", (req, res) => {
-    const { code, name, active } = req.body as any;
-    if (!code || !name) return res.status(400).json({ error: "code e name são obrigatórios" });
+    const { code, name, sector_id, active } = req.body as any;
+    if (!code || !name || !sector_id) return res.status(400).json({ error: "code, name e sector_id são obrigatórios" });
     try {
-      const result = db.prepare("INSERT INTO crds (code, name, active) VALUES (?, ?, ?)").run(
+      const result = db.prepare("INSERT INTO crds (code, name, sector_id, active) VALUES (?, ?, ?, ?)").run(
         code,
         name,
+        Number(sector_id),
         active === false ? 0 : 1
       );
       res.json({ id: result.lastInsertRowid });
     } catch (e: any) {
-      res.status(400).json({ error: "Não foi possível cadastrar (code duplicado?)" });
+      res.status(400).json({ error: "Não foi possível cadastrar CRD (código já existe neste setor?)" });
     }
   });
 

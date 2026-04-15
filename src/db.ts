@@ -97,10 +97,13 @@ db.exec(`
 
   CREATE TABLE IF NOT EXISTS crds (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    code TEXT UNIQUE NOT NULL,
+    code TEXT NOT NULL,
     name TEXT NOT NULL,
+    sector_id INTEGER,
     active BOOLEAN DEFAULT 1,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (sector_id) REFERENCES sectors(id),
+    UNIQUE(code, sector_id)
   );
 
   CREATE TABLE IF NOT EXISTS requisitions (
@@ -134,6 +137,10 @@ if (!hasColumn('cancelled_by_sector')) db.exec(`ALTER TABLE invoices ADD COLUMN 
 if (!hasColumn('cancel_reason')) db.exec(`ALTER TABLE invoices ADD COLUMN cancel_reason TEXT`);
 if (!hasColumn('natureza')) db.exec(`ALTER TABLE invoices ADD COLUMN natureza TEXT DEFAULT 'O'`);
 
+const crdTableInfo = db.prepare(`PRAGMA table_info(crds)`).all() as Array<{ name: string }>;
+const crdHasColumn = (name: string) => crdTableInfo.some((column) => column.name === name);
+if (!crdHasColumn('sector_id')) db.exec(`ALTER TABLE crds ADD COLUMN sector_id INTEGER`);
+
 // Seeds de cadastros (se vazio)
 const paymentMethodCount = db.prepare('SELECT COUNT(*) as count FROM payment_methods').get() as { count: number };
 if (paymentMethodCount.count === 0) {
@@ -146,10 +153,35 @@ if (paymentMethodCount.count === 0) {
 
 const crdCount = db.prepare('SELECT COUNT(*) as count FROM crds').get() as { count: number };
 if (crdCount.count === 0) {
-  const insertCrd = db.prepare('INSERT INTO crds (code, name, active) VALUES (?, ?, ?)');
-  insertCrd.run('CRD1', 'CRD1', 1);
-  insertCrd.run('CRD2', 'CRD2', 1);
-  insertCrd.run('CRD3', 'CRD3', 1);
+  const rhSector = db.prepare(`SELECT id FROM sectors WHERE UPPER(name) = 'RH' LIMIT 1`).get() as { id?: number } | undefined;
+  const rhSectorId = rhSector?.id ?? null;
+  const insertCrd = db.prepare('INSERT INTO crds (code, name, sector_id, active) VALUES (?, ?, ?, ?)');
+  insertCrd.run('350', 'SEGURO VIDA EM GRUPO', rhSectorId, 1);
+  insertCrd.run('379', 'SINDICATO HOTEIS E BARES', rhSectorId, 1);
+  insertCrd.run('398', 'DESPESAS MENSAIS RH', rhSectorId, 1);
+  insertCrd.run('536', 'COSTURAS ZZ', rhSectorId, 1);
+  insertCrd.run('423', 'CURSOS/TREINAMENTOS/CAPACITACOES', rhSectorId, 1);
+  insertCrd.run('439', 'XEROX/PLASTIFICACOES', rhSectorId, 1);
+  insertCrd.run('603', 'ENDOMARKETING', rhSectorId, 1);
+  insertCrd.run('664', 'COSTURAS UNIFORMES RH ZZ', rhSectorId, 1);
+  insertCrd.run('337', 'TAXA PROC TRABALHISTA', rhSectorId, 1);
+  insertCrd.run('RH-RECURSOS-HUMANOS', 'RECURSOS HUMANOS', rhSectorId, 1);
+  insertCrd.run('RH-UNIFORMES-EPIS', 'UNIFORMES E EPIS', rhSectorId, 1);
+  insertCrd.run('RH-FOLHA-PAGAMENTO', 'Folha de pagamento', rhSectorId, 1);
+  insertCrd.run('RH-EXTRAS', 'Extras', rhSectorId, 1);
+  insertCrd.run('RH-COMBUSTIVEL-FOLHA', 'COMBUSTIVEL FOLHA', rhSectorId, 1);
+  insertCrd.run('267', 'VALE TRANSPORTE', rhSectorId, 1);
+  insertCrd.run('296', 'PROCESSO TRABALHISTA', rhSectorId, 1);
+  insertCrd.run('297', 'CONVENIOS MEDICOS', rhSectorId, 1);
+  insertCrd.run('299', 'CONVENIO ODONTOLOGICO', rhSectorId, 1);
+  insertCrd.run('300', 'AJUDA DE CUSTO', rhSectorId, 1);
+  insertCrd.run('306', 'RPA', rhSectorId, 1);
+  insertCrd.run('308', 'VALE ALIMENTACAO/REFEICAO HOTEL', rhSectorId, 1);
+  insertCrd.run('630', 'ASSIDUIDADE E BOAS PRATICAS', rhSectorId, 1);
+  insertCrd.run('378', 'SINDICATO PATRONAL', rhSectorId, 1);
+  insertCrd.run('382', 'SERV SEGURANCA TRABALHO', rhSectorId, 1);
+  insertCrd.run('528', 'COMPLEMENTO FOLHA ZZ', rhSectorId, 1);
+  insertCrd.run('302', 'AUTO INFRACAO MINISTERIO TRABALHO', rhSectorId, 1);
 }
 
 // Seed Initial Data

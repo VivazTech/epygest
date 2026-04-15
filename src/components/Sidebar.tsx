@@ -11,7 +11,8 @@ import {
   LogOut,
   Receipt,
   PlusCircle,
-  Database
+  Database,
+  Archive
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 
@@ -28,6 +29,7 @@ const menuItems = [
   { id: 'dre', label: 'DRE Gerencial', icon: FileSpreadsheet, roles: ['admin', 'finance'] },
   { id: 'planejamento', label: 'Planejamento', icon: Target, roles: ['admin', 'finance', 'manager'] },
   { id: 'notas', label: 'Controle de Notas', icon: Receipt, roles: ['admin', 'finance', 'manager'] },
+  { id: 'requisicoes', label: 'Requisições', icon: Archive, roles: ['admin', 'finance', 'manager'] },
   { id: 'importacao', label: 'Importação', icon: PlusCircle, roles: ['admin', 'finance'] },
   { id: 'cadastros', label: 'Cadastros', icon: Database, roles: ['admin', 'finance'] },
   { id: 'usuarios', label: 'Usuários', icon: Users, roles: ['admin'] },

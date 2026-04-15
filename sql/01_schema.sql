@@ -94,10 +94,12 @@ CREATE TABLE IF NOT EXISTS public.payment_methods (
 
 CREATE TABLE IF NOT EXISTS public.crds (
   id BIGSERIAL PRIMARY KEY,
-  code TEXT UNIQUE NOT NULL,
+  code TEXT NOT NULL,
   name TEXT NOT NULL,
+  sector_id BIGINT REFERENCES public.sectors (id) ON DELETE SET NULL,
   active BOOLEAN NOT NULL DEFAULT true,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (code, sector_id)
 );
 
 -- ---------------------------------------------------------------------------
