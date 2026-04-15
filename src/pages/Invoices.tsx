@@ -116,7 +116,7 @@ export const Invoices: React.FC = () => {
       }));
 
       if (data.warning) {
-        alert(data.warning);
+        alert(`${data.warning}${data.parse_error ? `\nDetalhe técnico: ${data.parse_error}` : ''}`);
       }
     } catch (error: any) {
       alert(error.message || 'Não foi possível processar o PDF.');

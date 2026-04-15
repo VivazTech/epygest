@@ -345,48 +345,68 @@ export function createApp() {
     if (!req.file) return res.status(400).json({ error: "PDF não enviado" });
 
     try {
-      const buffer = fs.readFileSync(req.file.path);
-      const pdfParse = await loadPdfParse();
-      const parsed = await pdfParse(buffer);
-      const text = parsed.text || "";
-
-      const pick = (...patterns: RegExp[]) => {
-        for (const p of patterns) {
-          const m = text.match(p);
-          if (m?.[1]) return m[1].trim();
-        }
-        return "";
-      };
-
-      const provider_name = pick(
-        /(?:Raz[aã]o\s*Social|Fornecedor)\s*[:\-]\s*([^\n\r]+)/i,
-        /Emitente\s*[:\-]\s*([^\n\r]+)/i
-      );
-      const invoice_number = pick(
-        /(?:N[úu]mero\s*da\s*NF-e|N[úu]mero\s*da\s*Nota|NF[-\s]?e?)\s*[:#\-]?\s*([A-Z0-9.\-\/]+)/i
-      );
-      const issue_dateRaw = pick(
-        /(?:Data\s*de\s*Emiss[aã]o|Emiss[aã]o)\s*[:\-]?\s*(\d{2}[\/.-]\d{2}[\/.-]\d{2,4})/i
-      );
-      const due_dateRaw = pick(
-        /(?:Data\s*de\s*Vencimento|Vencimento)\s*[:\-]?\s*(\d{2}[\/.-]\d{2}[\/.-]\d{2,4})/i
-      );
-      const amountRaw = pick(
-        /(?:Valor\s*Total|Valor\s*da\s*Nota|Total)\s*[:\-]?\s*R?\$?\s*([\d.,]+)/i
-      );
-
-      // Faz upload para Supabase Storage
       const fileBuffer = fs.readFileSync(req.file.path);
       const storagePath = `invoices/${Date.now()}-${req.file.originalname || "nota.pdf"}`;
-      await supabase.storage.from("invoice-files").upload(storagePath, fileBuffer, {
+
+      const { error: uploadError } = await supabase.storage.from("invoice-files").upload(storagePath, fileBuffer, {
         contentType: "application/pdf",
         upsert: true,
       });
+      if (uploadError) {
+        return res.status(500).json({
+          success: false,
+          error: `Não foi possível salvar o PDF no storage: ${uploadError.message}`,
+        });
+      }
+
       const { data: urlData } = supabase.storage.from("invoice-files").getPublicUrl(storagePath);
-      fs.unlinkSync(req.file.path);
+
+      let parseWarning = "";
+      let parseErrorDetail = "";
+      let invoice_number = "";
+      let provider_name = "";
+      let issue_dateRaw = "";
+      let due_dateRaw = "";
+      let amountRaw = "";
+
+      try {
+        const pdfParse = await loadPdfParse();
+        const parsed = await pdfParse(fileBuffer);
+        const text = parsed.text || "";
+
+        const pick = (...patterns: RegExp[]) => {
+          for (const p of patterns) {
+            const m = text.match(p);
+            if (m?.[1]) return m[1].trim();
+          }
+          return "";
+        };
+
+        provider_name = pick(
+          /(?:Raz[aã]o\s*Social|Fornecedor)\s*[:\-]\s*([^\n\r]+)/i,
+          /Emitente\s*[:\-]\s*([^\n\r]+)/i
+        );
+        invoice_number = pick(
+          /(?:N[úu]mero\s*da\s*NF-e|N[úu]mero\s*da\s*Nota|NF[-\s]?e?)\s*[:#\-]?\s*([A-Z0-9.\-\/]+)/i
+        );
+        issue_dateRaw = pick(
+          /(?:Data\s*de\s*Emiss[aã]o|Emiss[aã]o)\s*[:\-]?\s*(\d{2}[\/.-]\d{2}[\/.-]\d{2,4})/i
+        );
+        due_dateRaw = pick(
+          /(?:Data\s*de\s*Vencimento|Vencimento)\s*[:\-]?\s*(\d{2}[\/.-]\d{2}[\/.-]\d{2,4})/i
+        );
+        amountRaw = pick(
+          /(?:Valor\s*Total|Valor\s*da\s*Nota|Total)\s*[:\-]?\s*R?\$?\s*([\d.,]+)/i
+        );
+      } catch (parseError: any) {
+        parseWarning = "PDF salvo, mas não foi possível extrair os campos automaticamente. Preencha manualmente.";
+        parseErrorDetail = parseError?.message || "Falha desconhecida na leitura do PDF";
+      }
 
       res.json({
         success: true,
+        warning: parseWarning || undefined,
+        parse_error: parseErrorDetail || undefined,
         extracted: {
           invoice_number,
           provider_name,
@@ -396,13 +416,13 @@ export function createApp() {
         },
         file_path: urlData.publicUrl,
       });
-    } catch {
-      res.json({
+    } catch (error: any) {
+      res.status(500).json({
         success: false,
-        warning: "PDF enviado, mas não foi possível extrair campos automaticamente. Preencha manualmente.",
-        extracted: { invoice_number: "", provider_name: "", issue_date: "", due_date: "", amount: "" },
-        file_path: req.file?.path?.replace(/\\/g, "/") ?? "",
+        error: error?.message || "Não foi possível processar o PDF.",
       });
+    } finally {
+      if (req.file?.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
     }
   });
 
