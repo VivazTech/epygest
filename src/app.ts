@@ -1,12 +1,15 @@
 import express from "express";
 import multer from "multer";
-import * as pdfParseModule from "pdf-parse";
 import fs from "node:fs";
 import path from "node:path";
 import xlsx from "xlsx";
 import { supabase } from "./lib/supabase.js";
 
-const pdfParse = (pdfParseModule as any).default ?? (pdfParseModule as any);
+// Lazy import: pdf-parse depende de pdfjs-dist que usa DOMMatrix (browser-only)
+const loadPdfParse = async () => {
+  const mod = await import("pdf-parse");
+  return (mod as any).default ?? (mod as any);
+};
 
 // ---------- helpers ----------
 const toIsoDate = (value: string) => {
@@ -338,6 +341,7 @@ export function createApp() {
 
     try {
       const buffer = fs.readFileSync(req.file.path);
+      const pdfParse = await loadPdfParse();
       const parsed = await pdfParse(buffer);
       const text = parsed.text || "";
 
