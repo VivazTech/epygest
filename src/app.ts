@@ -4,7 +4,7 @@ import * as pdfParseModule from "pdf-parse";
 import fs from "node:fs";
 import path from "node:path";
 import xlsx from "xlsx";
-import { supabase } from "./lib/supabase";
+import { supabase } from "./lib/supabase.js";
 
 const pdfParse = (pdfParseModule as any).default ?? (pdfParseModule as any);
 
