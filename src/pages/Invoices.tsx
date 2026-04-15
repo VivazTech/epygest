@@ -292,14 +292,11 @@ export const Invoices: React.FC = () => {
   };
 
   const isRequester = actingSector === 'requester';
-  const canSeeAllInfo = actingSector === 'financeiro';
   const requesterSector = sectors.find((s) => String(s.id) === requesterSectorId);
-  const budgetSectors = isRequester
-    ? (requesterSector ? [requesterSector] : [])
-    : sectors;
-  const visibleInvoices = canSeeAllInfo
-    ? invoices
-    : invoices.filter((invoice) => String(invoice.sector_id ?? '') === requesterSectorId);
+  const budgetSectors = sectors;
+  const visibleInvoices = invoices;
+  const canSeeSectorValues = (sectorId?: number | string) =>
+    !isRequester || String(sectorId ?? '') === requesterSectorId;
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
@@ -332,15 +329,13 @@ export const Invoices: React.FC = () => {
               ))}
             </select>
           )}
-          {canSeeAllInfo && (
-            <button
-              onClick={() => setShowModal(true)}
-              className="flex items-center gap-2 bg-[#004D40] text-white px-4 py-2.5 rounded-xl shadow-lg shadow-emerald-900/10 hover:bg-[#003d33] transition-colors"
-            >
-              <Plus className="w-4 h-4" />
-              <span className="font-bold text-sm">Importar Nota</span>
-            </button>
-          )}
+          <button
+            onClick={() => setShowModal(true)}
+            className="flex items-center gap-2 bg-[#004D40] text-white px-4 py-2.5 rounded-xl shadow-lg shadow-emerald-900/10 hover:bg-[#003d33] transition-colors"
+          >
+            <Plus className="w-4 h-4" />
+            <span className="font-bold text-sm">Importar Nota</span>
+          </button>
         </div>
       </div>
 
@@ -354,15 +349,21 @@ export const Invoices: React.FC = () => {
             <div className="space-y-1">
               <p className="text-xs text-slate-400 font-medium">Utilizado / Limite</p>
               <p className="text-lg font-bold text-slate-900">
-                <ValueTrace
-                  displayValue={formatCurrency(sector.pending_amount || 0)}
-                  source={`Soma de pendências do setor ${sector.name}`}
-                  calculation="pending_invoices + pending_requisitions"
-                /> <span className="text-slate-300 font-normal">/ <ValueTrace
-                  displayValue={formatCurrency(sector.budget_limit)}
-                  source={`Cadastro do setor ${sector.name}`}
-                  calculation="Campo budget_limit da tabela sectors"
-                /></span>
+                {canSeeSectorValues(sector.id) ? (
+                  <>
+                    <ValueTrace
+                      displayValue={formatCurrency(sector.pending_amount || 0)}
+                      source={`Soma de pendências do setor ${sector.name}`}
+                      calculation="pending_invoices + pending_requisitions"
+                    /> <span className="text-slate-300 font-normal">/ <ValueTrace
+                      displayValue={formatCurrency(sector.budget_limit)}
+                      source={`Cadastro do setor ${sector.name}`}
+                      calculation="Campo budget_limit da tabela sectors"
+                    /></span>
+                  </>
+                ) : (
+                  <span className="text-slate-400 font-medium">Valores ocultos</span>
+                )}
               </p>
             </div>
             <div className="w-full bg-slate-100 h-1.5 rounded-full mt-4 overflow-hidden">
@@ -371,7 +372,7 @@ export const Invoices: React.FC = () => {
                   "h-full transition-all duration-500",
                   (sector.pending_amount / sector.budget_limit) > 0.9 ? "bg-orange-500" : "bg-emerald-500"
                 )}
-                style={{ width: `${Math.min((sector.pending_amount / sector.budget_limit) * 100, 100)}%` }}
+                style={{ width: `${canSeeSectorValues(sector.id) ? Math.min((sector.pending_amount / sector.budget_limit) * 100, 100) : 0}%` }}
               ></div>
             </div>
           </div>
@@ -380,11 +381,10 @@ export const Invoices: React.FC = () => {
 
       {isRequester && (
         <div className="bg-blue-50 border border-blue-100 rounded-2xl px-4 py-3 text-sm text-blue-800">
-          Neste perfil, você visualiza somente o orçamento do seu setor.
+          Neste perfil, os valores de outros setores ficam ocultos.
         </div>
       )}
 
-      {canSeeAllInfo && (
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
         <div className="p-4 border-b border-slate-50 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="relative flex-1 max-w-md">
@@ -439,12 +439,16 @@ export const Invoices: React.FC = () => {
                     </span>
                   </td>
                   <td className="px-6 py-4">
-                    <ValueTrace
-                      className="text-sm font-bold text-slate-900"
-                      displayValue={formatCurrency(invoice.amount)}
-                      source={`Nota #${invoice.invoice_number}`}
-                      calculation="Campo amount informado no lançamento da nota"
-                    />
+                    {canSeeSectorValues(invoice.sector_id) ? (
+                      <ValueTrace
+                        className="text-sm font-bold text-slate-900"
+                        displayValue={formatCurrency(invoice.amount)}
+                        source={`Nota #${invoice.invoice_number}`}
+                        calculation="Campo amount informado no lançamento da nota"
+                      />
+                    ) : (
+                      <span className="text-sm font-semibold text-slate-400">Valor oculto</span>
+                    )}
                   </td>
                   <td className="px-6 py-4">
                     <p className="text-sm text-slate-600">{formatDate(invoice.due_date)}</p>
@@ -551,9 +555,8 @@ export const Invoices: React.FC = () => {
           </table>
         </div>
       </div>
-      )}
 
-      {canSeeAllInfo && showModal && (
+      {showModal && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-white w-full max-w-lg rounded-3xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
             <div className="p-6 border-b border-slate-100 flex justify-between items-center">
@@ -751,7 +754,7 @@ export const Invoices: React.FC = () => {
         </div>
       )}
 
-      {canSeeAllInfo && showReceiptModal && (
+      {showReceiptModal && (
         <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
             <div className="p-6 border-b border-slate-100 flex justify-between items-center">
@@ -802,7 +805,7 @@ export const Invoices: React.FC = () => {
         </div>
       )}
 
-      {canSeeAllInfo && showReportModal && (
+      {showReportModal && (
         <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-white w-full max-w-lg rounded-3xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
             <div className="p-6 border-b border-slate-100 flex justify-between items-center">
