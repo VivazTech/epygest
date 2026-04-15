@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Plus, Archive, XCircle } from 'lucide-react';
 import { cn, formatCurrency } from '../lib/utils';
+import { ValueTrace } from '../components/ValueTrace';
 
 export const RequisicoesPage: React.FC = () => {
   const [requisitions, setRequisitions] = useState<any[]>([]);
@@ -130,7 +131,14 @@ export const RequisicoesPage: React.FC = () => {
                 <td className="px-6 py-4 text-sm font-medium text-slate-700">{r.sector_name}</td>
                 <td className="px-6 py-4 text-sm text-slate-600">{r.date}</td>
                 <td className="px-6 py-4 text-sm text-slate-600">{r.description || '—'}</td>
-                <td className="px-6 py-4 text-sm font-bold text-slate-900">{formatCurrency(r.amount)}</td>
+                <td className="px-6 py-4">
+                  <ValueTrace
+                    className="text-sm font-bold text-slate-900"
+                    displayValue={formatCurrency(r.amount)}
+                    source={`Requisição interna #${r.id}`}
+                    calculation="Campo amount informado no lançamento da requisição"
+                  />
+                </td>
                 <td className="px-6 py-4">
                   <span className={cn(
                     "text-[10px] font-bold px-2 py-1 rounded-lg uppercase tracking-wider",

@@ -12,6 +12,7 @@ import {
   XCircle
 } from 'lucide-react';
 import { cn, formatCurrency, formatDate } from '../lib/utils';
+import { ValueTrace } from '../components/ValueTrace';
 
 export const Invoices: React.FC = () => {
   const [invoices, setInvoices] = useState<any[]>([]);
@@ -19,6 +20,7 @@ export const Invoices: React.FC = () => {
   const [paymentMethods, setPaymentMethods] = useState<any[]>([]);
   const [crdOptions, setCrdOptions] = useState<any[]>([]);
   const [actingSector, setActingSector] = useState<'requester' | 'controle' | 'financeiro'>('requester');
+  const [requesterSectorId, setRequesterSectorId] = useState<string>('');
   const [showModal, setShowModal] = useState(false);
   const [showReceiptModal, setShowReceiptModal] = useState(false);
   const [selectedInvoiceId, setSelectedInvoiceId] = useState<number | null>(null);
@@ -53,6 +55,23 @@ export const Invoices: React.FC = () => {
     fetch('/api/payment-methods').then(res => res.json()).then(setPaymentMethods);
     fetch('/api/crds').then(res => res.json()).then(setCrdOptions);
   }, []);
+
+  useEffect(() => {
+    if (requesterSectorId || sectors.length === 0) return;
+    const userRaw = localStorage.getItem('user');
+    if (userRaw) {
+      try {
+        const user = JSON.parse(userRaw);
+        if (user?.sector_id) {
+          setRequesterSectorId(String(user.sector_id));
+          return;
+        }
+      } catch {
+        // Ignora parse inválido e usa fallback abaixo.
+      }
+    }
+    setRequesterSectorId(String(sectors[0].id));
+  }, [sectors, requesterSectorId]);
 
   useEffect(() => {
     if (!formData.sector_id) {
@@ -272,6 +291,16 @@ export const Invoices: React.FC = () => {
     window.URL.revokeObjectURL(url);
   };
 
+  const isRequester = actingSector === 'requester';
+  const canSeeAllInfo = actingSector === 'financeiro';
+  const requesterSector = sectors.find((s) => String(s.id) === requesterSectorId);
+  const budgetSectors = isRequester
+    ? (requesterSector ? [requesterSector] : [])
+    : sectors;
+  const visibleInvoices = canSeeAllInfo
+    ? invoices
+    : invoices.filter((invoice) => String(invoice.sector_id ?? '') === requesterSectorId);
+
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
       <div className="flex items-center justify-between">
@@ -290,18 +319,33 @@ export const Invoices: React.FC = () => {
             <option value="controle">Perfil de teste: CONTROLE</option>
             <option value="financeiro">Perfil de teste: FINANCEIRO</option>
           </select>
-          <button 
-            onClick={() => setShowModal(true)}
-            className="flex items-center gap-2 bg-[#004D40] text-white px-4 py-2.5 rounded-xl shadow-lg shadow-emerald-900/10 hover:bg-[#003d33] transition-colors"
-          >
-            <Plus className="w-4 h-4" />
-            <span className="font-bold text-sm">Importar Nota</span>
-          </button>
+          {isRequester && (
+            <select
+              value={requesterSectorId}
+              onChange={(e) => setRequesterSectorId(e.target.value)}
+              className="px-3 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-semibold text-slate-700"
+            >
+              {sectors.map((sector) => (
+                <option key={sector.id} value={sector.id}>
+                  Setor solicitante: {sector.name}
+                </option>
+              ))}
+            </select>
+          )}
+          {canSeeAllInfo && (
+            <button
+              onClick={() => setShowModal(true)}
+              className="flex items-center gap-2 bg-[#004D40] text-white px-4 py-2.5 rounded-xl shadow-lg shadow-emerald-900/10 hover:bg-[#003d33] transition-colors"
+            >
+              <Plus className="w-4 h-4" />
+              <span className="font-bold text-sm">Importar Nota</span>
+            </button>
+          )}
         </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {sectors.map(sector => (
+        {budgetSectors.map(sector => (
           <div key={sector.id} className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm">
             <div className="flex justify-between items-start mb-4">
               <h4 className="font-bold text-slate-800">{sector.name}</h4>
@@ -310,7 +354,15 @@ export const Invoices: React.FC = () => {
             <div className="space-y-1">
               <p className="text-xs text-slate-400 font-medium">Utilizado / Limite</p>
               <p className="text-lg font-bold text-slate-900">
-                {formatCurrency(sector.pending_amount || 0)} <span className="text-slate-300 font-normal">/ {formatCurrency(sector.budget_limit)}</span>
+                <ValueTrace
+                  displayValue={formatCurrency(sector.pending_amount || 0)}
+                  source={`Soma de pendências do setor ${sector.name}`}
+                  calculation="pending_invoices + pending_requisitions"
+                /> <span className="text-slate-300 font-normal">/ <ValueTrace
+                  displayValue={formatCurrency(sector.budget_limit)}
+                  source={`Cadastro do setor ${sector.name}`}
+                  calculation="Campo budget_limit da tabela sectors"
+                /></span>
               </p>
             </div>
             <div className="w-full bg-slate-100 h-1.5 rounded-full mt-4 overflow-hidden">
@@ -326,6 +378,13 @@ export const Invoices: React.FC = () => {
         ))}
       </div>
 
+      {isRequester && (
+        <div className="bg-blue-50 border border-blue-100 rounded-2xl px-4 py-3 text-sm text-blue-800">
+          Neste perfil, você visualiza somente o orçamento do seu setor.
+        </div>
+      )}
+
+      {canSeeAllInfo && (
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
         <div className="p-4 border-b border-slate-50 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="relative flex-1 max-w-md">
@@ -361,7 +420,7 @@ export const Invoices: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50">
-              {invoices.map((invoice) => (
+              {visibleInvoices.map((invoice) => (
                 <tr key={invoice.id} className="hover:bg-slate-50/50 transition-colors group">
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-3">
@@ -380,7 +439,12 @@ export const Invoices: React.FC = () => {
                     </span>
                   </td>
                   <td className="px-6 py-4">
-                    <p className="text-sm font-bold text-slate-900">{formatCurrency(invoice.amount)}</p>
+                    <ValueTrace
+                      className="text-sm font-bold text-slate-900"
+                      displayValue={formatCurrency(invoice.amount)}
+                      source={`Nota #${invoice.invoice_number}`}
+                      calculation="Campo amount informado no lançamento da nota"
+                    />
                   </td>
                   <td className="px-6 py-4">
                     <p className="text-sm text-slate-600">{formatDate(invoice.due_date)}</p>
@@ -487,8 +551,9 @@ export const Invoices: React.FC = () => {
           </table>
         </div>
       </div>
+      )}
 
-      {showModal && (
+      {canSeeAllInfo && showModal && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-white w-full max-w-lg rounded-3xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
             <div className="p-6 border-b border-slate-100 flex justify-between items-center">
@@ -686,7 +751,7 @@ export const Invoices: React.FC = () => {
         </div>
       )}
 
-      {showReceiptModal && (
+      {canSeeAllInfo && showReceiptModal && (
         <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
             <div className="p-6 border-b border-slate-100 flex justify-between items-center">
@@ -737,7 +802,7 @@ export const Invoices: React.FC = () => {
         </div>
       )}
 
-      {showReportModal && (
+      {canSeeAllInfo && showReportModal && (
         <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-white w-full max-w-lg rounded-3xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
             <div className="p-6 border-b border-slate-100 flex justify-between items-center">

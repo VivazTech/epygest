@@ -22,6 +22,7 @@ import {
   ResponsiveContainer 
 } from 'recharts';
 import { cn, formatCurrency, formatPercent } from '../lib/utils';
+import { ValueTrace } from '../components/ValueTrace';
 
 const planningData = [
   { name: 'Jan', realizado: 180000, planejado: 175000 },
@@ -98,7 +99,12 @@ export const PlanningPage: React.FC = () => {
             <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Gap de Receita</h4>
             <AlertTriangle className="w-3 h-3 text-slate-300" />
           </div>
-          <p className="text-xl font-bold text-slate-900">{formatCurrency(15000)}</p>
+          <ValueTrace
+            className="text-xl font-bold text-slate-900"
+            displayValue={formatCurrency(15000)}
+            source="Planejamento mensal"
+            calculation="Meta de receita do mês - receita realizada do mês"
+          />
           <p className="text-[10px] text-slate-500 mt-2 font-medium">Faltam para atingir meta Mar/24</p>
         </div>
       </div>

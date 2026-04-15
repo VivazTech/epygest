@@ -94,9 +94,15 @@ CREATE TABLE IF NOT EXISTS public.payment_methods (
 
 CREATE TABLE IF NOT EXISTS public.crds (
   id BIGSERIAL PRIMARY KEY,
+  natureza TEXT NOT NULL DEFAULT 'O' CHECK (natureza IN ('M', 'O')),
   code TEXT NOT NULL,
   name TEXT NOT NULL,
   sector_id BIGINT REFERENCES public.sectors (id) ON DELETE SET NULL,
+  saldo_anterior NUMERIC(18, 2) NOT NULL DEFAULT 0,
+  previsto_mes NUMERIC(18, 2) NOT NULL DEFAULT 0,
+  disponivel_mes NUMERIC(18, 2) NOT NULL DEFAULT 0,
+  realizado_mes NUMERIC(18, 2) NOT NULL DEFAULT 0,
+  saldo NUMERIC(18, 2) NOT NULL DEFAULT 0,
   active BOOLEAN NOT NULL DEFAULT true,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE (code, sector_id)

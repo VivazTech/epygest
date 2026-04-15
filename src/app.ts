@@ -34,6 +34,11 @@ const escapeCsv = (value: any) => {
   return `"${str.replace(/"/g, '""')}"`;
 };
 
+const toNumberOrZero = (value: any) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
 type ParsedNode = {
   hierarchyCode: string;
   hierarchyLevel: number;
@@ -593,12 +598,34 @@ export function createApp() {
   });
 
   app.post("/api/crds", async (req, res) => {
-    const { code, name, sector_id, active } = req.body;
-    if (!code || !name || !sector_id)
-      return res.status(400).json({ error: "code, name e sector_id são obrigatórios" });
+    const {
+      natureza,
+      code,
+      name,
+      sector_id,
+      saldo_anterior,
+      previsto_mes,
+      disponivel_mes,
+      realizado_mes,
+      saldo,
+      active,
+    } = req.body;
+    if (!natureza || !code || !name || !sector_id)
+      return res.status(400).json({ error: "natureza, code, name e sector_id são obrigatórios" });
     const { data, error } = await supabase
       .from("crds")
-      .insert({ code, name, sector_id: Number(sector_id), active: active !== false })
+      .insert({
+        natureza: String(natureza).trim().toUpperCase(),
+        code,
+        name,
+        sector_id: Number(sector_id),
+        saldo_anterior: toNumberOrZero(saldo_anterior),
+        previsto_mes: toNumberOrZero(previsto_mes),
+        disponivel_mes: toNumberOrZero(disponivel_mes),
+        realizado_mes: toNumberOrZero(realizado_mes),
+        saldo: toNumberOrZero(saldo),
+        active: active !== false,
+      })
       .select("id")
       .single();
     if (error)
@@ -608,16 +635,33 @@ export function createApp() {
 
   app.patch("/api/crds/:id", async (req, res) => {
     const { id } = req.params;
-    const { code, name, sector_id, active } = req.body;
-    if (!code || !name || !sector_id)
-      return res.status(400).json({ error: "code, name e sector_id são obrigatórios" });
+    const {
+      natureza,
+      code,
+      name,
+      sector_id,
+      saldo_anterior,
+      previsto_mes,
+      disponivel_mes,
+      realizado_mes,
+      saldo,
+      active,
+    } = req.body;
+    if (!natureza || !code || !name || !sector_id)
+      return res.status(400).json({ error: "natureza, code, name e sector_id são obrigatórios" });
 
     const { error } = await supabase
       .from("crds")
       .update({
+        natureza: String(natureza).trim().toUpperCase(),
         code: String(code).trim(),
         name: String(name).trim(),
         sector_id: Number(sector_id),
+        saldo_anterior: toNumberOrZero(saldo_anterior),
+        previsto_mes: toNumberOrZero(previsto_mes),
+        disponivel_mes: toNumberOrZero(disponivel_mes),
+        realizado_mes: toNumberOrZero(realizado_mes),
+        saldo: toNumberOrZero(saldo),
         active: active !== false,
       })
       .eq("id", Number(id));
@@ -694,9 +738,15 @@ export function createApp() {
 
       const payload = groupedCrdRows
         .map((row) => ({
+          natureza: "O",
           code: row.code,
           name: row.name,
           sector_id: sectorIdByGroup.get(row.groupName.toUpperCase()),
+          saldo_anterior: 0,
+          previsto_mes: 0,
+          disponivel_mes: 0,
+          realizado_mes: 0,
+          saldo: 0,
           active: true,
         }))
         .filter((row) => Number.isFinite(Number(row.sector_id)));

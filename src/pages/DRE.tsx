@@ -9,6 +9,7 @@ import {
   Calendar
 } from 'lucide-react';
 import { cn, formatCurrency, formatPercent } from '../lib/utils';
+import { ValueTrace } from '../components/ValueTrace';
 
 interface DRERow {
   id: string;
@@ -127,7 +128,11 @@ export const DREPage: React.FC = () => {
               "px-6 py-4 text-right text-sm tabular-nums",
               val < 0 ? "text-red-600" : row.isTotal ? "text-slate-900" : "text-slate-600"
             )}>
-              {formatCurrency(val)}
+              <ValueTrace
+                displayValue={formatCurrency(val)}
+                source={`Linha DRE: ${row.label}`}
+                calculation={`Valor do mês ${months[idx]} na estrutura DRE`}
+              />
             </td>
           ))}
           <td className="px-6 py-4 text-right text-sm font-medium text-slate-400">
@@ -165,21 +170,21 @@ export const DREPage: React.FC = () => {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm">
           <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Faturamento Bruto</p>
-          <p className="text-xl font-bold text-slate-900">{formatCurrency(795000)}</p>
+          <ValueTrace className="text-xl font-bold text-slate-900" displayValue={formatCurrency(795000)} source="Resumo DRE" calculation="Soma das receitas brutas do período selecionado" />
           <div className="flex items-center gap-1 text-emerald-600 text-[10px] font-bold mt-2">
             <TrendingUp className="w-3 h-3" /> +15.2% vs 2023
           </div>
         </div>
         <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm">
           <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">EBITDA Acumulado</p>
-          <p className="text-xl font-bold text-slate-900">{formatCurrency(226500)}</p>
+          <ValueTrace className="text-xl font-bold text-slate-900" displayValue={formatCurrency(226500)} source="Resumo DRE" calculation="EBITDA acumulado no período selecionado" />
           <div className="flex items-center gap-1 text-emerald-600 text-[10px] font-bold mt-2">
             Margem: 28.5%
           </div>
         </div>
         <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm">
           <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Lucro Operacional</p>
-          <p className="text-xl font-bold text-slate-900">{formatCurrency(211500)}</p>
+          <ValueTrace className="text-xl font-bold text-slate-900" displayValue={formatCurrency(211500)} source="Resumo DRE" calculation="Lucro operacional acumulado no período selecionado" />
           <div className="flex items-center gap-1 text-orange-600 text-[10px] font-bold mt-2">
             <TrendingDown className="w-3 h-3" /> -2.1% vs Meta
           </div>

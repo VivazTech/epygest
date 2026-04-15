@@ -6,6 +6,7 @@ import {
 } from 'recharts';
 import { Calendar, Filter, ChevronDown, Download, ArrowUpRight } from 'lucide-react';
 import { formatCurrency } from '../lib/utils';
+import { ValueTrace } from '../components/ValueTrace';
 
 const chartData = [
   { name: 'Jan', receita: 180000, despesa: 140000 },
@@ -65,6 +66,8 @@ export const Dashboard: React.FC = () => {
           variation={8.2} 
           description="vs mês anterior"
           color="blue"
+          traceSource="Tabela financial_records (type = revenue no mês)"
+          traceCalculation="Soma de amount filtrado por mês/ano"
         />
         <IndicatorCard 
           title="Faturamento Acumulado" 
@@ -73,6 +76,8 @@ export const Dashboard: React.FC = () => {
           variation={12.5} 
           description="vs ano anterior"
           color="green"
+          traceSource="Tabela financial_records (type = revenue)"
+          traceCalculation="Soma acumulada de receitas e ajuste de faturamento"
         />
         <IndicatorCard 
           title="Lucro Líquido" 
@@ -81,6 +86,8 @@ export const Dashboard: React.FC = () => {
           variation={-2.4} 
           description="vs meta projetada"
           color="orange"
+          traceSource="Receita acumulada e despesas acumuladas"
+          traceCalculation="(Receita - Despesas) * 0.8"
         />
         <IndicatorCard 
           title="Ticket Médio" 
@@ -88,6 +95,8 @@ export const Dashboard: React.FC = () => {
           type="currency" 
           variation={5.1} 
           description="crescimento orgânico"
+          traceSource="Indicador calculado na API"
+          traceCalculation="Valor médio por venda definido no backend"
         />
       </div>
 
@@ -178,7 +187,12 @@ export const Dashboard: React.FC = () => {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="bg-white p-5 rounded-2xl border border-slate-100">
           <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Ponto de Equilíbrio</p>
-          <p className="text-xl font-bold text-slate-800">{formatCurrency(indicators.pontoEquilibrio)}</p>
+          <ValueTrace
+            className="text-xl font-bold text-slate-800"
+            displayValue={formatCurrency(indicators.pontoEquilibrio)}
+            source="Indicador pontoEquilibrio da API"
+            calculation="Valor calculado e retornado em /api/dashboard/indicators"
+          />
           <div className="w-full bg-slate-100 h-1.5 rounded-full mt-3 overflow-hidden">
             <div className="bg-emerald-500 h-full w-[75%]"></div>
           </div>
@@ -187,7 +201,12 @@ export const Dashboard: React.FC = () => {
         
         <div className="bg-white p-5 rounded-2xl border border-slate-100">
           <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">NCG</p>
-          <p className="text-xl font-bold text-slate-800">{formatCurrency(indicators.ncg)}</p>
+          <ValueTrace
+            className="text-xl font-bold text-slate-800"
+            displayValue={formatCurrency(indicators.ncg)}
+            source="Indicador ncg da API"
+            calculation="Valor calculado e retornado em /api/dashboard/indicators"
+          />
           <p className="text-[10px] text-orange-600 mt-3 font-bold flex items-center gap-1">
             <ArrowUpRight className="w-3 h-3" /> +12% vs ideal
           </p>
@@ -195,7 +214,12 @@ export const Dashboard: React.FC = () => {
 
         <div className="bg-white p-5 rounded-2xl border border-slate-100">
           <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Caixa Mínimo</p>
-          <p className="text-xl font-bold text-slate-800">{formatCurrency(indicators.caixaMinimo)}</p>
+          <ValueTrace
+            className="text-xl font-bold text-slate-800"
+            displayValue={formatCurrency(indicators.caixaMinimo)}
+            source="Indicador caixaMinimo da API"
+            calculation="Valor calculado e retornado em /api/dashboard/indicators"
+          />
           <p className="text-[10px] text-emerald-600 mt-3 font-bold flex items-center gap-1">
             Status: Seguro
           </p>
@@ -203,7 +227,12 @@ export const Dashboard: React.FC = () => {
 
         <div className="bg-white p-5 rounded-2xl border border-slate-100">
           <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Investimentos</p>
-          <p className="text-xl font-bold text-slate-800">{indicators.investimentos}%</p>
+          <ValueTrace
+            className="text-xl font-bold text-slate-800"
+            displayValue={`${indicators.investimentos}%`}
+            source="Indicador investimentos da API"
+            calculation="Percentual de investimentos sobre faturamento bruto"
+          />
           <p className="text-[10px] text-slate-500 mt-3 font-medium">Do faturamento bruto</p>
         </div>
       </div>

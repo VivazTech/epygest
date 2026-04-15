@@ -1,6 +1,7 @@
 import React from 'react';
 import { ArrowUpRight, ArrowDownRight, Info } from 'lucide-react';
 import { cn, formatCurrency, formatPercent } from '../lib/utils';
+import { ValueTrace } from './ValueTrace';
 
 interface IndicatorCardProps {
   title: string;
@@ -9,10 +10,12 @@ interface IndicatorCardProps {
   variation: number;
   description: string;
   color?: 'green' | 'orange' | 'blue' | 'neutral';
+  traceSource?: string;
+  traceCalculation?: string;
 }
 
 export const IndicatorCard: React.FC<IndicatorCardProps> = ({ 
-  title, value, type, variation, description, color = 'neutral' 
+  title, value, type, variation, description, color = 'neutral', traceSource, traceCalculation
 }) => {
   const isPositive = variation >= 0;
   
@@ -36,9 +39,12 @@ export const IndicatorCard: React.FC<IndicatorCardProps> = ({
       </div>
       
       <div className="flex items-baseline gap-2 mb-1">
-        <span className="text-2xl font-bold text-slate-900">
-          {type === 'currency' ? formatCurrency(value) : formatPercent(value)}
-        </span>
+        <ValueTrace
+          className="text-2xl font-bold text-slate-900"
+          displayValue={type === 'currency' ? formatCurrency(value) : formatPercent(value)}
+          source={traceSource || `Indicador ${title}`}
+          calculation={traceCalculation || 'Valor retornado pela API de indicadores'}
+        />
       </div>
 
       <div className="flex items-center gap-2">

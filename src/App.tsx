@@ -80,7 +80,7 @@ export default function App() {
           </div>
         </header>
 
-        <div className={activeTab === 'notas' ? "p-8 w-full max-w-none" : "p-8 max-w-7xl mx-auto"}>
+        <div className={activeTab === 'notas' || activeTab === 'cadastros' ? "p-8 w-full max-w-none" : "p-8 max-w-7xl mx-auto"}>
           {renderContent()}
         </div>
       </main>

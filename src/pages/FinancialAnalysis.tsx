@@ -19,6 +19,7 @@ import {
   Cell
 } from 'recharts';
 import { cn, formatCurrency, formatPercent } from '../lib/utils';
+import { ValueTrace } from '../components/ValueTrace';
 
 const analysisData = [
   { category: 'Receitas', valor: 265000, av: 100, ah: 5.2 },
@@ -73,7 +74,7 @@ export const FinancialAnalysisPage: React.FC = () => {
             </div>
             <div>
               <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Ponto de Equilíbrio</p>
-              <p className="text-xl font-bold text-slate-900">{formatCurrency(185000)}</p>
+              <ValueTrace className="text-xl font-bold text-slate-900" displayValue={formatCurrency(185000)} source="Análise financeira" calculation="Ponto de equilíbrio calculado para o período" />
             </div>
           </div>
           <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
@@ -88,7 +89,7 @@ export const FinancialAnalysisPage: React.FC = () => {
             </div>
             <div>
               <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Geração de Caixa</p>
-              <p className="text-xl font-bold text-slate-900">{formatCurrency(62000)}</p>
+              <ValueTrace className="text-xl font-bold text-slate-900" displayValue={formatCurrency(62000)} source="Análise financeira" calculation="Geração de caixa calculada no período" />
             </div>
           </div>
           <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
@@ -156,7 +157,11 @@ export const FinancialAnalysisPage: React.FC = () => {
                       "px-6 py-3 text-sm text-right tabular-nums font-bold",
                       item.valor < 0 ? "text-red-500" : "text-slate-900"
                     )}>
-                      {formatCurrency(Math.abs(item.valor))}
+                      <ValueTrace
+                        displayValue={formatCurrency(Math.abs(item.valor))}
+                        source={`Categoria ${item.category}`}
+                        calculation="Valor absoluto da linha de resultado operacional"
+                      />
                     </td>
                     <td className="px-6 py-3 text-sm text-right text-slate-500">{item.av}%</td>
                     <td className={cn(

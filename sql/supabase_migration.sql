@@ -96,9 +96,15 @@ CREATE TABLE IF NOT EXISTS payment_methods (
 -- Tabela: crds
 CREATE TABLE IF NOT EXISTS crds (
   id BIGSERIAL PRIMARY KEY,
+  natureza TEXT CHECK(natureza IN ('M', 'O')) DEFAULT 'O',
   code TEXT NOT NULL,
   name TEXT NOT NULL,
   sector_id BIGINT REFERENCES sectors(id),
+  saldo_anterior NUMERIC DEFAULT 0,
+  previsto_mes NUMERIC DEFAULT 0,
+  disponivel_mes NUMERIC DEFAULT 0,
+  realizado_mes NUMERIC DEFAULT 0,
+  saldo NUMERIC DEFAULT 0,
   active BOOLEAN DEFAULT TRUE,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   UNIQUE(code, sector_id)
