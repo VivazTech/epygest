@@ -5,7 +5,7 @@ import path from "node:path";
 import xlsx from "xlsx";
 import { supabase } from "./lib/supabase.js";
 
-// Lazy import: pdf-parse depende de pdfjs-dist que usa DOMMatrix (browser-only)
+// Lazy import para manter compatibilidade no ambiente serverless
 const loadPdfParse = async () => {
   const mod = await import("pdf-parse");
   return (mod as any).default ?? (mod as any);
@@ -372,11 +372,12 @@ export function createApp() {
       try {
         const pdfParse = await loadPdfParse();
         const parsed = await pdfParse(fileBuffer);
-        const text = parsed.text || "";
+        const text = (parsed.text || "").replace(/\u00A0/g, " ");
+        const compactText = text.replace(/[ \t]+/g, " ");
 
         const pick = (...patterns: RegExp[]) => {
           for (const p of patterns) {
-            const m = text.match(p);
+            const m = text.match(p) || compactText.match(p);
             if (m?.[1]) return m[1].trim();
           }
           return "";
@@ -384,19 +385,22 @@ export function createApp() {
 
         provider_name = pick(
           /(?:Raz[aã]o\s*Social|Fornecedor)\s*[:\-]\s*([^\n\r]+)/i,
-          /Emitente\s*[:\-]\s*([^\n\r]+)/i
+          /Emitente\s*[:\-]\s*([^\n\r]+)/i,
+          /Prestador\s*[:\-]\s*([^\n\r]+)/i
         );
         invoice_number = pick(
-          /(?:N[úu]mero\s*da\s*NF-e|N[úu]mero\s*da\s*Nota|NF[-\s]?e?)\s*[:#\-]?\s*([A-Z0-9.\-\/]+)/i
+          /(?:N[úu]mero\s*da\s*NF-e|N[úu]mero\s*da\s*Nota|N[úu]mero\s*NFS-e|NF[-\s]?e?|NFS[-\s]?e?)\s*[:#\-]?\s*([A-Z0-9.\-\/]+)/i,
+          /(?:N[úu]mero)\s*[:#\-]?\s*([A-Z0-9.\-\/]{3,})/i
         );
         issue_dateRaw = pick(
-          /(?:Data\s*de\s*Emiss[aã]o|Emiss[aã]o)\s*[:\-]?\s*(\d{2}[\/.-]\d{2}[\/.-]\d{2,4})/i
+          /(?:Data\s*de\s*Emiss[aã]o|Emiss[aã]o|Data\s*Emiss[aã]o)\s*[:\-]?\s*(\d{2}[\/.-]\d{2}[\/.-]\d{2,4})/i
         );
         due_dateRaw = pick(
-          /(?:Data\s*de\s*Vencimento|Vencimento)\s*[:\-]?\s*(\d{2}[\/.-]\d{2}[\/.-]\d{2,4})/i
+          /(?:Data\s*de\s*Vencimento|Vencimento|Data\s*Vencimento)\s*[:\-]?\s*(\d{2}[\/.-]\d{2}[\/.-]\d{2,4})/i
         );
         amountRaw = pick(
-          /(?:Valor\s*Total|Valor\s*da\s*Nota|Total)\s*[:\-]?\s*R?\$?\s*([\d.,]+)/i
+          /(?:Valor\s*Total|Valor\s*da\s*Nota|Valor\s*L[ií]quido|Valor\s*a\s*Pagar|Total)\s*[:\-]?\s*R?\$?\s*([\d.,]+)/i,
+          /R\$\s*([\d.]+,\d{2})/i
         );
       } catch (parseError: any) {
         parseWarning = "PDF salvo, mas não foi possível extrair os campos automaticamente. Preencha manualmente.";
