@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__7cdea168-3251-4650-9313-e8b89464371c__list_teams",
+      "mcp__7cdea168-3251-4650-9313-e8b89464371c__list_projects",
+      "mcp__7cdea168-3251-4650-9313-e8b89464371c__get_project",
+      "mcp__f86c1e8f-c558-4ea5-b96b-f65e594c0810__list_projects",
+      "mcp__f86c1e8f-c558-4ea5-b96b-f65e594c0810__get_project_url",
+      "mcp__f86c1e8f-c558-4ea5-b96b-f65e594c0810__get_publishable_keys",
+      "mcp__7cdea168-3251-4650-9313-e8b89464371c__deploy_to_vercel",
+      "Bash(npx vercel:*)",
+      "mcp__7cdea168-3251-4650-9313-e8b89464371c__get_runtime_logs",
+      "mcp__7cdea168-3251-4650-9313-e8b89464371c__get_deployment_build_logs",
+      "mcp__7cdea168-3251-4650-9313-e8b89464371c__web_fetch_vercel_url",
+      "Bash(npx vite:*)"
+    ]
+  }
+}
