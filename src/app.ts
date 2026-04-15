@@ -99,6 +99,30 @@ export function createApp() {
   // ====================================================
   // DASHBOARD
   // ====================================================
+  app.get("/api/supabase/health", async (_req, res) => {
+    const startedAt = Date.now();
+    const { error, count } = await supabase
+      .from("sectors")
+      .select("id", { head: true, count: "exact" });
+
+    if (error) {
+      return res.status(500).json({
+        ok: false,
+        message: "Falha ao conectar no Supabase",
+        error: error.message,
+        latency_ms: Date.now() - startedAt,
+      });
+    }
+
+    res.json({
+      ok: true,
+      message: "Conexão com Supabase ativa",
+      latency_ms: Date.now() - startedAt,
+      sectors_count: count ?? 0,
+      checked_at: new Date().toISOString(),
+    });
+  });
+
   app.get("/api/dashboard/indicators", async (req, res) => {
     const { month, year } = req.query as { month?: string; year?: string };
 

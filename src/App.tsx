@@ -10,6 +10,7 @@ import { PlanningPage as Planejamento } from './pages/Planning';
 const Importacao = () => <div className="p-8 text-slate-400">Módulo de Importação de Dados em desenvolvimento...</div>;
 import { CadastrosPage as Cadastros } from './pages/Cadastros';
 import { RequisicoesPage as Requisicoes } from './pages/Requisicoes';
+import { SupabaseConnectionTestPage as SupabaseTeste } from './pages/SupabaseConnectionTest';
 const Usuarios = () => <div className="p-8 text-slate-400">Módulo de Gestão de Usuários em desenvolvimento...</div>;
 const Configuracoes = () => <div className="p-8 text-slate-400">Configurações do Sistema em desenvolvimento...</div>;
 
@@ -44,6 +45,7 @@ export default function App() {
       case 'requisicoes': return <Requisicoes />;
       case 'importacao': return <Importacao />;
       case 'cadastros': return <Cadastros />;
+      case 'supabase-teste': return <SupabaseTeste />;
       case 'usuarios': return <Usuarios />;
       case 'configuracoes': return <Configuracoes />;
       default: return <Dashboard />;
