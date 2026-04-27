@@ -13,7 +13,8 @@ import {
   PlusCircle,
   Database,
   Archive,
-  PlugZap
+  PlugZap,
+  Rows4
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 
@@ -33,6 +34,7 @@ const menuItems = [
   { id: 'requisicoes', label: 'Requisições', icon: Archive, roles: ['admin', 'finance', 'manager'] },
   { id: 'importacao', label: 'Importação', icon: PlusCircle, roles: ['admin', 'finance'] },
   { id: 'cadastros', label: 'Cadastros', icon: Database, roles: ['admin', 'finance'] },
+  { id: 'sintase', label: 'Síntase', icon: Rows4, roles: ['admin', 'finance', 'manager'] },
   { id: 'supabase-teste', label: 'Teste Supabase', icon: PlugZap, roles: ['admin', 'finance'] },
   { id: 'usuarios', label: 'Usuários', icon: Users, roles: ['admin'] },
   { id: 'configuracoes', label: 'Configurações', icon: Settings, roles: ['admin'] },

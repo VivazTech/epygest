@@ -339,6 +339,9 @@ export const CadastrosPage: React.FC = () => {
         <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
           {/* Toolbar */}
           <div className="p-4 border-b border-slate-50 flex flex-wrap items-center justify-between gap-3">
+            <div className="w-full text-xs text-slate-500">
+              Grupo = Setor/centro de custo. Detalhado/Subgrupo = nome do CRD (ex.: Bar da Piscina, Cafe da manha, cambuza, frigobar).
+            </div>
             <div className="relative flex-1 max-w-md">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
               <input

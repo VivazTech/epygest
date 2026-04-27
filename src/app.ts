@@ -46,6 +46,15 @@ type ParsedNode = {
   numericCode: string;
 };
 
+type SintaseRow = {
+  id: number;
+  crd: string;
+  grupo: string;
+  detalhado: string;
+  months: number[];
+  total: number;
+};
+
 const parseHierarchyLine = (raw: string): ParsedNode | null => {
   const normalized = raw.replace(/\s+/g, " ").trim();
   const match = normalized.match(/^([\d.]+)\s*-\s*(.*?)\s*\((\d+)\)\s*$/);
@@ -69,6 +78,11 @@ const getAncestors = (code: string): string[] => {
     ancestors.push(parts.slice(0, i).join("."));
   }
   return ancestors;
+};
+
+const sanitizeMonthBudget = (value: any) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
 };
 
 // Diretório de upload: /tmp no Vercel (serverless), local no dev
@@ -791,6 +805,65 @@ export function createApp() {
       if (req.file?.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
       res.status(500).json({ error: error?.message || "Erro ao importar CRDs" });
     }
+  });
+
+  // ====================================================
+  // SÍNTASE (VISÃO ANUAL DE ORÇAMENTO POR CRD)
+  // ====================================================
+  app.get("/api/sintase", async (req, res) => {
+    const { year, crd } = req.query as { year?: string; crd?: string };
+    const selectedYear = Number(year) || new Date().getFullYear();
+    const crdFilter = (crd || "").trim().toLowerCase();
+
+    const { data: crdData, error } = await supabase
+      .from("crds")
+      .select("id, code, name, previsto_mes, sectors(name)")
+      .eq("active", true)
+      .order("code");
+
+    if (error) return res.status(500).json({ error: error.message });
+
+    const rows = (crdData ?? [])
+      .map((item: any) => {
+        const monthlyBudget = sanitizeMonthBudget(item.previsto_mes);
+        const months = Array.from({ length: 12 }, () => monthlyBudget);
+        const total = months.reduce((sum, monthValue) => sum + monthValue, 0);
+
+        const row: SintaseRow = {
+          id: Number(item.id),
+          crd: String(item.code || ""),
+          grupo: String(item.sectors?.name || "Sem grupo"),
+          detalhado: String(item.name || ""),
+          months,
+          total,
+        };
+        return row;
+      })
+      .filter((row) => {
+        if (!crdFilter) return true;
+        return (
+          row.crd.toLowerCase().includes(crdFilter) ||
+          row.detalhado.toLowerCase().includes(crdFilter) ||
+          row.grupo.toLowerCase().includes(crdFilter)
+        );
+      });
+
+    const monthlyTotals = Array.from({ length: 12 }, (_, monthIndex) =>
+      rows.reduce((sum, row) => sum + (row.months[monthIndex] || 0), 0)
+    );
+    const grandTotal = monthlyTotals.reduce((sum, monthValue) => sum + monthValue, 0);
+
+    res.json({
+      year: selectedYear,
+      filters: {
+        crd: crdFilter || null,
+      },
+      rows,
+      totals: {
+        months: monthlyTotals,
+        total: grandTotal,
+      },
+    });
   });
 
   // ====================================================

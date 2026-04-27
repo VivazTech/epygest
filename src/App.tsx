@@ -11,6 +11,7 @@ const Importacao = () => <div className="p-8 text-slate-400">Módulo de Importa�
 import { CadastrosPage as Cadastros } from './pages/Cadastros';
 import { RequisicoesPage as Requisicoes } from './pages/Requisicoes';
 import { SupabaseConnectionTestPage as SupabaseTeste } from './pages/SupabaseConnectionTest';
+import { SintasePage as Sintase } from './pages/Sintase';
 const Usuarios = () => <div className="p-8 text-slate-400">Módulo de Gestão de Usuários em desenvolvimento...</div>;
 const Configuracoes = () => <div className="p-8 text-slate-400">Configurações do Sistema em desenvolvimento...</div>;
 
@@ -45,6 +46,7 @@ export default function App() {
       case 'requisicoes': return <Requisicoes />;
       case 'importacao': return <Importacao />;
       case 'cadastros': return <Cadastros />;
+      case 'sintase': return <Sintase />;
       case 'supabase-teste': return <SupabaseTeste />;
       case 'usuarios': return <Usuarios />;
       case 'configuracoes': return <Configuracoes />;
@@ -80,7 +82,7 @@ export default function App() {
           </div>
         </header>
 
-        <div className={activeTab === 'notas' || activeTab === 'cadastros' ? "p-8 w-full max-w-none" : "p-8 max-w-7xl mx-auto"}>
+        <div className={activeTab === 'notas' || activeTab === 'cadastros' || activeTab === 'sintase' ? "p-8 w-full max-w-none" : "p-8 max-w-7xl mx-auto"}>
           {renderContent()}
         </div>
       </main>
