@@ -23,6 +23,8 @@ interface SidebarProps {
   setActiveTab: (tab: string) => void;
   user: any;
   onLogout: () => void;
+  collapsed: boolean;
+  onToggleCollapsed: () => void;
 }
 
 const menuItems = [
@@ -40,16 +42,26 @@ const menuItems = [
   { id: 'configuracoes', label: 'Configurações', icon: Settings, roles: ['admin'] },
 ];
 
-export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, user, onLogout }) => {
+export const Sidebar: React.FC<SidebarProps> = ({
+  activeTab,
+  setActiveTab,
+  user,
+  onLogout,
+  collapsed,
+  onToggleCollapsed
+}) => {
   const filteredMenu = menuItems.filter(item => item.roles.includes(user?.role));
 
   return (
-    <div className="w-64 bg-[#004D40] text-white h-screen flex flex-col fixed left-0 top-0 z-50">
+    <div className={cn(
+      "bg-[#004D40] text-white h-screen flex flex-col fixed left-0 top-0 z-50 transition-all duration-200",
+      collapsed ? "w-20" : "w-64"
+    )}>
       <div className="p-6 flex items-center gap-3 border-b border-white/10">
         <div className="w-10 h-10 bg-emerald-400 rounded-lg flex items-center justify-center font-bold text-xl text-[#004D40]">
           F
         </div>
-        <div>
+        <div className={cn(collapsed && "hidden")}>
           <h1 className="font-bold text-lg leading-tight">EpyGest</h1>
           <p className="text-[10px] opacity-60 uppercase tracking-widest">Gestão Inteligente</p>
         </div>
@@ -71,17 +83,17 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, user,
               "w-5 h-5 transition-transform duration-200",
               activeTab === item.id ? "scale-110" : "group-hover:scale-110"
             )} />
-            <span className="font-medium text-sm">{item.label}</span>
+            <span className={cn("font-medium text-sm", collapsed && "hidden")}>{item.label}</span>
           </button>
         ))}
       </nav>
 
       <div className="p-4 border-t border-white/10 space-y-4">
-        <div className="flex items-center gap-3 px-2">
+        <div className={cn("flex items-center gap-3 px-2", collapsed && "justify-center")}>
           <div className="w-10 h-10 rounded-full bg-emerald-800 flex items-center justify-center border border-emerald-400/30">
             <User className="w-5 h-5 text-emerald-300" />
           </div>
-          <div className="flex-1 min-w-0">
+          <div className={cn("flex-1 min-w-0", collapsed && "hidden")}>
             <p className="text-sm font-semibold truncate">{user?.name}</p>
             <p className="text-[10px] text-emerald-300/70 uppercase font-bold tracking-tighter">
               {user?.role === 'admin' ? 'Administrador' : 
@@ -90,13 +102,26 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, user,
             </p>
           </div>
         </div>
+
+        <button
+          onClick={onToggleCollapsed}
+          className={cn(
+            "w-full px-4 py-2 rounded-xl text-xs font-bold bg-white/10 hover:bg-white/15 transition-colors",
+            collapsed ? "text-center" : "text-left"
+          )}
+        >
+          {collapsed ? 'Expandir menu' : 'Colapsar menu'}
+        </button>
         
         <button 
           onClick={onLogout}
-          className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-red-300 hover:bg-red-500/10 hover:text-red-200 transition-colors"
+          className={cn(
+            "w-full flex items-center px-4 py-3 rounded-xl text-red-300 hover:bg-red-500/10 hover:text-red-200 transition-colors",
+            collapsed ? "justify-center" : "gap-3"
+          )}
         >
           <LogOut className="w-5 h-5" />
-          <span className="font-medium text-sm">Sair do sistema</span>
+          <span className={cn("font-medium text-sm", collapsed && "hidden")}>Sair do sistema</span>
         </button>
       </div>
     </div>

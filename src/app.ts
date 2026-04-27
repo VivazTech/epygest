@@ -866,6 +866,44 @@ export function createApp() {
     });
   });
 
+  app.patch("/api/sintase/cell", async (req, res) => {
+    const { crd_id, month, year, value } = req.body as {
+      crd_id?: number;
+      month?: number;
+      year?: number;
+      value?: number | string;
+    };
+
+    if (!Number.isFinite(Number(crd_id))) {
+      return res.status(400).json({ error: "crd_id inválido" });
+    }
+    if (!Number.isFinite(Number(month)) || Number(month) < 1 || Number(month) > 12) {
+      return res.status(400).json({ error: "month deve estar entre 1 e 12" });
+    }
+    if (!Number.isFinite(Number(year))) {
+      return res.status(400).json({ error: "year inválido" });
+    }
+
+    const sanitizedValue = sanitizeMonthBudget(value);
+    const { error } = await supabase
+      .from("crds")
+      .update({ previsto_mes: sanitizedValue })
+      .eq("id", Number(crd_id));
+
+    if (error) return res.status(500).json({ error: error.message });
+
+    res.json({
+      success: true,
+      saved: {
+        crd_id: Number(crd_id),
+        month: Number(month),
+        year: Number(year),
+        value: sanitizedValue,
+      },
+      note: "No modelo atual, previsto_mes é único e reflete em todos os meses.",
+    });
+  });
+
   // ====================================================
   // SCENARIOS
   // ====================================================

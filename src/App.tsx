@@ -25,6 +25,7 @@ const TEST_USER = {
 export default function App() {
   const [user, setUser] = useState<any>(TEST_USER);
   const [activeTab, setActiveTab] = useState('dashboard');
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   // Login temporariamente desativado para permitir testes sem autenticação.
   useEffect(() => {
@@ -61,9 +62,11 @@ export default function App() {
         setActiveTab={setActiveTab} 
         user={user} 
         onLogout={handleLogout} 
+        collapsed={sidebarCollapsed}
+        onToggleCollapsed={() => setSidebarCollapsed((prev) => !prev)}
       />
       
-      <main className="pl-64 min-h-screen">
+      <main className={sidebarCollapsed ? "pl-20 min-h-screen" : "pl-64 min-h-screen"}>
         <header className="h-20 bg-white/80 backdrop-blur-md border-b border-slate-100 flex items-center justify-between px-8 sticky top-0 z-40">
           <div className="flex items-center gap-2">
             <span className="text-slate-400 text-sm font-medium">EpyGest</span>
