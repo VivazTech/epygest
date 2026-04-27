@@ -87,6 +87,27 @@ export const SintasePage: React.FC = () => {
     });
   }, [data]);
 
+  useEffect(() => {
+    if (!rowsByCrd.length) {
+      setExpandedCrds(new Set());
+      return;
+    }
+
+    // Quando houver filtro por CRD, já abre automaticamente
+    // para evitar impressão de que não carregou dados.
+    if (crdFilter.trim()) {
+      const filteredName = crdFilter.trim();
+      const exists = rowsByCrd.some((item) => item.crdName.toLowerCase() === filteredName.toLowerCase());
+      if (exists) {
+        setExpandedCrds(new Set([rowsByCrd.find((item) => item.crdName.toLowerCase() === filteredName.toLowerCase())!.crdName]));
+      }
+      return;
+    }
+
+    // Sem filtro, mantém tudo colapsado por padrão.
+    setExpandedCrds(new Set());
+  }, [rowsByCrd, crdFilter]);
+
   const toggleCrd = (crdName: string) => {
     setExpandedCrds((prev) => {
       const next = new Set(prev);
