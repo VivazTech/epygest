@@ -78,7 +78,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               "w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group",
               activeTab === item.id 
                 ? "bg-emerald-500 text-white shadow-lg shadow-emerald-900/20" 
-                : "text-emerald-100/70 hover:bg-white/5 hover:text-white"
+                : "text-white/80 hover:bg-white/5 hover:text-white"
             )}
           >
             <item.icon className={cn(
@@ -97,7 +97,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
           <div className={cn("flex-1 min-w-0", collapsed && "hidden")}>
             <p className="text-sm font-semibold truncate">{user?.name}</p>
-            <p className="text-[10px] text-emerald-300/70 uppercase font-bold tracking-tighter">
+            <p className="text-[10px] text-white/75 uppercase font-bold tracking-tighter">
               {user?.role === 'admin' ? 'Administrador' : 
                user?.role === 'finance' ? 'Financeiro' : 
                user?.role === 'manager' ? 'Gestor' : 'Visualizador'}

@@ -136,7 +136,7 @@ export const Dashboard: React.FC = () => {
                   cursor={{ fill: '#f8fafc' }}
                   contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
                 />
-                <Bar dataKey="receita" fill="#10b981" radius={[4, 4, 0, 0]} barSize={32} />
+                <Bar dataKey="receita" fill="#0077a8" radius={[4, 4, 0, 0]} barSize={32} />
                 <Bar dataKey="despesa" fill="#e2e8f0" radius={[4, 4, 0, 0]} barSize={32} />
               </BarChart>
             </ResponsiveContainer>
