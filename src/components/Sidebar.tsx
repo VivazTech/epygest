@@ -14,7 +14,9 @@ import {
   Database,
   Archive,
   PlugZap,
-  Rows4
+  Rows4,
+  PanelLeftClose,
+  PanelLeftOpen
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 
@@ -67,7 +69,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
       </div>
 
-      <nav className="flex-1 py-6 px-3 space-y-1 overflow-y-auto custom-scrollbar">
+      <nav className="flex-1 py-6 px-3 space-y-1 overflow-y-auto no-scrollbar">
         {filteredMenu.map((item) => (
           <button
             key={item.id}
@@ -80,7 +82,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             )}
           >
             <item.icon className={cn(
-              "w-5 h-5 transition-transform duration-200",
+              "w-5 h-5 min-w-5 min-h-5 shrink-0 transition-transform duration-200",
               activeTab === item.id ? "scale-110" : "group-hover:scale-110"
             )} />
             <span className={cn("font-medium text-sm", collapsed && "hidden")}>{item.label}</span>
@@ -106,11 +108,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <button
           onClick={onToggleCollapsed}
           className={cn(
-            "w-full px-4 py-2 rounded-xl text-xs font-bold bg-white/10 hover:bg-white/15 transition-colors",
-            collapsed ? "text-center" : "text-left"
+            "w-full px-4 py-2 rounded-xl text-xs font-bold bg-white/10 hover:bg-white/15 transition-colors flex items-center justify-center"
           )}
+          title={collapsed ? 'Expandir menu' : 'Colapsar menu'}
+          aria-label={collapsed ? 'Expandir menu' : 'Colapsar menu'}
         >
-          {collapsed ? 'Expandir menu' : 'Colapsar menu'}
+          {collapsed ? <PanelLeftOpen className="w-4 h-4 shrink-0" /> : <PanelLeftClose className="w-4 h-4 shrink-0" />}
         </button>
         
         <button 

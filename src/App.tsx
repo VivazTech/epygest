@@ -12,8 +12,8 @@ import { CadastrosPage as Cadastros } from './pages/Cadastros';
 import { RequisicoesPage as Requisicoes } from './pages/Requisicoes';
 import { SupabaseConnectionTestPage as SupabaseTeste } from './pages/SupabaseConnectionTest';
 import { SintasePage as Sintase } from './pages/Sintase';
-const Usuarios = () => <div className="p-8 text-slate-400">Módulo de Gestão de Usuários em desenvolvimento...</div>;
-const Configuracoes = () => <div className="p-8 text-slate-400">Configurações do Sistema em desenvolvimento...</div>;
+import { ConfiguracoesPage as Configuracoes } from './pages/Configuracoes';
+import { UsuariosPage as Usuarios } from './pages/Usuarios';
 
 const TEST_USER = {
   id: 1,

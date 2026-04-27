@@ -118,6 +118,90 @@ export function createApp() {
     res.json(userWithoutPassword);
   });
 
+  app.get("/api/users", async (_req, res) => {
+    const { data, error } = await supabase
+      .from("users")
+      .select("id, name, email, role, sector_id, created_at, sectors(name)")
+      .order("name");
+
+    if (error) return res.status(500).json({ error: error.message });
+
+    res.json(
+      (data ?? []).map((user: any) => ({
+        ...user,
+        sector_name: user.sectors?.name ?? null,
+        sectors: undefined,
+      }))
+    );
+  });
+
+  app.post("/api/users", async (req, res) => {
+    const { name, email, password, role, sector_id } = req.body as {
+      name?: string;
+      email?: string;
+      password?: string;
+      role?: "admin" | "finance" | "manager" | "viewer";
+      sector_id?: number | null;
+    };
+
+    if (!name || !email || !password || !role) {
+      return res.status(400).json({ error: "name, email, password e role são obrigatórios" });
+    }
+
+    if (!["admin", "finance", "manager", "viewer"].includes(role)) {
+      return res.status(400).json({ error: "role inválido" });
+    }
+
+    const { data, error } = await supabase
+      .from("users")
+      .insert({
+        name: String(name).trim(),
+        email: String(email).trim().toLowerCase(),
+        password: String(password),
+        role,
+        sector_id: Number.isFinite(Number(sector_id)) ? Number(sector_id) : null,
+      })
+      .select("id")
+      .single();
+
+    if (error) return res.status(400).json({ error: "Não foi possível criar usuário (email duplicado?)" });
+    res.json({ id: data.id });
+  });
+
+  app.patch("/api/users/:id", async (req, res) => {
+    const { id } = req.params;
+    const { name, email, password, role, sector_id } = req.body as {
+      name?: string;
+      email?: string;
+      password?: string;
+      role?: "admin" | "finance" | "manager" | "viewer";
+      sector_id?: number | null;
+    };
+
+    if (!name || !email || !role) {
+      return res.status(400).json({ error: "name, email e role são obrigatórios" });
+    }
+    if (!["admin", "finance", "manager", "viewer"].includes(role)) {
+      return res.status(400).json({ error: "role inválido" });
+    }
+
+    const payload: any = {
+      name: String(name).trim(),
+      email: String(email).trim().toLowerCase(),
+      role,
+      sector_id: Number.isFinite(Number(sector_id)) ? Number(sector_id) : null,
+    };
+    if (password && String(password).trim()) payload.password = String(password);
+
+    const { error } = await supabase
+      .from("users")
+      .update(payload)
+      .eq("id", Number(id));
+
+    if (error) return res.status(400).json({ error: "Não foi possível atualizar usuário" });
+    res.json({ success: true });
+  });
+
   // ====================================================
   // DASHBOARD
   // ====================================================

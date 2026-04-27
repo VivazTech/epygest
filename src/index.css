@@ -1,5 +1,14 @@
 @import "tailwindcss";
 
+:root {
+  --brand-500: #0077a8;
+  --brand-600: #006c98;
+  --brand-700: #005d84;
+  --brand-100: #d9eef8;
+  --brand-50: #eef7fc;
+  --brand-900: #003e59;
+}
+
 @layer base {
   button:not(:disabled),
   [role="button"]:not([aria-disabled="true"]),
@@ -10,3 +19,53 @@
     cursor: pointer;
   }
 }
+
+@layer utilities {
+  .no-scrollbar {
+    -ms-overflow-style: none; /* IE and old Edge */
+    scrollbar-width: none; /* Firefox */
+  }
+
+  .no-scrollbar::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+    display: none; /* Chrome, Safari, Opera */
+  }
+}
+
+/* =========================================================
+   Rebrand: verde -> azul (#0077a8 e variações)
+   ========================================================= */
+
+.bg-emerald-500 { background-color: var(--brand-500) !important; }
+.bg-emerald-400 { background-color: #1f8fbe !important; }
+.bg-emerald-100 { background-color: var(--brand-100) !important; }
+.bg-emerald-50 { background-color: var(--brand-50) !important; }
+.bg-emerald-800 { background-color: var(--brand-700) !important; }
+
+.text-emerald-900 { color: var(--brand-900) !important; }
+.text-emerald-800 { color: var(--brand-700) !important; }
+.text-emerald-700 { color: var(--brand-600) !important; }
+.text-emerald-600 { color: var(--brand-500) !important; }
+.text-emerald-300 { color: #7cc0de !important; }
+.text-emerald-100 { color: #d7edf7 !important; }
+
+.border-emerald-300 { border-color: #9ecfe4 !important; }
+.border-emerald-200 { border-color: #b6dced !important; }
+.border-emerald-100 { border-color: #cce7f4 !important; }
+.border-emerald-400\/30 { border-color: rgb(124 192 222 / 0.3) !important; }
+
+.focus\:ring-emerald-500\/20:focus { --tw-ring-color: rgb(0 119 168 / 0.2) !important; }
+.focus\:border-emerald-500:focus { border-color: var(--brand-500) !important; }
+
+.shadow-emerald-900\/10 { --tw-shadow-color: rgb(0 62 89 / 0.1) !important; }
+.shadow-emerald-900\/20 { --tw-shadow-color: rgb(0 62 89 / 0.2) !important; }
+
+.hover\:bg-emerald-50:hover { background-color: #e8f5fb !important; }
+.hover\:bg-emerald-100:hover { background-color: #d9eef8 !important; }
+.hover\:text-emerald-200:hover { color: #9fd0e5 !important; }
+
+/* classes arbitrárias utilizadas no projeto */
+[class~="bg-[#004D40]"] { background-color: var(--brand-500) !important; }
+[class~="text-[#004D40]"] { color: var(--brand-500) !important; }
+[class~="hover:bg-[#003d33]"]:hover { background-color: var(--brand-600) !important; }

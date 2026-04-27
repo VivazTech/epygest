@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { RefreshCcw, ChevronDown, ChevronRight } from 'lucide-react';
 import { formatCurrency } from '../lib/utils';
+import { ValueTrace } from '../components/ValueTrace';
 
 type SintaseApiResponse = {
   year: number;
@@ -212,7 +213,12 @@ export const SintasePage: React.FC = () => {
                   )}
                   <span className="text-sm font-bold text-slate-900">CRD {crdGroup.crdName}</span>
                   <span className="text-xs text-slate-500">({crdGroup.rows.length} grupo(s)/linha(s))</span>
-                  <span className="ml-auto text-sm font-extrabold text-slate-900">{formatCurrency(crdGroup.total)}</span>
+                  <ValueTrace
+                    className="ml-auto text-sm font-extrabold text-slate-900"
+                    displayValue={formatCurrency(crdGroup.total)}
+                    source={`Soma do CRD ${crdGroup.crdName}`}
+                    calculation="Soma dos valores M1 a M12 de todas as linhas do CRD"
+                  />
                 </button>
 
                 {isOpen && (
@@ -266,13 +272,25 @@ export const SintasePage: React.FC = () => {
                                       className="min-w-20 px-2 py-1 rounded hover:bg-emerald-50 transition-colors"
                                       title="Clique para editar"
                                     >
-                                      {formatCurrency(value || 0)}
+                                      <ValueTrace
+                                        className="text-xs text-slate-700"
+                                        displayValue={formatCurrency(value || 0)}
+                                        source={`CRD ${row.crd} / Grupo ${row.grupo} / ${row.detalhado}`}
+                                        calculation={`Valor do mês ${index + 1} (modelo atual usa previsto_mes do CRD)`}
+                                      />
                                     </button>
                                   )}
                                 </td>
                               );
                             })}
-                            <td className="px-4 py-3 text-xs text-right font-bold text-slate-900">{formatCurrency(row.total || 0)}</td>
+                            <td className="px-4 py-3 text-xs text-right font-bold text-slate-900">
+                              <ValueTrace
+                                className="text-xs text-right font-bold text-slate-900"
+                                displayValue={formatCurrency(row.total || 0)}
+                                source={`Linha ${row.detalhado}`}
+                                calculation="Soma dos meses M1 a M12 da linha"
+                              />
+                            </td>
                           </tr>
                         ))}
                         <tr className="bg-white/80 border-t border-slate-200">
@@ -281,11 +299,21 @@ export const SintasePage: React.FC = () => {
                           </td>
                           {crdGroup.months.map((value, index) => (
                             <td key={`subtotal-${crdGroup.crdName}-${index}`} className="px-4 py-3 text-xs text-right font-bold text-slate-800">
-                              {formatCurrency(value || 0)}
+                              <ValueTrace
+                                className="text-xs text-right font-bold text-slate-800"
+                                displayValue={formatCurrency(value || 0)}
+                                source={`Subtotal do CRD ${crdGroup.crdName}`}
+                                calculation={`Soma do mês ${index + 1} para todas as linhas do CRD`}
+                              />
                             </td>
                           ))}
                           <td className="px-4 py-3 text-xs text-right font-extrabold text-slate-900">
-                            {formatCurrency(crdGroup.total || 0)}
+                            <ValueTrace
+                              className="text-xs text-right font-extrabold text-slate-900"
+                              displayValue={formatCurrency(crdGroup.total || 0)}
+                              source={`Subtotal total do CRD ${crdGroup.crdName}`}
+                              calculation="Soma de todos os meses e linhas dentro do CRD"
+                            />
                           </td>
                         </tr>
                       </tbody>
@@ -307,11 +335,21 @@ export const SintasePage: React.FC = () => {
               </td>
               {(data?.totals?.months || Array.from({ length: 12 }, () => 0)).map((value, index) => (
                 <td key={`total-${index}`} className="px-4 py-3 text-xs text-right font-bold text-emerald-800">
-                  {formatCurrency(value || 0)}
+                  <ValueTrace
+                    className="text-xs text-right font-bold text-emerald-800"
+                    displayValue={formatCurrency(value || 0)}
+                    source="Total geral da Síntase"
+                    calculation={`Soma do mês ${index + 1} considerando todos os CRDs`}
+                  />
                 </td>
               ))}
               <td className="px-4 py-3 text-xs text-right font-extrabold text-emerald-900">
-                {formatCurrency(data?.totals?.total || 0)}
+                <ValueTrace
+                  className="text-xs text-right font-extrabold text-emerald-900"
+                  displayValue={formatCurrency(data?.totals?.total || 0)}
+                  source="Total geral da Síntase"
+                  calculation="Soma de M1..M12 para todos os CRDs"
+                />
               </td>
             </tr>
           </tbody>
