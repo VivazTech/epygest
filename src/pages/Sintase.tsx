@@ -24,7 +24,7 @@ export const SintasePage: React.FC = () => {
   const currentYear = new Date().getFullYear();
   const [year, setYear] = useState(String(currentYear));
   const [crdFilter, setCrdFilter] = useState('');
-  const [crdOptions, setCrdOptions] = useState<Array<{ code: string; name: string }>>([]);
+  const [crdOptions, setCrdOptions] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [savingCell, setSavingCell] = useState(false);
   const [data, setData] = useState<SintaseApiResponse | null>(null);
@@ -55,13 +55,11 @@ export const SintasePage: React.FC = () => {
     fetch('/api/crds')
       .then((res) => res.json())
       .then((rows) => {
-        const options = (Array.isArray(rows) ? rows : [])
-          .map((row: any) => ({
-            code: String(row.code || ''),
-            name: String(row.name || ''),
-          }))
-          .filter((row) => row.code)
-          .sort((a, b) => a.code.localeCompare(b.code));
+        const options = Array.from(new Set(
+          (Array.isArray(rows) ? rows : [])
+            .map((row: any) => String(row.sector_name || '').trim())
+            .filter((value: string) => Boolean(value))
+        )).sort((a, b) => a.localeCompare(b));
         setCrdOptions(options);
       });
     loadData();
@@ -75,13 +73,13 @@ export const SintasePage: React.FC = () => {
       if (!grouped.has(row.crd)) grouped.set(row.crd, []);
       grouped.get(row.crd)!.push(row);
     }
-    return Array.from(grouped.entries()).map(([crdCode, rows]) => {
+    return Array.from(grouped.entries()).map(([crdName, rows]) => {
       const crdTotalMonths = Array.from({ length: 12 }, (_, monthIdx) =>
         rows.reduce((sum, row) => sum + (row.months[monthIdx] || 0), 0)
       );
       const crdTotal = crdTotalMonths.reduce((sum, value) => sum + value, 0);
       return {
-        crdCode,
+        crdName,
         rows,
         months: crdTotalMonths,
         total: crdTotal,
@@ -89,11 +87,11 @@ export const SintasePage: React.FC = () => {
     });
   }, [data]);
 
-  const toggleCrd = (crdCode: string) => {
+  const toggleCrd = (crdName: string) => {
     setExpandedCrds((prev) => {
       const next = new Set(prev);
-      if (next.has(crdCode)) next.delete(crdCode);
-      else next.add(crdCode);
+      if (next.has(crdName)) next.delete(crdName);
+      else next.add(crdName);
       return next;
     });
   };
@@ -152,8 +150,8 @@ export const SintasePage: React.FC = () => {
           >
             <option value="">Todos os CRDs</option>
             {crdOptions.map((option) => (
-              <option key={option.code} value={option.code}>
-                {option.code} - {option.name}
+              <option key={option} value={option}>
+                {option}
               </option>
             ))}
           </select>
@@ -179,11 +177,11 @@ export const SintasePage: React.FC = () => {
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
         <div className="divide-y divide-slate-100">
           {rowsByCrd.map((crdGroup) => {
-            const isOpen = expandedCrds.has(crdGroup.crdCode);
+            const isOpen = expandedCrds.has(crdGroup.crdName);
             return (
-              <div key={crdGroup.crdCode}>
+              <div key={crdGroup.crdName}>
                 <button
-                  onClick={() => toggleCrd(crdGroup.crdCode)}
+                  onClick={() => toggleCrd(crdGroup.crdName)}
                   className="w-full flex items-center gap-3 px-5 py-4 hover:bg-slate-50 transition-colors text-left"
                 >
                   {isOpen ? (
@@ -191,7 +189,7 @@ export const SintasePage: React.FC = () => {
                   ) : (
                     <ChevronRight className="w-4 h-4 text-slate-500 shrink-0" />
                   )}
-                  <span className="text-sm font-bold text-slate-900">CRD {crdGroup.crdCode}</span>
+                  <span className="text-sm font-bold text-slate-900">CRD {crdGroup.crdName}</span>
                   <span className="text-xs text-slate-500">({crdGroup.rows.length} grupo(s)/linha(s))</span>
                   <span className="ml-auto text-sm font-extrabold text-slate-900">{formatCurrency(crdGroup.total)}</span>
                 </button>
@@ -204,7 +202,7 @@ export const SintasePage: React.FC = () => {
                           <th className="px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Grupo</th>
                           <th className="px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Detalhado</th>
                           {monthHeaders.map((month) => (
-                            <th key={`${crdGroup.crdCode}-${month}`} className="px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-right">
+                            <th key={`${crdGroup.crdName}-${month}`} className="px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-right">
                               {month}
                             </th>
                           ))}
@@ -258,10 +256,10 @@ export const SintasePage: React.FC = () => {
                         ))}
                         <tr className="bg-white/80 border-t border-slate-200">
                           <td className="px-4 py-3 text-xs font-bold text-slate-700" colSpan={2}>
-                            Total CRD {crdGroup.crdCode}
+                            Total CRD {crdGroup.crdName}
                           </td>
                           {crdGroup.months.map((value, index) => (
-                            <td key={`subtotal-${crdGroup.crdCode}-${index}`} className="px-4 py-3 text-xs text-right font-bold text-slate-800">
+                            <td key={`subtotal-${crdGroup.crdName}-${index}`} className="px-4 py-3 text-xs text-right font-bold text-slate-800">
                               {formatCurrency(value || 0)}
                             </td>
                           ))}

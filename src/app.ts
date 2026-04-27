@@ -831,8 +831,10 @@ export function createApp() {
 
         const row: SintaseRow = {
           id: Number(item.id),
-          crd: String(item.code || ""),
-          grupo: String(item.sectors?.name || "Sem grupo"),
+          // CRD = nome macro (ex.: A&B, RH) vindo do setor.
+          crd: String(item.sectors?.name || "Sem CRD"),
+          // Grupo = código curto (1-2 dígitos) cadastrado no campo code.
+          grupo: String(item.code || ""),
           detalhado: String(item.name || ""),
           months,
           total,
