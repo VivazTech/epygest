@@ -1379,7 +1379,7 @@ export function createApp() {
     const { data: reqData, error: reqError } = await supabase
       .from("requisitions")
       .select("amount, date, status, crd_id")
-      .eq("status", "posted")
+      .neq("status", "cancelled")
       .gte("date", dateFrom)
       .lte("date", dateTo);
     if (reqError) return res.status(500).json({ error: reqError.message });

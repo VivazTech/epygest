@@ -16,10 +16,22 @@ import { ValueTrace } from '../components/ValueTrace';
 
 export const Invoices: React.FC = () => {
   const now = new Date();
+  const initialMonth = (() => {
+    const saved = localStorage.getItem('invoices:selectedMonth');
+    return saved && Number(saved) >= 1 && Number(saved) <= 12
+      ? String(Number(saved))
+      : String(now.getMonth() + 1);
+  })();
+  const initialYear = (() => {
+    const saved = localStorage.getItem('invoices:selectedYear');
+    return saved && Number(saved) >= 2000 && Number(saved) <= 2100
+      ? String(Number(saved))
+      : String(now.getFullYear());
+  })();
   const [invoices, setInvoices] = useState<any[]>([]);
   const [sectors, setSectors] = useState<any[]>([]);
-  const [selectedMonth, setSelectedMonth] = useState(String(now.getMonth() + 1));
-  const [selectedYear, setSelectedYear] = useState(String(now.getFullYear()));
+  const [selectedMonth, setSelectedMonth] = useState(initialMonth);
+  const [selectedYear, setSelectedYear] = useState(initialYear);
   const [paymentMethods, setPaymentMethods] = useState<any[]>([]);
   const [crdOptions, setCrdOptions] = useState<any[]>([]);
   const [actingSector, setActingSector] = useState<'requester' | 'controle' | 'financeiro'>('requester');
@@ -56,6 +68,11 @@ export const Invoices: React.FC = () => {
   useEffect(() => {
     fetchInvoices(selectedMonth, selectedYear);
     fetchSectors(selectedMonth, selectedYear);
+  }, [selectedMonth, selectedYear]);
+
+  useEffect(() => {
+    localStorage.setItem('invoices:selectedMonth', selectedMonth);
+    localStorage.setItem('invoices:selectedYear', selectedYear);
   }, [selectedMonth, selectedYear]);
 
   useEffect(() => {
