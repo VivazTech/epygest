@@ -355,9 +355,13 @@ export function createApp() {
 
     const { data: crdData, error: crdError } = await supabase
       .from("crds")
-      .select("id, sector_id, previsto_mes")
+      .select("id, code, sector_id, previsto_mes")
       .eq("active", true);
     if (crdError) return res.status(500).json({ error: crdError.message });
+
+    const { data: allCrds } = await supabase
+      .from("crds")
+      .select("id, code, sector_id");
 
     let occupancyPercent = 100;
     const { data: occupancyRows, error: occupancyError } = await supabase
@@ -372,6 +376,15 @@ export function createApp() {
 
     const crdIds = (crdData ?? []).map((item: any) => Number(item.id)).filter((id) => Number.isFinite(id));
     const monthlyValueByCrdId = new Map<number, number>();
+    const crdIdToSectorCodeKey = new Map<number, string>();
+    for (const row of allCrds ?? []) {
+      const id = Number((row as any).id);
+      const sectorId = Number((row as any).sector_id);
+      const code = String((row as any).code || "").trim();
+      if (!Number.isFinite(id)) continue;
+      crdIdToSectorCodeKey.set(id, `${sectorId}|${code}`);
+    }
+    const monthlyValueBySectorCodeKey = new Map<string, number>();
 
     if (crdIds.length) {
       const { data: monthlyValues, error: monthlyError } = await supabase
@@ -389,7 +402,11 @@ export function createApp() {
       }
 
       for (const row of monthlyValues ?? []) {
-        monthlyValueByCrdId.set(Number((row as any).crd_id), sanitizeMonthBudget((row as any).value));
+        const crdId = Number((row as any).crd_id);
+        const value = sanitizeMonthBudget((row as any).value);
+        monthlyValueByCrdId.set(crdId, value);
+        const sectorCodeKey = crdIdToSectorCodeKey.get(crdId);
+        if (sectorCodeKey) monthlyValueBySectorCodeKey.set(sectorCodeKey, value);
       }
     }
 
@@ -397,8 +414,10 @@ export function createApp() {
     for (const crd of crdData ?? []) {
       const crdId = Number((crd as any).id);
       const sectorId = Number((crd as any).sector_id);
+      const code = String((crd as any).code || "").trim();
+      const sectorCodeKey = `${sectorId}|${code}`;
       const defaultValue = sanitizeMonthBudget((crd as any).previsto_mes);
-      const monthlyValue = monthlyValueByCrdId.get(crdId);
+      const monthlyValue = monthlyValueByCrdId.get(crdId) ?? monthlyValueBySectorCodeKey.get(sectorCodeKey);
       const baseValue = monthlyValue ?? defaultValue;
       const effectiveValue = baseValue * occupancyFactor;
       budgetBySectorId.set(sectorId, (budgetBySectorId.get(sectorId) || 0) + effectiveValue);
@@ -1047,14 +1066,27 @@ export function createApp() {
 
     const { data: crdData, error } = await supabase
       .from("crds")
-      .select("id, code, name, previsto_mes, sectors(name)")
+      .select("id, code, name, sector_id, previsto_mes, sectors(name)")
       .eq("active", true)
       .order("code");
 
     if (error) return res.status(500).json({ error: error.message });
 
+    const { data: allCrds } = await supabase
+      .from("crds")
+      .select("id, code, sector_id");
+
     const crdIds = (crdData ?? []).map((item: any) => Number(item.id)).filter((id) => Number.isFinite(id));
     const monthValueByKey = new Map<string, number>();
+    const crdIdToSectorCodeKey = new Map<number, string>();
+    for (const row of allCrds ?? []) {
+      const id = Number((row as any).id);
+      const sectorId = Number((row as any).sector_id);
+      const code = String((row as any).code || "").trim();
+      if (!Number.isFinite(id)) continue;
+      crdIdToSectorCodeKey.set(id, `${sectorId}|${code}`);
+    }
+    const monthValueBySectorCodeKey = new Map<string, number>();
 
     if (crdIds.length) {
       const { data: monthlyRows, error: monthlyError } = await supabase
@@ -1065,7 +1097,10 @@ export function createApp() {
 
       if (!monthlyError) {
         for (const row of (monthlyRows ?? []) as CrdMonthlyValueRow[]) {
-          monthValueByKey.set(`${row.crd_id}:${row.month}`, sanitizeMonthBudget(row.value));
+          const value = sanitizeMonthBudget(row.value);
+          monthValueByKey.set(`${row.crd_id}:${row.month}`, value);
+          const sectorCodeKey = crdIdToSectorCodeKey.get(Number(row.crd_id));
+          if (sectorCodeKey) monthValueBySectorCodeKey.set(`${sectorCodeKey}:${row.month}`, value);
         }
       }
     }
@@ -1074,9 +1109,13 @@ export function createApp() {
       .map((item: any) => {
         const monthlyBudget = sanitizeMonthBudget(item.previsto_mes);
         const crdId = Number(item.id);
+        const sectorId = Number(item.sector_id);
+        const code = String(item.code || "").trim();
         const months = Array.from({ length: 12 }, (_, monthIndex) => {
           const monthNumber = monthIndex + 1;
-          const override = monthValueByKey.get(`${crdId}:${monthNumber}`);
+          const override =
+            monthValueByKey.get(`${crdId}:${monthNumber}`) ??
+            monthValueBySectorCodeKey.get(`${sectorId}|${code}:${monthNumber}`);
           const baseValue = override ?? monthlyBudget;
           return baseValue * occupancyFactor;
         });
@@ -1237,8 +1276,21 @@ export function createApp() {
       .order("code");
     if (crdError) return res.status(500).json({ error: crdError.message });
 
+    const { data: allCrds } = await supabase
+      .from("crds")
+      .select("id, code, sector_id");
+
     const crdIds = (crdData ?? []).map((item: any) => Number(item.id)).filter((id) => Number.isFinite(id));
     const monthValueByKey = new Map<string, number>();
+    const crdIdToSectorCodeKey = new Map<number, string>();
+    for (const row of allCrds ?? []) {
+      const id = Number((row as any).id);
+      const sectorId = Number((row as any).sector_id);
+      const code = String((row as any).code || "").trim();
+      if (!Number.isFinite(id)) continue;
+      crdIdToSectorCodeKey.set(id, `${sectorId}|${code}`);
+    }
+    const monthValueBySectorCodeKey = new Map<string, number>();
 
     if (crdIds.length) {
       const { data: monthlyRows, error: monthlyError } = await supabase
@@ -1249,7 +1301,10 @@ export function createApp() {
 
       if (!monthlyError) {
         for (const row of (monthlyRows ?? []) as CrdMonthlyValueRow[]) {
-          monthValueByKey.set(`${row.crd_id}:${row.month}`, sanitizeMonthBudget(row.value));
+          const value = sanitizeMonthBudget(row.value);
+          monthValueByKey.set(`${row.crd_id}:${row.month}`, value);
+          const sectorCodeKey = crdIdToSectorCodeKey.get(Number(row.crd_id));
+          if (sectorCodeKey) monthValueBySectorCodeKey.set(`${sectorCodeKey}:${row.month}`, value);
         }
       }
     }
@@ -1310,10 +1365,14 @@ export function createApp() {
     const rows = (crdData ?? [])
       .map((item: any) => {
         const crdId = Number(item.id);
+        const sectorId = Number(item.sector_id);
+        const code = String(item.code || "").trim();
         const monthlyBudget = sanitizeMonthBudget(item.previsto_mes);
         const months: PrevRealMonth[] = Array.from({ length: 12 }, (_, monthIndex) => {
           const month = monthIndex + 1;
-          const override = monthValueByKey.get(`${crdId}:${month}`);
+          const override =
+            monthValueByKey.get(`${crdId}:${month}`) ??
+            monthValueBySectorCodeKey.get(`${sectorId}|${code}:${month}`);
           const basePrevisto = override ?? monthlyBudget;
           const previsto = basePrevisto * occupancyFactor;
           const realizado = realizedByKey.get(`${crdId}:${month}`) || 0;
