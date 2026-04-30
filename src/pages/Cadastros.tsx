@@ -50,7 +50,7 @@ export const CadastrosPage: React.FC = () => {
     active: true,
   });
   const [isImportingCrd, setIsImportingCrd] = useState(false);
-  const [reqForm, setReqForm] = useState({ sector_id: '', date: '', amount: '', description: '' });
+  const [reqForm, setReqForm] = useState({ crd_id: '', date: '', amount: '', description: '' });
   const [expandedGroups, setExpandedGroups] = useState<Set<number>>(new Set());
   const [crdSearch, setCrdSearch] = useState('');
 
@@ -179,15 +179,15 @@ export const CadastrosPage: React.FC = () => {
   };
 
   const createRequisition = async () => {
-    if (!reqForm.sector_id || !reqForm.date || !reqForm.amount) {
-      alert('Preencha setor, data e valor.');
+    if (!reqForm.crd_id || !reqForm.date || !reqForm.amount) {
+      alert('Preencha CRD, data e valor.');
       return;
     }
     const res = await fetch('/api/requisitions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        sector_id: parseInt(reqForm.sector_id),
+        crd_id: parseInt(reqForm.crd_id),
         date: reqForm.date,
         amount: parseFloat(reqForm.amount),
         description: reqForm.description || null
@@ -198,7 +198,7 @@ export const CadastrosPage: React.FC = () => {
       alert(data.error || 'Erro ao cadastrar requisição');
       return;
     }
-    setReqForm({ sector_id: '', date: '', amount: '', description: '' });
+    setReqForm({ crd_id: '', date: '', amount: '', description: '' });
     fetch('/api/requisitions').then(res => res.json()).then(data => setRequisitions(data));
     refreshSectors();
   };
@@ -650,12 +650,16 @@ export const CadastrosPage: React.FC = () => {
           {activeTab === 'requisicoes' && (
             <div className="flex flex-wrap items-center gap-2 ml-4">
               <select
-                value={reqForm.sector_id}
-                onChange={(e) => setReqForm((p) => ({ ...p, sector_id: e.target.value }))}
+                value={reqForm.crd_id}
+                onChange={(e) => setReqForm((p) => ({ ...p, crd_id: e.target.value }))}
                 className="w-48 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
               >
-                <option value="">Setor</option>
-                {sectors.map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                <option value="">CRD</option>
+                {crds.filter((c: any) => c.active !== false).map((c: any) => (
+                  <option key={c.id} value={c.id}>
+                    {c.code} - {c.name}{c.sector_name ? ` (${c.sector_name})` : ''}
+                  </option>
+                ))}
               </select>
               <input
                 type="date"
@@ -772,7 +776,10 @@ export const CadastrosPage: React.FC = () => {
                 <tr key={r.id} className="hover:bg-slate-50/50 transition-colors group">
                   <td className="px-6 py-4">
                     <div className="space-y-1">
-                      <p className="text-sm font-medium text-slate-800">{r.sector_name} • {r.date}</p>
+                      <p className="text-sm font-medium text-slate-800">
+                        {(r.crd_code || 'CRD')} - {(r.crd_name || 'Sem descrição')} • {r.date}
+                      </p>
+                      <p className="text-xs text-slate-500">{r.sector_name || 'Sem setor'}</p>
                       <p className="text-xs text-slate-500">{r.description || '—'}</p>
                     </div>
                   </td>

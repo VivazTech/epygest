@@ -124,6 +124,7 @@ CREATE TABLE IF NOT EXISTS crd_monthly_values (
 -- Tabela: requisitions
 CREATE TABLE IF NOT EXISTS requisitions (
   id BIGSERIAL PRIMARY KEY,
+  crd_id BIGINT REFERENCES crds(id),
   sector_id BIGINT NOT NULL REFERENCES sectors(id),
   description TEXT,
   amount NUMERIC NOT NULL,

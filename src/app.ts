@@ -415,7 +415,7 @@ export function createApp() {
   app.get("/api/requisitions", async (_req, res) => {
     const { data, error } = await supabase
       .from("requisitions")
-      .select("*, sectors(name)")
+      .select("*, sectors(name), crds(id, code, name, sector_id, sectors(name))")
       .order("date", { ascending: false });
 
     if (error) return res.status(500).json({ error: error.message });
@@ -423,20 +423,39 @@ export function createApp() {
     res.json(
       (data ?? []).map((r: any) => ({
         ...r,
-        sector_name: r.sectors?.name ?? null,
+        sector_name: r.crds?.sectors?.name ?? r.sectors?.name ?? null,
+        crd_name: r.crds?.name ?? null,
+        crd_code: r.crds?.code ?? null,
         sectors: undefined,
+        crds: undefined,
       }))
     );
   });
 
   app.post("/api/requisitions", async (req, res) => {
-    const { sector_id, description, amount, date } = req.body;
-    if (!sector_id || !amount || !date)
-      return res.status(400).json({ error: "sector_id, amount e date são obrigatórios" });
+    const { crd_id, description, amount, date } = req.body;
+    if (!crd_id || !amount || !date)
+      return res.status(400).json({ error: "crd_id, amount e date são obrigatórios" });
+
+    const { data: crd, error: crdError } = await supabase
+      .from("crds")
+      .select("id, sector_id")
+      .eq("id", Number(crd_id))
+      .single();
+    if (crdError || !crd) {
+      return res.status(400).json({ error: "CRD inválido para a requisição" });
+    }
 
     const { data, error } = await supabase
       .from("requisitions")
-      .insert({ sector_id, description: description || null, amount, date, status: "open" })
+      .insert({
+        crd_id: Number(crd_id),
+        sector_id: Number(crd.sector_id),
+        description: description || null,
+        amount,
+        date,
+        status: "open",
+      })
       .select("id")
       .single();
 

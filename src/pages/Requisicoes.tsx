@@ -5,9 +5,9 @@ import { ValueTrace } from '../components/ValueTrace';
 
 export const RequisicoesPage: React.FC = () => {
   const [requisitions, setRequisitions] = useState<any[]>([]);
-  const [sectors, setSectors] = useState<any[]>([]);
+  const [crds, setCrds] = useState<any[]>([]);
   const [form, setForm] = useState({
-    sector_id: '',
+    crd_id: '',
     date: '',
     amount: '',
     description: ''
@@ -15,7 +15,7 @@ export const RequisicoesPage: React.FC = () => {
 
   const loadData = () => {
     fetch('/api/requisitions').then((res) => res.json()).then(setRequisitions);
-    fetch('/api/sectors').then((res) => res.json()).then(setSectors);
+    fetch('/api/crds').then((res) => res.json()).then(setCrds);
   };
 
   useEffect(() => {
@@ -24,8 +24,8 @@ export const RequisicoesPage: React.FC = () => {
 
   const createRequisition = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!form.sector_id || !form.date || !form.amount) {
-      alert('Preencha setor, data e valor.');
+    if (!form.crd_id || !form.date || !form.amount) {
+      alert('Preencha CRD, data e valor.');
       return;
     }
 
@@ -33,7 +33,7 @@ export const RequisicoesPage: React.FC = () => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        sector_id: parseInt(form.sector_id),
+        crd_id: parseInt(form.crd_id),
         date: form.date,
         amount: parseFloat(form.amount),
         description: form.description || null
@@ -46,7 +46,7 @@ export const RequisicoesPage: React.FC = () => {
       return;
     }
 
-    setForm({ sector_id: '', date: '', amount: '', description: '' });
+    setForm({ crd_id: '', date: '', amount: '', description: '' });
     loadData();
   };
 
@@ -64,19 +64,21 @@ export const RequisicoesPage: React.FC = () => {
       <div>
         <h2 className="text-2xl font-bold text-slate-900">Requisições Internas</h2>
         <p className="text-slate-500 text-sm">
-          Registre compras internas do almoxarifado para compor o orçamento do setor.
+          Registre compras internas por CRD para compor o orçamento do CRD na competência da requisição.
         </p>
       </div>
 
       <form onSubmit={createRequisition} className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5 grid grid-cols-1 md:grid-cols-5 gap-3">
         <select
           required
-          value={form.sector_id}
-          onChange={(e) => setForm((p) => ({ ...p, sector_id: e.target.value }))}
+          value={form.crd_id}
+          onChange={(e) => setForm((p) => ({ ...p, crd_id: e.target.value }))}
           className="px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm"
         >
-          <option value="">Setor</option>
-          {sectors.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+          <option value="">CRD</option>
+          {crds.filter((c) => c.active !== false).map((c) => (
+            <option key={c.id} value={c.id}>{c.code} - {c.name}{c.sector_name ? ` (${c.sector_name})` : ''}</option>
+          ))}
         </select>
 
         <input
@@ -117,7 +119,7 @@ export const RequisicoesPage: React.FC = () => {
         <table className="w-full text-left border-collapse">
           <thead>
             <tr className="bg-slate-50/50">
-              <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Setor</th>
+              <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">CRD</th>
               <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Data</th>
               <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Descrição</th>
               <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Valor</th>
@@ -128,7 +130,10 @@ export const RequisicoesPage: React.FC = () => {
           <tbody className="divide-y divide-slate-50">
             {requisitions.map((r) => (
               <tr key={r.id} className="hover:bg-slate-50/50 transition-colors">
-                <td className="px-6 py-4 text-sm font-medium text-slate-700">{r.sector_name}</td>
+                <td className="px-6 py-4 text-sm font-medium text-slate-700">
+                  {(r.crd_code || 'CRD')} - {r.crd_name || 'Sem descrição'}
+                  <span className="block text-xs font-normal text-slate-500">{r.sector_name || 'Sem setor'}</span>
+                </td>
                 <td className="px-6 py-4 text-sm text-slate-600">{r.date}</td>
                 <td className="px-6 py-4 text-sm text-slate-600">{r.description || '—'}</td>
                 <td className="px-6 py-4">
