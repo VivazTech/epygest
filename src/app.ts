@@ -87,6 +87,13 @@ const getNormalizedOccupancyPercent = (value: any) => {
   return parsed;
 };
 
+const normalizeCrdFilterText = (value: string) =>
+  String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/^crd\s+/, "")
+    .trim();
+
 const parseHierarchyLine = (raw: string): ParsedNode | null => {
   const normalized = raw.replace(/\s+/g, " ").trim();
   const match = normalized.match(/^([\d.]+)\s*-\s*(.*?)\s*\((\d+)\)\s*$/);
@@ -1051,7 +1058,7 @@ export function createApp() {
   app.get("/api/sintase", async (req, res) => {
     const { year, crd } = req.query as { year?: string; crd?: string };
     const selectedYear = Number(year) || new Date().getFullYear();
-    const crdFilter = (crd || "").trim().toLowerCase();
+    const crdFilter = normalizeCrdFilterText(crd || "");
 
     let occupancyPercent = 100;
     const { data: occupancyRows, error: occupancyError } = await supabase
@@ -1135,8 +1142,9 @@ export function createApp() {
       })
       .filter((row) => {
         if (!crdFilter) return true;
+        const normalizedRowCrd = normalizeCrdFilterText(row.crd);
         return (
-          row.crd.toLowerCase().includes(crdFilter) ||
+          normalizedRowCrd.includes(crdFilter) ||
           row.detalhado.toLowerCase().includes(crdFilter) ||
           row.grupo.toLowerCase().includes(crdFilter)
         );
@@ -1254,7 +1262,7 @@ export function createApp() {
   app.get("/api/prev-real", async (req, res) => {
     const { year, crd } = req.query as { year?: string; crd?: string };
     const selectedYear = Number(year) || new Date().getFullYear();
-    const crdFilter = (crd || "").trim().toLowerCase();
+    const crdFilter = normalizeCrdFilterText(crd || "");
     const dateFrom = `${selectedYear}-01-01`;
     const dateTo = `${selectedYear}-12-31`;
 
@@ -1396,8 +1404,9 @@ export function createApp() {
       })
       .filter((row) => {
         if (!crdFilter) return true;
+        const normalizedRowCrd = normalizeCrdFilterText(row.crd);
         return (
-          row.crd.toLowerCase().includes(crdFilter) ||
+          normalizedRowCrd.includes(crdFilter) ||
           row.grupo.toLowerCase().includes(crdFilter) ||
           row.detalhado.toLowerCase().includes(crdFilter)
         );
