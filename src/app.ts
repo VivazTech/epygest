@@ -92,6 +92,17 @@ const sanitizeMonthBudget = (value: any) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
+const getMonthDateRange = (year: number, month: number) => {
+  const safeYear = Number.isFinite(year) ? year : new Date().getFullYear();
+  const safeMonth = Number.isFinite(month) && month >= 1 && month <= 12 ? month : new Date().getMonth() + 1;
+  const lastDay = new Date(safeYear, safeMonth, 0).getDate();
+  const monthText = String(safeMonth).padStart(2, "0");
+  return {
+    dateFrom: `${safeYear}-${monthText}-01`,
+    dateTo: `${safeYear}-${monthText}-${String(lastDay).padStart(2, "0")}`,
+  };
+};
+
 // Diretório de upload: /tmp no Vercel (serverless), local no dev
 const uploadDir = process.env.VERCEL
   ? "/tmp/uploads"
@@ -308,8 +319,7 @@ export function createApp() {
     const now = new Date();
     const selectedMonth = Number(month) || now.getMonth() + 1;
     const selectedYear = Number(year) || now.getFullYear();
-    const dateFrom = `${selectedYear}-${String(selectedMonth).padStart(2, "0")}-01`;
-    const dateTo = `${selectedYear}-${String(selectedMonth).padStart(2, "0")}-31`;
+    const { dateFrom, dateTo } = getMonthDateRange(selectedYear, selectedMonth);
 
     const { data: sectors, error } = await supabase
       .from("sectors")
@@ -453,8 +463,7 @@ export function createApp() {
     const now = new Date();
     const selectedMonth = Number(month) || now.getMonth() + 1;
     const selectedYear = Number(year) || now.getFullYear();
-    const dateFrom = `${selectedYear}-${String(selectedMonth).padStart(2, "0")}-01`;
-    const dateTo = `${selectedYear}-${String(selectedMonth).padStart(2, "0")}-31`;
+    const { dateFrom, dateTo } = getMonthDateRange(selectedYear, selectedMonth);
 
     const { data, error } = await supabase
       .from("invoices")

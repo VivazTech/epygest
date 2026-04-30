@@ -93,7 +93,8 @@ export const Invoices: React.FC = () => {
     params.set('year', year);
     fetch(`/api/invoices?${params.toString()}`)
       .then(res => res.json())
-      .then(data => setInvoices(data));
+      .then(data => setInvoices(Array.isArray(data) ? data : []))
+      .catch(() => setInvoices([]));
   };
 
   const fetchSectors = (month = selectedMonth, year = selectedYear) => {
@@ -102,7 +103,8 @@ export const Invoices: React.FC = () => {
     params.set('year', year);
     fetch(`/api/sectors?${params.toString()}`)
       .then(res => res.json())
-      .then(data => setSectors(data));
+      .then(data => setSectors(Array.isArray(data) ? data : []))
+      .catch(() => setSectors([]));
   };
 
   const handlePdfUpload = async (file: File) => {
