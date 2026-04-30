@@ -39,6 +39,9 @@ export const PrevRealPage: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<PrevRealApiResponse | null>(null);
   const [expandedCrds, setExpandedCrds] = useState<Set<string>>(new Set());
+  const [savingCell, setSavingCell] = useState(false);
+  const [editingCell, setEditingCell] = useState<{ rowId: number; monthIndex: number } | null>(null);
+  const [editingValue, setEditingValue] = useState('');
 
   const loadData = async () => {
     setLoading(true);
@@ -117,6 +120,47 @@ export const PrevRealPage: React.FC = () => {
       else next.add(crdName);
       return next;
     });
+  };
+
+  const startCellEdit = (rowId: number, monthIndex: number, value: number) => {
+    setEditingCell({ rowId, monthIndex });
+    setEditingValue(String(value ?? 0));
+  };
+
+  const saveCellEdit = async (
+    row: PrevRealApiResponse['rows'][number],
+    monthIndex: number
+  ) => {
+    if (savingCell) return;
+    const parsedValue = Number(String(editingValue).replace(',', '.'));
+    if (!Number.isFinite(parsedValue)) {
+      alert('Digite um valor numérico válido.');
+      return;
+    }
+
+    setSavingCell(true);
+    try {
+      const res = await fetch('/api/sintase/cell', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          crd_id: row.id,
+          month: monthIndex + 1,
+          year: Number(year),
+          value: parsedValue,
+          occupancy_percent: Number(data?.occupancy_percent ?? 100),
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        alert(json.error || 'Erro ao salvar célula.');
+        return;
+      }
+      setEditingCell(null);
+      await loadData();
+    } finally {
+      setSavingCell(false);
+    }
   };
 
   return (
@@ -218,7 +262,31 @@ export const PrevRealPage: React.FC = () => {
                             <td className="px-4 py-3 text-sm text-slate-700">{row.detalhado}</td>
                             {row.months.map((m, idx) => (
                               <React.Fragment key={`${row.id}-${idx}`}>
-                                <td className="px-3 py-2 text-xs text-right text-slate-700 border-l border-slate-200">{formatCurrency(m.previsto || 0)}</td>
+                                <td className="px-3 py-2 text-xs text-right text-slate-700 border-l border-slate-200">
+                                  {editingCell?.rowId === row.id && editingCell?.monthIndex === idx ? (
+                                    <input
+                                      autoFocus
+                                      type="number"
+                                      step="0.01"
+                                      value={editingValue}
+                                      onChange={(e) => setEditingValue(e.target.value)}
+                                      onBlur={() => saveCellEdit(row, idx)}
+                                      onKeyDown={(e) => {
+                                        if (e.key === 'Enter') saveCellEdit(row, idx);
+                                        if (e.key === 'Escape') setEditingCell(null);
+                                      }}
+                                      className="w-24 px-2 py-1 text-right bg-white border border-emerald-300 rounded-md"
+                                    />
+                                  ) : (
+                                    <button
+                                      onClick={() => startCellEdit(row.id, idx, m.previsto || 0)}
+                                      className="px-2 py-1 rounded hover:bg-emerald-50 transition-colors"
+                                      title="Clique para editar previsto"
+                                    >
+                                      {formatCurrency(m.previsto || 0)}
+                                    </button>
+                                  )}
+                                </td>
                                 <td className="px-3 py-2 text-xs text-right text-slate-700">{formatCurrency(m.realizado || 0)}</td>
                                 <td className={`px-3 py-2 text-xs text-right font-semibold ${(m.diferenca || 0) < 0 ? 'text-red-600' : 'text-emerald-700'}`}>{formatCurrency(m.diferenca || 0)}</td>
                               </React.Fragment>
