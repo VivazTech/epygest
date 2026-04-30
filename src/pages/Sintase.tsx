@@ -108,8 +108,14 @@ export const SintasePage: React.FC = () => {
       return;
     }
 
-    // Sem filtro, mantém tudo colapsado por padrão.
-    setExpandedCrds(new Set());
+    // Sem filtro, preserva os grupos já abertos após recarregar dados
+    // (ex.: depois de editar uma célula).
+    setExpandedCrds((prev) => {
+      if (!prev.size) return prev;
+      const available = new Set(rowsByCrd.map((item) => item.crdName));
+      const next = new Set(Array.from(prev).filter((name) => available.has(name)));
+      return next;
+    });
   }, [rowsByCrd, crdFilter]);
 
   const toggleCrd = (crdName: string) => {
