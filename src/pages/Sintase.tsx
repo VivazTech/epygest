@@ -276,8 +276,8 @@ export const SintasePage: React.FC = () => {
                     <table className="w-full text-left border-collapse min-w-[1500px]">
                       <thead>
                         <tr className="bg-slate-100/70">
-                          <th className="px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Grupo</th>
-                          <th className="px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Detalhado</th>
+                          <th className="sticky left-0 z-20 bg-slate-100/90 px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Grupo</th>
+                          <th className="sticky left-[120px] z-20 bg-slate-100/90 px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Detalhado</th>
                           {monthHeaders.map((month) => (
                             <th key={`${crdGroup.crdName}-${month}`} className="px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-right">
                               {month}
@@ -292,16 +292,16 @@ export const SintasePage: React.FC = () => {
                             key={row.id}
                             className={
                               rowIndex % 2 === 0
-                                ? "bg-white/70 hover:bg-white transition-colors"
-                                : "bg-slate-50/70 hover:bg-slate-100/70 transition-colors"
+                                ? "bg-white hover:bg-slate-50 transition-colors"
+                                : "bg-slate-200/60 hover:bg-slate-200 transition-colors"
                             }
                           >
-                            <td className="px-4 py-3 text-xs text-slate-700">{row.grupo}</td>
-                            <td className="px-4 py-3 text-sm text-slate-700">{row.detalhado}</td>
+                            <td className={`sticky left-0 z-10 px-4 py-3 text-xs text-slate-900 min-w-[120px] ${rowIndex % 2 === 0 ? 'bg-white' : 'bg-slate-200/70'}`}>{row.grupo}</td>
+                            <td className={`sticky left-[120px] z-10 px-4 py-3 text-sm text-slate-900 min-w-[260px] ${rowIndex % 2 === 0 ? 'bg-white' : 'bg-slate-200/70'}`}>{row.detalhado}</td>
                             {row.months.map((value, index) => {
                               const isEditing = editingCell?.rowId === row.id && editingCell?.monthIndex === index;
                               return (
-                                <td key={`${row.id}-${index}`} className="px-4 py-3 text-xs text-right text-slate-700">
+                                <td key={`${row.id}-${index}`} className="px-4 py-3 text-xs text-right text-slate-900">
                                   {isEditing ? (
                                     <input
                                       autoFocus
@@ -323,7 +323,7 @@ export const SintasePage: React.FC = () => {
                                       title="Clique para editar"
                                     >
                                       <ValueTrace
-                                        className="text-xs text-slate-700"
+                                        className="text-xs text-slate-900"
                                         displayValue={formatCurrency(value || 0)}
                                         source={`CRD ${row.crd} / Grupo ${row.grupo} / ${row.detalhado}`}
                                         calculation={`Valor do mês ${index + 1} (modelo atual usa previsto_mes do CRD)`}
@@ -343,8 +343,8 @@ export const SintasePage: React.FC = () => {
                             </td>
                           </tr>
                         ))}
-                        <tr className="bg-white/80 border-t border-slate-200">
-                          <td className="px-4 py-3 text-xs font-bold text-slate-700" colSpan={2}>
+                        <tr className="bg-slate-100 border-t border-slate-300">
+                          <td className="sticky left-0 z-10 bg-white px-4 py-3 text-xs font-bold text-slate-700 min-w-[380px]" colSpan={2}>
                             Total CRD {crdGroup.crdName}
                           </td>
                           {crdGroup.months.map((value, index) => (
