@@ -293,11 +293,11 @@ export const SintasePage: React.FC = () => {
                             className={
                               rowIndex % 2 === 0
                                 ? "bg-white hover:bg-slate-50 transition-colors"
-                                : "bg-slate-200/60 hover:bg-slate-200 transition-colors"
+                                : "bg-slate-200 hover:bg-slate-300 transition-colors"
                             }
                           >
-                            <td className={`sticky left-0 z-10 px-4 py-3 text-xs text-slate-900 min-w-[120px] ${rowIndex % 2 === 0 ? 'bg-white' : 'bg-slate-200/70'}`}>{row.grupo}</td>
-                            <td className={`sticky left-[120px] z-10 px-4 py-3 text-sm text-slate-900 min-w-[260px] ${rowIndex % 2 === 0 ? 'bg-white' : 'bg-slate-200/70'}`}>{row.detalhado}</td>
+                            <td className={`sticky left-0 z-10 px-4 py-3 text-xs text-slate-900 min-w-[120px] ${rowIndex % 2 === 0 ? 'bg-white' : 'bg-slate-200'}`}>{row.grupo}</td>
+                            <td className={`sticky left-[120px] z-10 px-4 py-3 text-sm text-slate-900 min-w-[260px] ${rowIndex % 2 === 0 ? 'bg-white' : 'bg-slate-200'}`}>{row.detalhado}</td>
                             {row.months.map((value, index) => {
                               const isEditing = editingCell?.rowId === row.id && editingCell?.monthIndex === index;
                               return (
@@ -378,6 +378,21 @@ export const SintasePage: React.FC = () => {
 
       <div className="bg-white rounded-2xl border border-emerald-100 shadow-sm overflow-auto">
         <table className="w-full text-left border-collapse min-w-[1200px]">
+          <thead>
+            <tr className="bg-emerald-100/70 border-b border-emerald-200">
+              <th className="px-4 py-2 text-[10px] font-bold text-emerald-700 uppercase tracking-widest" colSpan={2}>
+                Referência
+              </th>
+              {monthHeaders.map((month) => (
+                <th key={`total-head-${month}`} className="px-4 py-2 text-[10px] font-bold text-emerald-700 uppercase tracking-widest text-right">
+                  {month}
+                </th>
+              ))}
+              <th className="px-4 py-2 text-[10px] font-bold text-emerald-700 uppercase tracking-widest text-right">
+                Total
+              </th>
+            </tr>
+          </thead>
           <tbody>
             <tr className="bg-emerald-50/50 border-t border-emerald-100">
               <td className="px-4 py-3 text-xs font-bold text-emerald-800" colSpan={2}>
