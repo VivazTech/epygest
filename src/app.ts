@@ -394,12 +394,13 @@ export function createApp() {
     const monthlyValueBySectorCodeKey = new Map<string, number>();
 
     if (crdIds.length) {
+      const allowedCrdIds = new Set(crdIds);
       const { data: monthlyValues, error: monthlyError } = await supabase
         .from("crd_monthly_values")
         .select("crd_id, value")
         .eq("year", selectedYear)
         .eq("month", selectedMonth)
-        .in("crd_id", crdIds);
+        .limit(5000);
 
       if (monthlyError) {
         const isMissingTable =
@@ -410,6 +411,7 @@ export function createApp() {
 
       for (const row of monthlyValues ?? []) {
         const crdId = Number((row as any).crd_id);
+        if (!allowedCrdIds.has(crdId)) continue;
         const value = sanitizeMonthBudget((row as any).value);
         monthlyValueByCrdId.set(crdId, value);
         const sectorCodeKey = crdIdToSectorCodeKey.get(crdId);
@@ -1096,14 +1098,16 @@ export function createApp() {
     const monthValueBySectorCodeKey = new Map<string, number>();
 
     if (crdIds.length) {
+      const allowedCrdIds = new Set(crdIds);
       const { data: monthlyRows, error: monthlyError } = await supabase
         .from("crd_monthly_values")
         .select("crd_id, year, month, value")
         .eq("year", selectedYear)
-        .in("crd_id", crdIds);
+        .limit(5000);
 
       if (!monthlyError) {
         for (const row of (monthlyRows ?? []) as CrdMonthlyValueRow[]) {
+          if (!allowedCrdIds.has(Number(row.crd_id))) continue;
           const value = sanitizeMonthBudget(row.value);
           monthValueByKey.set(`${row.crd_id}:${row.month}`, value);
           const sectorCodeKey = crdIdToSectorCodeKey.get(Number(row.crd_id));
@@ -1301,14 +1305,16 @@ export function createApp() {
     const monthValueBySectorCodeKey = new Map<string, number>();
 
     if (crdIds.length) {
+      const allowedCrdIds = new Set(crdIds);
       const { data: monthlyRows, error: monthlyError } = await supabase
         .from("crd_monthly_values")
         .select("crd_id, year, month, value")
         .eq("year", selectedYear)
-        .in("crd_id", crdIds);
+        .limit(5000);
 
       if (!monthlyError) {
         for (const row of (monthlyRows ?? []) as CrdMonthlyValueRow[]) {
+          if (!allowedCrdIds.has(Number(row.crd_id))) continue;
           const value = sanitizeMonthBudget(row.value);
           monthValueByKey.set(`${row.crd_id}:${row.month}`, value);
           const sectorCodeKey = crdIdToSectorCodeKey.get(Number(row.crd_id));
