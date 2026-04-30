@@ -297,6 +297,7 @@ export const Invoices: React.FC = () => {
   const visibleInvoices = invoices;
   const canSeeSectorValues = (sectorId?: number | string) =>
     !isRequester || String(sectorId ?? '') === requesterSectorId;
+  const getSectorBudget = (sector: any) => Number(sector?.budget_month ?? sector?.budget_limit ?? 0);
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
@@ -341,7 +342,15 @@ export const Invoices: React.FC = () => {
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {budgetSectors.map(sector => (
-          <div key={sector.id} className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm">
+          <div
+            key={sector.id}
+            className={cn(
+              "bg-white p-5 rounded-2xl border shadow-sm",
+              canSeeSectorValues(sector.id) && (sector.pending_amount > getSectorBudget(sector))
+                ? "border-red-200"
+                : "border-slate-100"
+            )}
+          >
             <div className="flex justify-between items-start mb-4">
               <h4 className="font-bold text-slate-800">{sector.name}</h4>
               <span className="text-[10px] font-bold px-2 py-1 bg-slate-100 rounded-lg text-slate-500 uppercase">Orçamento</span>
@@ -356,9 +365,9 @@ export const Invoices: React.FC = () => {
                       source={`Soma de pendências do setor ${sector.name}`}
                       calculation="pending_invoices + pending_requisitions"
                     /> <span className="text-slate-300 font-normal">/ <ValueTrace
-                      displayValue={formatCurrency(sector.budget_limit)}
-                      source={`Cadastro do setor ${sector.name}`}
-                      calculation="Campo budget_limit da tabela sectors"
+                      displayValue={formatCurrency(getSectorBudget(sector))}
+                      source={`Síntase do setor ${sector.name}`}
+                      calculation="Soma dos CRDs do setor no mês de referência da API /api/sectors"
                     /></span>
                   </>
                 ) : (
@@ -366,13 +375,27 @@ export const Invoices: React.FC = () => {
                 )}
               </p>
             </div>
+            {canSeeSectorValues(sector.id) && (sector.pending_amount > getSectorBudget(sector)) && (
+              <div className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2">
+                <p className="text-[11px] font-bold uppercase tracking-wide text-red-700">
+                  Orçamento ultrapassado
+                </p>
+                <p className="text-xs text-red-700">
+                  Excedido em {formatCurrency((sector.pending_amount || 0) - getSectorBudget(sector))}
+                </p>
+              </div>
+            )}
             <div className="w-full bg-slate-100 h-1.5 rounded-full mt-4 overflow-hidden">
               <div 
                 className={cn(
                   "h-full transition-all duration-500",
-                  (sector.pending_amount / sector.budget_limit) > 0.9 ? "bg-orange-500" : "bg-emerald-500"
+                  (sector.pending_amount / Math.max(getSectorBudget(sector), 1)) > 1
+                    ? "bg-red-500"
+                    : (sector.pending_amount / Math.max(getSectorBudget(sector), 1)) > 0.9
+                      ? "bg-orange-500"
+                      : "bg-emerald-500"
                 )}
-                style={{ width: `${canSeeSectorValues(sector.id) ? Math.min((sector.pending_amount / sector.budget_limit) * 100, 100) : 0}%` }}
+                style={{ width: `${canSeeSectorValues(sector.id) ? Math.min((sector.pending_amount / Math.max(getSectorBudget(sector), 1)) * 100, 100) : 0}%` }}
               ></div>
             </div>
           </div>

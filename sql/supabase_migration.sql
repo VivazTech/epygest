@@ -110,6 +110,17 @@ CREATE TABLE IF NOT EXISTS crds (
   UNIQUE(code, sector_id)
 );
 
+CREATE TABLE IF NOT EXISTS crd_monthly_values (
+  id BIGSERIAL PRIMARY KEY,
+  crd_id BIGINT NOT NULL REFERENCES crds(id) ON DELETE CASCADE,
+  year INTEGER NOT NULL,
+  month INTEGER NOT NULL CHECK (month BETWEEN 1 AND 12),
+  value NUMERIC(18, 2) NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (crd_id, year, month)
+);
+
 -- Tabela: requisitions
 CREATE TABLE IF NOT EXISTS requisitions (
   id BIGSERIAL PRIMARY KEY,

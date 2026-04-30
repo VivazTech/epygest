@@ -55,6 +55,13 @@ type SintaseRow = {
   total: number;
 };
 
+type CrdMonthlyValueRow = {
+  crd_id: number;
+  year: number;
+  month: number;
+  value: number;
+};
+
 const parseHierarchyLine = (raw: string): ParsedNode | null => {
   const normalized = raw.replace(/\s+/g, " ").trim();
   const match = normalized.match(/^([\d.]+)\s*-\s*(.*?)\s*\((\d+)\)\s*$/);
@@ -296,13 +303,57 @@ export function createApp() {
   // ====================================================
   // SECTORS
   // ====================================================
-  app.get("/api/sectors", async (_req, res) => {
+  app.get("/api/sectors", async (req, res) => {
+    const { month, year } = req.query as { month?: string; year?: string };
+    const now = new Date();
+    const selectedMonth = Number(month) || now.getMonth() + 1;
+    const selectedYear = Number(year) || now.getFullYear();
+
     const { data: sectors, error } = await supabase
       .from("sectors")
       .select("*")
       .order("name");
 
     if (error) return res.status(500).json({ error: error.message });
+
+    const { data: crdData, error: crdError } = await supabase
+      .from("crds")
+      .select("id, sector_id, previsto_mes")
+      .eq("active", true);
+    if (crdError) return res.status(500).json({ error: crdError.message });
+
+    const crdIds = (crdData ?? []).map((item: any) => Number(item.id)).filter((id) => Number.isFinite(id));
+    const monthlyValueByCrdId = new Map<number, number>();
+
+    if (crdIds.length) {
+      const { data: monthlyValues, error: monthlyError } = await supabase
+        .from("crd_monthly_values")
+        .select("crd_id, value")
+        .eq("year", selectedYear)
+        .eq("month", selectedMonth)
+        .in("crd_id", crdIds);
+
+      if (monthlyError) {
+        const isMissingTable =
+          monthlyError.message?.toLowerCase().includes("relation") &&
+          monthlyError.message?.includes("crd_monthly_values");
+        if (!isMissingTable) return res.status(500).json({ error: monthlyError.message });
+      }
+
+      for (const row of monthlyValues ?? []) {
+        monthlyValueByCrdId.set(Number((row as any).crd_id), sanitizeMonthBudget((row as any).value));
+      }
+    }
+
+    const budgetBySectorId = new Map<number, number>();
+    for (const crd of crdData ?? []) {
+      const crdId = Number((crd as any).id);
+      const sectorId = Number((crd as any).sector_id);
+      const defaultValue = sanitizeMonthBudget((crd as any).previsto_mes);
+      const monthlyValue = monthlyValueByCrdId.get(crdId);
+      const effectiveValue = monthlyValue ?? defaultValue;
+      budgetBySectorId.set(sectorId, (budgetBySectorId.get(sectorId) || 0) + effectiveValue);
+    }
 
     const enriched = await Promise.all(
       (sectors ?? []).map(async (sector: any) => {
@@ -332,6 +383,11 @@ export function createApp() {
           pending_invoices,
           pending_requisitions,
           pending_amount: pending_invoices + pending_requisitions,
+          budget_month: budgetBySectorId.get(Number(sector.id)) || 0,
+          budget_month_ref: {
+            month: selectedMonth,
+            year: selectedYear,
+          },
         };
       })
     );
@@ -907,10 +963,32 @@ export function createApp() {
 
     if (error) return res.status(500).json({ error: error.message });
 
+    const crdIds = (crdData ?? []).map((item: any) => Number(item.id)).filter((id) => Number.isFinite(id));
+    const monthValueByKey = new Map<string, number>();
+
+    if (crdIds.length) {
+      const { data: monthlyRows, error: monthlyError } = await supabase
+        .from("crd_monthly_values")
+        .select("crd_id, year, month, value")
+        .eq("year", selectedYear)
+        .in("crd_id", crdIds);
+
+      if (!monthlyError) {
+        for (const row of (monthlyRows ?? []) as CrdMonthlyValueRow[]) {
+          monthValueByKey.set(`${row.crd_id}:${row.month}`, sanitizeMonthBudget(row.value));
+        }
+      }
+    }
+
     const rows = (crdData ?? [])
       .map((item: any) => {
         const monthlyBudget = sanitizeMonthBudget(item.previsto_mes);
-        const months = Array.from({ length: 12 }, () => monthlyBudget);
+        const crdId = Number(item.id);
+        const months = Array.from({ length: 12 }, (_, monthIndex) => {
+          const monthNumber = monthIndex + 1;
+          const override = monthValueByKey.get(`${crdId}:${monthNumber}`);
+          return override ?? monthlyBudget;
+        });
         const total = months.reduce((sum, monthValue) => sum + monthValue, 0);
 
         const row: SintaseRow = {
@@ -972,11 +1050,26 @@ export function createApp() {
 
     const sanitizedValue = sanitizeMonthBudget(value);
     const { error } = await supabase
-      .from("crds")
-      .update({ previsto_mes: sanitizedValue })
-      .eq("id", Number(crd_id));
+      .from("crd_monthly_values")
+      .upsert(
+        {
+          crd_id: Number(crd_id),
+          year: Number(year),
+          month: Number(month),
+          value: sanitizedValue,
+        },
+        { onConflict: "crd_id,year,month" }
+      );
 
-    if (error) return res.status(500).json({ error: error.message });
+    if (error) {
+      if (error.message?.toLowerCase().includes("relation") && error.message?.includes("crd_monthly_values")) {
+        return res.status(500).json({
+          error:
+            "Tabela crd_monthly_values não encontrada. Execute a migração SQL de valores mensais da Síntase.",
+        });
+      }
+      return res.status(500).json({ error: error.message });
+    }
 
     res.json({
       success: true,
@@ -986,7 +1079,6 @@ export function createApp() {
         year: Number(year),
         value: sanitizedValue,
       },
-      note: "No modelo atual, previsto_mes é único e reflete em todos os meses.",
     });
   });
 
