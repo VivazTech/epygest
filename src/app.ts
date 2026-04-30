@@ -362,7 +362,6 @@ export function createApp() {
             .from("invoices")
             .select("amount")
             .eq("sector_id", sector.id)
-            .neq("status", "paid")
             .or("flow_stage.is.null,flow_stage.neq.cancelled"),
           supabase
             .from("requisitions")

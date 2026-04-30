@@ -362,8 +362,8 @@ export const Invoices: React.FC = () => {
                   <>
                     <ValueTrace
                       displayValue={formatCurrency(sector.pending_amount || 0)}
-                      source={`Soma de pendências do setor ${sector.name}`}
-                      calculation="pending_invoices + pending_requisitions"
+                      source={`Soma de compromissos do setor ${sector.name}`}
+                      calculation="Notas não canceladas (inclui pagas) + requisições em aberto"
                     /> <span className="text-slate-300 font-normal">/ <ValueTrace
                       displayValue={formatCurrency(getSectorBudget(sector))}
                       source={`Síntase do setor ${sector.name}`}
@@ -527,28 +527,28 @@ export const Invoices: React.FC = () => {
                           href={invoice.file_path.startsWith('/') ? invoice.file_path : `/${invoice.file_path}`}
                           target="_blank"
                           rel="noreferrer"
-                          className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                          title="Visualizar PDF da nota"
+                          className="inline-flex items-center px-3 py-1.5 text-xs font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors"
+                          title="Visualizar nota fiscal"
                         >
-                          <FileText className="w-4 h-4" />
+                          Ver Nota Fiscal
                         </a>
                       )}
                       {(actingSector === 'controle' && (invoice.flow_stage || 'control_pending') === 'control_pending') && (
                         <button 
                           onClick={() => approveByControl(invoice.id)}
-                          className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                          className="inline-flex items-center px-3 py-1.5 text-xs font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors"
                           title="Aprovar no Controle"
                         >
-                          <BadgeCheck className="w-4 h-4" />
+                          Aprovar (Controle)
                         </button>
                       )}
                       {(actingSector === 'financeiro' && (invoice.flow_stage || 'control_pending') === 'control_approved') && (
                         <button 
                           onClick={() => markAsPaid(invoice.id)}
-                          className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"
+                          className="inline-flex items-center px-3 py-1.5 text-xs font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded-lg transition-colors"
                           title="Marcar como pago e anexar comprovante"
                         >
-                          <Upload className="w-4 h-4" />
+                          Marcar como Pago
                         </button>
                       )}
                       {(actingSector === 'requester' &&
@@ -557,10 +557,10 @@ export const Invoices: React.FC = () => {
                         invoice.status !== 'paid') && (
                         <button
                           onClick={() => cancelRequest(invoice.id)}
-                          className="p-2 text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+                          className="inline-flex items-center px-3 py-1.5 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors"
                           title="Cancelar solicitação (para corrigir e lançar novamente)"
                         >
-                          <XCircle className="w-4 h-4" />
+                          Cancelar Solicitação
                         </button>
                       )}
                       {!(
