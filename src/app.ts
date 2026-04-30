@@ -94,6 +94,34 @@ const normalizeCrdFilterText = (value: string) =>
     .replace(/^crd\s+/, "")
     .trim();
 
+const fetchMonthlyValuesByYear = async (year: number) => {
+  const pageSize = 1000;
+  let from = 0;
+  const rows: CrdMonthlyValueRow[] = [];
+
+  while (true) {
+    const to = from + pageSize - 1;
+    const { data, error } = await supabase
+      .from("crd_monthly_values")
+      .select("crd_id, year, month, value")
+      .eq("year", year)
+      .order("crd_id", { ascending: true })
+      .range(from, to);
+
+    if (error) {
+      return { rows: [] as CrdMonthlyValueRow[], error };
+    }
+
+    const page = (data ?? []) as CrdMonthlyValueRow[];
+    rows.push(...page);
+
+    if (page.length < pageSize) break;
+    from += pageSize;
+  }
+
+  return { rows, error: null as any };
+};
+
 const parseHierarchyLine = (raw: string): ParsedNode | null => {
   const normalized = raw.replace(/\s+/g, " ").trim();
   const match = normalized.match(/^([\d.]+)\s*-\s*(.*?)\s*\((\d+)\)\s*$/);
@@ -395,12 +423,7 @@ export function createApp() {
 
     if (crdIds.length) {
       const allowedCrdIds = new Set(crdIds);
-      const { data: monthlyValues, error: monthlyError } = await supabase
-        .from("crd_monthly_values")
-        .select("crd_id, value")
-        .eq("year", selectedYear)
-        .eq("month", selectedMonth)
-        .limit(5000);
+      const { rows: monthlyValues, error: monthlyError } = await fetchMonthlyValuesByYear(selectedYear);
 
       if (monthlyError) {
         const isMissingTable =
@@ -410,6 +433,7 @@ export function createApp() {
       }
 
       for (const row of monthlyValues ?? []) {
+        if (Number((row as any).month) !== selectedMonth) continue;
         const crdId = Number((row as any).crd_id);
         if (!allowedCrdIds.has(crdId)) continue;
         const value = sanitizeMonthBudget((row as any).value);
@@ -1099,11 +1123,7 @@ export function createApp() {
 
     if (crdIds.length) {
       const allowedCrdIds = new Set(crdIds);
-      const { data: monthlyRows, error: monthlyError } = await supabase
-        .from("crd_monthly_values")
-        .select("crd_id, year, month, value")
-        .eq("year", selectedYear)
-        .limit(5000);
+      const { rows: monthlyRows, error: monthlyError } = await fetchMonthlyValuesByYear(selectedYear);
 
       if (!monthlyError) {
         for (const row of (monthlyRows ?? []) as CrdMonthlyValueRow[]) {
@@ -1306,11 +1326,7 @@ export function createApp() {
 
     if (crdIds.length) {
       const allowedCrdIds = new Set(crdIds);
-      const { data: monthlyRows, error: monthlyError } = await supabase
-        .from("crd_monthly_values")
-        .select("crd_id, year, month, value")
-        .eq("year", selectedYear)
-        .limit(5000);
+      const { rows: monthlyRows, error: monthlyError } = await fetchMonthlyValuesByYear(selectedYear);
 
       if (!monthlyError) {
         for (const row of (monthlyRows ?? []) as CrdMonthlyValueRow[]) {
