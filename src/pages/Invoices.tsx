@@ -24,6 +24,7 @@ export const Invoices: React.FC = () => {
   const [crdOptions, setCrdOptions] = useState<any[]>([]);
   const [actingSector, setActingSector] = useState<'requester' | 'controle' | 'financeiro'>('requester');
   const [requesterSectorId, setRequesterSectorId] = useState<string>('');
+  const [sectorFilterId, setSectorFilterId] = useState<string>('');
   const [showModal, setShowModal] = useState(false);
   const [showReceiptModal, setShowReceiptModal] = useState(false);
   const [selectedInvoiceId, setSelectedInvoiceId] = useState<number | null>(null);
@@ -318,8 +319,12 @@ export const Invoices: React.FC = () => {
 
   const isRequester = actingSector === 'requester';
   const requesterSector = sectors.find((s) => String(s.id) === requesterSectorId);
-  const budgetSectors = sectors;
-  const visibleInvoices = invoices;
+  const budgetSectors = sectorFilterId
+    ? sectors.filter((s) => String(s.id) === sectorFilterId)
+    : sectors;
+  const visibleInvoices = sectorFilterId
+    ? invoices.filter((invoice) => String(invoice.sector_id) === sectorFilterId)
+    : invoices;
   const canSeeSectorValues = (sectorId?: number | string) =>
     !isRequester || String(sectorId ?? '') === requesterSectorId;
   const getSectorBudget = (sector: any) => Number(sector?.budget_month ?? sector?.budget_limit ?? 0);
@@ -351,6 +356,20 @@ export const Invoices: React.FC = () => {
               {sectors.map((sector) => (
                 <option key={sector.id} value={sector.id}>
                   Setor solicitante: {sector.name}
+                </option>
+              ))}
+            </select>
+          )}
+          {!isRequester && (
+            <select
+              value={sectorFilterId}
+              onChange={(e) => setSectorFilterId(e.target.value)}
+              className="px-3 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-semibold text-slate-700"
+            >
+              <option value="">Todos os setores</option>
+              {sectors.map((sector) => (
+                <option key={sector.id} value={sector.id}>
+                  Filtrar setor: {sector.name}
                 </option>
               ))}
             </select>

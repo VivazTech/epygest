@@ -32,6 +32,8 @@ export const SintasePage: React.FC = () => {
   const [expandedCrds, setExpandedCrds] = useState<Set<string>>(new Set());
   const [editingCell, setEditingCell] = useState<{ rowId: number; monthIndex: number } | null>(null);
   const [editingValue, setEditingValue] = useState('');
+  const [occupancyPercent, setOccupancyPercent] = useState<number>(100);
+  const [savingOccupancy, setSavingOccupancy] = useState(false);
 
   const loadData = async () => {
     setLoading(true);
@@ -46,6 +48,7 @@ export const SintasePage: React.FC = () => {
         setLoading(false);
         return;
       }
+      setOccupancyPercent(Number(json.occupancy_percent ?? 100));
       setData(json);
     } finally {
       setLoading(false);
@@ -141,6 +144,7 @@ export const SintasePage: React.FC = () => {
           month: monthIndex + 1,
           year: Number(year),
           value: parsedValue,
+          occupancy_percent: occupancyPercent,
         }),
       });
       const json = await res.json().catch(() => ({}));
@@ -152,6 +156,34 @@ export const SintasePage: React.FC = () => {
       await loadData();
     } finally {
       setSavingCell(false);
+    }
+  };
+
+  const saveOccupancy = async () => {
+    if (savingOccupancy) return;
+    const normalized = Math.max(0, Math.min(100, Number(occupancyPercent)));
+    if (!Number.isFinite(normalized)) {
+      alert('Informe uma ocupação válida entre 0 e 100.');
+      return;
+    }
+    setSavingOccupancy(true);
+    try {
+      const res = await fetch('/api/sintase/occupancy', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          year: Number(year),
+          occupancy_percent: normalized,
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        alert(json.error || 'Erro ao salvar ocupação.');
+        return;
+      }
+      await loadData();
+    } finally {
+      setSavingOccupancy(false);
     }
   };
 
@@ -192,6 +224,24 @@ export const SintasePage: React.FC = () => {
         >
           <RefreshCcw className="w-4 h-4" />
           {loading ? 'Atualizando...' : 'Atualizar'}
+        </button>
+        <div className="h-8 w-px bg-slate-200" />
+        <span className="text-xs font-bold uppercase tracking-wider text-slate-500">Ocupação %</span>
+        <input
+          type="number"
+          min={0}
+          max={100}
+          step="0.01"
+          value={occupancyPercent}
+          onChange={(e) => setOccupancyPercent(Number(e.target.value))}
+          className="w-24 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+        />
+        <button
+          onClick={saveOccupancy}
+          disabled={savingOccupancy}
+          className="inline-flex items-center gap-2 px-4 py-2 bg-slate-700 text-white text-sm font-bold rounded-xl hover:bg-slate-800 disabled:opacity-60"
+        >
+          {savingOccupancy ? 'Salvando...' : 'Aplicar ocupação'}
         </button>
         <span className="text-xs text-slate-500">Total de linhas: {totalRows}</span>
       </div>

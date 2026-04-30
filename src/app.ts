@@ -62,6 +62,31 @@ type CrdMonthlyValueRow = {
   value: number;
 };
 
+type PrevRealMonth = {
+  previsto: number;
+  realizado: number;
+  diferenca: number;
+};
+
+type PrevRealRow = {
+  id: number;
+  crd: string;
+  grupo: string;
+  detalhado: string;
+  months: PrevRealMonth[];
+  total_previsto: number;
+  total_realizado: number;
+  total_diferenca: number;
+};
+
+const getNormalizedOccupancyPercent = (value: any) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return 100;
+  if (parsed < 0) return 0;
+  if (parsed > 100) return 100;
+  return parsed;
+};
+
 const parseHierarchyLine = (raw: string): ParsedNode | null => {
   const normalized = raw.replace(/\s+/g, " ").trim();
   const match = normalized.match(/^([\d.]+)\s*-\s*(.*?)\s*\((\d+)\)\s*$/);
@@ -334,6 +359,17 @@ export function createApp() {
       .eq("active", true);
     if (crdError) return res.status(500).json({ error: crdError.message });
 
+    let occupancyPercent = 100;
+    const { data: occupancyRows, error: occupancyError } = await supabase
+      .from("sintase_occupancy")
+      .select("occupancy_percent")
+      .eq("year", selectedYear)
+      .limit(1);
+    if (!occupancyError && occupancyRows?.length) {
+      occupancyPercent = getNormalizedOccupancyPercent((occupancyRows[0] as any).occupancy_percent);
+    }
+    const occupancyFactor = occupancyPercent / 100;
+
     const crdIds = (crdData ?? []).map((item: any) => Number(item.id)).filter((id) => Number.isFinite(id));
     const monthlyValueByCrdId = new Map<number, number>();
 
@@ -363,7 +399,8 @@ export function createApp() {
       const sectorId = Number((crd as any).sector_id);
       const defaultValue = sanitizeMonthBudget((crd as any).previsto_mes);
       const monthlyValue = monthlyValueByCrdId.get(crdId);
-      const effectiveValue = monthlyValue ?? defaultValue;
+      const baseValue = monthlyValue ?? defaultValue;
+      const effectiveValue = baseValue * occupancyFactor;
       budgetBySectorId.set(sectorId, (budgetBySectorId.get(sectorId) || 0) + effectiveValue);
     }
 
@@ -997,6 +1034,17 @@ export function createApp() {
     const selectedYear = Number(year) || new Date().getFullYear();
     const crdFilter = (crd || "").trim().toLowerCase();
 
+    let occupancyPercent = 100;
+    const { data: occupancyRows, error: occupancyError } = await supabase
+      .from("sintase_occupancy")
+      .select("occupancy_percent")
+      .eq("year", selectedYear)
+      .limit(1);
+    if (!occupancyError && occupancyRows?.length) {
+      occupancyPercent = getNormalizedOccupancyPercent((occupancyRows[0] as any).occupancy_percent);
+    }
+    const occupancyFactor = occupancyPercent / 100;
+
     const { data: crdData, error } = await supabase
       .from("crds")
       .select("id, code, name, previsto_mes, sectors(name)")
@@ -1029,7 +1077,8 @@ export function createApp() {
         const months = Array.from({ length: 12 }, (_, monthIndex) => {
           const monthNumber = monthIndex + 1;
           const override = monthValueByKey.get(`${crdId}:${monthNumber}`);
-          return override ?? monthlyBudget;
+          const baseValue = override ?? monthlyBudget;
+          return baseValue * occupancyFactor;
         });
         const total = months.reduce((sum, monthValue) => sum + monthValue, 0);
 
@@ -1064,6 +1113,7 @@ export function createApp() {
       filters: {
         crd: crdFilter || null,
       },
+      occupancy_percent: occupancyPercent,
       rows,
       totals: {
         months: monthlyTotals,
@@ -1073,11 +1123,12 @@ export function createApp() {
   });
 
   app.patch("/api/sintase/cell", async (req, res) => {
-    const { crd_id, month, year, value } = req.body as {
+    const { crd_id, month, year, value, occupancy_percent } = req.body as {
       crd_id?: number;
       month?: number;
       year?: number;
       value?: number | string;
+      occupancy_percent?: number | string;
     };
 
     if (!Number.isFinite(Number(crd_id))) {
@@ -1090,7 +1141,10 @@ export function createApp() {
       return res.status(400).json({ error: "year inválido" });
     }
 
-    const sanitizedValue = sanitizeMonthBudget(value);
+    const occupancyPercent = getNormalizedOccupancyPercent(occupancy_percent ?? 100);
+    const occupancyFactor = occupancyPercent / 100;
+    const adjustedValue = sanitizeMonthBudget(value);
+    const sanitizedValue = occupancyFactor > 0 ? adjustedValue / occupancyFactor : 0;
     const { error } = await supabase
       .from("crd_monthly_values")
       .upsert(
@@ -1121,6 +1175,191 @@ export function createApp() {
         year: Number(year),
         value: sanitizedValue,
       },
+    });
+  });
+
+  app.get("/api/sintase/occupancy", async (req, res) => {
+    const { year } = req.query as { year?: string };
+    const selectedYear = Number(year) || new Date().getFullYear();
+    const { data, error } = await supabase
+      .from("sintase_occupancy")
+      .select("year, occupancy_percent")
+      .eq("year", selectedYear)
+      .limit(1);
+    if (error) return res.status(500).json({ error: error.message });
+    const occupancyPercent = data?.length
+      ? getNormalizedOccupancyPercent((data[0] as any).occupancy_percent)
+      : 100;
+    res.json({ year: selectedYear, occupancy_percent: occupancyPercent });
+  });
+
+  app.patch("/api/sintase/occupancy", async (req, res) => {
+    const { year, occupancy_percent } = req.body as { year?: number | string; occupancy_percent?: number | string };
+    if (!Number.isFinite(Number(year))) {
+      return res.status(400).json({ error: "year inválido" });
+    }
+    const occupancyPercent = getNormalizedOccupancyPercent(occupancy_percent ?? 100);
+    const { error } = await supabase
+      .from("sintase_occupancy")
+      .upsert(
+        {
+          year: Number(year),
+          occupancy_percent: occupancyPercent,
+        },
+        { onConflict: "year" }
+      );
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ success: true, year: Number(year), occupancy_percent: occupancyPercent });
+  });
+
+  app.get("/api/prev-real", async (req, res) => {
+    const { year, crd } = req.query as { year?: string; crd?: string };
+    const selectedYear = Number(year) || new Date().getFullYear();
+    const crdFilter = (crd || "").trim().toLowerCase();
+    const dateFrom = `${selectedYear}-01-01`;
+    const dateTo = `${selectedYear}-12-31`;
+
+    let occupancyPercent = 100;
+    const { data: occupancyRows, error: occupancyError } = await supabase
+      .from("sintase_occupancy")
+      .select("occupancy_percent")
+      .eq("year", selectedYear)
+      .limit(1);
+    if (!occupancyError && occupancyRows?.length) {
+      occupancyPercent = getNormalizedOccupancyPercent((occupancyRows[0] as any).occupancy_percent);
+    }
+    const occupancyFactor = occupancyPercent / 100;
+
+    const { data: crdData, error: crdError } = await supabase
+      .from("crds")
+      .select("id, code, name, previsto_mes, sector_id, sectors(name)")
+      .eq("active", true)
+      .order("code");
+    if (crdError) return res.status(500).json({ error: crdError.message });
+
+    const crdIds = (crdData ?? []).map((item: any) => Number(item.id)).filter((id) => Number.isFinite(id));
+    const monthValueByKey = new Map<string, number>();
+
+    if (crdIds.length) {
+      const { data: monthlyRows, error: monthlyError } = await supabase
+        .from("crd_monthly_values")
+        .select("crd_id, year, month, value")
+        .eq("year", selectedYear)
+        .in("crd_id", crdIds);
+
+      if (!monthlyError) {
+        for (const row of (monthlyRows ?? []) as CrdMonthlyValueRow[]) {
+          monthValueByKey.set(`${row.crd_id}:${row.month}`, sanitizeMonthBudget(row.value));
+        }
+      }
+    }
+
+    const crdById = new Map<number, any>();
+    const crdBySectorAndCode = new Map<string, number>();
+    for (const c of crdData ?? []) {
+      const id = Number((c as any).id);
+      const sectorId = Number((c as any).sector_id);
+      const code = String((c as any).code || "").trim();
+      crdById.set(id, c);
+      crdBySectorAndCode.set(`${sectorId}:${code}`, id);
+    }
+
+    const realizedByKey = new Map<string, number>();
+    const addRealized = (crdId: number, month: number, amount: any) => {
+      if (!Number.isFinite(crdId) || !Number.isFinite(month) || month < 1 || month > 12) return;
+      const key = `${crdId}:${month}`;
+      realizedByKey.set(key, (realizedByKey.get(key) || 0) + sanitizeMonthBudget(amount));
+    };
+
+    const { data: invoiceData, error: invoiceError } = await supabase
+      .from("invoices")
+      .select("amount, due_date, sector_id, crd, status, flow_stage")
+      .gte("due_date", dateFrom)
+      .lte("due_date", dateTo)
+      .neq("flow_stage", "cancelled");
+    if (invoiceError) return res.status(500).json({ error: invoiceError.message });
+
+    for (const invoice of invoiceData ?? []) {
+      const date = new Date(String((invoice as any).due_date || ""));
+      if (Number.isNaN(date.getTime())) continue;
+      const month = date.getMonth() + 1;
+      const sectorId = Number((invoice as any).sector_id);
+      const code = String((invoice as any).crd || "").trim();
+      if (!code || !Number.isFinite(sectorId)) continue;
+      const crdId = crdBySectorAndCode.get(`${sectorId}:${code}`);
+      if (!crdId) continue;
+      addRealized(crdId, month, (invoice as any).amount);
+    }
+
+    const { data: reqData, error: reqError } = await supabase
+      .from("requisitions")
+      .select("amount, date, status, crd_id")
+      .eq("status", "posted")
+      .gte("date", dateFrom)
+      .lte("date", dateTo);
+    if (reqError) return res.status(500).json({ error: reqError.message });
+
+    for (const reqRow of reqData ?? []) {
+      const date = new Date(String((reqRow as any).date || ""));
+      if (Number.isNaN(date.getTime())) continue;
+      const month = date.getMonth() + 1;
+      const crdId = Number((reqRow as any).crd_id);
+      addRealized(crdId, month, (reqRow as any).amount);
+    }
+
+    const rows = (crdData ?? [])
+      .map((item: any) => {
+        const crdId = Number(item.id);
+        const monthlyBudget = sanitizeMonthBudget(item.previsto_mes);
+        const months: PrevRealMonth[] = Array.from({ length: 12 }, (_, monthIndex) => {
+          const month = monthIndex + 1;
+          const override = monthValueByKey.get(`${crdId}:${month}`);
+          const basePrevisto = override ?? monthlyBudget;
+          const previsto = basePrevisto * occupancyFactor;
+          const realizado = realizedByKey.get(`${crdId}:${month}`) || 0;
+          const diferenca = previsto - realizado;
+          return { previsto, realizado, diferenca };
+        });
+        const total_previsto = months.reduce((sum, m) => sum + m.previsto, 0);
+        const total_realizado = months.reduce((sum, m) => sum + m.realizado, 0);
+        const total_diferenca = total_previsto - total_realizado;
+        const row: PrevRealRow = {
+          id: crdId,
+          crd: String(item.sectors?.name || "Sem CRD"),
+          grupo: String(item.code || ""),
+          detalhado: String(item.name || ""),
+          months,
+          total_previsto,
+          total_realizado,
+          total_diferenca,
+        };
+        return row;
+      })
+      .filter((row) => {
+        if (!crdFilter) return true;
+        return (
+          row.crd.toLowerCase().includes(crdFilter) ||
+          row.grupo.toLowerCase().includes(crdFilter) ||
+          row.detalhado.toLowerCase().includes(crdFilter)
+        );
+      });
+
+    const totals = {
+      months: Array.from({ length: 12 }, (_, monthIndex) => {
+        const previsto = rows.reduce((sum, row) => sum + (row.months[monthIndex]?.previsto || 0), 0);
+        const realizado = rows.reduce((sum, row) => sum + (row.months[monthIndex]?.realizado || 0), 0);
+        return { previsto, realizado, diferenca: previsto - realizado };
+      }),
+      previsto: rows.reduce((sum, row) => sum + row.total_previsto, 0),
+      realizado: rows.reduce((sum, row) => sum + row.total_realizado, 0),
+      diferenca: rows.reduce((sum, row) => sum + row.total_diferenca, 0),
+    };
+
+    res.json({
+      year: selectedYear,
+      occupancy_percent: occupancyPercent,
+      rows,
+      totals,
     });
   });
 

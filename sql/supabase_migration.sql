@@ -121,6 +121,14 @@ CREATE TABLE IF NOT EXISTS crd_monthly_values (
   UNIQUE (crd_id, year, month)
 );
 
+CREATE TABLE IF NOT EXISTS sintase_occupancy (
+  id BIGSERIAL PRIMARY KEY,
+  year INTEGER NOT NULL UNIQUE,
+  occupancy_percent NUMERIC(5, 2) NOT NULL DEFAULT 100 CHECK (occupancy_percent >= 0 AND occupancy_percent <= 100),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 -- Tabela: requisitions
 CREATE TABLE IF NOT EXISTS requisitions (
   id BIGSERIAL PRIMARY KEY,

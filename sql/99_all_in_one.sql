@@ -107,6 +107,14 @@ CREATE TABLE IF NOT EXISTS public.crd_monthly_values (
   UNIQUE (crd_id, year, month)
 );
 
+CREATE TABLE IF NOT EXISTS public.sintase_occupancy (
+  id BIGSERIAL PRIMARY KEY,
+  year INTEGER NOT NULL UNIQUE,
+  occupancy_percent NUMERIC(5, 2) NOT NULL DEFAULT 100 CHECK (occupancy_percent >= 0 AND occupancy_percent <= 100),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE INDEX IF NOT EXISTS idx_financial_records_date ON public.financial_records (date DESC);
 CREATE INDEX IF NOT EXISTS idx_financial_records_type ON public.financial_records (type);
 CREATE INDEX IF NOT EXISTS idx_financial_records_category ON public.financial_records (category_id);
@@ -117,6 +125,7 @@ CREATE INDEX IF NOT EXISTS idx_invoices_sector ON public.invoices (sector_id);
 CREATE INDEX IF NOT EXISTS idx_users_email ON public.users (email);
 CREATE INDEX IF NOT EXISTS idx_crd_monthly_values_year ON public.crd_monthly_values (year);
 CREATE INDEX IF NOT EXISTS idx_crd_monthly_values_crd ON public.crd_monthly_values (crd_id);
+CREATE INDEX IF NOT EXISTS idx_sintase_occupancy_year ON public.sintase_occupancy (year);
 
 CREATE OR REPLACE FUNCTION public.set_crd_monthly_values_updated_at()
 RETURNS TRIGGER AS $$
@@ -132,6 +141,21 @@ CREATE TRIGGER trg_crd_monthly_values_updated_at
 BEFORE UPDATE ON public.crd_monthly_values
 FOR EACH ROW
 EXECUTE FUNCTION public.set_crd_monthly_values_updated_at();
+
+CREATE OR REPLACE FUNCTION public.set_sintase_occupancy_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = now();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_sintase_occupancy_updated_at ON public.sintase_occupancy;
+
+CREATE TRIGGER trg_sintase_occupancy_updated_at
+BEFORE UPDATE ON public.sintase_occupancy
+FOR EACH ROW
+EXECUTE FUNCTION public.set_sintase_occupancy_updated_at();
 
 -- ========== INÍCIO 02_seed ==========
 
