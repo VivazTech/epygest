@@ -15,8 +15,11 @@ import { cn, formatCurrency, formatDate } from '../lib/utils';
 import { ValueTrace } from '../components/ValueTrace';
 
 export const Invoices: React.FC = () => {
+  const now = new Date();
   const [invoices, setInvoices] = useState<any[]>([]);
   const [sectors, setSectors] = useState<any[]>([]);
+  const [selectedMonth, setSelectedMonth] = useState(String(now.getMonth() + 1));
+  const [selectedYear, setSelectedYear] = useState(String(now.getFullYear()));
   const [paymentMethods, setPaymentMethods] = useState<any[]>([]);
   const [crdOptions, setCrdOptions] = useState<any[]>([]);
   const [actingSector, setActingSector] = useState<'requester' | 'controle' | 'financeiro'>('requester');
@@ -50,8 +53,11 @@ export const Invoices: React.FC = () => {
   });
 
   useEffect(() => {
-    fetchInvoices();
-    fetchSectors();
+    fetchInvoices(selectedMonth, selectedYear);
+    fetchSectors(selectedMonth, selectedYear);
+  }, [selectedMonth, selectedYear]);
+
+  useEffect(() => {
     fetch('/api/payment-methods').then(res => res.json()).then(setPaymentMethods);
     fetch('/api/crds').then(res => res.json()).then(setCrdOptions);
   }, []);
@@ -81,14 +87,20 @@ export const Invoices: React.FC = () => {
     fetch(`/api/crds?sector_id=${formData.sector_id}`).then(res => res.json()).then(setCrdOptions);
   }, [formData.sector_id]);
 
-  const fetchInvoices = () => {
-    fetch('/api/invoices')
+  const fetchInvoices = (month = selectedMonth, year = selectedYear) => {
+    const params = new URLSearchParams();
+    params.set('month', month);
+    params.set('year', year);
+    fetch(`/api/invoices?${params.toString()}`)
       .then(res => res.json())
       .then(data => setInvoices(data));
   };
 
-  const fetchSectors = () => {
-    fetch('/api/sectors')
+  const fetchSectors = (month = selectedMonth, year = selectedYear) => {
+    const params = new URLSearchParams();
+    params.set('month', month);
+    params.set('year', year);
+    fetch(`/api/sectors?${params.toString()}`)
       .then(res => res.json())
       .then(data => setSectors(data));
   };
@@ -143,6 +155,15 @@ export const Invoices: React.FC = () => {
       alert('Informe a chave Pix.');
       return;
     }
+    if (!formData.due_date) {
+      alert('Informe a data de vencimento.');
+      return;
+    }
+    const [dueYear, dueMonth] = formData.due_date.split('-');
+    if (String(Number(dueMonth)) !== String(Number(selectedMonth)) || String(Number(dueYear)) !== String(Number(selectedYear))) {
+      alert(`A data de vencimento deve estar na competência selecionada (${String(selectedMonth).padStart(2, '0')}/${selectedYear}).`);
+      return;
+    }
     const response = await fetch('/api/invoices', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -157,6 +178,7 @@ export const Invoices: React.FC = () => {
       setShowModal(false);
       setFormData({ invoice_number: '', provider_name: '', amount: '', issue_date: '', due_date: '', sector_id: '', file_path: '', boleto_file_path: '', natureza: 'O', crd: '', payment_method: '', pix_key: '' });
       fetchInvoices();
+      fetchSectors();
     }
   };
 
@@ -204,6 +226,7 @@ export const Invoices: React.FC = () => {
       return false;
     }
     fetchInvoices();
+    fetchSectors();
     return true;
   };
 
@@ -340,6 +363,33 @@ export const Invoices: React.FC = () => {
         </div>
       </div>
 
+      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 flex items-center gap-3">
+        <span className="text-xs font-bold uppercase tracking-wider text-slate-500">Competência</span>
+        <select
+          value={selectedMonth}
+          onChange={(e) => setSelectedMonth(e.target.value)}
+          className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+        >
+          {Array.from({ length: 12 }, (_, idx) => {
+            const monthNumber = idx + 1;
+            return (
+              <option key={monthNumber} value={String(monthNumber)}>
+                {String(monthNumber).padStart(2, '0')}
+              </option>
+            );
+          })}
+        </select>
+        <input
+          type="number"
+          min={2000}
+          max={2100}
+          value={selectedYear}
+          onChange={(e) => setSelectedYear(e.target.value)}
+          className="w-28 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+        />
+        <span className="text-xs text-slate-400">Orçamento, lista e ações usam esta competência.</span>
+      </div>
+
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {budgetSectors.map(sector => (
           <div
@@ -356,7 +406,7 @@ export const Invoices: React.FC = () => {
               <span className="text-[10px] font-bold px-2 py-1 bg-slate-100 rounded-lg text-slate-500 uppercase">Orçamento</span>
             </div>
             <div className="space-y-1">
-              <p className="text-xs text-slate-400 font-medium">Utilizado / Limite</p>
+              <p className="text-xs text-slate-400 font-medium">Utilizado no mês / Orçamento da Síntase</p>
               <p className="text-lg font-bold text-slate-900">
                 {canSeeSectorValues(sector.id) ? (
                   <>
@@ -375,6 +425,22 @@ export const Invoices: React.FC = () => {
                 )}
               </p>
             </div>
+            {canSeeSectorValues(sector.id) && (
+              <div className="mt-3 grid grid-cols-1 gap-1 text-[11px] text-slate-500">
+                <p>
+                  Notas no mês (não canceladas):{' '}
+                  <span className="font-semibold text-slate-700">{formatCurrency(sector.pending_invoices || 0)}</span>
+                </p>
+                <p>
+                  Requisições em aberto no mês:{' '}
+                  <span className="font-semibold text-slate-700">{formatCurrency(sector.pending_requisitions || 0)}</span>
+                </p>
+                <p>
+                  Orçamento da Síntase ({String(selectedMonth).padStart(2, '0')}/{selectedYear}):{' '}
+                  <span className="font-semibold text-slate-700">{formatCurrency(getSectorBudget(sector))}</span>
+                </p>
+              </div>
+            )}
             {canSeeSectorValues(sector.id) && (sector.pending_amount > getSectorBudget(sector)) && (
               <div className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2">
                 <p className="text-[11px] font-bold uppercase tracking-wide text-red-700">
@@ -521,7 +587,7 @@ export const Invoices: React.FC = () => {
                     </div>
                   </td>
                   <td className="px-6 py-4">
-                    <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <div className="flex items-center gap-2">
                       {(invoice.file_path && (actingSector === 'controle' || actingSector === 'financeiro')) && (
                         <a
                           href={invoice.file_path.startsWith('/') ? invoice.file_path : `/${invoice.file_path}`}

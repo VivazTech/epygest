@@ -308,6 +308,8 @@ export function createApp() {
     const now = new Date();
     const selectedMonth = Number(month) || now.getMonth() + 1;
     const selectedYear = Number(year) || now.getFullYear();
+    const dateFrom = `${selectedYear}-${String(selectedMonth).padStart(2, "0")}-01`;
+    const dateTo = `${selectedYear}-${String(selectedMonth).padStart(2, "0")}-31`;
 
     const { data: sectors, error } = await supabase
       .from("sectors")
@@ -362,12 +364,16 @@ export function createApp() {
             .from("invoices")
             .select("amount")
             .eq("sector_id", sector.id)
+            .gte("due_date", dateFrom)
+            .lte("due_date", dateTo)
             .or("flow_stage.is.null,flow_stage.neq.cancelled"),
           supabase
             .from("requisitions")
             .select("amount")
             .eq("sector_id", sector.id)
-            .eq("status", "open"),
+            .eq("status", "open")
+            .gte("date", dateFrom)
+            .lte("date", dateTo),
         ]);
 
         const pending_invoices = (pendingInvoices ?? []).reduce(
@@ -442,10 +448,19 @@ export function createApp() {
   // ====================================================
   // INVOICES
   // ====================================================
-  app.get("/api/invoices", async (_req, res) => {
+  app.get("/api/invoices", async (req, res) => {
+    const { month, year } = req.query as { month?: string; year?: string };
+    const now = new Date();
+    const selectedMonth = Number(month) || now.getMonth() + 1;
+    const selectedYear = Number(year) || now.getFullYear();
+    const dateFrom = `${selectedYear}-${String(selectedMonth).padStart(2, "0")}-01`;
+    const dateTo = `${selectedYear}-${String(selectedMonth).padStart(2, "0")}-31`;
+
     const { data, error } = await supabase
       .from("invoices")
       .select("*, sectors(name), users(name)")
+      .gte("due_date", dateFrom)
+      .lte("due_date", dateTo)
       .order("due_date", { ascending: true });
 
     if (error) return res.status(500).json({ error: error.message });
