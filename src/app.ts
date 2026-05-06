@@ -247,7 +247,7 @@ export function createApp() {
       name?: string;
       email?: string;
       password?: string;
-      role?: "admin" | "finance" | "manager" | "viewer";
+      role?: "admin" | "finance" | "controle" | "manager" | "viewer";
       sector_id?: number | null;
       sector_ids?: number[];
     };
@@ -256,7 +256,7 @@ export function createApp() {
       return res.status(400).json({ error: "name, email, password e role são obrigatórios" });
     }
 
-    if (!["admin", "finance", "manager", "viewer"].includes(role)) {
+    if (!["admin", "finance", "controle", "manager", "viewer"].includes(role)) {
       return res.status(400).json({ error: "role inválido" });
     }
 
@@ -300,7 +300,7 @@ export function createApp() {
       name?: string;
       email?: string;
       password?: string;
-      role?: "admin" | "finance" | "manager" | "viewer";
+      role?: "admin" | "finance" | "controle" | "manager" | "viewer";
       sector_id?: number | null;
       sector_ids?: number[];
     };
@@ -308,7 +308,7 @@ export function createApp() {
     if (!name || !email || !role) {
       return res.status(400).json({ error: "name, email e role são obrigatórios" });
     }
-    if (!["admin", "finance", "manager", "viewer"].includes(role)) {
+    if (!["admin", "finance", "controle", "manager", "viewer"].includes(role)) {
       return res.status(400).json({ error: "role inválido" });
     }
 
@@ -355,7 +355,7 @@ export function createApp() {
   app.delete("/api/users/:id", async (req, res) => {
     const { id } = req.params;
     const { actor_role, actor_id } = req.body as {
-      actor_role?: "admin" | "finance" | "manager" | "viewer";
+      actor_role?: "admin" | "finance" | "controle" | "manager" | "viewer";
       actor_id?: number;
     };
 

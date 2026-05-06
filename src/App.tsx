@@ -16,26 +16,61 @@ import { PrevRealPage as PrevReal } from './pages/PrevReal';
 import { ConfiguracoesPage as Configuracoes } from './pages/Configuracoes';
 import { UsuariosPage as Usuarios } from './pages/Usuarios';
 
-const TEST_USER = {
-  id: 1,
-  name: 'Usuário de Teste',
-  email: 'teste@epygest.com',
-  role: 'admin'
-};
-
 export default function App() {
-  const [user, setUser] = useState<any>(TEST_USER);
+  const [user, setUser] = useState<any | null>(null);
   const [activeTab, setActiveTab] = useState('dashboard');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [loginForm, setLoginForm] = useState({ email: '', password: '' });
+  const [loginLoading, setLoginLoading] = useState(false);
+  const [loginError, setLoginError] = useState('');
 
-  // Login temporariamente desativado para permitir testes sem autenticação.
   useEffect(() => {
-    localStorage.setItem('user', JSON.stringify(TEST_USER));
+    try {
+      const raw = localStorage.getItem('user');
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      if (parsed?.id && parsed?.name && parsed?.role) setUser(parsed);
+    } catch {
+      // sessão inválida no storage, ignora
+    }
   }, []);
 
   const handleLogout = () => {
-    setUser(TEST_USER);
-    localStorage.setItem('user', JSON.stringify(TEST_USER));
+    setUser(null);
+    setLoginForm({ email: '', password: '' });
+    setActiveTab('dashboard');
+    localStorage.removeItem('user');
+  };
+
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!loginForm.email.trim() || !loginForm.password.trim()) {
+      setLoginError('Preencha e-mail e senha.');
+      return;
+    }
+
+    setLoginError('');
+    setLoginLoading(true);
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: loginForm.email.trim(),
+          password: loginForm.password,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setLoginError(data.error || 'Não foi possível realizar login.');
+        return;
+      }
+      setUser(data);
+      localStorage.setItem('user', JSON.stringify(data));
+      setLoginForm({ email: '', password: '' });
+    } finally {
+      setLoginLoading(false);
+    }
   };
 
   const renderContent = () => {
@@ -56,6 +91,56 @@ export default function App() {
       default: return <Dashboard />;
     }
   };
+
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-[#F8FAFC] font-sans text-slate-900 flex items-center justify-center p-6">
+        <div className="w-full max-w-md bg-white border border-slate-100 rounded-2xl shadow-sm p-6 space-y-5">
+          <div className="text-center">
+            <h1 className="text-2xl font-bold text-slate-900">EpyGest</h1>
+            <p className="text-sm text-slate-500 mt-1">Acesse sua conta para entrar no sistema.</p>
+          </div>
+
+          <form onSubmit={handleLogin} className="space-y-3">
+            <div>
+              <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">E-mail</label>
+              <input
+                type="email"
+                value={loginForm.email}
+                onChange={(e) => setLoginForm((p) => ({ ...p, email: e.target.value }))}
+                className="mt-1 w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+                placeholder="seu@email.com"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Senha</label>
+              <input
+                type="password"
+                value={loginForm.password}
+                onChange={(e) => setLoginForm((p) => ({ ...p, password: e.target.value }))}
+                className="mt-1 w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+                placeholder="••••••••"
+              />
+            </div>
+
+            {loginError && (
+              <div className="text-xs font-medium text-red-600 bg-red-50 border border-red-100 rounded-xl px-3 py-2">
+                {loginError}
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={loginLoading}
+              className="w-full px-4 py-2.5 rounded-xl bg-[#004D40] text-white text-sm font-bold hover:bg-[#003d33] disabled:opacity-60 transition-colors"
+            >
+              {loginLoading ? 'Entrando...' : 'Entrar'}
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#F8FAFC] font-sans text-slate-900">

@@ -30,17 +30,17 @@ interface SidebarProps {
 }
 
 const menuItems = [
-  { id: 'dashboard', label: 'Dashboard Geral', icon: LayoutDashboard, roles: ['admin', 'finance', 'manager', 'viewer'] },
-  { id: 'analise', label: 'Análise Financeira', icon: BarChart3, roles: ['admin', 'finance', 'manager'] },
-  { id: 'dre', label: 'DRE Gerencial', icon: FileSpreadsheet, roles: ['admin', 'finance'] },
-  { id: 'planejamento', label: 'Planejamento', icon: Target, roles: ['admin', 'finance', 'manager'] },
-  { id: 'notas', label: 'Controle de Notas', icon: Receipt, roles: ['admin', 'finance', 'manager'] },
-  { id: 'requisicoes', label: 'Requisições', icon: Archive, roles: ['admin', 'finance', 'manager'] },
-  { id: 'importacao', label: 'Importação', icon: PlusCircle, roles: ['admin', 'finance'] },
-  { id: 'cadastros', label: 'Cadastros', icon: Database, roles: ['admin', 'finance'] },
-  { id: 'sintase', label: 'Síntase', icon: Rows4, roles: ['admin', 'finance', 'manager'] },
-  { id: 'prev-real', label: 'Prev x Real', icon: BarChart3, roles: ['admin', 'finance', 'manager'] },
-  { id: 'supabase-teste', label: 'Teste Supabase', icon: PlugZap, roles: ['admin', 'finance'] },
+  { id: 'dashboard', label: 'Dashboard Geral', icon: LayoutDashboard, roles: ['admin', 'finance', 'controle', 'manager', 'viewer'] },
+  { id: 'analise', label: 'Análise Financeira', icon: BarChart3, roles: ['admin', 'finance', 'controle', 'manager'] },
+  { id: 'dre', label: 'DRE Gerencial', icon: FileSpreadsheet, roles: ['admin', 'finance', 'controle'] },
+  { id: 'planejamento', label: 'Planejamento', icon: Target, roles: ['admin', 'finance', 'controle', 'manager'] },
+  { id: 'notas', label: 'Controle de Notas', icon: Receipt, roles: ['admin', 'finance', 'controle', 'manager'] },
+  { id: 'requisicoes', label: 'Requisições', icon: Archive, roles: ['admin', 'finance', 'controle', 'manager'] },
+  { id: 'importacao', label: 'Importação', icon: PlusCircle, roles: ['admin', 'finance', 'controle'] },
+  { id: 'cadastros', label: 'Cadastros', icon: Database, roles: ['admin', 'finance', 'controle'] },
+  { id: 'sintase', label: 'Síntase', icon: Rows4, roles: ['admin', 'finance', 'controle', 'manager'] },
+  { id: 'prev-real', label: 'Prev x Real', icon: BarChart3, roles: ['admin', 'finance', 'controle', 'manager'] },
+  { id: 'supabase-teste', label: 'Teste Supabase', icon: PlugZap, roles: ['admin', 'finance', 'controle'] },
   { id: 'usuarios', label: 'Usuários', icon: Users, roles: ['admin'] },
   { id: 'configuracoes', label: 'Configurações', icon: Settings, roles: ['admin'] },
 ];
@@ -101,6 +101,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <p className="text-[10px] text-white/75 uppercase font-bold tracking-tighter">
               {user?.role === 'admin' ? 'Administrador' : 
                user?.role === 'finance' ? 'Financeiro' : 
+               user?.role === 'controle' ? 'Controle' :
                user?.role === 'manager' ? 'Gestor' : 'Visualizador'}
             </p>
           </div>

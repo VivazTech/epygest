@@ -5,7 +5,7 @@ type UserRow = {
   id: number | string;
   name: string;
   email: string;
-  role: 'admin' | 'finance' | 'manager' | 'viewer';
+  role: 'admin' | 'finance' | 'controle' | 'manager' | 'viewer';
   sector_id: number | null;
   sector_ids?: number[];
   sector_names?: string[];
@@ -16,6 +16,7 @@ type UserRow = {
 const roleLabel: Record<UserRow['role'], string> = {
   admin: 'Administrador',
   finance: 'Financeiro',
+  controle: 'Controle',
   manager: 'Gestor',
   viewer: 'Visualizador',
 };
@@ -23,7 +24,7 @@ const roleLabel: Record<UserRow['role'], string> = {
 export const UsuariosPage: React.FC = () => {
   const [users, setUsers] = useState<UserRow[]>([]);
   const [sectors, setSectors] = useState<any[]>([]);
-  const [currentUserRole, setCurrentUserRole] = useState<'admin' | 'finance' | 'manager' | 'viewer'>('viewer');
+  const [currentUserRole, setCurrentUserRole] = useState<'admin' | 'finance' | 'controle' | 'manager' | 'viewer'>('viewer');
   const [currentUserId, setCurrentUserId] = useState<number | string | null>(null);
   const [editingId, setEditingId] = useState<number | string | null>(null);
   const [editForm, setEditForm] = useState<any>({});
@@ -194,6 +195,7 @@ export const UsuariosPage: React.FC = () => {
             <option value="viewer">Visualizador</option>
             <option value="manager">Gestor</option>
             <option value="finance">Financeiro</option>
+            <option value="controle">Controle</option>
             <option value="admin">Administrador</option>
           </select>
           <div className="w-64 h-24 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm overflow-auto space-y-1">
@@ -268,6 +270,7 @@ export const UsuariosPage: React.FC = () => {
                         <option value="viewer">Visualizador</option>
                         <option value="manager">Gestor</option>
                         <option value="finance">Financeiro</option>
+                        <option value="controle">Controle</option>
                         <option value="admin">Administrador</option>
                       </select>
                     ) : roleLabel[user.role]}
