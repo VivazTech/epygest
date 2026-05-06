@@ -40,7 +40,6 @@ const menuItems = [
   { id: 'cadastros', label: 'Cadastros', icon: Database, roles: ['admin', 'finance', 'controle'] },
   { id: 'sintase', label: 'Síntase', icon: Rows4, roles: ['admin', 'finance', 'controle', 'manager'] },
   { id: 'prev-real', label: 'Prev x Real', icon: BarChart3, roles: ['admin', 'finance', 'controle', 'manager'] },
-  { id: 'supabase-teste', label: 'Teste Supabase', icon: PlugZap, roles: ['admin', 'finance', 'controle'] },
   { id: 'usuarios', label: 'Usuários', icon: Users, roles: ['admin'] },
   { id: 'configuracoes', label: 'Configurações', icon: Settings, roles: ['admin'] },
 ];

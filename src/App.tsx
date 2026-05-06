@@ -17,6 +17,7 @@ import { ConfiguracoesPage as Configuracoes } from './pages/Configuracoes';
 import { UsuariosPage as Usuarios } from './pages/Usuarios';
 
 export default function App() {
+  const isSupabaseTestRoute = window.location.pathname === '/teste-supabase';
   const [user, setUser] = useState<any | null>(null);
   const [activeTab, setActiveTab] = useState('dashboard');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -166,6 +167,14 @@ export default function App() {
             </a>
           </div>
         </div>
+      </div>
+    );
+  }
+
+  if (isSupabaseTestRoute) {
+    return (
+      <div className="min-h-screen bg-[#F8FAFC] font-sans text-slate-900 p-8 max-w-7xl mx-auto">
+        <SupabaseTeste />
       </div>
     );
   }
