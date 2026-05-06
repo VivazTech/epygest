@@ -199,13 +199,14 @@ export function createApp() {
   app.get("/api/users", async (_req, res) => {
     const { data, error } = await supabase
       .from("users")
-      .select("id, name, email, role, sector_id, created_at, sectors(name)")
+      .select("id, name, email, role, sector_id, created_at")
       .order("name");
 
     if (error) return res.status(500).json({ error: error.message });
 
     const userIds = (data ?? []).map((user: any) => user.id);
     let sectorLinksByUserId = new Map<string, Array<{ id: number; name: string }>>();
+    let sectorNameById = new Map<number, string>();
 
     if (userIds.length) {
       const { data: linksData, error: linksError } = await supabase
@@ -213,52 +214,63 @@ export function createApp() {
         .select("user_id, sector_id")
         .in("user_id", userIds);
 
-      if (linksError) {
-        return res.status(500).json({
-          error:
-            "Não foi possível carregar múltiplos setores dos usuários. Execute a migração da tabela user_sectors no Supabase.",
-          detail: linksError.message,
-        });
-      }
+      // Se user_sectors não existir/der erro, seguimos com fallback em users.sector_id
+      if (!linksError) {
+        const sectorIds = Array.from(
+          new Set(
+            (linksData ?? [])
+              .map((link: any) => Number(link.sector_id))
+              .filter((sectorId) => Number.isFinite(sectorId))
+          )
+        );
 
-      const sectorIds = Array.from(
-        new Set(
-          (linksData ?? [])
-            .map((link: any) => Number(link.sector_id))
-            .filter((sectorId) => Number.isFinite(sectorId))
-        )
-      );
-      const { data: linkedSectors, error: sectorsError } = sectorIds.length
-        ? await supabase.from("sectors").select("id, name").in("id", sectorIds)
-        : { data: [], error: null as any };
+        // Inclui também os setores "primários" dos usuários para compor nomes sempre.
+        for (const user of data ?? []) {
+          const sid = Number((user as any).sector_id);
+          if (Number.isFinite(sid) && !sectorIds.includes(sid)) sectorIds.push(sid);
+        }
 
-      if (sectorsError) {
-        return res.status(500).json({
-          error: "Não foi possível carregar nomes dos setores vinculados dos usuários.",
-          detail: sectorsError.message,
-        });
-      }
+        const { data: linkedSectors } = sectorIds.length
+          ? await supabase.from("sectors").select("id, name").in("id", sectorIds)
+          : { data: [] as any[] };
 
-      const sectorNameById = new Map<number, string>(
-        (linkedSectors ?? []).map((sector: any) => [Number(sector.id), String(sector.name || "")])
-      );
+        sectorNameById = new Map<number, string>(
+          (linkedSectors ?? []).map((sector: any) => [Number(sector.id), String(sector.name || "")])
+        );
 
-      for (const link of linksData ?? []) {
-        const userId = String((link as any).user_id ?? "");
-        const sectorId = Number((link as any).sector_id);
-        if (!userId || !Number.isFinite(sectorId)) continue;
-        if (!sectorLinksByUserId.has(userId)) sectorLinksByUserId.set(userId, []);
-        sectorLinksByUserId.get(userId)!.push({
-          id: sectorId,
-          name: sectorNameById.get(sectorId) || "",
-        });
+        for (const link of linksData ?? []) {
+          const userId = String((link as any).user_id ?? "");
+          const sectorId = Number((link as any).sector_id);
+          if (!userId || !Number.isFinite(sectorId)) continue;
+          if (!sectorLinksByUserId.has(userId)) sectorLinksByUserId.set(userId, []);
+          sectorLinksByUserId.get(userId)!.push({
+            id: sectorId,
+            name: sectorNameById.get(sectorId) || "",
+          });
+        }
+      } else {
+        const fallbackIds = Array.from(
+          new Set(
+            (data ?? [])
+              .map((user: any) => Number(user.sector_id))
+              .filter((sectorId: number) => Number.isFinite(sectorId))
+          )
+        );
+        const { data: fallbackSectors } = fallbackIds.length
+          ? await supabase.from("sectors").select("id, name").in("id", fallbackIds)
+          : { data: [] as any[] };
+        sectorNameById = new Map<number, string>(
+          (fallbackSectors ?? []).map((sector: any) => [Number(sector.id), String(sector.name || "")])
+        );
       }
     }
 
     res.json(
       (data ?? []).map((user: any) => ({
         ...user,
-        sector_name: user.sectors?.name ?? null,
+        sector_name: Number.isFinite(Number(user.sector_id))
+          ? (sectorNameById.get(Number(user.sector_id)) ?? null)
+          : null,
         sector_ids:
           (sectorLinksByUserId.get(String(user.id)) ?? []).map((s) => s.id).length > 0
             ? (sectorLinksByUserId.get(String(user.id)) ?? []).map((s) => s.id)
@@ -266,8 +278,9 @@ export function createApp() {
         sector_names:
           (sectorLinksByUserId.get(String(user.id)) ?? []).map((s) => s.name).length > 0
             ? (sectorLinksByUserId.get(String(user.id)) ?? []).map((s) => s.name)
-            : (user.sectors?.name ? [String(user.sectors.name)] : []),
-        sectors: undefined,
+            : (Number.isFinite(Number(user.sector_id)) && sectorNameById.get(Number(user.sector_id))
+                ? [String(sectorNameById.get(Number(user.sector_id)))]
+                : []),
       }))
     );
   });
