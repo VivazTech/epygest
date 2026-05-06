@@ -36,7 +36,8 @@ export const Invoices: React.FC = () => {
   const [crdOptions, setCrdOptions] = useState<any[]>([]);
   const [actingSector, setActingSector] = useState<'requester' | 'controle' | 'financeiro'>('requester');
   const [requesterSectorId, setRequesterSectorId] = useState<string>('');
-  const [sectorFilterId, setSectorFilterId] = useState<string>('');
+  const [userRole, setUserRole] = useState<string>('viewer');
+  const [allowedSectorIds, setAllowedSectorIds] = useState<string[]>([]);
   const [showModal, setShowModal] = useState(false);
   const [showReceiptModal, setShowReceiptModal] = useState(false);
   const [selectedInvoiceId, setSelectedInvoiceId] = useState<number | null>(null);
@@ -81,13 +82,36 @@ export const Invoices: React.FC = () => {
   }, []);
 
   useEffect(() => {
+    const userRaw = localStorage.getItem('user');
+    if (!userRaw) return;
+    try {
+      const user = JSON.parse(userRaw);
+      setUserRole(String(user?.role || 'viewer'));
+      const normalizedSectorIds = Array.from(
+        new Set(
+          (Array.isArray(user?.sector_ids) ? user.sector_ids : [user?.sector_id])
+            .map((id) => String(id ?? '').trim())
+            .filter((id) => id !== '')
+        )
+      );
+      setAllowedSectorIds(normalizedSectorIds);
+      if (user?.role === 'finance') setActingSector('financeiro');
+      else if (user?.role === 'controle') setActingSector('controle');
+      else setActingSector('requester');
+    } catch {
+      // fallback mantém requester
+    }
+  }, []);
+
+  useEffect(() => {
     if (requesterSectorId || sectors.length === 0) return;
     const userRaw = localStorage.getItem('user');
     if (userRaw) {
       try {
         const user = JSON.parse(userRaw);
-        if (user?.sector_id) {
-          setRequesterSectorId(String(user.sector_id));
+        const firstSectorId = user?.sector_ids?.[0] ?? user?.sector_id;
+        if (firstSectorId) {
+          setRequesterSectorId(String(firstSectorId));
           return;
         }
       } catch {
@@ -336,12 +360,11 @@ export const Invoices: React.FC = () => {
 
   const isRequester = actingSector === 'requester';
   const requesterSector = sectors.find((s) => String(s.id) === requesterSectorId);
-  const budgetSectors = sectorFilterId
-    ? sectors.filter((s) => String(s.id) === sectorFilterId)
+  const isManager = userRole === 'manager';
+  const budgetSectors = isManager
+    ? sectors.filter((s) => allowedSectorIds.includes(String(s.id)))
     : sectors;
-  const visibleInvoices = sectorFilterId
-    ? invoices.filter((invoice) => String(invoice.sector_id) === sectorFilterId)
-    : invoices;
+  const visibleInvoices = invoices;
   const canSeeSectorValues = (sectorId?: number | string) =>
     !isRequester || String(sectorId ?? '') === requesterSectorId;
   const getSectorBudget = (sector: any) => Number(sector?.budget_month ?? sector?.budget_limit ?? 0);
@@ -355,42 +378,6 @@ export const Invoices: React.FC = () => {
         </div>
         
         <div className="flex items-center gap-3">
-          <select
-            value={actingSector}
-            onChange={(e) => setActingSector(e.target.value as 'requester' | 'controle' | 'financeiro')}
-            className="px-3 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-semibold text-slate-700"
-          >
-            <option value="requester">Perfil de teste: Setor Solicitante</option>
-            <option value="controle">Perfil de teste: CONTROLE</option>
-            <option value="financeiro">Perfil de teste: FINANCEIRO</option>
-          </select>
-          {isRequester && (
-            <select
-              value={requesterSectorId}
-              onChange={(e) => setRequesterSectorId(e.target.value)}
-              className="px-3 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-semibold text-slate-700"
-            >
-              {sectors.map((sector) => (
-                <option key={sector.id} value={sector.id}>
-                  Setor solicitante: {sector.name}
-                </option>
-              ))}
-            </select>
-          )}
-          {!isRequester && (
-            <select
-              value={sectorFilterId}
-              onChange={(e) => setSectorFilterId(e.target.value)}
-              className="px-3 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-semibold text-slate-700"
-            >
-              <option value="">Todos os setores</option>
-              {sectors.map((sector) => (
-                <option key={sector.id} value={sector.id}>
-                  Filtrar setor: {sector.name}
-                </option>
-              ))}
-            </select>
-          )}
           <button
             onClick={() => setShowModal(true)}
             className="flex items-center gap-2 bg-[#004D40] text-white px-4 py-2.5 rounded-xl shadow-lg shadow-emerald-900/10 hover:bg-[#003d33] transition-colors"
