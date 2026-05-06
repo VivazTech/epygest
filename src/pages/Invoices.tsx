@@ -82,25 +82,44 @@ export const Invoices: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    const userRaw = localStorage.getItem('user');
-    if (!userRaw) return;
-    try {
-      const user = JSON.parse(userRaw);
-      setUserRole(String(user?.role || 'viewer'));
-      const normalizedSectorIds = Array.from(
-        new Set(
-          (Array.isArray(user?.sector_ids) ? user.sector_ids : [user?.sector_id])
-            .map((id) => String(id ?? '').trim())
-            .filter((id) => id !== '')
-        )
-      );
-      setAllowedSectorIds(normalizedSectorIds);
-      if (user?.role === 'finance') setActingSector('financeiro');
-      else if (user?.role === 'controle') setActingSector('controle');
-      else setActingSector('requester');
-    } catch {
-      // fallback mantém requester
-    }
+    const loadCurrentUserContext = async () => {
+      const userRaw = localStorage.getItem('user');
+      if (!userRaw) return;
+      try {
+        const user = JSON.parse(userRaw);
+        setUserRole(String(user?.role || 'viewer'));
+        if (user?.role === 'finance') setActingSector('financeiro');
+        else if (user?.role === 'controle') setActingSector('controle');
+        else setActingSector('requester');
+
+        // Recarrega dados atuais do usuário no backend para refletir
+        // vínculos novos de setores sem depender da sessão antiga.
+        const users = await fetch('/api/users').then((res) => res.json()).catch(() => []);
+        const freshUser = (Array.isArray(users) ? users : []).find((u: any) => String(u.id) === String(user.id));
+        const normalizedSectorIds = Array.from(
+          new Set(
+            (Array.isArray(freshUser?.sector_ids) ? freshUser.sector_ids : [freshUser?.sector_id ?? user?.sector_id])
+              .map((id) => String(id ?? '').trim())
+              .filter((id) => id !== '')
+          )
+        );
+        setAllowedSectorIds(normalizedSectorIds);
+
+        if (freshUser) {
+          const updatedUser = {
+            ...user,
+            sector_ids: freshUser.sector_ids ?? [],
+            sector_names: freshUser.sector_names ?? [],
+            sector_id: freshUser.sector_id ?? user?.sector_id ?? null,
+          };
+          localStorage.setItem('user', JSON.stringify(updatedUser));
+        }
+      } catch {
+        // fallback mantém requester
+      }
+    };
+
+    loadCurrentUserContext();
   }, []);
 
   useEffect(() => {

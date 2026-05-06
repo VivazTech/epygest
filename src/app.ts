@@ -192,8 +192,35 @@ export function createApp() {
     if (error || !user) {
       return res.status(401).json({ error: "Credenciais inválidas" });
     }
+
+    const { data: userSectorLinks } = await supabase
+      .from("user_sectors")
+      .select("sector_id")
+      .eq("user_id", user.id);
+
+    const sectorIds = Array.from(
+      new Set(
+        (userSectorLinks ?? [])
+          .map((link: any) => Number(link.sector_id))
+          .filter((id) => Number.isFinite(id))
+      )
+    );
+
+    const fallbackSectorIds = sectorIds.length
+      ? sectorIds
+      : (Number.isFinite(Number(user.sector_id)) ? [Number(user.sector_id)] : []);
+
+    const { data: sectorRows } = fallbackSectorIds.length
+      ? await supabase.from("sectors").select("id, name").in("id", fallbackSectorIds)
+      : { data: [] as any[] };
+
+    const sectorNames = (sectorRows ?? []).map((row: any) => String(row.name || ""));
     const { password: _pwd, ...userWithoutPassword } = user;
-    res.json(userWithoutPassword);
+    res.json({
+      ...userWithoutPassword,
+      sector_ids: fallbackSectorIds,
+      sector_names: sectorNames,
+    });
   });
 
   app.get("/api/users", async (_req, res) => {
