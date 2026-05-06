@@ -73,6 +73,14 @@ export default function App() {
     }
   };
 
+  const getWhatsappSupportLink = () => {
+    const errorText = loginError?.trim() ? loginError.trim() : 'Mensagem de erro';
+    const message =
+      `Olá, preciso de ajuda para acessar o EpyGest.\n` +
+      `Estou com o seguinte erro: "${errorText}"`;
+    return `https://wa.me/5545991070844?text=${encodeURIComponent(message)}`;
+  };
+
   const renderContent = () => {
     switch (activeTab) {
       case 'dashboard': return <Dashboard />;
@@ -95,48 +103,68 @@ export default function App() {
   if (!user) {
     return (
       <div className="min-h-screen bg-[#F8FAFC] font-sans text-slate-900 flex items-center justify-center p-6">
-        <div className="w-full max-w-md bg-white border border-slate-100 rounded-2xl shadow-sm p-6 space-y-5">
-          <div className="text-center">
-            <h1 className="text-2xl font-bold text-slate-900">EpyGest</h1>
-            <p className="text-sm text-slate-500 mt-1">Acesse sua conta para entrar no sistema.</p>
+        <div className="w-full max-w-md">
+          <div className="bg-white border border-slate-100 rounded-2xl shadow-sm p-6 space-y-5">
+            <div className="text-center">
+              <h1 className="text-2xl font-bold text-slate-900">EpyGest</h1>
+              <p className="text-sm text-slate-500 mt-1">Acesse sua conta para entrar no sistema.</p>
+            </div>
+
+            <form onSubmit={handleLogin} className="space-y-3">
+              <div>
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">E-mail</label>
+                <input
+                  type="email"
+                  value={loginForm.email}
+                  onChange={(e) => setLoginForm((p) => ({ ...p, email: e.target.value }))}
+                  className="mt-1 w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+                  placeholder="seu@email.com"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Senha</label>
+                <input
+                  type="password"
+                  value={loginForm.password}
+                  onChange={(e) => setLoginForm((p) => ({ ...p, password: e.target.value }))}
+                  className="mt-1 w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+                  placeholder="••••••••"
+                />
+              </div>
+
+              {loginError && (
+                <div className="text-xs font-medium text-red-600 bg-red-50 border border-red-100 rounded-xl px-3 py-2">
+                  {loginError}
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={loginLoading}
+                className="w-full px-4 py-2.5 rounded-xl bg-[#004D40] text-white text-sm font-bold hover:bg-[#003d33] disabled:opacity-60 transition-colors"
+              >
+                {loginLoading ? 'Entrando...' : 'Entrar'}
+              </button>
+            </form>
           </div>
 
-          <form onSubmit={handleLogin} className="space-y-3">
-            <div>
-              <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">E-mail</label>
-              <input
-                type="email"
-                value={loginForm.email}
-                onChange={(e) => setLoginForm((p) => ({ ...p, email: e.target.value }))}
-                className="mt-1 w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
-                placeholder="seu@email.com"
-              />
-            </div>
-            <div>
-              <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Senha</label>
-              <input
-                type="password"
-                value={loginForm.password}
-                onChange={(e) => setLoginForm((p) => ({ ...p, password: e.target.value }))}
-                className="mt-1 w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
-                placeholder="••••••••"
-              />
-            </div>
-
-            {loginError && (
-              <div className="text-xs font-medium text-red-600 bg-red-50 border border-red-100 rounded-xl px-3 py-2">
-                {loginError}
-              </div>
-            )}
-
+          <div className="mt-4 flex items-center justify-center gap-3">
             <button
-              type="submit"
-              disabled={loginLoading}
-              className="w-full px-4 py-2.5 rounded-xl bg-[#004D40] text-white text-sm font-bold hover:bg-[#003d33] disabled:opacity-60 transition-colors"
+              type="button"
+              className="px-4 py-2 text-sm font-semibold text-slate-600 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors"
+              onClick={() => alert('Configuração de recuperação de senha será definida em breve.')}
             >
-              {loginLoading ? 'Entrando...' : 'Entrar'}
+              Esqueci minha senha
             </button>
-          </form>
+            <a
+              href={getWhatsappSupportLink()}
+              target="_blank"
+              rel="noreferrer"
+              className="px-4 py-2 text-sm font-semibold text-white bg-[#004D40] rounded-xl hover:bg-[#003d33] transition-colors"
+            >
+              Suporte
+            </a>
+          </div>
         </div>
       </div>
     );

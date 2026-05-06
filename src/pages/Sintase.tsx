@@ -34,6 +34,8 @@ export const SintasePage: React.FC = () => {
   const [editingValue, setEditingValue] = useState('');
   const [occupancyPercent, setOccupancyPercent] = useState<number>(100);
   const [savingOccupancy, setSavingOccupancy] = useState(false);
+  const [userRole, setUserRole] = useState<string>('viewer');
+  const [allowedSectorNames, setAllowedSectorNames] = useState<string[]>([]);
 
   const loadData = async () => {
     setLoading(true);
@@ -56,6 +58,24 @@ export const SintasePage: React.FC = () => {
   };
 
   useEffect(() => {
+    try {
+      const raw = localStorage.getItem('user');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        setUserRole(String(parsed?.role || 'viewer'));
+        const names = Array.from(
+          new Set(
+            (Array.isArray(parsed?.sector_names) ? parsed.sector_names : [])
+              .map((name: any) => String(name || '').trim())
+              .filter((name: string) => Boolean(name))
+          )
+        );
+        setAllowedSectorNames(names);
+      }
+    } catch {
+      // ignora erro de parse
+    }
+
     fetch('/api/crds')
       .then((res) => res.json())
       .then((rows) => {
@@ -70,10 +90,26 @@ export const SintasePage: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const totalRows = useMemo(() => data?.rows?.length || 0, [data]);
+  const visibleRows = useMemo(() => {
+    const allRows = data?.rows || [];
+    if (userRole !== 'manager') return allRows;
+    return allRows.filter((row) => allowedSectorNames.includes(String(row.crd || '').trim()));
+  }, [data, userRole, allowedSectorNames]);
+
+  const visibleTotals = useMemo(() => {
+    const months = Array.from({ length: 12 }, (_, idx) =>
+      visibleRows.reduce((sum, row) => sum + (row.months[idx] || 0), 0)
+    );
+    return {
+      months,
+      total: months.reduce((sum, value) => sum + value, 0),
+    };
+  }, [visibleRows]);
+
+  const totalRows = useMemo(() => visibleRows.length || 0, [visibleRows]);
   const rowsByCrd = useMemo(() => {
     const grouped = new Map<string, SintaseApiResponse['rows']>();
-    for (const row of data?.rows || []) {
+    for (const row of visibleRows) {
       if (!grouped.has(row.crd)) grouped.set(row.crd, []);
       grouped.get(row.crd)!.push(row);
     }
@@ -89,7 +125,7 @@ export const SintasePage: React.FC = () => {
         total: crdTotal,
       };
     });
-  }, [data]);
+  }, [visibleRows]);
 
   useEffect(() => {
     if (!rowsByCrd.length) {
@@ -404,7 +440,7 @@ export const SintasePage: React.FC = () => {
               <td className="px-4 py-3 text-xs font-bold text-emerald-800" colSpan={2}>
                 Total geral por mês ({data?.year || currentYear})
               </td>
-              {(data?.totals?.months || Array.from({ length: 12 }, () => 0)).map((value, index) => (
+              {(visibleTotals.months || Array.from({ length: 12 }, () => 0)).map((value, index) => (
                 <td key={`total-${index}`} className="px-4 py-3 text-xs text-right font-bold text-emerald-800">
                   <ValueTrace
                     className="text-xs text-right font-bold text-emerald-800"
@@ -417,7 +453,7 @@ export const SintasePage: React.FC = () => {
               <td className="px-4 py-3 text-xs text-right font-extrabold text-emerald-900">
                 <ValueTrace
                   className="text-xs text-right font-extrabold text-emerald-900"
-                  displayValue={formatCurrency(data?.totals?.total || 0)}
+                  displayValue={formatCurrency(visibleTotals.total || 0)}
                   source="Total geral da Síntase"
                   calculation="Soma de M1..M12 para todos os CRDs"
                 />

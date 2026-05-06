@@ -42,6 +42,8 @@ export const PrevRealPage: React.FC = () => {
   const [savingCell, setSavingCell] = useState(false);
   const [editingCell, setEditingCell] = useState<{ rowId: number; monthIndex: number } | null>(null);
   const [editingValue, setEditingValue] = useState('');
+  const [userRole, setUserRole] = useState<string>('viewer');
+  const [allowedSectorNames, setAllowedSectorNames] = useState<string[]>([]);
 
   const loadData = async () => {
     setLoading(true);
@@ -62,6 +64,24 @@ export const PrevRealPage: React.FC = () => {
   };
 
   useEffect(() => {
+    try {
+      const raw = localStorage.getItem('user');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        setUserRole(String(parsed?.role || 'viewer'));
+        const names = Array.from(
+          new Set(
+            (Array.isArray(parsed?.sector_names) ? parsed.sector_names : [])
+              .map((name: any) => String(name || '').trim())
+              .filter((name: string) => Boolean(name))
+          )
+        );
+        setAllowedSectorNames(names);
+      }
+    } catch {
+      // ignora erro de parse
+    }
+
     fetch('/api/crds')
       .then((res) => res.json())
       .then((rows) => {
@@ -76,9 +96,29 @@ export const PrevRealPage: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const visibleRows = useMemo(() => {
+    const allRows = data?.rows || [];
+    if (userRole !== 'manager') return allRows;
+    return allRows.filter((row) => allowedSectorNames.includes(String(row.crd || '').trim()));
+  }, [data, userRole, allowedSectorNames]);
+
+  const visibleTotals = useMemo(() => {
+    const months = Array.from({ length: 12 }, (_, idx) => ({
+      previsto: visibleRows.reduce((sum, row) => sum + (row.months[idx]?.previsto || 0), 0),
+      realizado: visibleRows.reduce((sum, row) => sum + (row.months[idx]?.realizado || 0), 0),
+      diferenca: visibleRows.reduce((sum, row) => sum + (row.months[idx]?.diferenca || 0), 0),
+    }));
+    return {
+      months,
+      previsto: months.reduce((sum, m) => sum + m.previsto, 0),
+      realizado: months.reduce((sum, m) => sum + m.realizado, 0),
+      diferenca: months.reduce((sum, m) => sum + m.diferenca, 0),
+    };
+  }, [visibleRows]);
+
   const rowsByCrd = useMemo(() => {
     const grouped = new Map<string, PrevRealApiResponse['rows']>();
-    for (const row of data?.rows || []) {
+    for (const row of visibleRows) {
       if (!grouped.has(row.crd)) grouped.set(row.crd, []);
       grouped.get(row.crd)!.push(row);
     }
@@ -97,7 +137,7 @@ export const PrevRealPage: React.FC = () => {
         total_diferenca: months.reduce((sum, m) => sum + m.diferenca, 0),
       };
     });
-  }, [data]);
+  }, [visibleRows]);
 
   useEffect(() => {
     if (!rowsByCrd.length) {
@@ -322,16 +362,16 @@ export const PrevRealPage: React.FC = () => {
           <tbody>
             <tr className="bg-white">
               <td className="px-4 py-3 text-xs text-emerald-800 font-bold">Consolidado</td>
-              {(data?.totals?.months || Array.from({ length: 12 }, () => ({ previsto: 0, realizado: 0, diferenca: 0 }))).map((m, idx) => (
+              {(visibleTotals.months || Array.from({ length: 12 }, () => ({ previsto: 0, realizado: 0, diferenca: 0 }))).map((m, idx) => (
                 <React.Fragment key={`tot-${idx}`}>
                   <td className="px-3 py-2 text-xs text-right text-emerald-800 border-l border-emerald-100">{formatCurrency(m.previsto || 0)}</td>
                   <td className="px-3 py-2 text-xs text-right text-emerald-800">{formatCurrency(m.realizado || 0)}</td>
                   <td className={`px-3 py-2 text-xs text-right font-bold ${(m.diferenca || 0) < 0 ? 'text-red-700' : 'text-emerald-800'}`}>{formatCurrency(m.diferenca || 0)}</td>
                 </React.Fragment>
               ))}
-              <td className="px-4 py-3 text-xs text-right font-bold text-emerald-900">{formatCurrency(data?.totals?.previsto || 0)}</td>
-              <td className="px-4 py-3 text-xs text-right font-bold text-emerald-900">{formatCurrency(data?.totals?.realizado || 0)}</td>
-              <td className={`px-4 py-3 text-xs text-right font-extrabold ${(data?.totals?.diferenca || 0) < 0 ? 'text-red-700' : 'text-emerald-900'}`}>{formatCurrency(data?.totals?.diferenca || 0)}</td>
+              <td className="px-4 py-3 text-xs text-right font-bold text-emerald-900">{formatCurrency(visibleTotals.previsto || 0)}</td>
+              <td className="px-4 py-3 text-xs text-right font-bold text-emerald-900">{formatCurrency(visibleTotals.realizado || 0)}</td>
+              <td className={`px-4 py-3 text-xs text-right font-extrabold ${(visibleTotals.diferenca || 0) < 0 ? 'text-red-700' : 'text-emerald-900'}`}>{formatCurrency(visibleTotals.diferenca || 0)}</td>
             </tr>
           </tbody>
         </table>
