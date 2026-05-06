@@ -147,8 +147,10 @@ export const UsuariosPage: React.FC = () => {
     loadAll();
   };
 
-  const selectedValues = (event: React.ChangeEvent<HTMLSelectElement>) =>
-    Array.from(event.target.selectedOptions).map((option) => option.value);
+  const toggleSectorSelection = (current: string[], sectorId: string) => {
+    if (current.includes(sectorId)) return current.filter((id) => id !== sectorId);
+    return [...current, sectorId];
+  };
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
@@ -194,16 +196,24 @@ export const UsuariosPage: React.FC = () => {
             <option value="finance">Financeiro</option>
             <option value="admin">Administrador</option>
           </select>
-          <select
-            multiple
-            value={newUser.sector_ids}
-            onChange={(e) => setNewUser((p) => ({ ...p, sector_ids: selectedValues(e) }))}
-            className="w-64 h-24 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
-          >
-            {sectors.map((sector: any) => (
-              <option key={sector.id} value={sector.id}>{sector.name}</option>
-            ))}
-          </select>
+          <div className="w-64 h-24 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm overflow-auto space-y-1">
+            {sectors.map((sector: any) => {
+              const sectorId = String(sector.id);
+              const checked = newUser.sector_ids.includes(sectorId);
+              return (
+                <label key={sector.id} className="flex items-center gap-2 text-xs text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() =>
+                      setNewUser((p) => ({ ...p, sector_ids: toggleSectorSelection(p.sector_ids, sectorId) }))
+                    }
+                  />
+                  <span>{sector.name}</span>
+                </label>
+              );
+            })}
+          </div>
           <button
             onClick={createUser}
             className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-[#004D40] text-white text-sm font-bold hover:bg-[#003d33] transition-colors"
@@ -265,16 +275,27 @@ export const UsuariosPage: React.FC = () => {
                   <td className="px-4 py-3 text-sm text-slate-700">
                     {editing ? (
                       <div className="flex items-center gap-2">
-                        <select
-                          multiple
-                          value={editForm.sector_ids ?? []}
-                          onChange={(e) => setEditForm((p: any) => ({ ...p, sector_ids: selectedValues(e) }))}
-                          className="w-56 h-24 px-2 py-1 bg-white border border-slate-200 rounded-lg text-sm"
-                        >
-                          {sectors.map((sector: any) => (
-                            <option key={sector.id} value={sector.id}>{sector.name}</option>
-                          ))}
-                        </select>
+                        <div className="w-56 h-24 px-2 py-1 bg-white border border-slate-200 rounded-lg text-sm overflow-auto space-y-1">
+                          {sectors.map((sector: any) => {
+                            const sectorId = String(sector.id);
+                            const checked = (editForm.sector_ids ?? []).includes(sectorId);
+                            return (
+                              <label key={sector.id} className="flex items-center gap-2 text-xs text-slate-700">
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  onChange={() =>
+                                    setEditForm((p: any) => ({
+                                      ...p,
+                                      sector_ids: toggleSectorSelection(p.sector_ids ?? [], sectorId),
+                                    }))
+                                  }
+                                />
+                                <span>{sector.name}</span>
+                              </label>
+                            );
+                          })}
+                        </div>
                         <input
                           type="password"
                           value={editForm.password}
