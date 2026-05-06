@@ -208,10 +208,18 @@ export function createApp() {
     let sectorLinksByUserId = new Map<number, Array<{ id: number; name: string }>>();
 
     if (userIds.length) {
-      const { data: linksData } = await supabase
+      const { data: linksData, error: linksError } = await supabase
         .from("user_sectors")
         .select("user_id, sector_id, sectors(id, name)")
         .in("user_id", userIds);
+
+      if (linksError) {
+        return res.status(500).json({
+          error:
+            "Não foi possível carregar múltiplos setores dos usuários. Execute a migração da tabela user_sectors no Supabase.",
+          detail: linksError.message,
+        });
+      }
 
       for (const link of linksData ?? []) {
         const userId = Number((link as any).user_id);
@@ -283,12 +291,20 @@ export function createApp() {
     if (error) return res.status(400).json({ error: "Não foi possível criar usuário (email duplicado?)" });
 
     if (normalizedSectorIds.length) {
-      await supabase
+      const { error: userSectorsError } = await supabase
         .from("user_sectors")
         .upsert(
           normalizedSectorIds.map((sid) => ({ user_id: data.id, sector_id: sid })),
           { onConflict: "user_id,sector_id", ignoreDuplicates: true }
         );
+
+      if (userSectorsError) {
+        return res.status(500).json({
+          error:
+            "Usuário criado, mas não foi possível salvar múltiplos setores. Execute a migração user_sectors no Supabase.",
+          detail: userSectorsError.message,
+        });
+      }
     }
 
     res.json({ id: data.id });
@@ -339,14 +355,30 @@ export function createApp() {
 
     if (error) return res.status(400).json({ error: error.message || "Não foi possível atualizar usuário" });
 
-    await supabase.from("user_sectors").delete().eq("user_id", id);
+    const { error: deleteLinksError } = await supabase.from("user_sectors").delete().eq("user_id", id);
+    if (deleteLinksError) {
+      return res.status(500).json({
+        error:
+          "Usuário atualizado, mas não foi possível atualizar vínculos de setores. Execute a migração user_sectors no Supabase.",
+        detail: deleteLinksError.message,
+      });
+    }
+
     if (normalizedSectorIds.length) {
-      await supabase
+      const { error: upsertLinksError } = await supabase
         .from("user_sectors")
         .upsert(
           normalizedSectorIds.map((sid) => ({ user_id: id, sector_id: sid })),
           { onConflict: "user_id,sector_id", ignoreDuplicates: true }
         );
+
+      if (upsertLinksError) {
+        return res.status(500).json({
+          error:
+            "Usuário atualizado, mas não foi possível salvar múltiplos setores. Execute a migração user_sectors no Supabase.",
+          detail: upsertLinksError.message,
+        });
+      }
     }
 
     res.json({ success: true });

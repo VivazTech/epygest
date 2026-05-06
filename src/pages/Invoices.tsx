@@ -493,12 +493,6 @@ export const Invoices: React.FC = () => {
         ))}
       </div>
 
-      {isRequester && (
-        <div className="bg-blue-50 border border-blue-100 rounded-2xl px-4 py-3 text-sm text-blue-800">
-          Neste perfil, os valores de outros setores ficam ocultos.
-        </div>
-      )}
-
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
         <div className="p-4 border-b border-slate-50 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="relative flex-1 max-w-md">
