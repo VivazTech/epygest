@@ -204,22 +204,52 @@ export function createApp() {
 
     if (error) return res.status(500).json({ error: error.message });
 
+    const userIds = (data ?? []).map((user: any) => user.id);
+    let sectorLinksByUserId = new Map<number, Array<{ id: number; name: string }>>();
+
+    if (userIds.length) {
+      const { data: linksData } = await supabase
+        .from("user_sectors")
+        .select("user_id, sector_id, sectors(id, name)")
+        .in("user_id", userIds);
+
+      for (const link of linksData ?? []) {
+        const userId = Number((link as any).user_id);
+        const sector = (link as any).sectors;
+        if (!Number.isFinite(userId) || !sector?.id) continue;
+        if (!sectorLinksByUserId.has(userId)) sectorLinksByUserId.set(userId, []);
+        sectorLinksByUserId.get(userId)!.push({
+          id: Number(sector.id),
+          name: String(sector.name || ""),
+        });
+      }
+    }
+
     res.json(
       (data ?? []).map((user: any) => ({
         ...user,
         sector_name: user.sectors?.name ?? null,
+        sector_ids:
+          (sectorLinksByUserId.get(Number(user.id)) ?? []).map((s) => s.id).length > 0
+            ? (sectorLinksByUserId.get(Number(user.id)) ?? []).map((s) => s.id)
+            : (user.sector_id ? [Number(user.sector_id)] : []),
+        sector_names:
+          (sectorLinksByUserId.get(Number(user.id)) ?? []).map((s) => s.name).length > 0
+            ? (sectorLinksByUserId.get(Number(user.id)) ?? []).map((s) => s.name)
+            : (user.sectors?.name ? [String(user.sectors.name)] : []),
         sectors: undefined,
       }))
     );
   });
 
   app.post("/api/users", async (req, res) => {
-    const { name, email, password, role, sector_id } = req.body as {
+    const { name, email, password, role, sector_id, sector_ids } = req.body as {
       name?: string;
       email?: string;
       password?: string;
       role?: "admin" | "finance" | "manager" | "viewer";
       sector_id?: number | null;
+      sector_ids?: number[];
     };
 
     if (!name || !email || !password || !role) {
@@ -230,6 +260,14 @@ export function createApp() {
       return res.status(400).json({ error: "role inválido" });
     }
 
+    const normalizedSectorIds = Array.from(
+      new Set(
+        (Array.isArray(sector_ids) ? sector_ids : [sector_id])
+          .map((value) => Number(value))
+          .filter((value) => Number.isFinite(value))
+      )
+    );
+
     const { data, error } = await supabase
       .from("users")
       .insert({
@@ -237,23 +275,34 @@ export function createApp() {
         email: String(email).trim().toLowerCase(),
         password: String(password),
         role,
-        sector_id: Number.isFinite(Number(sector_id)) ? Number(sector_id) : null,
+        sector_id: normalizedSectorIds.length ? normalizedSectorIds[0] : null,
       })
       .select("id")
       .single();
 
     if (error) return res.status(400).json({ error: "Não foi possível criar usuário (email duplicado?)" });
+
+    if (normalizedSectorIds.length) {
+      await supabase
+        .from("user_sectors")
+        .upsert(
+          normalizedSectorIds.map((sid) => ({ user_id: data.id, sector_id: sid })),
+          { onConflict: "user_id,sector_id", ignoreDuplicates: true }
+        );
+    }
+
     res.json({ id: data.id });
   });
 
   app.patch("/api/users/:id", async (req, res) => {
     const { id } = req.params;
-    const { name, email, password, role, sector_id } = req.body as {
+    const { name, email, password, role, sector_id, sector_ids } = req.body as {
       name?: string;
       email?: string;
       password?: string;
       role?: "admin" | "finance" | "manager" | "viewer";
       sector_id?: number | null;
+      sector_ids?: number[];
     };
 
     if (!name || !email || !role) {
@@ -263,20 +312,43 @@ export function createApp() {
       return res.status(400).json({ error: "role inválido" });
     }
 
+    if (!id || String(id).trim() === "") {
+      return res.status(400).json({ error: "id do usuário é obrigatório" });
+    }
+
+    const normalizedSectorIds = Array.from(
+      new Set(
+        (Array.isArray(sector_ids) ? sector_ids : [sector_id])
+          .map((value) => Number(value))
+          .filter((value) => Number.isFinite(value))
+      )
+    );
+
     const payload: any = {
       name: String(name).trim(),
       email: String(email).trim().toLowerCase(),
       role,
-      sector_id: Number.isFinite(Number(sector_id)) ? Number(sector_id) : null,
+      sector_id: normalizedSectorIds.length ? normalizedSectorIds[0] : null,
     };
     if (password && String(password).trim()) payload.password = String(password);
 
     const { error } = await supabase
       .from("users")
       .update(payload)
-      .eq("id", Number(id));
+      .eq("id", id);
 
-    if (error) return res.status(400).json({ error: "Não foi possível atualizar usuário" });
+    if (error) return res.status(400).json({ error: error.message || "Não foi possível atualizar usuário" });
+
+    await supabase.from("user_sectors").delete().eq("user_id", id);
+    if (normalizedSectorIds.length) {
+      await supabase
+        .from("user_sectors")
+        .upsert(
+          normalizedSectorIds.map((sid) => ({ user_id: id, sector_id: sid })),
+          { onConflict: "user_id,sector_id", ignoreDuplicates: true }
+        );
+    }
+
     res.json({ success: true });
   });
 
@@ -291,16 +363,20 @@ export function createApp() {
       return res.status(403).json({ error: "Apenas administradores podem excluir usuários" });
     }
 
-    if (Number.isFinite(Number(actor_id)) && Number(actor_id) === Number(id)) {
+    if (!id || String(id).trim() === "") {
+      return res.status(400).json({ error: "id do usuário é obrigatório" });
+    }
+
+    if (actor_id !== undefined && actor_id !== null && String(actor_id) === String(id)) {
       return res.status(400).json({ error: "Você não pode excluir seu próprio usuário" });
     }
 
     const { error } = await supabase
       .from("users")
       .delete()
-      .eq("id", Number(id));
+      .eq("id", id);
 
-    if (error) return res.status(400).json({ error: "Não foi possível excluir usuário" });
+    if (error) return res.status(400).json({ error: error.message || "Não foi possível excluir usuário" });
     res.json({ success: true });
   });
 

@@ -2,11 +2,13 @@ import React, { useEffect, useState } from 'react';
 import { Users, UserPlus, Edit2, Save, X, Trash2 } from 'lucide-react';
 
 type UserRow = {
-  id: number;
+  id: number | string;
   name: string;
   email: string;
   role: 'admin' | 'finance' | 'manager' | 'viewer';
   sector_id: number | null;
+  sector_ids?: number[];
+  sector_names?: string[];
   sector_name?: string | null;
   created_at?: string;
 };
@@ -22,15 +24,15 @@ export const UsuariosPage: React.FC = () => {
   const [users, setUsers] = useState<UserRow[]>([]);
   const [sectors, setSectors] = useState<any[]>([]);
   const [currentUserRole, setCurrentUserRole] = useState<'admin' | 'finance' | 'manager' | 'viewer'>('viewer');
-  const [currentUserId, setCurrentUserId] = useState<number | null>(null);
-  const [editingId, setEditingId] = useState<number | null>(null);
+  const [currentUserId, setCurrentUserId] = useState<number | string | null>(null);
+  const [editingId, setEditingId] = useState<number | string | null>(null);
   const [editForm, setEditForm] = useState<any>({});
   const [newUser, setNewUser] = useState({
     name: '',
     email: '',
     password: '',
     role: 'viewer',
-    sector_id: '',
+    sector_ids: [] as string[],
   });
 
   const loadAll = async () => {
@@ -48,7 +50,7 @@ export const UsuariosPage: React.FC = () => {
       if (raw) {
         const parsed = JSON.parse(raw);
         if (parsed?.role) setCurrentUserRole(parsed.role);
-        if (Number.isFinite(Number(parsed?.id))) setCurrentUserId(Number(parsed.id));
+        if (parsed?.id !== undefined && parsed?.id !== null) setCurrentUserId(String(parsed.id));
       }
     } catch {
       // ignora erro de parse
@@ -61,7 +63,7 @@ export const UsuariosPage: React.FC = () => {
       alert('Apenas administradores podem excluir usuários.');
       return;
     }
-    if (currentUserId && user.id === currentUserId) {
+    if (currentUserId !== null && String(user.id) === String(currentUserId)) {
       alert('Você não pode excluir seu próprio usuário.');
       return;
     }
@@ -96,7 +98,7 @@ export const UsuariosPage: React.FC = () => {
         email: newUser.email.trim(),
         password: newUser.password,
         role: newUser.role,
-        sector_id: newUser.sector_id ? Number(newUser.sector_id) : null,
+        sector_ids: newUser.sector_ids.map((id) => Number(id)).filter((id) => Number.isFinite(id)),
       }),
     });
     const data = await res.json().catch(() => ({}));
@@ -104,7 +106,7 @@ export const UsuariosPage: React.FC = () => {
       alert(data.error || 'Erro ao criar usuário');
       return;
     }
-    setNewUser({ name: '', email: '', password: '', role: 'viewer', sector_id: '' });
+    setNewUser({ name: '', email: '', password: '', role: 'viewer', sector_ids: [] });
     loadAll();
   };
 
@@ -114,12 +116,16 @@ export const UsuariosPage: React.FC = () => {
       name: user.name,
       email: user.email,
       role: user.role,
-      sector_id: user.sector_id ? String(user.sector_id) : '',
+      sector_ids: (user.sector_ids ?? (user.sector_id ? [Number(user.sector_id)] : [])).map((id) => String(id)),
       password: '',
     });
   };
 
-  const saveEdit = async (id: number) => {
+  const saveEdit = async (id: number | string) => {
+    if (id === undefined || id === null || String(id).trim() === '') {
+      alert('ID de usuário inválido para atualização.');
+      return;
+    }
     const res = await fetch(`/api/users/${id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
@@ -127,7 +133,7 @@ export const UsuariosPage: React.FC = () => {
         name: editForm.name,
         email: editForm.email,
         role: editForm.role,
-        sector_id: editForm.sector_id ? Number(editForm.sector_id) : null,
+        sector_ids: (editForm.sector_ids ?? []).map((value: string) => Number(value)).filter((value: number) => Number.isFinite(value)),
         password: editForm.password || undefined,
       }),
     });
@@ -140,6 +146,9 @@ export const UsuariosPage: React.FC = () => {
     setEditForm({});
     loadAll();
   };
+
+  const selectedValues = (event: React.ChangeEvent<HTMLSelectElement>) =>
+    Array.from(event.target.selectedOptions).map((option) => option.value);
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
@@ -186,11 +195,11 @@ export const UsuariosPage: React.FC = () => {
             <option value="admin">Administrador</option>
           </select>
           <select
-            value={newUser.sector_id}
-            onChange={(e) => setNewUser((p) => ({ ...p, sector_id: e.target.value }))}
-            className="w-52 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+            multiple
+            value={newUser.sector_ids}
+            onChange={(e) => setNewUser((p) => ({ ...p, sector_ids: selectedValues(e) }))}
+            className="w-64 h-24 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
           >
-            <option value="">Sem setor</option>
             {sectors.map((sector: any) => (
               <option key={sector.id} value={sector.id}>{sector.name}</option>
             ))}
@@ -257,11 +266,11 @@ export const UsuariosPage: React.FC = () => {
                     {editing ? (
                       <div className="flex items-center gap-2">
                         <select
-                          value={editForm.sector_id}
-                          onChange={(e) => setEditForm((p: any) => ({ ...p, sector_id: e.target.value }))}
-                          className="w-44 px-2 py-1 bg-white border border-slate-200 rounded-lg text-sm"
+                          multiple
+                          value={editForm.sector_ids ?? []}
+                          onChange={(e) => setEditForm((p: any) => ({ ...p, sector_ids: selectedValues(e) }))}
+                          className="w-56 h-24 px-2 py-1 bg-white border border-slate-200 rounded-lg text-sm"
                         >
-                          <option value="">Sem setor</option>
                           {sectors.map((sector: any) => (
                             <option key={sector.id} value={sector.id}>{sector.name}</option>
                           ))}
@@ -274,7 +283,7 @@ export const UsuariosPage: React.FC = () => {
                           className="w-48 px-2 py-1 bg-white border border-slate-200 rounded-lg text-sm"
                         />
                       </div>
-                    ) : (user.sector_name || 'Sem setor')}
+                    ) : ((user.sector_names && user.sector_names.length > 0 ? user.sector_names.join(', ') : (user.sector_name || 'Sem setor')))}
                   </td>
                   <td className="px-4 py-3">
                     {editing ? (
@@ -306,7 +315,7 @@ export const UsuariosPage: React.FC = () => {
                         {currentUserRole === 'admin' && (
                           <button
                             onClick={() => deleteUser(user)}
-                            disabled={currentUserId === user.id}
+                            disabled={currentUserId !== null && String(currentUserId) === String(user.id)}
                             className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold rounded-lg bg-red-50 text-red-700 hover:bg-red-100 disabled:opacity-50 disabled:cursor-not-allowed"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
