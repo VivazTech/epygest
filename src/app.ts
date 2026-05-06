@@ -350,7 +350,19 @@ export function createApp() {
       .select("id")
       .single();
 
-    if (error) return res.status(400).json({ error: "Não foi possível criar usuário (email duplicado?)" });
+    if (error) {
+      const detail = String(error.message || "");
+      if (detail.toLowerCase().includes("role") || detail.toLowerCase().includes("check")) {
+        return res.status(400).json({
+          error:
+            "Não foi possível criar usuário: o banco ainda não aceita o perfil 'controle'. Atualize a constraint de role no Supabase.",
+          detail,
+        });
+      }
+      return res.status(400).json({
+        error: detail || "Não foi possível criar usuário",
+      });
+    }
 
     if (normalizedSectorIds.length) {
       const { error: userSectorsError } = await supabase
