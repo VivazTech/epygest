@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Users, UserPlus, Edit2, Save, X } from 'lucide-react';
+import { Users, UserPlus, Edit2, Save, X, Trash2 } from 'lucide-react';
 
 type UserRow = {
   id: number;
@@ -21,6 +21,8 @@ const roleLabel: Record<UserRow['role'], string> = {
 export const UsuariosPage: React.FC = () => {
   const [users, setUsers] = useState<UserRow[]>([]);
   const [sectors, setSectors] = useState<any[]>([]);
+  const [currentUserRole, setCurrentUserRole] = useState<'admin' | 'finance' | 'manager' | 'viewer'>('viewer');
+  const [currentUserId, setCurrentUserId] = useState<number | null>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editForm, setEditForm] = useState<any>({});
   const [newUser, setNewUser] = useState({
@@ -41,8 +43,45 @@ export const UsuariosPage: React.FC = () => {
   };
 
   useEffect(() => {
+    try {
+      const raw = localStorage.getItem('user');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed?.role) setCurrentUserRole(parsed.role);
+        if (Number.isFinite(Number(parsed?.id))) setCurrentUserId(Number(parsed.id));
+      }
+    } catch {
+      // ignora erro de parse
+    }
     loadAll();
   }, []);
+
+  const deleteUser = async (user: UserRow) => {
+    if (currentUserRole !== 'admin') {
+      alert('Apenas administradores podem excluir usuários.');
+      return;
+    }
+    if (currentUserId && user.id === currentUserId) {
+      alert('Você não pode excluir seu próprio usuário.');
+      return;
+    }
+    if (!window.confirm(`Deseja realmente excluir o usuário "${user.name}"?`)) return;
+
+    const res = await fetch(`/api/users/${user.id}`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        actor_role: currentUserRole,
+        actor_id: currentUserId,
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      alert(data.error || 'Erro ao excluir usuário');
+      return;
+    }
+    loadAll();
+  };
 
   const createUser = async () => {
     if (!newUser.name.trim() || !newUser.email.trim() || !newUser.password.trim()) {
@@ -256,13 +295,25 @@ export const UsuariosPage: React.FC = () => {
                         </button>
                       </div>
                     ) : (
-                      <button
-                        onClick={() => startEdit(user)}
-                        className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold rounded-lg bg-white border border-slate-200 text-slate-700 hover:bg-slate-50"
-                      >
-                        <Edit2 className="w-3.5 h-3.5" />
-                        Editar
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => startEdit(user)}
+                          className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold rounded-lg bg-white border border-slate-200 text-slate-700 hover:bg-slate-50"
+                        >
+                          <Edit2 className="w-3.5 h-3.5" />
+                          Editar
+                        </button>
+                        {currentUserRole === 'admin' && (
+                          <button
+                            onClick={() => deleteUser(user)}
+                            disabled={currentUserId === user.id}
+                            className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold rounded-lg bg-red-50 text-red-700 hover:bg-red-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            Excluir
+                          </button>
+                        )}
+                      </div>
                     )}
                   </td>
                 </tr>

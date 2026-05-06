@@ -280,6 +280,30 @@ export function createApp() {
     res.json({ success: true });
   });
 
+  app.delete("/api/users/:id", async (req, res) => {
+    const { id } = req.params;
+    const { actor_role, actor_id } = req.body as {
+      actor_role?: "admin" | "finance" | "manager" | "viewer";
+      actor_id?: number;
+    };
+
+    if (actor_role !== "admin") {
+      return res.status(403).json({ error: "Apenas administradores podem excluir usuários" });
+    }
+
+    if (Number.isFinite(Number(actor_id)) && Number(actor_id) === Number(id)) {
+      return res.status(400).json({ error: "Você não pode excluir seu próprio usuário" });
+    }
+
+    const { error } = await supabase
+      .from("users")
+      .delete()
+      .eq("id", Number(id));
+
+    if (error) return res.status(400).json({ error: "Não foi possível excluir usuário" });
+    res.json({ success: true });
+  });
+
   // ====================================================
   // DASHBOARD
   // ====================================================
