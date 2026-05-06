@@ -58,23 +58,32 @@ export const SintasePage: React.FC = () => {
   };
 
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem('user');
-      if (raw) {
+    const loadUserScope = async () => {
+      try {
+        const raw = localStorage.getItem('user');
+        if (!raw) return;
         const parsed = JSON.parse(raw);
         setUserRole(String(parsed?.role || 'viewer'));
+
+        const users = await fetch('/api/users').then((res) => res.json()).catch(() => []);
+        const freshUser = (Array.isArray(users) ? users : []).find((u: any) => String(u.id) === String(parsed?.id));
+        const sourceNames = Array.isArray(freshUser?.sector_names)
+          ? freshUser.sector_names
+          : (Array.isArray(parsed?.sector_names) ? parsed.sector_names : []);
         const names = Array.from(
           new Set(
-            (Array.isArray(parsed?.sector_names) ? parsed.sector_names : [])
+            sourceNames
               .map((name: any) => String(name || '').trim())
               .filter((name: string) => Boolean(name))
           )
         );
         setAllowedSectorNames(names);
+      } catch {
+        // ignora erro de parse
       }
-    } catch {
-      // ignora erro de parse
-    }
+    };
+
+    loadUserScope();
 
     fetch('/api/crds')
       .then((res) => res.json())
@@ -239,18 +248,20 @@ export const SintasePage: React.FC = () => {
       </div>
 
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 flex flex-wrap items-center gap-3">
-        <select
-            value={crdFilter}
-            onChange={(e) => setCrdFilter(e.target.value)}
-            className="w-full md:w-80 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
-          >
-            <option value="">Todos os CRDs</option>
-            {crdOptions.map((option) => (
-              <option key={option} value={option}>
-                {option}
-              </option>
-            ))}
-          </select>
+        {userRole !== 'manager' && (
+          <select
+              value={crdFilter}
+              onChange={(e) => setCrdFilter(e.target.value)}
+              className="w-full md:w-80 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+            >
+              <option value="">Todos os CRDs</option>
+              {crdOptions.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
+        )}
         <input
           type="number"
           min={2000}
@@ -270,21 +281,11 @@ export const SintasePage: React.FC = () => {
         <div className="h-8 w-px bg-slate-200" />
         <span className="text-xs font-bold uppercase tracking-wider text-slate-500">Ocupação %</span>
         <input
-          type="number"
-          min={0}
-          max={100}
-          step="0.01"
-          value={occupancyPercent}
-          onChange={(e) => setOccupancyPercent(Number(e.target.value))}
-          className="w-24 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+          type="text"
+          value={`${Number(occupancyPercent || 0).toFixed(2)}%`}
+          readOnly
+          className="w-28 px-3 py-2 bg-slate-100 border border-slate-200 rounded-xl text-sm text-slate-700"
         />
-        <button
-          onClick={saveOccupancy}
-          disabled={savingOccupancy}
-          className="inline-flex items-center gap-2 px-4 py-2 bg-slate-700 text-white text-sm font-bold rounded-xl hover:bg-slate-800 disabled:opacity-60"
-        >
-          {savingOccupancy ? 'Salvando...' : 'Aplicar ocupação'}
-        </button>
         <span className="text-xs text-slate-500">Total de linhas: {totalRows}</span>
       </div>
 

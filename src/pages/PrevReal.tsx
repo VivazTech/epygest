@@ -64,23 +64,32 @@ export const PrevRealPage: React.FC = () => {
   };
 
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem('user');
-      if (raw) {
+    const loadUserScope = async () => {
+      try {
+        const raw = localStorage.getItem('user');
+        if (!raw) return;
         const parsed = JSON.parse(raw);
         setUserRole(String(parsed?.role || 'viewer'));
+
+        const users = await fetch('/api/users').then((res) => res.json()).catch(() => []);
+        const freshUser = (Array.isArray(users) ? users : []).find((u: any) => String(u.id) === String(parsed?.id));
+        const sourceNames = Array.isArray(freshUser?.sector_names)
+          ? freshUser.sector_names
+          : (Array.isArray(parsed?.sector_names) ? parsed.sector_names : []);
         const names = Array.from(
           new Set(
-            (Array.isArray(parsed?.sector_names) ? parsed.sector_names : [])
+            sourceNames
               .map((name: any) => String(name || '').trim())
               .filter((name: string) => Boolean(name))
           )
         );
         setAllowedSectorNames(names);
+      } catch {
+        // ignora erro de parse
       }
-    } catch {
-      // ignora erro de parse
-    }
+    };
+
+    loadUserScope();
 
     fetch('/api/crds')
       .then((res) => res.json())
@@ -213,18 +222,20 @@ export const PrevRealPage: React.FC = () => {
       </div>
 
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 flex flex-wrap items-center gap-3">
-        <select
-          value={crdFilter}
-          onChange={(e) => setCrdFilter(e.target.value)}
-          className="w-full md:w-80 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
-        >
-          <option value="">Todos os setores</option>
-          {crdOptions.map((option) => (
-            <option key={option} value={option}>
-              {option}
-            </option>
-          ))}
-        </select>
+        {userRole !== 'manager' && (
+          <select
+            value={crdFilter}
+            onChange={(e) => setCrdFilter(e.target.value)}
+            className="w-full md:w-80 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+          >
+            <option value="">Todos os setores</option>
+            {crdOptions.map((option) => (
+              <option key={option} value={option}>
+                {option}
+              </option>
+            ))}
+          </select>
+        )}
         <input
           type="number"
           min={2000}
@@ -271,8 +282,8 @@ export const PrevRealPage: React.FC = () => {
                     <table className="w-full text-left border-collapse min-w-[2800px]">
                       <thead>
                         <tr className="bg-slate-100/70">
-                          <th rowSpan={2} className="px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Grupo</th>
-                          <th rowSpan={2} className="px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Detalhado</th>
+                          <th rowSpan={2} className="sticky left-0 z-30 bg-slate-100/95 px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-widest min-w-[120px]">Grupo</th>
+                          <th rowSpan={2} className="sticky left-[120px] z-30 bg-slate-100/95 px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-widest min-w-[260px]">Detalhado</th>
                           {monthHeaders.map((month) => (
                             <th key={`${crdGroup.crdName}-${month}`} colSpan={3} className="px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center border-l border-slate-200">
                               {month}
@@ -298,8 +309,8 @@ export const PrevRealPage: React.FC = () => {
                             key={row.id}
                             className={rowIndex % 2 === 0 ? "bg-white/70 hover:bg-white transition-colors" : "bg-slate-50/70 hover:bg-slate-100/70 transition-colors"}
                           >
-                            <td className="px-4 py-3 text-xs text-slate-700">{row.grupo}</td>
-                            <td className="px-4 py-3 text-sm text-slate-700">{row.detalhado}</td>
+                            <td className={`sticky left-0 z-20 px-4 py-3 text-xs text-slate-700 min-w-[120px] ${rowIndex % 2 === 0 ? 'bg-white' : 'bg-slate-50'}`}>{row.grupo}</td>
+                            <td className={`sticky left-[120px] z-20 px-4 py-3 text-sm text-slate-700 min-w-[260px] ${rowIndex % 2 === 0 ? 'bg-white' : 'bg-slate-50'}`}>{row.detalhado}</td>
                             {row.months.map((m, idx) => (
                               <React.Fragment key={`${row.id}-${idx}`}>
                                 <td className="px-3 py-2 text-xs text-right text-slate-700 border-l border-slate-200">
@@ -336,6 +347,21 @@ export const PrevRealPage: React.FC = () => {
                             <td className={`px-4 py-3 text-xs text-right font-extrabold ${(row.total_diferenca || 0) < 0 ? 'text-red-700' : 'text-emerald-700'}`}>{formatCurrency(row.total_diferenca || 0)}</td>
                           </tr>
                         ))}
+                        <tr className="bg-slate-100 border-t border-slate-300">
+                          <td className="sticky left-0 z-20 bg-slate-100 px-4 py-3 text-xs font-bold text-slate-700 min-w-[120px]" colSpan={2}>
+                            Total Setor {crdGroup.crdName}
+                          </td>
+                          {crdGroup.months.map((m, idx) => (
+                            <React.Fragment key={`subtotal-${crdGroup.crdName}-${idx}`}>
+                              <td className="px-3 py-2 text-xs text-right font-bold text-slate-800 border-l border-slate-200">{formatCurrency(m.previsto || 0)}</td>
+                              <td className="px-3 py-2 text-xs text-right font-bold text-slate-800">{formatCurrency(m.realizado || 0)}</td>
+                              <td className={`px-3 py-2 text-xs text-right font-extrabold ${(m.diferenca || 0) < 0 ? 'text-red-700' : 'text-emerald-700'}`}>{formatCurrency(m.diferenca || 0)}</td>
+                            </React.Fragment>
+                          ))}
+                          <td className="px-4 py-3 text-xs text-right font-bold text-slate-900">{formatCurrency(crdGroup.total_previsto || 0)}</td>
+                          <td className="px-4 py-3 text-xs text-right font-bold text-slate-900">{formatCurrency(crdGroup.total_realizado || 0)}</td>
+                          <td className={`px-4 py-3 text-xs text-right font-extrabold ${(crdGroup.total_diferenca || 0) < 0 ? 'text-red-700' : 'text-emerald-700'}`}>{formatCurrency(crdGroup.total_diferenca || 0)}</td>
+                        </tr>
                       </tbody>
                     </table>
                   </div>
