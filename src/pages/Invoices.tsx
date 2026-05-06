@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Plus, 
   Search, 
@@ -390,6 +390,51 @@ export const Invoices: React.FC = () => {
     return !isRequester || currentSectorId === requesterSectorId;
   };
   const getSectorBudget = (sector: any) => Number(sector?.budget_month ?? sector?.budget_limit ?? 0);
+  const scopedInvoices = useMemo(
+    () => visibleInvoices.filter((invoice) => canSeeSectorValues(invoice.sector_id)),
+    [visibleInvoices, actingSector, requesterSectorId, allowedSectorIds, userRole]
+  );
+
+  const metrics = useMemo(() => {
+    const withFlow = scopedInvoices.map((invoice) => ({
+      ...invoice,
+      flow: invoice.flow_stage || (invoice.status === 'paid' ? 'paid' : 'control_pending'),
+    }));
+    const aguardandoControle = withFlow.filter((i) => i.flow === 'control_pending').length;
+    const aprovadasControle = withFlow.filter((i) => i.flow === 'control_approved').length;
+    const pagas = withFlow.filter((i) => i.flow === 'paid' || i.status === 'paid').length;
+    const canceladas = withFlow.filter((i) => i.flow === 'cancelled').length;
+    const atrasadas = withFlow.filter((i) => i.status === 'overdue' && i.flow !== 'paid' && i.flow !== 'cancelled').length;
+
+    let pendentesParaVoce = 0;
+    let acoesConcluidas = 0;
+    let perfilLabel = 'Acompanhamento';
+
+    if (actingSector === 'controle') {
+      pendentesParaVoce = aguardandoControle;
+      acoesConcluidas = withFlow.filter((i) => String(i.approved_by_sector || '').toUpperCase() === 'CONTROLE').length;
+      perfilLabel = 'Controle';
+    } else if (actingSector === 'financeiro') {
+      pendentesParaVoce = aprovadasControle;
+      acoesConcluidas = withFlow.filter((i) => String(i.paid_by_sector || '').toUpperCase() === 'FINANCEIRO').length;
+      perfilLabel = 'Financeiro';
+    } else {
+      pendentesParaVoce = withFlow.filter((i) => i.flow !== 'paid' && i.flow !== 'cancelled').length;
+      acoesConcluidas = withFlow.filter((i) => String(i.cancelled_by_sector || '').toUpperCase() === 'REQUESTER').length;
+      perfilLabel = userRole === 'manager' ? 'Gestor' : 'Solicitante';
+    }
+
+    return {
+      perfilLabel,
+      pendentesParaVoce,
+      acoesConcluidas,
+      aguardandoControle,
+      aprovadasControle,
+      pagas,
+      canceladas,
+      atrasadas,
+    };
+  }, [scopedInvoices, actingSector, userRole]);
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
@@ -407,6 +452,29 @@ export const Invoices: React.FC = () => {
             <Plus className="w-4 h-4" />
             <span className="font-bold text-sm">Importar Nota</span>
           </button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="bg-white border border-slate-100 rounded-2xl p-4 shadow-sm">
+          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Pendentes para {metrics.perfilLabel}</p>
+          <p className="text-2xl font-extrabold text-slate-900 mt-1">{metrics.pendentesParaVoce}</p>
+        </div>
+        <div className="bg-white border border-slate-100 rounded-2xl p-4 shadow-sm">
+          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Ações concluídas ({metrics.perfilLabel})</p>
+          <p className="text-2xl font-extrabold text-slate-900 mt-1">{metrics.acoesConcluidas}</p>
+        </div>
+        <div className="bg-white border border-slate-100 rounded-2xl p-4 shadow-sm">
+          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Aguardando Controle / Aprovadas</p>
+          <p className="text-2xl font-extrabold text-slate-900 mt-1">
+            {metrics.aguardandoControle} <span className="text-slate-300">/</span> {metrics.aprovadasControle}
+          </p>
+        </div>
+        <div className="bg-white border border-slate-100 rounded-2xl p-4 shadow-sm">
+          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Pagas / Canceladas / Atrasadas</p>
+          <p className="text-2xl font-extrabold text-slate-900 mt-1">
+            {metrics.pagas} <span className="text-slate-300">/</span> {metrics.canceladas} <span className="text-slate-300">/</span> {metrics.atrasadas}
+          </p>
         </div>
       </div>
 
