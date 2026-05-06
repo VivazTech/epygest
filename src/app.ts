@@ -205,12 +205,12 @@ export function createApp() {
     if (error) return res.status(500).json({ error: error.message });
 
     const userIds = (data ?? []).map((user: any) => user.id);
-    let sectorLinksByUserId = new Map<number, Array<{ id: number; name: string }>>();
+    let sectorLinksByUserId = new Map<string, Array<{ id: number; name: string }>>();
 
     if (userIds.length) {
       const { data: linksData, error: linksError } = await supabase
         .from("user_sectors")
-        .select("user_id, sector_id, sectors(id, name)")
+        .select("user_id, sector_id")
         .in("user_id", userIds);
 
       if (linksError) {
@@ -221,14 +221,36 @@ export function createApp() {
         });
       }
 
+      const sectorIds = Array.from(
+        new Set(
+          (linksData ?? [])
+            .map((link: any) => Number(link.sector_id))
+            .filter((sectorId) => Number.isFinite(sectorId))
+        )
+      );
+      const { data: linkedSectors, error: sectorsError } = sectorIds.length
+        ? await supabase.from("sectors").select("id, name").in("id", sectorIds)
+        : { data: [], error: null as any };
+
+      if (sectorsError) {
+        return res.status(500).json({
+          error: "Não foi possível carregar nomes dos setores vinculados dos usuários.",
+          detail: sectorsError.message,
+        });
+      }
+
+      const sectorNameById = new Map<number, string>(
+        (linkedSectors ?? []).map((sector: any) => [Number(sector.id), String(sector.name || "")])
+      );
+
       for (const link of linksData ?? []) {
-        const userId = Number((link as any).user_id);
-        const sector = (link as any).sectors;
-        if (!Number.isFinite(userId) || !sector?.id) continue;
+        const userId = String((link as any).user_id ?? "");
+        const sectorId = Number((link as any).sector_id);
+        if (!userId || !Number.isFinite(sectorId)) continue;
         if (!sectorLinksByUserId.has(userId)) sectorLinksByUserId.set(userId, []);
         sectorLinksByUserId.get(userId)!.push({
-          id: Number(sector.id),
-          name: String(sector.name || ""),
+          id: sectorId,
+          name: sectorNameById.get(sectorId) || "",
         });
       }
     }
@@ -238,12 +260,12 @@ export function createApp() {
         ...user,
         sector_name: user.sectors?.name ?? null,
         sector_ids:
-          (sectorLinksByUserId.get(Number(user.id)) ?? []).map((s) => s.id).length > 0
-            ? (sectorLinksByUserId.get(Number(user.id)) ?? []).map((s) => s.id)
+          (sectorLinksByUserId.get(String(user.id)) ?? []).map((s) => s.id).length > 0
+            ? (sectorLinksByUserId.get(String(user.id)) ?? []).map((s) => s.id)
             : (user.sector_id ? [Number(user.sector_id)] : []),
         sector_names:
-          (sectorLinksByUserId.get(Number(user.id)) ?? []).map((s) => s.name).length > 0
-            ? (sectorLinksByUserId.get(Number(user.id)) ?? []).map((s) => s.name)
+          (sectorLinksByUserId.get(String(user.id)) ?? []).map((s) => s.name).length > 0
+            ? (sectorLinksByUserId.get(String(user.id)) ?? []).map((s) => s.name)
             : (user.sectors?.name ? [String(user.sectors.name)] : []),
         sectors: undefined,
       }))
