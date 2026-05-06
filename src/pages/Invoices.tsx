@@ -384,8 +384,11 @@ export const Invoices: React.FC = () => {
     ? sectors.filter((s) => allowedSectorIds.includes(String(s.id)))
     : sectors;
   const visibleInvoices = invoices;
-  const canSeeSectorValues = (sectorId?: number | string) =>
-    !isRequester || String(sectorId ?? '') === requesterSectorId;
+  const canSeeSectorValues = (sectorId?: number | string) => {
+    const currentSectorId = String(sectorId ?? '');
+    if (isManager) return allowedSectorIds.includes(currentSectorId);
+    return !isRequester || currentSectorId === requesterSectorId;
+  };
   const getSectorBudget = (sector: any) => Number(sector?.budget_month ?? sector?.budget_limit ?? 0);
 
   return (
