@@ -340,6 +340,37 @@ export function createApp() {
   app.use("/uploads", express.static(uploadDir));
 
   // ====================================================
+  // PLANILHAS (Extracao_Planilhas)
+  // ====================================================
+  const planilhasDir = path.resolve(process.cwd(), "Extracao_Planilhas");
+  const planilhaFilePattern = /^aba_\d{3}_[A-Za-z0-9_]+\.json$/;
+
+  app.get("/api/planilhas", (_req, res) => {
+    try {
+      const files = fs
+        .readdirSync(planilhasDir)
+        .filter((f) => planilhaFilePattern.test(f))
+        .sort();
+      res.json(files);
+    } catch (err: any) {
+      res.status(500).json({ error: "Não foi possível listar as planilhas", message: err?.message });
+    }
+  });
+
+  app.get("/api/planilhas/:arquivo", (req, res) => {
+    const { arquivo } = req.params;
+    if (!planilhaFilePattern.test(arquivo)) {
+      return res.status(400).json({ error: "Arquivo inválido" });
+    }
+    const filePath = path.join(planilhasDir, arquivo);
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ error: "Planilha não encontrada" });
+    }
+    res.setHeader("Content-Type", "application/json; charset=utf-8");
+    fs.createReadStream(filePath).pipe(res);
+  });
+
+  // ====================================================
   // AUTH
   // ====================================================
   app.post("/api/auth/login", async (req, res) => {

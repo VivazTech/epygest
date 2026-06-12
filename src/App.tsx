@@ -15,11 +15,14 @@ import { SintasePage as Sintase } from './pages/Sintase';
 import { PrevRealPage as PrevReal } from './pages/PrevReal';
 import { ConfiguracoesPage as Configuracoes } from './pages/Configuracoes';
 import { UsuariosPage as Usuarios } from './pages/Usuarios';
+import { PlanilhasPage } from './pages/Planilhas';
+import { PLANILHAS } from './lib/planilhas';
 
 export default function App() {
   const isSupabaseTestRoute = window.location.pathname === '/teste-supabase';
   const [user, setUser] = useState<any | null>(null);
   const [activeTab, setActiveTab] = useState('dashboard');
+  const [planilhaCell, setPlanilhaCell] = useState<string | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [loginForm, setLoginForm] = useState({ email: '', password: '' });
   const [loginLoading, setLoginLoading] = useState(false);
@@ -82,7 +85,26 @@ export default function App() {
     return `https://wa.me/5545991070844?text=${encodeURIComponent(message)}`;
   };
 
+  const handleSetActiveTab = (tab: string) => {
+    setPlanilhaCell(null);
+    setActiveTab(tab);
+  };
+
   const renderContent = () => {
+    if (activeTab.startsWith('planilha-')) {
+      const indice = Number(activeTab.slice('planilha-'.length));
+      return (
+        <PlanilhasPage
+          indice={indice}
+          targetCell={planilhaCell}
+          onNavigate={(ind, cell) => {
+            setPlanilhaCell(cell ?? null);
+            setActiveTab(`planilha-${ind}`);
+          }}
+        />
+      );
+    }
+
     switch (activeTab) {
       case 'dashboard': return <Dashboard />;
       case 'analise': return <AnaliseFinanceira />;
@@ -181,10 +203,10 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-[#F8FAFC] font-sans text-slate-900">
-      <Sidebar 
-        activeTab={activeTab} 
-        setActiveTab={setActiveTab} 
-        user={user} 
+      <Sidebar
+        activeTab={activeTab}
+        setActiveTab={handleSetActiveTab}
+        user={user}
         onLogout={handleLogout} 
         collapsed={sidebarCollapsed}
         onToggleCollapsed={() => setSidebarCollapsed((prev) => !prev)}
@@ -195,7 +217,11 @@ export default function App() {
           <div className="flex items-center gap-2">
             <span className="text-slate-400 text-sm font-medium">EpyGest</span>
             <span className="text-slate-300">/</span>
-            <span className="text-slate-900 text-sm font-bold capitalize">{activeTab.replace('-', ' ')}</span>
+            <span className="text-slate-900 text-sm font-bold capitalize">
+              {activeTab.startsWith('planilha-')
+                ? `Planilhas / ${PLANILHAS.find((p) => `planilha-${p.indice}` === activeTab)?.nome ?? ''}`
+                : activeTab.replace('-', ' ')}
+            </span>
           </div>
           
           <div className="flex items-center gap-4">
@@ -209,7 +235,7 @@ export default function App() {
           </div>
         </header>
 
-        <div className={activeTab === 'notas' || activeTab === 'cadastros' || activeTab === 'sintase' || activeTab === 'prev-real' || activeTab === 'dre' ? "p-8 w-full max-w-none" : "p-8 max-w-7xl mx-auto"}>
+        <div className={activeTab === 'notas' || activeTab === 'cadastros' || activeTab === 'sintase' || activeTab === 'prev-real' || activeTab === 'dre' || activeTab.startsWith('planilha-') ? "p-8 w-full max-w-none" : "p-8 max-w-7xl mx-auto"}>
           {renderContent()}
         </div>
       </main>

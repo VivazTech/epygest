@@ -17,9 +17,11 @@ import {
   Rows4,
   PanelLeftClose,
   PanelLeftOpen,
-  ChevronDown
+  ChevronDown,
+  Table2
 } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { PLANILHAS } from '../lib/planilhas';
 
 interface SidebarProps {
   activeTab: string;
@@ -54,16 +56,28 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onToggleCollapsed
 }) => {
   const constructionGroupIds = ['dashboard', 'analise', 'planejamento'];
+  const adminGroupIds = ['usuarios', 'configuracoes'];
+  const planilhasRoles = ['admin', 'finance', 'controle', 'manager'];
   const filteredMenu = menuItems.filter(item => item.roles.includes(user?.role));
   const constructionMenu = filteredMenu.filter((item) => constructionGroupIds.includes(item.id));
-  const primaryMenu = filteredMenu.filter((item) => !constructionGroupIds.includes(item.id));
+  const primaryMenu = filteredMenu.filter(
+    (item) => !constructionGroupIds.includes(item.id) && !adminGroupIds.includes(item.id)
+  );
+  const adminMenu = filteredMenu.filter((item) => adminGroupIds.includes(item.id));
+  const showPlanilhas = planilhasRoles.includes(user?.role);
   const [constructionExpanded, setConstructionExpanded] = React.useState(
     constructionMenu.some((item) => item.id === activeTab)
+  );
+  const [planilhasExpanded, setPlanilhasExpanded] = React.useState(
+    activeTab.startsWith('planilha-')
   );
 
   React.useEffect(() => {
     if (constructionMenu.some((item) => item.id === activeTab)) {
       setConstructionExpanded(true);
+    }
+    if (activeTab.startsWith('planilha-')) {
+      setPlanilhasExpanded(true);
     }
   }, [activeTab, constructionMenu]);
 
@@ -131,8 +145,76 @@ export const Sidebar: React.FC<SidebarProps> = ({
             onClick={() => setActiveTab(item.id)}
             className={cn(
               "w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group",
-              activeTab === item.id 
-                ? "bg-emerald-500 text-white shadow-lg shadow-emerald-900/20" 
+              activeTab === item.id
+                ? "bg-emerald-500 text-white shadow-lg shadow-emerald-900/20"
+                : "text-white/80 hover:bg-white/5 hover:text-white"
+            )}
+          >
+            <item.icon className={cn(
+              "w-5 h-5 min-w-5 min-h-5 shrink-0 transition-transform duration-200",
+              activeTab === item.id ? "scale-110" : "group-hover:scale-110"
+            )} />
+            <span className={cn("font-medium text-sm", collapsed && "hidden")}>{item.label}</span>
+          </button>
+        ))}
+
+        {showPlanilhas && (
+          <div className="space-y-1">
+            <button
+              onClick={() => setPlanilhasExpanded((prev) => !prev)}
+              className={cn(
+                "w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group",
+                activeTab.startsWith('planilha-')
+                  ? "text-white bg-white/10"
+                  : "text-white/80 hover:bg-white/5 hover:text-white"
+              )}
+            >
+              <FileSpreadsheet className="w-5 h-5 min-w-5 min-h-5 shrink-0 transition-transform duration-200 group-hover:scale-110" />
+              <span className={cn("font-medium text-sm flex-1 text-left", collapsed && "hidden")}>
+                Planilhas
+              </span>
+              <ChevronDown
+                className={cn(
+                  "w-4 h-4 transition-transform duration-200",
+                  planilhasExpanded && "rotate-180",
+                  collapsed && "hidden"
+                )}
+              />
+            </button>
+
+            {!collapsed && planilhasExpanded && PLANILHAS.map((planilha) => {
+              const tabId = `planilha-${planilha.indice}`;
+              return (
+                <button
+                  key={tabId}
+                  onClick={() => setActiveTab(tabId)}
+                  className={cn(
+                    "w-full flex items-center gap-3 pl-11 pr-4 py-2 rounded-xl transition-all duration-200 group",
+                    activeTab === tabId
+                      ? "bg-emerald-500 text-white shadow-lg shadow-emerald-900/20"
+                      : "text-white/70 hover:bg-white/5 hover:text-white"
+                  )}
+                  title={planilha.nome}
+                >
+                  <Table2 className={cn(
+                    "w-4 h-4 min-w-4 min-h-4 shrink-0 transition-transform duration-200",
+                    activeTab === tabId ? "scale-110" : "group-hover:scale-110"
+                  )} />
+                  <span className="font-medium text-xs truncate text-left">{planilha.nome}</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        {adminMenu.map((item) => (
+          <button
+            key={item.id}
+            onClick={() => setActiveTab(item.id)}
+            className={cn(
+              "w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group",
+              activeTab === item.id
+                ? "bg-emerald-500 text-white shadow-lg shadow-emerald-900/20"
                 : "text-white/80 hover:bg-white/5 hover:text-white"
             )}
           >
