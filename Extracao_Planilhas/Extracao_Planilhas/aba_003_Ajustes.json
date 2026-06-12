@@ -1,0 +1,4083 @@
+{
+  "id": 379936102,
+  "nome": "Ajustes",
+  "indice": 3,
+  "totalLinhas": 106,
+  "totalColunas": 14,
+  "cabecalhos": [
+    {
+      "coluna": "C",
+      "indice": 3,
+      "texto": "Real1"
+    },
+    {
+      "coluna": "D",
+      "indice": 4,
+      "texto": "Real2"
+    },
+    {
+      "coluna": "E",
+      "indice": 5,
+      "texto": "Real3"
+    },
+    {
+      "coluna": "F",
+      "indice": 6,
+      "texto": "Real4"
+    },
+    {
+      "coluna": "G",
+      "indice": 7,
+      "texto": "Real5"
+    },
+    {
+      "coluna": "H",
+      "indice": 8,
+      "texto": "Real6"
+    },
+    {
+      "coluna": "I",
+      "indice": 9,
+      "texto": "Real7"
+    },
+    {
+      "coluna": "J",
+      "indice": 10,
+      "texto": "Real8"
+    },
+    {
+      "coluna": "K",
+      "indice": 11,
+      "texto": "Real9"
+    },
+    {
+      "coluna": "L",
+      "indice": 12,
+      "texto": "Real10"
+    },
+    {
+      "coluna": "M",
+      "indice": 13,
+      "texto": "Real11"
+    },
+    {
+      "coluna": "N",
+      "indice": 14,
+      "texto": "Real12"
+    }
+  ],
+  "celulas": [
+    {
+      "celula": "C1",
+      "linha": 1,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "formula": "=\"Real\"&MONTH(C2)",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "C2"
+          ]
+        }
+      ],
+      "valorCalculado": "Real1",
+      "valorReal": "Real1"
+    },
+    {
+      "celula": "D1",
+      "linha": 1,
+      "coluna": 4,
+      "colunaLetra": "D",
+      "formula": "=\"Real\"&MONTH(D2)",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "D2"
+          ]
+        }
+      ],
+      "valorCalculado": "Real2",
+      "valorReal": "Real2"
+    },
+    {
+      "celula": "E1",
+      "linha": 1,
+      "coluna": 5,
+      "colunaLetra": "E",
+      "formula": "=\"Real\"&MONTH(E2)",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "E2"
+          ]
+        }
+      ],
+      "valorCalculado": "Real3",
+      "valorReal": "Real3"
+    },
+    {
+      "celula": "F1",
+      "linha": 1,
+      "coluna": 6,
+      "colunaLetra": "F",
+      "formula": "=\"Real\"&MONTH(F2)",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "F2"
+          ]
+        }
+      ],
+      "valorCalculado": "Real4",
+      "valorReal": "Real4"
+    },
+    {
+      "celula": "G1",
+      "linha": 1,
+      "coluna": 7,
+      "colunaLetra": "G",
+      "formula": "=\"Real\"&MONTH(G2)",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "G2"
+          ]
+        }
+      ],
+      "valorCalculado": "Real5",
+      "valorReal": "Real5"
+    },
+    {
+      "celula": "H1",
+      "linha": 1,
+      "coluna": 8,
+      "colunaLetra": "H",
+      "formula": "=\"Real\"&MONTH(H2)",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "H2"
+          ]
+        }
+      ],
+      "valorCalculado": "Real6",
+      "valorReal": "Real6"
+    },
+    {
+      "celula": "I1",
+      "linha": 1,
+      "coluna": 9,
+      "colunaLetra": "I",
+      "formula": "=\"Real\"&MONTH(I2)",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "I2"
+          ]
+        }
+      ],
+      "valorCalculado": "Real7",
+      "valorReal": "Real7"
+    },
+    {
+      "celula": "J1",
+      "linha": 1,
+      "coluna": 10,
+      "colunaLetra": "J",
+      "formula": "=\"Real\"&MONTH(J2)",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "J2"
+          ]
+        }
+      ],
+      "valorCalculado": "Real8",
+      "valorReal": "Real8"
+    },
+    {
+      "celula": "K1",
+      "linha": 1,
+      "coluna": 11,
+      "colunaLetra": "K",
+      "formula": "=\"Real\"&MONTH(K2)",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "K2"
+          ]
+        }
+      ],
+      "valorCalculado": "Real9",
+      "valorReal": "Real9"
+    },
+    {
+      "celula": "L1",
+      "linha": 1,
+      "coluna": 12,
+      "colunaLetra": "L",
+      "formula": "=\"Real\"&MONTH(L2)",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "L2"
+          ]
+        }
+      ],
+      "valorCalculado": "Real10",
+      "valorReal": "Real10"
+    },
+    {
+      "celula": "M1",
+      "linha": 1,
+      "coluna": 13,
+      "colunaLetra": "M",
+      "formula": "=\"Real\"&MONTH(M2)",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "M2"
+          ]
+        }
+      ],
+      "valorCalculado": "Real11",
+      "valorReal": "Real11"
+    },
+    {
+      "celula": "N1",
+      "linha": 1,
+      "coluna": 14,
+      "colunaLetra": "N",
+      "formula": "=\"Real\"&MONTH(N2)",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "N2"
+          ]
+        }
+      ],
+      "valorCalculado": "Real12",
+      "valorReal": "Real12"
+    },
+    {
+      "celula": "B2",
+      "linha": 2,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "Contas",
+      "valorReal": "Contas",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "C2",
+      "linha": 2,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "formula": "='Prev x Real 2026'!G5",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "aba_externa",
+          "abaOrigem": "Ajustes",
+          "abaDestino": "Prev x Real 2026",
+          "celula": "G5",
+          "referencia": "Prev x Real 2026!G5"
+        }
+      ],
+      "valorCalculado": "31/1/2026",
+      "valorReal": "2026-01-31T03:00:00.000Z"
+    },
+    {
+      "celula": "D2",
+      "linha": 2,
+      "coluna": 4,
+      "colunaLetra": "D",
+      "formula": "=EOMONTH(C2;1)",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "C2"
+          ]
+        }
+      ],
+      "valorCalculado": "28/2/2026",
+      "valorReal": "2026-02-28T03:00:00.000Z"
+    },
+    {
+      "celula": "E2",
+      "linha": 2,
+      "coluna": 5,
+      "colunaLetra": "E",
+      "formula": "=EOMONTH(D2;1)",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "D2"
+          ]
+        }
+      ],
+      "valorCalculado": "31/3/2026",
+      "valorReal": "2026-03-31T03:00:00.000Z"
+    },
+    {
+      "celula": "F2",
+      "linha": 2,
+      "coluna": 6,
+      "colunaLetra": "F",
+      "formula": "=EOMONTH(E2;1)",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "E2"
+          ]
+        }
+      ],
+      "valorCalculado": "30/4/2026",
+      "valorReal": "2026-04-30T03:00:00.000Z"
+    },
+    {
+      "celula": "G2",
+      "linha": 2,
+      "coluna": 7,
+      "colunaLetra": "G",
+      "formula": "=EOMONTH(F2;1)",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "F2"
+          ]
+        }
+      ],
+      "valorCalculado": "31/5/2026",
+      "valorReal": "2026-05-31T03:00:00.000Z"
+    },
+    {
+      "celula": "H2",
+      "linha": 2,
+      "coluna": 8,
+      "colunaLetra": "H",
+      "formula": "=EOMONTH(G2;1)",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "G2"
+          ]
+        }
+      ],
+      "valorCalculado": "30/6/2026",
+      "valorReal": "2026-06-30T03:00:00.000Z"
+    },
+    {
+      "celula": "I2",
+      "linha": 2,
+      "coluna": 9,
+      "colunaLetra": "I",
+      "formula": "=EOMONTH(H2;1)",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "H2"
+          ]
+        }
+      ],
+      "valorCalculado": "31/7/2026",
+      "valorReal": "2026-07-31T03:00:00.000Z"
+    },
+    {
+      "celula": "J2",
+      "linha": 2,
+      "coluna": 10,
+      "colunaLetra": "J",
+      "formula": "=EOMONTH(I2;1)",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "I2"
+          ]
+        }
+      ],
+      "valorCalculado": "31/8/2026",
+      "valorReal": "2026-08-31T03:00:00.000Z"
+    },
+    {
+      "celula": "K2",
+      "linha": 2,
+      "coluna": 11,
+      "colunaLetra": "K",
+      "formula": "=EOMONTH(J2;1)",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "J2"
+          ]
+        }
+      ],
+      "valorCalculado": "30/9/2026",
+      "valorReal": "2026-09-30T03:00:00.000Z"
+    },
+    {
+      "celula": "L2",
+      "linha": 2,
+      "coluna": 12,
+      "colunaLetra": "L",
+      "formula": "=EOMONTH(K2;1)",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "K2"
+          ]
+        }
+      ],
+      "valorCalculado": "31/10/2026",
+      "valorReal": "2026-10-31T03:00:00.000Z"
+    },
+    {
+      "celula": "M2",
+      "linha": 2,
+      "coluna": 13,
+      "colunaLetra": "M",
+      "formula": "=EOMONTH(L2;1)",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "L2"
+          ]
+        }
+      ],
+      "valorCalculado": "30/11/2026",
+      "valorReal": "2026-11-30T03:00:00.000Z"
+    },
+    {
+      "celula": "N2",
+      "linha": 2,
+      "coluna": 14,
+      "colunaLetra": "N",
+      "formula": "=EOMONTH(M2;1)",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "M2"
+          ]
+        }
+      ],
+      "valorCalculado": "31/12/2026",
+      "valorReal": "2026-12-31T03:00:00.000Z"
+    },
+    {
+      "celula": "B3",
+      "linha": 3,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "Diárias",
+      "valorReal": "Diárias",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "C3",
+      "linha": 3,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "valor": "(85.242,00)",
+      "valorReal": -85242,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "D3",
+      "linha": 3,
+      "coluna": 4,
+      "colunaLetra": "D",
+      "valor": "(87.169,00)",
+      "valorReal": -87169,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "E3",
+      "linha": 3,
+      "coluna": 5,
+      "colunaLetra": "E",
+      "valor": "(95.063,00)",
+      "valorReal": -95063,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "B4",
+      "linha": 4,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "JANTAR (PENSAO)",
+      "valorReal": "JANTAR (PENSAO)",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "C4",
+      "linha": 4,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "formula": "=C3*-1",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "C3"
+          ]
+        }
+      ],
+      "valorCalculado": "85.242,00",
+      "valorReal": 85242
+    },
+    {
+      "celula": "D4",
+      "linha": 4,
+      "coluna": 4,
+      "colunaLetra": "D",
+      "formula": "=D3*-1",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "D3"
+          ]
+        }
+      ],
+      "valorCalculado": "87.169,00",
+      "valorReal": 87169
+    },
+    {
+      "celula": "E4",
+      "linha": 4,
+      "coluna": 5,
+      "colunaLetra": "E",
+      "formula": "=E3*-1",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "E3"
+          ]
+        }
+      ],
+      "valorCalculado": "95.063,00",
+      "valorReal": 95063
+    },
+    {
+      "celula": "F4",
+      "linha": 4,
+      "coluna": 6,
+      "colunaLetra": "F",
+      "formula": "=F3*-1",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "F3"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "G4",
+      "linha": 4,
+      "coluna": 7,
+      "colunaLetra": "G",
+      "formula": "=G3*-1",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "G3"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "H4",
+      "linha": 4,
+      "coluna": 8,
+      "colunaLetra": "H",
+      "formula": "=H3*-1",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "H3"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "I4",
+      "linha": 4,
+      "coluna": 9,
+      "colunaLetra": "I",
+      "formula": "=I3*-1",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "I3"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "J4",
+      "linha": 4,
+      "coluna": 10,
+      "colunaLetra": "J",
+      "formula": "=J3*-1",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "J3"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "K4",
+      "linha": 4,
+      "coluna": 11,
+      "colunaLetra": "K",
+      "formula": "=K3*-1",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "K3"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "L4",
+      "linha": 4,
+      "coluna": 12,
+      "colunaLetra": "L",
+      "formula": "=L3*-1",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "L3"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "M4",
+      "linha": 4,
+      "coluna": 13,
+      "colunaLetra": "M",
+      "formula": "=M3*-1",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "M3"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "N4",
+      "linha": 4,
+      "coluna": 14,
+      "colunaLetra": "N",
+      "formula": "=N3*-1",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "N3"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "A5",
+      "linha": 5,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B5=\"\";\"\";MATCH(B5;B$3:B3;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B5",
+            "B3"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "B5",
+      "linha": 5,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "CONVÊNIO ODONTOLÓGICO (299)",
+      "valorReal": "CONVÊNIO ODONTOLÓGICO (299)",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "D5",
+      "linha": 5,
+      "coluna": 4,
+      "colunaLetra": "D",
+      "valor": "3.500,00",
+      "valorReal": 3500,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A6",
+      "linha": 6,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B6=\"\";\"\";MATCH(B6;B$3:B5;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B6",
+            "B5"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "B6",
+      "linha": 6,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "Folha de pagamento",
+      "valorReal": "Folha de pagamento",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "A7",
+      "linha": 7,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B7=\"\";\"\";MATCH(B7;B$3:B6;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B7",
+            "B6"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "B7",
+      "linha": 7,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "PRO-LABORE (283)",
+      "valorReal": "PRO-LABORE (283)",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "C7",
+      "linha": 7,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "valor": "28.000,00",
+      "valorReal": 28000,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "D7",
+      "linha": 7,
+      "coluna": 4,
+      "colunaLetra": "D",
+      "valor": "30.957,60",
+      "valorReal": 30957.6,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "E7",
+      "linha": 7,
+      "coluna": 5,
+      "colunaLetra": "E",
+      "valor": "17.857,60",
+      "valorReal": 17857.6,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A8",
+      "linha": 8,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B8=\"\";\"\";MATCH(B8;B$3:B7;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B8",
+            "B7"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "B8",
+      "linha": 8,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "ENXOVAL DE APTOS (CAMA E BANHO) (506)",
+      "valorReal": "ENXOVAL DE APTOS (CAMA E BANHO) (506)",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "D8",
+      "linha": 8,
+      "coluna": 4,
+      "colunaLetra": "D",
+      "valor": "1.360,00",
+      "valorReal": 1360,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A9",
+      "linha": 9,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B9=\"\";\"\";MATCH(B9;B$3:B8;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B9",
+            "B8"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "B9",
+      "linha": 9,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "ENXOVAL DE EVENTOS",
+      "valorReal": "ENXOVAL DE EVENTOS",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "A10",
+      "linha": 10,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B10=\"\";\"\";MATCH(B10;B$3:B9;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B10",
+            "B9"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "B10",
+      "linha": 10,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "CAFE DA MANHA",
+      "valorReal": "CAFE DA MANHA",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "A11",
+      "linha": 11,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B11=\"\";\"\";MATCH(B11;B$3:B10;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B11",
+            "B10"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "B11",
+      "linha": 11,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "SERVIÇO DE RECREAÇÃO (390)",
+      "valorReal": "SERVIÇO DE RECREAÇÃO (390)",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "D11",
+      "linha": 11,
+      "coluna": 4,
+      "colunaLetra": "D",
+      "formula": "=19780-5414",
+      "tipoFormula": "outro",
+      "dependencias": [],
+      "valorCalculado": "14.366,00",
+      "valorReal": 14366
+    },
+    {
+      "celula": "E11",
+      "linha": 11,
+      "coluna": 5,
+      "colunaLetra": "E",
+      "valor": "(1.120,00)",
+      "valorReal": -1120,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "B12",
+      "linha": 12,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "CURSOS/TREINAMENTOS/CAPACITACOES (423)",
+      "valorReal": "CURSOS/TREINAMENTOS/CAPACITACOES (423)",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "D12",
+      "linha": 12,
+      "coluna": 4,
+      "colunaLetra": "D",
+      "valor": "9.000,00",
+      "valorReal": 9000,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "B13",
+      "linha": 13,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "COMISSÃO GERÊNCIA (597)",
+      "valorReal": "COMISSÃO GERÊNCIA (597)",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "C13",
+      "linha": 13,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "valor": "31.414,30",
+      "valorReal": 31414.3,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "D13",
+      "linha": 13,
+      "coluna": 4,
+      "colunaLetra": "D",
+      "formula": "=25985,84+698",
+      "tipoFormula": "outro",
+      "dependencias": [],
+      "valorCalculado": "26.683,84",
+      "valorReal": 26683.84
+    },
+    {
+      "celula": "A14",
+      "linha": 14,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B14=\"\";\"\";MATCH(B14;B$3:B13;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B14",
+            "B13"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "B14",
+      "linha": 14,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "SEGURO VIDA EM GRUPO (350)",
+      "valorReal": "SEGURO VIDA EM GRUPO (350)",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "A15",
+      "linha": 15,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B15=\"\";\"\";MATCH(B15;B$3:B14;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B15",
+            "B14"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "B15",
+      "linha": 15,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "CONSULTORIAS MENSAIS (371)",
+      "valorReal": "CONSULTORIAS MENSAIS (371)",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "A16",
+      "linha": 16,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B16=\"\";\"\";MATCH(B16;B$3:B15;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B16",
+            "B15"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "B16",
+      "linha": 16,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "PATROCINIO/ ANUNCIO (358)",
+      "valorReal": "PATROCINIO/ ANUNCIO (358)",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "C16",
+      "linha": 16,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "formula": "=8809,11+4884,9",
+      "tipoFormula": "outro",
+      "dependencias": [],
+      "valorCalculado": "13.694,01",
+      "valorReal": 13694.01
+    },
+    {
+      "celula": "A17",
+      "linha": 17,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B17=\"\";\"\";MATCH(B17;B$3:B16;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B17",
+            "B16"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "B17",
+      "linha": 17,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "COMISSÃO FATURAMENTOS (362)",
+      "valorReal": "COMISSÃO FATURAMENTOS (362)",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "C17",
+      "linha": 17,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "formula": "=113779,61+3994",
+      "tipoFormula": "outro",
+      "dependencias": [],
+      "valorCalculado": "117.773,61",
+      "valorReal": 117773.61
+    },
+    {
+      "celula": "D17",
+      "linha": 17,
+      "coluna": 4,
+      "colunaLetra": "D",
+      "valor": "70.000,00",
+      "valorReal": 70000,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "E17",
+      "linha": 17,
+      "coluna": 5,
+      "colunaLetra": "E",
+      "valor": "39.455,43",
+      "valorReal": 39455.43,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A18",
+      "linha": 18,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B18=\"\";\"\";MATCH(B18;B$3:B17;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B18",
+            "B17"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "B18",
+      "linha": 18,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "DESPESA COMERCIAL MENSAL E MARKETING (352)",
+      "valorReal": "DESPESA COMERCIAL MENSAL E MARKETING (352)",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "C18",
+      "linha": 18,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "formula": "=11113,64+10000",
+      "tipoFormula": "outro",
+      "dependencias": [],
+      "valorCalculado": "21.113,64",
+      "valorReal": 21113.64
+    },
+    {
+      "celula": "D18",
+      "linha": 18,
+      "coluna": 4,
+      "colunaLetra": "D",
+      "valor": "30.000,00",
+      "valorReal": 30000,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A19",
+      "linha": 19,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B19=\"\";\"\";MATCH(B19;B$3:B18;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B19",
+            "B18"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "B19",
+      "linha": 19,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "TELEFONE (366)",
+      "valorReal": "TELEFONE (366)",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "D19",
+      "linha": 19,
+      "coluna": 4,
+      "colunaLetra": "D",
+      "valor": "2.345,00",
+      "valorReal": 2345,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A20",
+      "linha": 20,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B20=\"\";\"\";MATCH(B20;B$3:B19;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B20",
+            "B19"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "B20",
+      "linha": 20,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "TELEFONE CELULAR (369)",
+      "valorReal": "TELEFONE CELULAR (369)",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "C20",
+      "linha": 20,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "valor": "2.345,00",
+      "valorReal": 2345,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A21",
+      "linha": 21,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B21=\"\";\"\";MATCH(B21;B$3:B20;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B21",
+            "B20"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "B21",
+      "linha": 21,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "MANUTENÇÃO AR CONDICIONADO (381)",
+      "valorReal": "MANUTENÇÃO AR CONDICIONADO (381)",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "A22",
+      "linha": 22,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B22=\"\";\"\";MATCH(B22;B$3:B21;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B22",
+            "B21"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "B22",
+      "linha": 22,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "ALUGUEL IMPRESSORAS (384)",
+      "valorReal": "ALUGUEL IMPRESSORAS (384)",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "C22",
+      "linha": 22,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "valor": "2.950,00",
+      "valorReal": 2950,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "D22",
+      "linha": 22,
+      "coluna": 4,
+      "colunaLetra": "D",
+      "valor": "3.044,00",
+      "valorReal": 3044,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A23",
+      "linha": 23,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B23=\"\";\"\";MATCH(B23;B$3:B22;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B23",
+            "B22"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "B23",
+      "linha": 23,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "ACIFI ASSOC COMERCIAL (393)",
+      "valorReal": "ACIFI ASSOC COMERCIAL (393)",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "C23",
+      "linha": 23,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "valor": "400,00",
+      "valorReal": 400,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "D23",
+      "linha": 23,
+      "coluna": 4,
+      "colunaLetra": "D",
+      "valor": "450,00",
+      "valorReal": 450,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A24",
+      "linha": 24,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B24=\"\";\"\";MATCH(B24;B$3:B23;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B24",
+            "B23"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "B24",
+      "linha": 24,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "SERVIÇOS JARDINAGEM (394)",
+      "valorReal": "SERVIÇOS JARDINAGEM (394)",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "A25",
+      "linha": 25,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B25=\"\";\"\";MATCH(B25;B$3:B24;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B25",
+            "B24"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "B25",
+      "linha": 25,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "HONORÁRIOS ADVOCATICIOS (400)",
+      "valorReal": "HONORÁRIOS ADVOCATICIOS (400)",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "C25",
+      "linha": 25,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "valor": "4.250,00",
+      "valorReal": 4250,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "D25",
+      "linha": 25,
+      "coluna": 4,
+      "colunaLetra": "D",
+      "valor": "2.500,00",
+      "valorReal": 2500,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A26",
+      "linha": 26,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B26=\"\";\"\";MATCH(B26;B$3:B25;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B26",
+            "B25"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "B26",
+      "linha": 26,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "SERVIÇOS DE LIMPEZA GOVERNANÇA (663)",
+      "valorReal": "SERVIÇOS DE LIMPEZA GOVERNANÇA (663)",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "A27",
+      "linha": 27,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B27=\"\";\"\";MATCH(B27;B$3:B26;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B27",
+            "B26"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "B27",
+      "linha": 27,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "IPTU (323)",
+      "valorReal": "IPTU (323)",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "C27",
+      "linha": 27,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "valor": "16.000,00",
+      "valorReal": 16000,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "D27",
+      "linha": 27,
+      "coluna": 4,
+      "colunaLetra": "D",
+      "valor": "16.000,00",
+      "valorReal": 16000,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "E27",
+      "linha": 27,
+      "coluna": 5,
+      "colunaLetra": "E",
+      "valor": "16.000,00",
+      "valorReal": 16000,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A28",
+      "linha": 28,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B28=\"\";\"\";MATCH(B28;B$3:B27;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B28",
+            "B27"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "B28",
+      "linha": 28,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "SEGURO PREDIO (348)",
+      "valorReal": "SEGURO PREDIO (348)",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "C28",
+      "linha": 28,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "formula": "=3500",
+      "tipoFormula": "outro",
+      "dependencias": [],
+      "valorCalculado": "3.500,00",
+      "valorReal": 3500
+    },
+    {
+      "celula": "D28",
+      "linha": 28,
+      "coluna": 4,
+      "colunaLetra": "D",
+      "valor": "3.500,00",
+      "valorReal": 3500,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "E28",
+      "linha": 28,
+      "coluna": 5,
+      "colunaLetra": "E",
+      "valor": "3.500,00",
+      "valorReal": 3500,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A29",
+      "linha": 29,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B29=\"\";\"\";MATCH(B29;B$3:B28;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B29",
+            "B28"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "B29",
+      "linha": 29,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "Comissão taxa cartão de credito (154)",
+      "valorReal": "Comissão taxa cartão de credito (154)",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "A30",
+      "linha": 30,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B30=\"\";\"\";MATCH(B30;B$3:B29;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B30",
+            "B29"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "B30",
+      "linha": 30,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "SERVIÇO DE RECREAÇÃO MENSALIDADE (658)",
+      "valorReal": "SERVIÇO DE RECREAÇÃO MENSALIDADE (658)",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "D30",
+      "linha": 30,
+      "coluna": 4,
+      "colunaLetra": "D",
+      "valor": "5.414,00",
+      "valorReal": 5414,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A31",
+      "linha": 31,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B31=\"\";\"\";MATCH(B31;B$3:B30;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B31",
+            "B30"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "B31",
+      "linha": 31,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "REPASSE AQUAMANIA - PASSAPORTES E CONSUMO (422)",
+      "valorReal": "REPASSE AQUAMANIA - PASSAPORTES E CONSUMO (422)",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "C31",
+      "linha": 31,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "valor": "157.034,74",
+      "valorReal": 157034.74,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "D31",
+      "linha": 31,
+      "coluna": 4,
+      "colunaLetra": "D",
+      "valor": "142.325,73",
+      "valorReal": 142325.73,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A32",
+      "linha": 32,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B32=\"\";\"\";MATCH(B32;B$3:B31;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B32",
+            "B31"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "B32",
+      "linha": 32,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "ASSIDUIDADE E BOAS PRATICAS (630)",
+      "valorReal": "ASSIDUIDADE E BOAS PRATICAS (630)",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "C32",
+      "linha": 32,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "valor": "79.750,00",
+      "valorReal": 79750,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "D32",
+      "linha": 32,
+      "coluna": 4,
+      "colunaLetra": "D",
+      "valor": "37.923,18",
+      "valorReal": 37923.18,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "E32",
+      "linha": 32,
+      "coluna": 5,
+      "colunaLetra": "E",
+      "valor": "36.000,00",
+      "valorReal": 36000,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A33",
+      "linha": 33,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B33=\"\";\"\";MATCH(B33;B$3:B32;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B33",
+            "B32"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "B33",
+      "linha": 33,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "VIAGENS COMERCIAIS (354)",
+      "valorReal": "VIAGENS COMERCIAIS (354)",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "A34",
+      "linha": 34,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B34=\"\";\"\";MATCH(B34;B$3:B33;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B34",
+            "B33"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "B34",
+      "linha": 34,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "Comissões sobre Vendas (Reservas / Recepção",
+      "valorReal": "Comissões sobre Vendas (Reservas / Recepção",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "A35",
+      "linha": 35,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B35=\"\";\"\";MATCH(B35;B$3:B34;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B35",
+            "B34"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "B35",
+      "linha": 35,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "Prêmio de Produtividade",
+      "valorReal": "Prêmio de Produtividade",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "A36",
+      "linha": 36,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B36=\"\";\"\";MATCH(B36;B$3:B35;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B36",
+            "B35"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "B36",
+      "linha": 36,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "ENERGIA (367)",
+      "valorReal": "ENERGIA (367)",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "C36",
+      "linha": 36,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "valor": "63.328,29",
+      "valorReal": 63328.29,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "D36",
+      "linha": 36,
+      "coluna": 4,
+      "colunaLetra": "D",
+      "valor": "67.589,89",
+      "valorReal": 67589.89,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A37",
+      "linha": 37,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B37=\"\";\"\";MATCH(B37;B$3:B36;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B37",
+            "B36"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "B37",
+      "linha": 37,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "TAXA TURISMO (370)",
+      "valorReal": "TAXA TURISMO (370)",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "A38",
+      "linha": 38,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B38=\"\";\"\";MATCH(B38;B$3:B37;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B38",
+            "B37"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "B38",
+      "linha": 38,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "APRESENTAÇÃO MUSICAL RESTAURANTE/PISCINA (364)",
+      "valorReal": "APRESENTAÇÃO MUSICAL RESTAURANTE/PISCINA (364)",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "A39",
+      "linha": 39,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B39=\"\";\"\";MATCH(B39;B$3:B38;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B39",
+            "B38"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "B39",
+      "linha": 39,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "COMPLEMENTO FOLHA DIRETORIA (567)",
+      "valorReal": "COMPLEMENTO FOLHA DIRETORIA (567)",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "A40",
+      "linha": 40,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B40=\"\";\"\";MATCH(B40;B$3:B39;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B40",
+            "B39"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "B40",
+      "linha": 40,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "COMBUSTIVEL FOLHA",
+      "valorReal": "COMBUSTIVEL FOLHA",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "A41",
+      "linha": 41,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B41=\"\";\"\";MATCH(B41;B$3:B40;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B41",
+            "B40"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "B41",
+      "linha": 41,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "DESPESAS BANCO ITAU (443)",
+      "valorReal": "DESPESAS BANCO ITAU (443)",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "A42",
+      "linha": 42,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B42=\"\";\"\";MATCH(B42;B$3:B41;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B42",
+            "B41"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "B42",
+      "linha": 42,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "MANUTENÇÃO SERVIÇOS (416)",
+      "valorReal": "MANUTENÇÃO SERVIÇOS (416)",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "A43",
+      "linha": 43,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B43=\"\";\"\";MATCH(B43;B$3:B42;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B43",
+            "B42"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "B43",
+      "linha": 43,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "ECAD CENTRAL DE ARRECADAÇÃO (392)",
+      "valorReal": "ECAD CENTRAL DE ARRECADAÇÃO (392)",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "A44",
+      "linha": 44,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B44=\"\";\"\";MATCH(B44;B$3:B43;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B44",
+            "B43"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "B44",
+      "linha": 44,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "SERVICO ASSINATURA TV (391)",
+      "valorReal": "SERVICO ASSINATURA TV (391)",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "C44",
+      "linha": 44,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "valor": "200,00",
+      "valorReal": 200,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "D44",
+      "linha": 44,
+      "coluna": 4,
+      "colunaLetra": "D",
+      "valor": "630,00",
+      "valorReal": 630,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A45",
+      "linha": 45,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B45=\"\";\"\";MATCH(B45;B$3:B44;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B45",
+            "B44"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "B45",
+      "linha": 45,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "SERVIÇO INTERNET (383)",
+      "valorReal": "SERVIÇO INTERNET (383)",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "C45",
+      "linha": 45,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "formula": "=1200+265+869",
+      "tipoFormula": "outro",
+      "dependencias": [],
+      "valorCalculado": "2.334,00",
+      "valorReal": 2334
+    },
+    {
+      "celula": "D45",
+      "linha": 45,
+      "coluna": 4,
+      "colunaLetra": "D",
+      "valor": "5.152,99",
+      "valorReal": 5152.99,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A46",
+      "linha": 46,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B46=\"\";\"\";MATCH(B46;B$3:B45;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B46",
+            "B45"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "B46",
+      "linha": 46,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "ASSOC BRAS ABIH (380)",
+      "valorReal": "ASSOC BRAS ABIH (380)",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "A47",
+      "linha": 47,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B47=\"\";\"\";MATCH(B47;B$3:B46;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B47",
+            "B46"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "B47",
+      "linha": 47,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "SINDICATO HOTEIS E BARES (379)",
+      "valorReal": "SINDICATO HOTEIS E BARES (379)",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "C47",
+      "linha": 47,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "valor": "400,00",
+      "valorReal": 400,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "D47",
+      "linha": 47,
+      "coluna": 4,
+      "colunaLetra": "D",
+      "valor": "400,00",
+      "valorReal": 400,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A48",
+      "linha": 48,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B48=\"\";\"\";MATCH(B48;B$3:B47;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B48",
+            "B47"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "B48",
+      "linha": 48,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "CONTRATO MANUTENÇÃO COMPUTADOR (375)",
+      "valorReal": "CONTRATO MANUTENÇÃO COMPUTADOR (375)",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "A49",
+      "linha": 49,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B49=\"\";\"\";MATCH(B49;B$3:B48;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B49",
+            "B48"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "B49",
+      "linha": 49,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "SISTEMA DE GESTÃO (376)",
+      "valorReal": "SISTEMA DE GESTÃO (376)",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "C49",
+      "linha": 49,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "valor": "1.250,00",
+      "valorReal": 1250,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A50",
+      "linha": 50,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B50=\"\";\"\";MATCH(B50;B$3:B49;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B50",
+            "B49"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "B50",
+      "linha": 50,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "ANÁLISE POÇO/PISCINA/ETE (385)",
+      "valorReal": "ANÁLISE POÇO/PISCINA/ETE (385)",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "D50",
+      "linha": 50,
+      "coluna": 4,
+      "colunaLetra": "D",
+      "valor": "2.562,40",
+      "valorReal": 2562.4,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A51",
+      "linha": 51,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B51=\"\";\"\";MATCH(B51;B$3:B50;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B51",
+            "B50"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "B51",
+      "linha": 51,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "SERVIÇOS SEGURANÇA (386)",
+      "valorReal": "SERVIÇOS SEGURANÇA (386)",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "D51",
+      "linha": 51,
+      "coluna": 4,
+      "colunaLetra": "D",
+      "valor": "10.206,56",
+      "valorReal": 10206.56,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A52",
+      "linha": 52,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B52=\"\";\"\";MATCH(B52;B$3:B51;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B52",
+            "B51"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "B52",
+      "linha": 52,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "MANUTENÇAO LAVANDERIA (389)",
+      "valorReal": "MANUTENÇAO LAVANDERIA (389)",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "B53",
+      "linha": 53,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "SERVIÇO DE RECREAÇÃO MENSALIDADE (658)",
+      "valorReal": "SERVIÇO DE RECREAÇÃO MENSALIDADE (658)",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "A54",
+      "linha": 54,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B54=\"\";\"\";MATCH(B54;B$3:B53;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B54",
+            "B53"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "B54",
+      "linha": 54,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "DESPESAS MENSAIS RH (398)",
+      "valorReal": "DESPESAS MENSAIS RH (398)",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "C54",
+      "linha": 54,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "valor": "7.182,49",
+      "valorReal": 7182.49,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A55",
+      "linha": 55,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B55=\"\";\"\";MATCH(B55;B$3:B54;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B55",
+            "B54"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "B55",
+      "linha": 55,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "MANUTENÇÃO ELEVADORES (377)",
+      "valorReal": "MANUTENÇÃO ELEVADORES (377)",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "C55",
+      "linha": 55,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "valor": "450,00",
+      "valorReal": 450,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "D55",
+      "linha": 55,
+      "coluna": 4,
+      "colunaLetra": "D",
+      "valor": "430,00",
+      "valorReal": 430,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A56",
+      "linha": 56,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B56=\"\";\"\";MATCH(B56;B$3:B55;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B56",
+            "B55"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "B56",
+      "linha": 56,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "CONTRIB SOCIAL (319)",
+      "valorReal": "CONTRIB SOCIAL (319)",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "C56",
+      "linha": 56,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "valor": "180.646,02",
+      "valorReal": 180646.02,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "D56",
+      "linha": 56,
+      "coluna": 4,
+      "colunaLetra": "D",
+      "valor": "120.593,63",
+      "valorReal": 120593.63,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "E56",
+      "linha": 56,
+      "coluna": 5,
+      "colunaLetra": "E",
+      "valor": "112.327,14",
+      "valorReal": 112327.14,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A57",
+      "linha": 57,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B57=\"\";\"\";MATCH(B57;B$3:B56;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B57",
+            "B56"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "B57",
+      "linha": 57,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "IRPJ (320)",
+      "valorReal": "IRPJ (320)",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "C57",
+      "linha": 57,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "valor": "463.433,73",
+      "valorReal": 463433.73,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "D57",
+      "linha": 57,
+      "coluna": 4,
+      "colunaLetra": "D",
+      "valor": "307.746,83",
+      "valorReal": 307746.83,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "E57",
+      "linha": 57,
+      "coluna": 5,
+      "colunaLetra": "E",
+      "valor": "142.438,72",
+      "valorReal": 142438.72,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A58",
+      "linha": 58,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B58=\"\";\"\";MATCH(B58;B$3:B57;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B58",
+            "B57"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "B58",
+      "linha": 58,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "DESPESAS TOTAIS",
+      "valorReal": "DESPESAS TOTAIS",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "A59",
+      "linha": 59,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B59=\"\";\"\";MATCH(B59;B$3:B58;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B59",
+            "B58"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "B59",
+      "linha": 59,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "ISS (314)",
+      "valorReal": "ISS (314)",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "C59",
+      "linha": 59,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "valor": "245.562,31",
+      "valorReal": 245562.31,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "E59",
+      "linha": 59,
+      "coluna": 5,
+      "colunaLetra": "E",
+      "valor": "124.259,38",
+      "valorReal": 124259.38,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A60",
+      "linha": 60,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B60=\"\";\"\";MATCH(B60;B$3:B59;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B60",
+            "B59"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "B60",
+      "linha": 60,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "COFINS (317)",
+      "valorReal": "COFINS (317)",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "C60",
+      "linha": 60,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "valor": "248.916,29",
+      "valorReal": 248916.29,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "E60",
+      "linha": 60,
+      "coluna": 5,
+      "colunaLetra": "E",
+      "valor": "132.204,91",
+      "valorReal": 132204.91,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A61",
+      "linha": 61,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B61=\"\";\"\";MATCH(B61;B$3:B60;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B61",
+            "B60"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "B61",
+      "linha": 61,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "ICMS (315)",
+      "valorReal": "ICMS (315)",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "C61",
+      "linha": 61,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "valor": "8.201,00",
+      "valorReal": 8201,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "E61",
+      "linha": 61,
+      "coluna": 5,
+      "colunaLetra": "E",
+      "valor": "61.492,57",
+      "valorReal": 61492.57,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A62",
+      "linha": 62,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B62=\"\";\"\";MATCH(B62;B$3:B61;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B62",
+            "B61"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "B62",
+      "linha": 62,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "DAS SIMPLES NACIONAL (318)",
+      "valorReal": "DAS SIMPLES NACIONAL (318)",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "A63",
+      "linha": 63,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B63=\"\";\"\";MATCH(B63;B$3:B62;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B63",
+            "B62"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "B63",
+      "linha": 63,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "PIS (316)",
+      "valorReal": "PIS (316)",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "C63",
+      "linha": 63,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "valor": "53.931,86",
+      "valorReal": 53931.86,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "E63",
+      "linha": 63,
+      "coluna": 5,
+      "colunaLetra": "E",
+      "valor": "28.644,40",
+      "valorReal": 28644.4,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A64",
+      "linha": 64,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B64=\"\";\"\";MATCH(B64;B$3:B63;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B64",
+            "B63"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "B64",
+      "linha": 64,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "CONTRATO MANUTENÇAO TELEFONE (374)",
+      "valorReal": "CONTRATO MANUTENÇAO TELEFONE (374)",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "D64",
+      "linha": 64,
+      "coluna": 4,
+      "colunaLetra": "D",
+      "valor": "649,00",
+      "valorReal": 649,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A65",
+      "linha": 65,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B65=\"\";\"\";MATCH(B65;B$3:B64;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B65",
+            "B64"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "B65",
+      "linha": 65,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "IMPRESSOES GRAFICAS (426)",
+      "valorReal": "IMPRESSOES GRAFICAS (426)",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "D65",
+      "linha": 65,
+      "coluna": 4,
+      "colunaLetra": "D",
+      "valor": "416,80",
+      "valorReal": 416.8,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A66",
+      "linha": 66,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B66=\"\";\"\";MATCH(B66;B$3:B65;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B66",
+            "B65"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "B66",
+      "linha": 66,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "REEMBOLSO HOSPEDE (521)",
+      "valorReal": "REEMBOLSO HOSPEDE (521)",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "D66",
+      "linha": 66,
+      "coluna": 4,
+      "colunaLetra": "D",
+      "valor": "(12.481,17)",
+      "valorReal": -12481.17,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A67",
+      "linha": 67,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B67=\"\";\"\";MATCH(B67;B$3:B66;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B67",
+            "B66"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "B67",
+      "linha": 67,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "SERVIÇOS DE INVESTIMENTOS (542)",
+      "valorReal": "SERVIÇOS DE INVESTIMENTOS (542)",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "D67",
+      "linha": 67,
+      "coluna": 4,
+      "colunaLetra": "D",
+      "valor": "21.880,00",
+      "valorReal": 21880,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A68",
+      "linha": 68,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B68=\"\";\"\";MATCH(B68;B$3:B67;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B68",
+            "B67"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "B68",
+      "linha": 68,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "MANUTENCAO",
+      "valorReal": "MANUTENCAO",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "D68",
+      "linha": 68,
+      "coluna": 4,
+      "colunaLetra": "D",
+      "valor": "(8.779,00)",
+      "valorReal": -8779,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "E68",
+      "linha": 68,
+      "coluna": 5,
+      "colunaLetra": "E",
+      "valor": "(38.000,00)",
+      "valorReal": -38000,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A69",
+      "linha": 69,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B69=\"\";\"\";MATCH(B69;B$3:B68;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B69",
+            "B68"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "B69",
+      "linha": 69,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "LAVANDERIA",
+      "valorReal": "LAVANDERIA",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "D69",
+      "linha": 69,
+      "coluna": 4,
+      "colunaLetra": "D",
+      "valor": "906,44",
+      "valorReal": 906.44,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "B70",
+      "linha": 70,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "COZINHA/COPA",
+      "valorReal": "COZINHA/COPA",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "D70",
+      "linha": 70,
+      "coluna": 4,
+      "colunaLetra": "D",
+      "valor": "6.513,21",
+      "valorReal": 6513.21,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A71",
+      "linha": 71,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B71=\"\";\"\";MATCH(B71;B$3:B70;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B71",
+            "B70"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "B71",
+      "linha": 71,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "Extras",
+      "valorReal": "Extras",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "D71",
+      "linha": 71,
+      "coluna": 4,
+      "colunaLetra": "D",
+      "valor": "104.000,00",
+      "valorReal": 104000,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "E71",
+      "linha": 71,
+      "coluna": 5,
+      "colunaLetra": "E",
+      "valor": "174.156,00",
+      "valorReal": 174156,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A72",
+      "linha": 72,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B72=\"\";\"\";MATCH(B72;B$3:B70;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B72",
+            "B70"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "B72",
+      "linha": 72,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "ENDOMARKETING (603)",
+      "valorReal": "ENDOMARKETING (603)",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "E72",
+      "linha": 72,
+      "coluna": 5,
+      "colunaLetra": "E",
+      "valor": "1.120,00",
+      "valorReal": 1120,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A73",
+      "linha": 73,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B73=\"\";\"\";MATCH(B73;B$3:B71;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B73",
+            "B71"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "B73",
+      "linha": 73,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "COMISSÃO A&B / RECEPÇÃO/ COMERCIAL ZZ (529)",
+      "valorReal": "COMISSÃO A&B / RECEPÇÃO/ COMERCIAL ZZ (529)",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "D73",
+      "linha": 73,
+      "coluna": 4,
+      "colunaLetra": "D",
+      "valor": "1.677,69",
+      "valorReal": 1677.69,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "E73",
+      "linha": 73,
+      "coluna": 5,
+      "colunaLetra": "E",
+      "valor": "1.335,34",
+      "valorReal": 1335.34,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A74",
+      "linha": 74,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B74=\"\";\"\";MATCH(B74;B$3:B72;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B74",
+            "B72"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "B74",
+      "linha": 74,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "COMPLEMENTO FOLHA ZZ (528)",
+      "valorReal": "COMPLEMENTO FOLHA ZZ (528)",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "E74",
+      "linha": 74,
+      "coluna": 5,
+      "colunaLetra": "E",
+      "valor": "300,00",
+      "valorReal": 300,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A75",
+      "linha": 75,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B75=\"\";\"\";MATCH(B75;B$3:B73;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B75",
+            "B73"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "E75",
+      "linha": 75,
+      "coluna": 5,
+      "colunaLetra": "E",
+      "valor": "6.269,91",
+      "valorReal": 6269.91,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "F75",
+      "linha": 75,
+      "coluna": 6,
+      "colunaLetra": "F",
+      "valor": "ferias swile",
+      "valorReal": "ferias swile",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "G75",
+      "linha": 75,
+      "coluna": 7,
+      "colunaLetra": "G",
+      "valor": "34.733,79",
+      "valorReal": 34733.79,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A76",
+      "linha": 76,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B76=\"\";\"\";MATCH(B76;B$3:B75;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B76",
+            "B75"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "B76",
+      "linha": 76,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "SEGURO VEICULO (349)",
+      "valorReal": "SEGURO VEICULO (349)",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "E76",
+      "linha": 76,
+      "coluna": 5,
+      "colunaLetra": "E",
+      "valor": "300,00",
+      "valorReal": 300,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A77",
+      "linha": 77,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B77=\"\";\"\";MATCH(B77;B$3:B76;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B77",
+            "B76"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "B77",
+      "linha": 77,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "BONIFICAÇÃO FUNCIONÁRIOS (648)",
+      "valorReal": "BONIFICAÇÃO FUNCIONÁRIOS (648)",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "E77",
+      "linha": 77,
+      "coluna": 5,
+      "colunaLetra": "E",
+      "valor": "(95.250,00)",
+      "valorReal": -95250,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A78",
+      "linha": 78,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B78=\"\";\"\";MATCH(B78;B$3:B77;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B78",
+            "B77"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "B78",
+      "linha": 78,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "INVESTIMENTO/REFORMA HOTEL",
+      "valorReal": "INVESTIMENTO/REFORMA HOTEL",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "E78",
+      "linha": 78,
+      "coluna": 5,
+      "colunaLetra": "E",
+      "valor": "38.000,00",
+      "valorReal": 38000,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A79",
+      "linha": 79,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B79=\"\";\"\";MATCH(B79;B$3:B78;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B79",
+            "B78"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "A80",
+      "linha": 80,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B80=\"\";\"\";MATCH(B80;B$3:B79;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B80",
+            "B79"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "A81",
+      "linha": 81,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B81=\"\";\"\";MATCH(B81;B$3:B80;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B81",
+            "B80"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "A82",
+      "linha": 82,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B82=\"\";\"\";MATCH(B82;B$3:B81;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B82",
+            "B81"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "A83",
+      "linha": 83,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B83=\"\";\"\";MATCH(B83;B$3:B82;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B83",
+            "B82"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "A84",
+      "linha": 84,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B84=\"\";\"\";MATCH(B84;B$3:B83;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B84",
+            "B83"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "A85",
+      "linha": 85,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B85=\"\";\"\";MATCH(B85;B$3:B84;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B85",
+            "B84"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "A86",
+      "linha": 86,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B86=\"\";\"\";MATCH(B86;B$3:B85;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B86",
+            "B85"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "A87",
+      "linha": 87,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B87=\"\";\"\";MATCH(B87;B$3:B86;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B87",
+            "B86"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "A88",
+      "linha": 88,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B88=\"\";\"\";MATCH(B88;B$3:B87;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B88",
+            "B87"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "A89",
+      "linha": 89,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B89=\"\";\"\";MATCH(B89;B$3:B88;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B89",
+            "B88"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "A90",
+      "linha": 90,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B90=\"\";\"\";MATCH(B90;B$3:B89;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B90",
+            "B89"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "A91",
+      "linha": 91,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B91=\"\";\"\";MATCH(B91;B$3:B90;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B91",
+            "B90"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "A92",
+      "linha": 92,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B92=\"\";\"\";MATCH(B92;B$3:B91;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B92",
+            "B91"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "A93",
+      "linha": 93,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B93=\"\";\"\";MATCH(B93;B$3:B92;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B93",
+            "B92"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "A94",
+      "linha": 94,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B94=\"\";\"\";MATCH(B94;B$3:B93;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B94",
+            "B93"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "A95",
+      "linha": 95,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B95=\"\";\"\";MATCH(B95;B$3:B94;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B95",
+            "B94"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "A96",
+      "linha": 96,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B96=\"\";\"\";MATCH(B96;B$3:B95;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B96",
+            "B95"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "A97",
+      "linha": 97,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B97=\"\";\"\";MATCH(B97;B$3:B96;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B97",
+            "B96"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "A98",
+      "linha": 98,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B98=\"\";\"\";MATCH(B98;B$3:B97;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B98",
+            "B97"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "A99",
+      "linha": 99,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B99=\"\";\"\";MATCH(B99;B$3:B98;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B99",
+            "B98"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "A100",
+      "linha": 100,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B100=\"\";\"\";MATCH(B100;B$3:B99;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B100",
+            "B99"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "A101",
+      "linha": 101,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B101=\"\";\"\";MATCH(B101;B$3:B100;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B101",
+            "B100"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "A102",
+      "linha": 102,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B102=\"\";\"\";MATCH(B102;B$3:B101;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B102",
+            "B101"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "A103",
+      "linha": 103,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B103=\"\";\"\";MATCH(B103;B$3:B102;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B103",
+            "B102"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "A104",
+      "linha": 104,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B104=\"\";\"\";MATCH(B104;B$3:B103;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B104",
+            "B103"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "A105",
+      "linha": 105,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B105=\"\";\"\";MATCH(B105;B$3:B104;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B105",
+            "B104"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    },
+    {
+      "celula": "A106",
+      "linha": 106,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=IFERROR(IF(B106=\"\";\"\";MATCH(B106;B$3:B105;0));\"\")",
+      "tipoFormula": "condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "B106",
+            "B105"
+          ]
+        }
+      ],
+      "valorCalculado": "",
+      "valorReal": ""
+    }
+  ],
+  "resumo": {
+    "totalCelulasComFormula": 141,
+    "totalCelulasComValor": 156,
+    "formulasUsadas": {
+      "MONTH": 12,
+      "EOMONTH": 11,
+      "IFERROR": 98,
+      "IF": 98,
+      "MATCH": 98
+    },
+    "dependenciasExternas": [
+      {
+        "tipo": "aba_externa",
+        "abaOrigem": "Ajustes",
+        "abaDestino": "Prev x Real 2026",
+        "celula": "G5",
+        "referencia": "Prev x Real 2026!G5"
+      }
+    ]
+  }
+}

@@ -1,15 +1,17 @@
 import { createClient } from '@supabase/supabase-js';
 
 const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const anonKey = process.env.SUPABASE_ANON_KEY;
+const supabaseKey = serviceRoleKey || anonKey;
 
 if (!supabaseUrl || !supabaseKey) {
   throw new Error(
-    'Variáveis de ambiente SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY são obrigatórias.'
+    'Variáveis de ambiente SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY (ou SUPABASE_ANON_KEY no modo local) são obrigatórias.'
   );
 }
 
-// Client server-side com service role key (bypassa RLS — usar apenas no servidor)
+// Em produção prefira SERVICE_ROLE; local pode usar ANON_KEY para facilitar o setup.
 export const supabase = createClient(supabaseUrl, supabaseKey, {
   auth: {
     autoRefreshToken: false,

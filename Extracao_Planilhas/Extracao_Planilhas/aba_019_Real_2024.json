@@ -1,0 +1,98 @@
+{
+  "id": 134922665,
+  "nome": "Real 2024",
+  "indice": 19,
+  "totalLinhas": 3,
+  "totalColunas": 2,
+  "cabecalhos": [
+    {
+      "coluna": "A",
+      "indice": 1,
+      "texto": "1p7HRaC-uDaTMvFhUPfsOce1kLEM7mlyVXobkEFplaos"
+    }
+  ],
+  "celulas": [
+    {
+      "celula": "A1",
+      "linha": 1,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "valor": "1p7HRaC-uDaTMvFhUPfsOce1kLEM7mlyVXobkEFplaos",
+      "valorReal": "1p7HRaC-uDaTMvFhUPfsOce1kLEM7mlyVXobkEFplaos",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "A3",
+      "linha": 3,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=importrange(A1;\"Prev x Real 2024!F8:f276\")",
+      "tipoFormula": "importacao_externa",
+      "dependencias": [
+        {
+          "tipo": "aba_externa",
+          "abaOrigem": "Real 2024",
+          "abaDestino": "Prev x Real 2024",
+          "celula": "F8",
+          "referencia": "Prev x Real 2024!F8"
+        },
+        {
+          "tipo": "local",
+          "celulas": [
+            "A1"
+          ]
+        }
+      ],
+      "valorCalculado": "#REF!",
+      "valorReal": "#REF!"
+    },
+    {
+      "celula": "B3",
+      "linha": 3,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "formula": "=importrange(A1;\"Prev x Real 2024!BF8:bf276\")",
+      "tipoFormula": "importacao_externa",
+      "dependencias": [
+        {
+          "tipo": "aba_externa",
+          "abaOrigem": "Real 2024",
+          "abaDestino": "Prev x Real 2024",
+          "celula": "BF8",
+          "referencia": "Prev x Real 2024!BF8"
+        },
+        {
+          "tipo": "local",
+          "celulas": [
+            "A1"
+          ]
+        }
+      ],
+      "valorCalculado": "#REF!",
+      "valorReal": "#REF!"
+    }
+  ],
+  "resumo": {
+    "totalCelulasComFormula": 2,
+    "totalCelulasComValor": 1,
+    "formulasUsadas": {
+      "IMPORTRANGE": 2
+    },
+    "dependenciasExternas": [
+      {
+        "tipo": "aba_externa",
+        "abaOrigem": "Real 2024",
+        "abaDestino": "Prev x Real 2024",
+        "celula": "F8",
+        "referencia": "Prev x Real 2024!F8"
+      },
+      {
+        "tipo": "aba_externa",
+        "abaOrigem": "Real 2024",
+        "abaDestino": "Prev x Real 2024",
+        "celula": "BF8",
+        "referencia": "Prev x Real 2024!BF8"
+      }
+    ]
+  }
+}

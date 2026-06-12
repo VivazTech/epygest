@@ -7,7 +7,7 @@ import { Invoices } from './pages/Invoices';
 import { FinancialAnalysisPage as AnaliseFinanceira } from './pages/FinancialAnalysis';
 import { DREPage as DRE } from './pages/DRE';
 import { PlanningPage as Planejamento } from './pages/Planning';
-const Importacao = () => <div className="p-8 text-slate-400">Módulo de Importação de Dados em desenvolvimento...</div>;
+import { ImportacaoPage as Importacao } from './pages/Importacao';
 import { CadastrosPage as Cadastros } from './pages/Cadastros';
 import { RequisicoesPage as Requisicoes } from './pages/Requisicoes';
 import { SupabaseConnectionTestPage as SupabaseTeste } from './pages/SupabaseConnectionTest';
@@ -209,7 +209,7 @@ export default function App() {
           </div>
         </header>
 
-        <div className={activeTab === 'notas' || activeTab === 'cadastros' || activeTab === 'sintase' || activeTab === 'prev-real' ? "p-8 w-full max-w-none" : "p-8 max-w-7xl mx-auto"}>
+        <div className={activeTab === 'notas' || activeTab === 'cadastros' || activeTab === 'sintase' || activeTab === 'prev-real' || activeTab === 'dre' ? "p-8 w-full max-w-none" : "p-8 max-w-7xl mx-auto"}>
           {renderContent()}
         </div>
       </main>

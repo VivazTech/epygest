@@ -1,0 +1,2828 @@
+{
+  "id": 1352746404,
+  "nome": "Dados Folha e Extras",
+  "indice": 17,
+  "totalLinhas": 15,
+  "totalColunas": 18,
+  "cabecalhos": [
+    {
+      "coluna": "A",
+      "indice": 1,
+      "texto": "14XNsRm9TqXNAiZZ4b5pFxbubFeaEXZG3caMxMVmnhWU"
+    },
+    {
+      "coluna": "D",
+      "indice": 4,
+      "texto": "1hZbTvNEBxz6Igf4UXTsLEdt94AaZ19bgy4T0mcbFGTk"
+    },
+    {
+      "coluna": "H",
+      "indice": 8,
+      "texto": "REALIZADO"
+    }
+  ],
+  "celulas": [
+    {
+      "celula": "A1",
+      "linha": 1,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "valor": "14XNsRm9TqXNAiZZ4b5pFxbubFeaEXZG3caMxMVmnhWU",
+      "valorReal": "14XNsRm9TqXNAiZZ4b5pFxbubFeaEXZG3caMxMVmnhWU",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "D1",
+      "linha": 1,
+      "coluna": 4,
+      "colunaLetra": "D",
+      "valor": "1hZbTvNEBxz6Igf4UXTsLEdt94AaZ19bgy4T0mcbFGTk",
+      "valorReal": "1hZbTvNEBxz6Igf4UXTsLEdt94AaZ19bgy4T0mcbFGTk",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "H1",
+      "linha": 1,
+      "coluna": 8,
+      "colunaLetra": "H",
+      "valor": "REALIZADO",
+      "valorReal": "REALIZADO",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "A2",
+      "linha": 2,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "valor": "FOLHA DE PAGAMENTO",
+      "valorReal": "FOLHA DE PAGAMENTO",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "C2",
+      "linha": 2,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "valor": "BENEFÍCIOS",
+      "valorReal": "BENEFÍCIOS",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "D2",
+      "linha": 2,
+      "coluna": 4,
+      "colunaLetra": "D",
+      "valor": "EXTRAS",
+      "valorReal": "EXTRAS",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "E2",
+      "linha": 2,
+      "coluna": 5,
+      "colunaLetra": "E",
+      "formula": "=importrange($A$1;\"Síntese Orçamento!f2:g15\")",
+      "tipoFormula": "importacao_externa",
+      "dependencias": [],
+      "valorCalculado": "#REF!",
+      "valorReal": "#REF!"
+    },
+    {
+      "celula": "H2",
+      "linha": 2,
+      "coluna": 8,
+      "colunaLetra": "H",
+      "valor": "PESSOAL",
+      "valorReal": "PESSOAL",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "I2",
+      "linha": 2,
+      "coluna": 9,
+      "colunaLetra": "I",
+      "valor": "BENEFÍCIOS",
+      "valorReal": "BENEFÍCIOS",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "J2",
+      "linha": 2,
+      "coluna": 10,
+      "colunaLetra": "J",
+      "valor": "EXTRAS",
+      "valorReal": "EXTRAS",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "L2",
+      "linha": 2,
+      "coluna": 12,
+      "colunaLetra": "L",
+      "valor": "(-) CMV",
+      "valorReal": "(-) CMV",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "M2",
+      "linha": 2,
+      "coluna": 13,
+      "colunaLetra": "M",
+      "valor": "(-) CSP - Aquamania",
+      "valorReal": "(-) CSP - Aquamania",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "N2",
+      "linha": 2,
+      "coluna": 14,
+      "colunaLetra": "N",
+      "valor": "(-) Impostos s/ Faturamento",
+      "valorReal": "(-) Impostos s/ Faturamento",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "O2",
+      "linha": 2,
+      "coluna": 15,
+      "colunaLetra": "O",
+      "valor": "Desp. Oper.",
+      "valorReal": "Desp. Oper.",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "P2",
+      "linha": 2,
+      "coluna": 16,
+      "colunaLetra": "P",
+      "valor": "Despesas com Vendas",
+      "valorReal": "Despesas com Vendas",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "Q2",
+      "linha": 2,
+      "coluna": 17,
+      "colunaLetra": "Q",
+      "valor": "(-) Impostos s/ Resultado",
+      "valorReal": "(-) Impostos s/ Resultado",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "R2",
+      "linha": 2,
+      "coluna": 18,
+      "colunaLetra": "R",
+      "valor": "Obras e Investimentos",
+      "valorReal": "Obras e Investimentos",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "A3",
+      "linha": 3,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=importrange($A$1;\"Síntese Orçamento!A3:b15\")",
+      "tipoFormula": "importacao_externa",
+      "dependencias": [
+        {
+          "tipo": "aba_externa",
+          "abaOrigem": "Dados Folha e Extras",
+          "abaDestino": "amento",
+          "celula": "A3",
+          "referencia": "amento!A3"
+        }
+      ],
+      "valorCalculado": "#REF!",
+      "valorReal": "#REF!"
+    },
+    {
+      "celula": "C3",
+      "linha": 3,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "formula": "=SUMIFS('Prev x Real 2026'!$347:$347;'Prev x Real 2026'!$5:$5;$A3;'Prev x Real 2026'!$2:$2;2)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A3"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "D3",
+      "linha": 3,
+      "coluna": 4,
+      "colunaLetra": "D",
+      "formula": "=IMPORTRANGE(D1;\"síntese por área!c37:c48\")",
+      "tipoFormula": "importacao_externa",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "D1"
+          ]
+        }
+      ],
+      "valorCalculado": "#REF!",
+      "valorReal": "#REF!"
+    },
+    {
+      "celula": "H3",
+      "linha": 3,
+      "coluna": 8,
+      "colunaLetra": "H",
+      "formula": "=SUMIFS('Prev x Real 2026'!$345:$345;'Prev x Real 2026'!$5:$5;$A3;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A3"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "I3",
+      "linha": 3,
+      "coluna": 9,
+      "colunaLetra": "I",
+      "formula": "=SUMIFS('Prev x Real 2026'!$347:$347;'Prev x Real 2026'!$5:$5;$A3;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A3"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "J3",
+      "linha": 3,
+      "coluna": 10,
+      "colunaLetra": "J",
+      "formula": "=SUMIFS('Prev x Real 2026'!$346:$346;'Prev x Real 2026'!$5:$5;$A3;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A3"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "L3",
+      "linha": 3,
+      "coluna": 12,
+      "colunaLetra": "L",
+      "formula": "=SUMIFS('Prev x Real 2026'!$351:$351;'Prev x Real 2026'!$5:$5;$A3;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A3"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "M3",
+      "linha": 3,
+      "coluna": 13,
+      "colunaLetra": "M",
+      "formula": "=SUMIFS('Prev x Real 2026'!$281:$281;'Prev x Real 2026'!$5:$5;$A3;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A3"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "N3",
+      "linha": 3,
+      "coluna": 14,
+      "colunaLetra": "N",
+      "formula": "=SUMIFS('Prev x Real 2026'!$332:$332;'Prev x Real 2026'!$5:$5;$A3;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A3"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "O3",
+      "linha": 3,
+      "coluna": 15,
+      "colunaLetra": "O",
+      "formula": "=SUMIFS('Prev x Real 2026'!$84:$84;'Prev x Real 2026'!$5:$5;$A3;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A3"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "P3",
+      "linha": 3,
+      "coluna": 16,
+      "colunaLetra": "P",
+      "formula": "=SUMIFS('Prev x Real 2026'!$252:$252;'Prev x Real 2026'!$5:$5;$A3;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A3"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "Q3",
+      "linha": 3,
+      "coluna": 17,
+      "colunaLetra": "Q",
+      "formula": "=SUMIFS('Prev x Real 2026'!$311:$311;'Prev x Real 2026'!$5:$5;$A3;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A3"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "R3",
+      "linha": 3,
+      "coluna": 18,
+      "colunaLetra": "R",
+      "formula": "=SUMIFS('Prev x Real 2026'!$319:$319;'Prev x Real 2026'!$5:$5;$A3;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A3"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "C4",
+      "linha": 4,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "formula": "=SUMIFS('Prev x Real 2026'!$347:$347;'Prev x Real 2026'!$5:$5;$A4;'Prev x Real 2026'!$2:$2;2)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A4"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "H4",
+      "linha": 4,
+      "coluna": 8,
+      "colunaLetra": "H",
+      "formula": "=SUMIFS('Prev x Real 2026'!$345:$345;'Prev x Real 2026'!$5:$5;$A4;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A4"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "I4",
+      "linha": 4,
+      "coluna": 9,
+      "colunaLetra": "I",
+      "formula": "=SUMIFS('Prev x Real 2026'!$347:$347;'Prev x Real 2026'!$5:$5;$A4;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A4"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "J4",
+      "linha": 4,
+      "coluna": 10,
+      "colunaLetra": "J",
+      "formula": "=SUMIFS('Prev x Real 2026'!$346:$346;'Prev x Real 2026'!$5:$5;$A4;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A4"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "L4",
+      "linha": 4,
+      "coluna": 12,
+      "colunaLetra": "L",
+      "formula": "=SUMIFS('Prev x Real 2026'!$351:$351;'Prev x Real 2026'!$5:$5;$A4;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A4"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "M4",
+      "linha": 4,
+      "coluna": 13,
+      "colunaLetra": "M",
+      "formula": "=SUMIFS('Prev x Real 2026'!$281:$281;'Prev x Real 2026'!$5:$5;$A4;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A4"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "N4",
+      "linha": 4,
+      "coluna": 14,
+      "colunaLetra": "N",
+      "formula": "=SUMIFS('Prev x Real 2026'!$332:$332;'Prev x Real 2026'!$5:$5;$A4;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A4"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "O4",
+      "linha": 4,
+      "coluna": 15,
+      "colunaLetra": "O",
+      "formula": "=SUMIFS('Prev x Real 2026'!$84:$84;'Prev x Real 2026'!$5:$5;$A4;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A4"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "P4",
+      "linha": 4,
+      "coluna": 16,
+      "colunaLetra": "P",
+      "formula": "=SUMIFS('Prev x Real 2026'!$252:$252;'Prev x Real 2026'!$5:$5;$A4;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A4"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "Q4",
+      "linha": 4,
+      "coluna": 17,
+      "colunaLetra": "Q",
+      "formula": "=SUMIFS('Prev x Real 2026'!$311:$311;'Prev x Real 2026'!$5:$5;$A4;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A4"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "R4",
+      "linha": 4,
+      "coluna": 18,
+      "colunaLetra": "R",
+      "formula": "=SUMIFS('Prev x Real 2026'!$319:$319;'Prev x Real 2026'!$5:$5;$A4;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A4"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "C5",
+      "linha": 5,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "formula": "=SUMIFS('Prev x Real 2026'!$347:$347;'Prev x Real 2026'!$5:$5;$A5;'Prev x Real 2026'!$2:$2;2)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A5"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "H5",
+      "linha": 5,
+      "coluna": 8,
+      "colunaLetra": "H",
+      "formula": "=SUMIFS('Prev x Real 2026'!$345:$345;'Prev x Real 2026'!$5:$5;$A5;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A5"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "I5",
+      "linha": 5,
+      "coluna": 9,
+      "colunaLetra": "I",
+      "formula": "=SUMIFS('Prev x Real 2026'!$347:$347;'Prev x Real 2026'!$5:$5;$A5;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A5"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "J5",
+      "linha": 5,
+      "coluna": 10,
+      "colunaLetra": "J",
+      "formula": "=SUMIFS('Prev x Real 2026'!$346:$346;'Prev x Real 2026'!$5:$5;$A5;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A5"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "L5",
+      "linha": 5,
+      "coluna": 12,
+      "colunaLetra": "L",
+      "formula": "=SUMIFS('Prev x Real 2026'!$351:$351;'Prev x Real 2026'!$5:$5;$A5;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A5"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "M5",
+      "linha": 5,
+      "coluna": 13,
+      "colunaLetra": "M",
+      "formula": "=SUMIFS('Prev x Real 2026'!$281:$281;'Prev x Real 2026'!$5:$5;$A5;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A5"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "N5",
+      "linha": 5,
+      "coluna": 14,
+      "colunaLetra": "N",
+      "formula": "=SUMIFS('Prev x Real 2026'!$332:$332;'Prev x Real 2026'!$5:$5;$A5;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A5"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "O5",
+      "linha": 5,
+      "coluna": 15,
+      "colunaLetra": "O",
+      "formula": "=SUMIFS('Prev x Real 2026'!$84:$84;'Prev x Real 2026'!$5:$5;$A5;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A5"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "P5",
+      "linha": 5,
+      "coluna": 16,
+      "colunaLetra": "P",
+      "formula": "=SUMIFS('Prev x Real 2026'!$252:$252;'Prev x Real 2026'!$5:$5;$A5;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A5"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "Q5",
+      "linha": 5,
+      "coluna": 17,
+      "colunaLetra": "Q",
+      "formula": "=SUMIFS('Prev x Real 2026'!$311:$311;'Prev x Real 2026'!$5:$5;$A5;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A5"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "R5",
+      "linha": 5,
+      "coluna": 18,
+      "colunaLetra": "R",
+      "formula": "=SUMIFS('Prev x Real 2026'!$319:$319;'Prev x Real 2026'!$5:$5;$A5;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A5"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "C6",
+      "linha": 6,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "formula": "=SUMIFS('Prev x Real 2026'!$347:$347;'Prev x Real 2026'!$5:$5;$A6;'Prev x Real 2026'!$2:$2;2)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A6"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "H6",
+      "linha": 6,
+      "coluna": 8,
+      "colunaLetra": "H",
+      "formula": "=SUMIFS('Prev x Real 2026'!$345:$345;'Prev x Real 2026'!$5:$5;$A6;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A6"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "I6",
+      "linha": 6,
+      "coluna": 9,
+      "colunaLetra": "I",
+      "formula": "=SUMIFS('Prev x Real 2026'!$347:$347;'Prev x Real 2026'!$5:$5;$A6;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A6"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "J6",
+      "linha": 6,
+      "coluna": 10,
+      "colunaLetra": "J",
+      "formula": "=SUMIFS('Prev x Real 2026'!$346:$346;'Prev x Real 2026'!$5:$5;$A6;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A6"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "L6",
+      "linha": 6,
+      "coluna": 12,
+      "colunaLetra": "L",
+      "formula": "=SUMIFS('Prev x Real 2026'!$351:$351;'Prev x Real 2026'!$5:$5;$A6;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A6"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "M6",
+      "linha": 6,
+      "coluna": 13,
+      "colunaLetra": "M",
+      "formula": "=SUMIFS('Prev x Real 2026'!$281:$281;'Prev x Real 2026'!$5:$5;$A6;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A6"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "N6",
+      "linha": 6,
+      "coluna": 14,
+      "colunaLetra": "N",
+      "formula": "=SUMIFS('Prev x Real 2026'!$332:$332;'Prev x Real 2026'!$5:$5;$A6;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A6"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "O6",
+      "linha": 6,
+      "coluna": 15,
+      "colunaLetra": "O",
+      "formula": "=SUMIFS('Prev x Real 2026'!$84:$84;'Prev x Real 2026'!$5:$5;$A6;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A6"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "P6",
+      "linha": 6,
+      "coluna": 16,
+      "colunaLetra": "P",
+      "formula": "=SUMIFS('Prev x Real 2026'!$252:$252;'Prev x Real 2026'!$5:$5;$A6;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A6"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "Q6",
+      "linha": 6,
+      "coluna": 17,
+      "colunaLetra": "Q",
+      "formula": "=SUMIFS('Prev x Real 2026'!$311:$311;'Prev x Real 2026'!$5:$5;$A6;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A6"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "R6",
+      "linha": 6,
+      "coluna": 18,
+      "colunaLetra": "R",
+      "formula": "=SUMIFS('Prev x Real 2026'!$319:$319;'Prev x Real 2026'!$5:$5;$A6;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A6"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "C7",
+      "linha": 7,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "formula": "=SUMIFS('Prev x Real 2026'!$347:$347;'Prev x Real 2026'!$5:$5;$A7;'Prev x Real 2026'!$2:$2;2)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A7"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "H7",
+      "linha": 7,
+      "coluna": 8,
+      "colunaLetra": "H",
+      "formula": "=SUMIFS('Prev x Real 2026'!$345:$345;'Prev x Real 2026'!$5:$5;$A7;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A7"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "I7",
+      "linha": 7,
+      "coluna": 9,
+      "colunaLetra": "I",
+      "formula": "=SUMIFS('Prev x Real 2026'!$347:$347;'Prev x Real 2026'!$5:$5;$A7;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A7"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "J7",
+      "linha": 7,
+      "coluna": 10,
+      "colunaLetra": "J",
+      "formula": "=SUMIFS('Prev x Real 2026'!$346:$346;'Prev x Real 2026'!$5:$5;$A7;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A7"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "L7",
+      "linha": 7,
+      "coluna": 12,
+      "colunaLetra": "L",
+      "formula": "=SUMIFS('Prev x Real 2026'!$351:$351;'Prev x Real 2026'!$5:$5;$A7;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A7"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "M7",
+      "linha": 7,
+      "coluna": 13,
+      "colunaLetra": "M",
+      "formula": "=SUMIFS('Prev x Real 2026'!$281:$281;'Prev x Real 2026'!$5:$5;$A7;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A7"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "N7",
+      "linha": 7,
+      "coluna": 14,
+      "colunaLetra": "N",
+      "formula": "=SUMIFS('Prev x Real 2026'!$332:$332;'Prev x Real 2026'!$5:$5;$A7;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A7"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "O7",
+      "linha": 7,
+      "coluna": 15,
+      "colunaLetra": "O",
+      "formula": "=SUMIFS('Prev x Real 2026'!$84:$84;'Prev x Real 2026'!$5:$5;$A7;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A7"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "P7",
+      "linha": 7,
+      "coluna": 16,
+      "colunaLetra": "P",
+      "formula": "=SUMIFS('Prev x Real 2026'!$252:$252;'Prev x Real 2026'!$5:$5;$A7;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A7"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "Q7",
+      "linha": 7,
+      "coluna": 17,
+      "colunaLetra": "Q",
+      "formula": "=SUMIFS('Prev x Real 2026'!$311:$311;'Prev x Real 2026'!$5:$5;$A7;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A7"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "R7",
+      "linha": 7,
+      "coluna": 18,
+      "colunaLetra": "R",
+      "formula": "=SUMIFS('Prev x Real 2026'!$319:$319;'Prev x Real 2026'!$5:$5;$A7;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A7"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "C8",
+      "linha": 8,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "formula": "=SUMIFS('Prev x Real 2026'!$347:$347;'Prev x Real 2026'!$5:$5;$A8;'Prev x Real 2026'!$2:$2;2)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A8"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "H8",
+      "linha": 8,
+      "coluna": 8,
+      "colunaLetra": "H",
+      "formula": "=SUMIFS('Prev x Real 2026'!$345:$345;'Prev x Real 2026'!$5:$5;$A8;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A8"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "I8",
+      "linha": 8,
+      "coluna": 9,
+      "colunaLetra": "I",
+      "formula": "=SUMIFS('Prev x Real 2026'!$347:$347;'Prev x Real 2026'!$5:$5;$A8;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A8"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "J8",
+      "linha": 8,
+      "coluna": 10,
+      "colunaLetra": "J",
+      "formula": "=SUMIFS('Prev x Real 2026'!$346:$346;'Prev x Real 2026'!$5:$5;$A8;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A8"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "L8",
+      "linha": 8,
+      "coluna": 12,
+      "colunaLetra": "L",
+      "formula": "=SUMIFS('Prev x Real 2026'!$351:$351;'Prev x Real 2026'!$5:$5;$A8;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A8"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "M8",
+      "linha": 8,
+      "coluna": 13,
+      "colunaLetra": "M",
+      "formula": "=SUMIFS('Prev x Real 2026'!$281:$281;'Prev x Real 2026'!$5:$5;$A8;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A8"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "N8",
+      "linha": 8,
+      "coluna": 14,
+      "colunaLetra": "N",
+      "formula": "=SUMIFS('Prev x Real 2026'!$332:$332;'Prev x Real 2026'!$5:$5;$A8;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A8"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "O8",
+      "linha": 8,
+      "coluna": 15,
+      "colunaLetra": "O",
+      "formula": "=SUMIFS('Prev x Real 2026'!$84:$84;'Prev x Real 2026'!$5:$5;$A8;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A8"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "P8",
+      "linha": 8,
+      "coluna": 16,
+      "colunaLetra": "P",
+      "formula": "=SUMIFS('Prev x Real 2026'!$252:$252;'Prev x Real 2026'!$5:$5;$A8;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A8"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "Q8",
+      "linha": 8,
+      "coluna": 17,
+      "colunaLetra": "Q",
+      "formula": "=SUMIFS('Prev x Real 2026'!$311:$311;'Prev x Real 2026'!$5:$5;$A8;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A8"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "R8",
+      "linha": 8,
+      "coluna": 18,
+      "colunaLetra": "R",
+      "formula": "=SUMIFS('Prev x Real 2026'!$319:$319;'Prev x Real 2026'!$5:$5;$A8;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A8"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "C9",
+      "linha": 9,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "formula": "=SUMIFS('Prev x Real 2026'!$347:$347;'Prev x Real 2026'!$5:$5;$A9;'Prev x Real 2026'!$2:$2;2)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A9"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "H9",
+      "linha": 9,
+      "coluna": 8,
+      "colunaLetra": "H",
+      "formula": "=SUMIFS('Prev x Real 2026'!$345:$345;'Prev x Real 2026'!$5:$5;$A9;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A9"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "I9",
+      "linha": 9,
+      "coluna": 9,
+      "colunaLetra": "I",
+      "formula": "=SUMIFS('Prev x Real 2026'!$347:$347;'Prev x Real 2026'!$5:$5;$A9;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A9"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "J9",
+      "linha": 9,
+      "coluna": 10,
+      "colunaLetra": "J",
+      "formula": "=SUMIFS('Prev x Real 2026'!$346:$346;'Prev x Real 2026'!$5:$5;$A9;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A9"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "L9",
+      "linha": 9,
+      "coluna": 12,
+      "colunaLetra": "L",
+      "formula": "=SUMIFS('Prev x Real 2026'!$351:$351;'Prev x Real 2026'!$5:$5;$A9;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A9"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "M9",
+      "linha": 9,
+      "coluna": 13,
+      "colunaLetra": "M",
+      "formula": "=SUMIFS('Prev x Real 2026'!$281:$281;'Prev x Real 2026'!$5:$5;$A9;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A9"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "N9",
+      "linha": 9,
+      "coluna": 14,
+      "colunaLetra": "N",
+      "formula": "=SUMIFS('Prev x Real 2026'!$332:$332;'Prev x Real 2026'!$5:$5;$A9;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A9"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "O9",
+      "linha": 9,
+      "coluna": 15,
+      "colunaLetra": "O",
+      "formula": "=SUMIFS('Prev x Real 2026'!$84:$84;'Prev x Real 2026'!$5:$5;$A9;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A9"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "P9",
+      "linha": 9,
+      "coluna": 16,
+      "colunaLetra": "P",
+      "formula": "=SUMIFS('Prev x Real 2026'!$252:$252;'Prev x Real 2026'!$5:$5;$A9;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A9"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "Q9",
+      "linha": 9,
+      "coluna": 17,
+      "colunaLetra": "Q",
+      "formula": "=SUMIFS('Prev x Real 2026'!$311:$311;'Prev x Real 2026'!$5:$5;$A9;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A9"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "R9",
+      "linha": 9,
+      "coluna": 18,
+      "colunaLetra": "R",
+      "formula": "=SUMIFS('Prev x Real 2026'!$319:$319;'Prev x Real 2026'!$5:$5;$A9;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A9"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "C10",
+      "linha": 10,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "formula": "=SUMIFS('Prev x Real 2026'!$347:$347;'Prev x Real 2026'!$5:$5;$A10;'Prev x Real 2026'!$2:$2;2)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A10"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "H10",
+      "linha": 10,
+      "coluna": 8,
+      "colunaLetra": "H",
+      "formula": "=SUMIFS('Prev x Real 2026'!$345:$345;'Prev x Real 2026'!$5:$5;$A10;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A10"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "I10",
+      "linha": 10,
+      "coluna": 9,
+      "colunaLetra": "I",
+      "formula": "=SUMIFS('Prev x Real 2026'!$347:$347;'Prev x Real 2026'!$5:$5;$A10;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A10"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "J10",
+      "linha": 10,
+      "coluna": 10,
+      "colunaLetra": "J",
+      "formula": "=SUMIFS('Prev x Real 2026'!$346:$346;'Prev x Real 2026'!$5:$5;$A10;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A10"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "L10",
+      "linha": 10,
+      "coluna": 12,
+      "colunaLetra": "L",
+      "formula": "=SUMIFS('Prev x Real 2026'!$351:$351;'Prev x Real 2026'!$5:$5;$A10;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A10"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "M10",
+      "linha": 10,
+      "coluna": 13,
+      "colunaLetra": "M",
+      "formula": "=SUMIFS('Prev x Real 2026'!$281:$281;'Prev x Real 2026'!$5:$5;$A10;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A10"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "N10",
+      "linha": 10,
+      "coluna": 14,
+      "colunaLetra": "N",
+      "formula": "=SUMIFS('Prev x Real 2026'!$332:$332;'Prev x Real 2026'!$5:$5;$A10;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A10"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "O10",
+      "linha": 10,
+      "coluna": 15,
+      "colunaLetra": "O",
+      "formula": "=SUMIFS('Prev x Real 2026'!$84:$84;'Prev x Real 2026'!$5:$5;$A10;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A10"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "P10",
+      "linha": 10,
+      "coluna": 16,
+      "colunaLetra": "P",
+      "formula": "=SUMIFS('Prev x Real 2026'!$252:$252;'Prev x Real 2026'!$5:$5;$A10;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A10"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "Q10",
+      "linha": 10,
+      "coluna": 17,
+      "colunaLetra": "Q",
+      "formula": "=SUMIFS('Prev x Real 2026'!$311:$311;'Prev x Real 2026'!$5:$5;$A10;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A10"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "R10",
+      "linha": 10,
+      "coluna": 18,
+      "colunaLetra": "R",
+      "formula": "=SUMIFS('Prev x Real 2026'!$319:$319;'Prev x Real 2026'!$5:$5;$A10;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A10"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "C11",
+      "linha": 11,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "formula": "=SUMIFS('Prev x Real 2026'!$347:$347;'Prev x Real 2026'!$5:$5;$A11;'Prev x Real 2026'!$2:$2;2)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A11"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "H11",
+      "linha": 11,
+      "coluna": 8,
+      "colunaLetra": "H",
+      "formula": "=SUMIFS('Prev x Real 2026'!$345:$345;'Prev x Real 2026'!$5:$5;$A11;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A11"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "I11",
+      "linha": 11,
+      "coluna": 9,
+      "colunaLetra": "I",
+      "formula": "=SUMIFS('Prev x Real 2026'!$347:$347;'Prev x Real 2026'!$5:$5;$A11;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A11"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "J11",
+      "linha": 11,
+      "coluna": 10,
+      "colunaLetra": "J",
+      "formula": "=SUMIFS('Prev x Real 2026'!$346:$346;'Prev x Real 2026'!$5:$5;$A11;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A11"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "L11",
+      "linha": 11,
+      "coluna": 12,
+      "colunaLetra": "L",
+      "formula": "=SUMIFS('Prev x Real 2026'!$351:$351;'Prev x Real 2026'!$5:$5;$A11;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A11"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "M11",
+      "linha": 11,
+      "coluna": 13,
+      "colunaLetra": "M",
+      "formula": "=SUMIFS('Prev x Real 2026'!$281:$281;'Prev x Real 2026'!$5:$5;$A11;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A11"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "N11",
+      "linha": 11,
+      "coluna": 14,
+      "colunaLetra": "N",
+      "formula": "=SUMIFS('Prev x Real 2026'!$332:$332;'Prev x Real 2026'!$5:$5;$A11;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A11"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "O11",
+      "linha": 11,
+      "coluna": 15,
+      "colunaLetra": "O",
+      "formula": "=SUMIFS('Prev x Real 2026'!$84:$84;'Prev x Real 2026'!$5:$5;$A11;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A11"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "P11",
+      "linha": 11,
+      "coluna": 16,
+      "colunaLetra": "P",
+      "formula": "=SUMIFS('Prev x Real 2026'!$252:$252;'Prev x Real 2026'!$5:$5;$A11;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A11"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "Q11",
+      "linha": 11,
+      "coluna": 17,
+      "colunaLetra": "Q",
+      "formula": "=SUMIFS('Prev x Real 2026'!$311:$311;'Prev x Real 2026'!$5:$5;$A11;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A11"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "R11",
+      "linha": 11,
+      "coluna": 18,
+      "colunaLetra": "R",
+      "formula": "=SUMIFS('Prev x Real 2026'!$319:$319;'Prev x Real 2026'!$5:$5;$A11;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A11"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "C12",
+      "linha": 12,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "formula": "=SUMIFS('Prev x Real 2026'!$347:$347;'Prev x Real 2026'!$5:$5;$A12;'Prev x Real 2026'!$2:$2;2)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A12"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "H12",
+      "linha": 12,
+      "coluna": 8,
+      "colunaLetra": "H",
+      "formula": "=SUMIFS('Prev x Real 2026'!$345:$345;'Prev x Real 2026'!$5:$5;$A12;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A12"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "I12",
+      "linha": 12,
+      "coluna": 9,
+      "colunaLetra": "I",
+      "formula": "=SUMIFS('Prev x Real 2026'!$347:$347;'Prev x Real 2026'!$5:$5;$A12;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A12"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "J12",
+      "linha": 12,
+      "coluna": 10,
+      "colunaLetra": "J",
+      "formula": "=SUMIFS('Prev x Real 2026'!$346:$346;'Prev x Real 2026'!$5:$5;$A12;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A12"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "L12",
+      "linha": 12,
+      "coluna": 12,
+      "colunaLetra": "L",
+      "formula": "=SUMIFS('Prev x Real 2026'!$351:$351;'Prev x Real 2026'!$5:$5;$A12;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A12"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "M12",
+      "linha": 12,
+      "coluna": 13,
+      "colunaLetra": "M",
+      "formula": "=SUMIFS('Prev x Real 2026'!$281:$281;'Prev x Real 2026'!$5:$5;$A12;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A12"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "N12",
+      "linha": 12,
+      "coluna": 14,
+      "colunaLetra": "N",
+      "formula": "=SUMIFS('Prev x Real 2026'!$332:$332;'Prev x Real 2026'!$5:$5;$A12;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A12"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "O12",
+      "linha": 12,
+      "coluna": 15,
+      "colunaLetra": "O",
+      "formula": "=SUMIFS('Prev x Real 2026'!$84:$84;'Prev x Real 2026'!$5:$5;$A12;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A12"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "P12",
+      "linha": 12,
+      "coluna": 16,
+      "colunaLetra": "P",
+      "formula": "=SUMIFS('Prev x Real 2026'!$252:$252;'Prev x Real 2026'!$5:$5;$A12;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A12"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "Q12",
+      "linha": 12,
+      "coluna": 17,
+      "colunaLetra": "Q",
+      "formula": "=SUMIFS('Prev x Real 2026'!$311:$311;'Prev x Real 2026'!$5:$5;$A12;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A12"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "R12",
+      "linha": 12,
+      "coluna": 18,
+      "colunaLetra": "R",
+      "formula": "=SUMIFS('Prev x Real 2026'!$319:$319;'Prev x Real 2026'!$5:$5;$A12;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A12"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "C13",
+      "linha": 13,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "formula": "=SUMIFS('Prev x Real 2026'!$347:$347;'Prev x Real 2026'!$5:$5;$A13;'Prev x Real 2026'!$2:$2;2)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A13"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "H13",
+      "linha": 13,
+      "coluna": 8,
+      "colunaLetra": "H",
+      "formula": "=SUMIFS('Prev x Real 2026'!$345:$345;'Prev x Real 2026'!$5:$5;$A13;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A13"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "I13",
+      "linha": 13,
+      "coluna": 9,
+      "colunaLetra": "I",
+      "formula": "=SUMIFS('Prev x Real 2026'!$347:$347;'Prev x Real 2026'!$5:$5;$A13;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A13"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "J13",
+      "linha": 13,
+      "coluna": 10,
+      "colunaLetra": "J",
+      "formula": "=SUMIFS('Prev x Real 2026'!$346:$346;'Prev x Real 2026'!$5:$5;$A13;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A13"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "L13",
+      "linha": 13,
+      "coluna": 12,
+      "colunaLetra": "L",
+      "formula": "=SUMIFS('Prev x Real 2026'!$351:$351;'Prev x Real 2026'!$5:$5;$A13;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A13"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "M13",
+      "linha": 13,
+      "coluna": 13,
+      "colunaLetra": "M",
+      "formula": "=SUMIFS('Prev x Real 2026'!$281:$281;'Prev x Real 2026'!$5:$5;$A13;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A13"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "N13",
+      "linha": 13,
+      "coluna": 14,
+      "colunaLetra": "N",
+      "formula": "=SUMIFS('Prev x Real 2026'!$332:$332;'Prev x Real 2026'!$5:$5;$A13;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A13"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "O13",
+      "linha": 13,
+      "coluna": 15,
+      "colunaLetra": "O",
+      "formula": "=SUMIFS('Prev x Real 2026'!$84:$84;'Prev x Real 2026'!$5:$5;$A13;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A13"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "P13",
+      "linha": 13,
+      "coluna": 16,
+      "colunaLetra": "P",
+      "formula": "=SUMIFS('Prev x Real 2026'!$252:$252;'Prev x Real 2026'!$5:$5;$A13;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A13"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "Q13",
+      "linha": 13,
+      "coluna": 17,
+      "colunaLetra": "Q",
+      "formula": "=SUMIFS('Prev x Real 2026'!$311:$311;'Prev x Real 2026'!$5:$5;$A13;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A13"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "R13",
+      "linha": 13,
+      "coluna": 18,
+      "colunaLetra": "R",
+      "formula": "=SUMIFS('Prev x Real 2026'!$319:$319;'Prev x Real 2026'!$5:$5;$A13;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A13"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "C14",
+      "linha": 14,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "formula": "=SUMIFS('Prev x Real 2026'!$347:$347;'Prev x Real 2026'!$5:$5;$A14;'Prev x Real 2026'!$2:$2;2)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A14"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "H14",
+      "linha": 14,
+      "coluna": 8,
+      "colunaLetra": "H",
+      "formula": "=SUMIFS('Prev x Real 2026'!$345:$345;'Prev x Real 2026'!$5:$5;$A14;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A14"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "I14",
+      "linha": 14,
+      "coluna": 9,
+      "colunaLetra": "I",
+      "formula": "=SUMIFS('Prev x Real 2026'!$347:$347;'Prev x Real 2026'!$5:$5;$A14;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A14"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "J14",
+      "linha": 14,
+      "coluna": 10,
+      "colunaLetra": "J",
+      "formula": "=SUMIFS('Prev x Real 2026'!$346:$346;'Prev x Real 2026'!$5:$5;$A14;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A14"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "L14",
+      "linha": 14,
+      "coluna": 12,
+      "colunaLetra": "L",
+      "formula": "=SUMIFS('Prev x Real 2026'!$351:$351;'Prev x Real 2026'!$5:$5;$A14;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A14"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "M14",
+      "linha": 14,
+      "coluna": 13,
+      "colunaLetra": "M",
+      "formula": "=SUMIFS('Prev x Real 2026'!$281:$281;'Prev x Real 2026'!$5:$5;$A14;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A14"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "N14",
+      "linha": 14,
+      "coluna": 14,
+      "colunaLetra": "N",
+      "formula": "=SUMIFS('Prev x Real 2026'!$332:$332;'Prev x Real 2026'!$5:$5;$A14;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A14"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "O14",
+      "linha": 14,
+      "coluna": 15,
+      "colunaLetra": "O",
+      "formula": "=SUMIFS('Prev x Real 2026'!$84:$84;'Prev x Real 2026'!$5:$5;$A14;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A14"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "P14",
+      "linha": 14,
+      "coluna": 16,
+      "colunaLetra": "P",
+      "formula": "=SUMIFS('Prev x Real 2026'!$252:$252;'Prev x Real 2026'!$5:$5;$A14;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A14"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "Q14",
+      "linha": 14,
+      "coluna": 17,
+      "colunaLetra": "Q",
+      "formula": "=SUMIFS('Prev x Real 2026'!$311:$311;'Prev x Real 2026'!$5:$5;$A14;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A14"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "R14",
+      "linha": 14,
+      "coluna": 18,
+      "colunaLetra": "R",
+      "formula": "=SUMIFS('Prev x Real 2026'!$319:$319;'Prev x Real 2026'!$5:$5;$A14;'Prev x Real 2026'!$6:$6;$H$1)",
+      "tipoFormula": "soma_condicional",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "A14"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "C15",
+      "linha": 15,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "formula": "=SUM(C3:C14)",
+      "tipoFormula": "soma",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "C3:C14"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "D15",
+      "linha": 15,
+      "coluna": 4,
+      "colunaLetra": "D",
+      "formula": "=SUM(D3:D14)",
+      "tipoFormula": "soma",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "D3:D14"
+          ]
+        }
+      ],
+      "valorCalculado": "#REF!",
+      "valorReal": "#REF!"
+    },
+    {
+      "celula": "H15",
+      "linha": 15,
+      "coluna": 8,
+      "colunaLetra": "H",
+      "formula": "=SUM(H3:H14)",
+      "tipoFormula": "soma",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "H3:H14"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "I15",
+      "linha": 15,
+      "coluna": 9,
+      "colunaLetra": "I",
+      "formula": "=SUM(I3:I14)",
+      "tipoFormula": "soma",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "I3:I14"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "J15",
+      "linha": 15,
+      "coluna": 10,
+      "colunaLetra": "J",
+      "formula": "=SUM(J3:J14)",
+      "tipoFormula": "soma",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "J3:J14"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "L15",
+      "linha": 15,
+      "coluna": 12,
+      "colunaLetra": "L",
+      "formula": "=SUM(L3:L14)",
+      "tipoFormula": "soma",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "L3:L14"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "M15",
+      "linha": 15,
+      "coluna": 13,
+      "colunaLetra": "M",
+      "formula": "=SUM(M3:M14)",
+      "tipoFormula": "soma",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "M3:M14"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "N15",
+      "linha": 15,
+      "coluna": 14,
+      "colunaLetra": "N",
+      "formula": "=SUM(N3:N14)",
+      "tipoFormula": "soma",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "N3:N14"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "O15",
+      "linha": 15,
+      "coluna": 15,
+      "colunaLetra": "O",
+      "formula": "=SUM(O3:O14)",
+      "tipoFormula": "soma",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "O3:O14"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "P15",
+      "linha": 15,
+      "coluna": 16,
+      "colunaLetra": "P",
+      "formula": "=SUM(P3:P14)",
+      "tipoFormula": "soma",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "P3:P14"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "Q15",
+      "linha": 15,
+      "coluna": 17,
+      "colunaLetra": "Q",
+      "formula": "=SUM(Q3:Q14)",
+      "tipoFormula": "soma",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "Q3:Q14"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    },
+    {
+      "celula": "R15",
+      "linha": 15,
+      "coluna": 18,
+      "colunaLetra": "R",
+      "formula": "=SUM(R3:R14)",
+      "tipoFormula": "soma",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "R3:R14"
+          ]
+        }
+      ],
+      "valorCalculado": "0,00",
+      "valorReal": 0
+    }
+  ],
+  "resumo": {
+    "totalCelulasComFormula": 147,
+    "totalCelulasComValor": 16,
+    "formulasUsadas": {
+      "IMPORTRANGE": 3,
+      "SUMIFS": 132,
+      "SUM": 12
+    },
+    "dependenciasExternas": [
+      {
+        "tipo": "aba_externa",
+        "abaOrigem": "Dados Folha e Extras",
+        "abaDestino": "amento",
+        "celula": "A3",
+        "referencia": "amento!A3"
+      }
+    ]
+  }
+}

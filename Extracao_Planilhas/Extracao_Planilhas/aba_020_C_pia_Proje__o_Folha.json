@@ -1,0 +1,306 @@
+{
+  "id": 1024520063,
+  "nome": "Cópia Projeção Folha",
+  "indice": 20,
+  "totalLinhas": 2,
+  "totalColunas": 38,
+  "cabecalhos": [
+    {
+      "coluna": "E",
+      "indice": 5,
+      "texto": "Prev"
+    },
+    {
+      "coluna": "H",
+      "indice": 8,
+      "texto": "Prev"
+    },
+    {
+      "coluna": "K",
+      "indice": 11,
+      "texto": "Prev"
+    },
+    {
+      "coluna": "N",
+      "indice": 14,
+      "texto": "Prev"
+    },
+    {
+      "coluna": "Q",
+      "indice": 17,
+      "texto": "Prev"
+    },
+    {
+      "coluna": "T",
+      "indice": 20,
+      "texto": "Prev"
+    },
+    {
+      "coluna": "W",
+      "indice": 23,
+      "texto": "Prev"
+    },
+    {
+      "coluna": "Z",
+      "indice": 26,
+      "texto": "Prev"
+    },
+    {
+      "coluna": "AC",
+      "indice": 29,
+      "texto": "Prev"
+    },
+    {
+      "coluna": "AF",
+      "indice": 32,
+      "texto": "Prev"
+    },
+    {
+      "coluna": "AI",
+      "indice": 35,
+      "texto": "Prev"
+    },
+    {
+      "coluna": "AL",
+      "indice": 38,
+      "texto": "Prev"
+    }
+  ],
+  "celulas": [
+    {
+      "celula": "E1",
+      "linha": 1,
+      "coluna": 5,
+      "colunaLetra": "E",
+      "formula": "=\"Prev\"&D6",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "D6"
+          ]
+        }
+      ],
+      "valorCalculado": "Prev",
+      "valorReal": "Prev"
+    },
+    {
+      "celula": "H1",
+      "linha": 1,
+      "coluna": 8,
+      "colunaLetra": "H",
+      "formula": "=\"Prev\"&G6",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "G6"
+          ]
+        }
+      ],
+      "valorCalculado": "Prev",
+      "valorReal": "Prev"
+    },
+    {
+      "celula": "K1",
+      "linha": 1,
+      "coluna": 11,
+      "colunaLetra": "K",
+      "formula": "=\"Prev\"&J6",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "J6"
+          ]
+        }
+      ],
+      "valorCalculado": "Prev",
+      "valorReal": "Prev"
+    },
+    {
+      "celula": "N1",
+      "linha": 1,
+      "coluna": 14,
+      "colunaLetra": "N",
+      "formula": "=\"Prev\"&M6",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "M6"
+          ]
+        }
+      ],
+      "valorCalculado": "Prev",
+      "valorReal": "Prev"
+    },
+    {
+      "celula": "Q1",
+      "linha": 1,
+      "coluna": 17,
+      "colunaLetra": "Q",
+      "formula": "=\"Prev\"&P6",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "P6"
+          ]
+        }
+      ],
+      "valorCalculado": "Prev",
+      "valorReal": "Prev"
+    },
+    {
+      "celula": "T1",
+      "linha": 1,
+      "coluna": 20,
+      "colunaLetra": "T",
+      "formula": "=\"Prev\"&S6",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "S6"
+          ]
+        }
+      ],
+      "valorCalculado": "Prev",
+      "valorReal": "Prev"
+    },
+    {
+      "celula": "W1",
+      "linha": 1,
+      "coluna": 23,
+      "colunaLetra": "W",
+      "formula": "=\"Prev\"&V6",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "V6"
+          ]
+        }
+      ],
+      "valorCalculado": "Prev",
+      "valorReal": "Prev"
+    },
+    {
+      "celula": "Z1",
+      "linha": 1,
+      "coluna": 26,
+      "colunaLetra": "Z",
+      "formula": "=\"Prev\"&Y6",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "Y6"
+          ]
+        }
+      ],
+      "valorCalculado": "Prev",
+      "valorReal": "Prev"
+    },
+    {
+      "celula": "AC1",
+      "linha": 1,
+      "coluna": 29,
+      "colunaLetra": "AC",
+      "formula": "=\"Prev\"&AB6",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "AB6"
+          ]
+        }
+      ],
+      "valorCalculado": "Prev",
+      "valorReal": "Prev"
+    },
+    {
+      "celula": "AF1",
+      "linha": 1,
+      "coluna": 32,
+      "colunaLetra": "AF",
+      "formula": "=\"Prev\"&AE6",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "AE6"
+          ]
+        }
+      ],
+      "valorCalculado": "Prev",
+      "valorReal": "Prev"
+    },
+    {
+      "celula": "AI1",
+      "linha": 1,
+      "coluna": 35,
+      "colunaLetra": "AI",
+      "formula": "=\"Prev\"&AH6",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "AH6"
+          ]
+        }
+      ],
+      "valorCalculado": "Prev",
+      "valorReal": "Prev"
+    },
+    {
+      "celula": "AL1",
+      "linha": 1,
+      "coluna": 38,
+      "colunaLetra": "AL",
+      "formula": "=\"Prev\"&AK6",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "AK6"
+          ]
+        }
+      ],
+      "valorCalculado": "Prev",
+      "valorReal": "Prev"
+    },
+    {
+      "celula": "A2",
+      "linha": 2,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=importrange(\"1XH_-F_3RKwZKsLxN6BadY54V9uXoLBiX8owi-W4wZqQ\";\"Colaboradores!a1:al210\")",
+      "tipoFormula": "importacao_externa",
+      "dependencias": [],
+      "valorCalculado": "#REF!",
+      "valorReal": "#REF!"
+    }
+  ],
+  "resumo": {
+    "totalCelulasComFormula": 13,
+    "totalCelulasComValor": 0,
+    "formulasUsadas": {
+      "IMPORTRANGE": 1
+    },
+    "dependenciasExternas": []
+  }
+}

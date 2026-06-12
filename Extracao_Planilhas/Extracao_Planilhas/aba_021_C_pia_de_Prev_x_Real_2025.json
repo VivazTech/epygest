@@ -1,0 +1,51 @@
+{
+  "id": 300292058,
+  "nome": "Cópia de Prev x Real 2025",
+  "indice": 21,
+  "totalLinhas": 1,
+  "totalColunas": 1,
+  "cabecalhos": [
+    {
+      "coluna": "A",
+      "indice": 1,
+      "texto": "#REF!"
+    }
+  ],
+  "celulas": [
+    {
+      "celula": "A1",
+      "linha": 1,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=importrange(\"1iXTZylb5WtYbiDHVQ2VgovDzTaKmfQrlI7FCrr5OSA0\";\"Prev x Real 2025!A1:ap400\")",
+      "tipoFormula": "importacao_externa",
+      "dependencias": [
+        {
+          "tipo": "aba_externa",
+          "abaOrigem": "Cópia de Prev x Real 2025",
+          "abaDestino": "Prev x Real 2025",
+          "celula": "A1",
+          "referencia": "Prev x Real 2025!A1"
+        }
+      ],
+      "valorCalculado": "#REF!",
+      "valorReal": "#REF!"
+    }
+  ],
+  "resumo": {
+    "totalCelulasComFormula": 1,
+    "totalCelulasComValor": 0,
+    "formulasUsadas": {
+      "IMPORTRANGE": 1
+    },
+    "dependenciasExternas": [
+      {
+        "tipo": "aba_externa",
+        "abaOrigem": "Cópia de Prev x Real 2025",
+        "abaDestino": "Prev x Real 2025",
+        "celula": "A1",
+        "referencia": "Prev x Real 2025!A1"
+      }
+    ]
+  }
+}

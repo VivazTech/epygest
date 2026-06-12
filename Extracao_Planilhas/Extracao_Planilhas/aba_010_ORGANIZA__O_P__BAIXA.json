@@ -1,0 +1,261 @@
+{
+  "id": 1145523426,
+  "nome": "ORGANIZAÇÃO P/ BAIXA",
+  "indice": 10,
+  "totalLinhas": 21,
+  "totalColunas": 6,
+  "cabecalhos": [],
+  "celulas": [
+    {
+      "celula": "A5",
+      "linha": 5,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "valor": "Produtos farmaceuticos",
+      "valorReal": "Produtos farmaceuticos",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "B5",
+      "linha": 5,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "RH",
+      "valorReal": "RH",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "C6",
+      "linha": 6,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "valor": "98",
+      "valorReal": 98,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "D6",
+      "linha": 6,
+      "coluna": 4,
+      "colunaLetra": "D",
+      "valor": "EQUIPAMENTOS E MANUTENÇÃO INFORMATICA",
+      "valorReal": "EQUIPAMENTOS E MANUTENÇÃO INFORMATICA",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "E6",
+      "linha": 6,
+      "coluna": 5,
+      "colunaLetra": "E",
+      "valor": "101",
+      "valorReal": 101,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "F6",
+      "linha": 6,
+      "coluna": 6,
+      "colunaLetra": "F",
+      "valor": "Equipamentos de Uso em Geral",
+      "valorReal": "Equipamentos de Uso em Geral",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "D7",
+      "linha": 7,
+      "coluna": 4,
+      "colunaLetra": "D",
+      "valor": "893,86",
+      "valorReal": 893.86,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "F7",
+      "linha": 7,
+      "coluna": 6,
+      "colunaLetra": "F",
+      "valor": "479,8",
+      "valorReal": 479.8,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "D8",
+      "linha": 8,
+      "coluna": 4,
+      "colunaLetra": "D",
+      "valor": "103,99",
+      "valorReal": 103.99,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "F8",
+      "linha": 8,
+      "coluna": 6,
+      "colunaLetra": "F",
+      "valor": "29",
+      "valorReal": 29,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "D9",
+      "linha": 9,
+      "coluna": 4,
+      "colunaLetra": "D",
+      "valor": "120,07",
+      "valorReal": 120.07,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "F9",
+      "linha": 9,
+      "coluna": 6,
+      "colunaLetra": "F",
+      "valor": "165",
+      "valorReal": 165,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "D10",
+      "linha": 10,
+      "coluna": 4,
+      "colunaLetra": "D",
+      "valor": "46,99",
+      "valorReal": 46.99,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "F10",
+      "linha": 10,
+      "coluna": 6,
+      "colunaLetra": "F",
+      "valor": "229,6",
+      "valorReal": 229.6,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "D11",
+      "linha": 11,
+      "coluna": 4,
+      "colunaLetra": "D",
+      "valor": "591",
+      "valorReal": 591,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "F11",
+      "linha": 11,
+      "coluna": 6,
+      "colunaLetra": "F",
+      "valor": "1124",
+      "valorReal": 1124,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "D12",
+      "linha": 12,
+      "coluna": 4,
+      "colunaLetra": "D",
+      "valor": "525,83",
+      "valorReal": 525.83,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "F12",
+      "linha": 12,
+      "coluna": 6,
+      "colunaLetra": "F",
+      "valor": "8991,3",
+      "valorReal": 8991.3,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "D13",
+      "linha": 13,
+      "coluna": 4,
+      "colunaLetra": "D",
+      "valor": "17,43",
+      "valorReal": 17.43,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "F13",
+      "linha": 13,
+      "coluna": 6,
+      "colunaLetra": "F",
+      "valor": "4989",
+      "valorReal": 4989,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "D14",
+      "linha": 14,
+      "coluna": 4,
+      "colunaLetra": "D",
+      "valor": "167,57",
+      "valorReal": 167.57,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "D15",
+      "linha": 15,
+      "coluna": 4,
+      "colunaLetra": "D",
+      "valor": "26,9",
+      "valorReal": 26.9,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "D16",
+      "linha": 16,
+      "coluna": 4,
+      "colunaLetra": "D",
+      "valor": "2964,17",
+      "valorReal": 2964.17,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "D21",
+      "linha": 21,
+      "coluna": 4,
+      "colunaLetra": "D",
+      "formula": "=SUM(D7:D20)",
+      "tipoFormula": "soma",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "D7:D20"
+          ]
+        }
+      ],
+      "valorCalculado": "5457,81",
+      "valorReal": 5457.81
+    },
+    {
+      "celula": "F21",
+      "linha": 21,
+      "coluna": 6,
+      "colunaLetra": "F",
+      "formula": "=SUM(F7:F20)",
+      "tipoFormula": "soma",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "F7:F20"
+          ]
+        }
+      ],
+      "valorCalculado": "16007,7",
+      "valorReal": 16007.699999999999
+    }
+  ],
+  "resumo": {
+    "totalCelulasComFormula": 2,
+    "totalCelulasComValor": 23,
+    "formulasUsadas": {
+      "SUM": 2
+    },
+    "dependenciasExternas": []
+  }
+}

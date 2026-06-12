@@ -19,7 +19,7 @@ type SintaseApiResponse = {
   };
 };
 
-const monthHeaders = ['M1', 'M2', 'M3', 'M4', 'M5', 'M6', 'M7', 'M8', 'M9', 'M10', 'M11', 'M12'];
+const monthHeaders = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
 
 export const SintasePage: React.FC = () => {
   const currentYear = new Date().getFullYear();

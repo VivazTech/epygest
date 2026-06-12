@@ -1,3 +1,5 @@
+import "dotenv/config";
+import { readFile } from "node:fs/promises";
 import { createServer as createViteServer } from "vite";
 import { createApp } from "./src/app.ts";
 
@@ -11,6 +13,15 @@ async function startServer() {
       appType: "spa",
     });
     app.use(vite.middlewares);
+    app.get("/", async (_req, res, next) => {
+      try {
+        const template = await readFile("index.html", "utf-8");
+        const html = await vite.transformIndexHtml("/", template);
+        res.status(200).set({ "Content-Type": "text/html" }).end(html);
+      } catch (error) {
+        next(error);
+      }
+    });
   } else {
     const express = (await import("express")).default;
     app.use(express.static("dist"));

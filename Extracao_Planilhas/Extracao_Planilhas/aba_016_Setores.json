@@ -1,0 +1,1301 @@
+{
+  "id": 1898574874,
+  "nome": "Setores",
+  "indice": 16,
+  "totalLinhas": 47,
+  "totalColunas": 3,
+  "cabecalhos": [
+    {
+      "coluna": "A",
+      "indice": 1,
+      "texto": "50"
+    },
+    {
+      "coluna": "B",
+      "indice": 2,
+      "texto": "INVESTIMENTO/REFORMA HOTEL"
+    },
+    {
+      "coluna": "C",
+      "indice": 3,
+      "texto": "1"
+    }
+  ],
+  "celulas": [
+    {
+      "celula": "A1",
+      "linha": 1,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "valor": "50",
+      "valorReal": 50,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "B1",
+      "linha": 1,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "INVESTIMENTO/REFORMA HOTEL",
+      "valorReal": "INVESTIMENTO/REFORMA HOTEL",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "C1",
+      "linha": 1,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "valor": "1",
+      "valorReal": 1,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A2",
+      "linha": 2,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "valor": "Código",
+      "valorReal": "Código",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "B2",
+      "linha": 2,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "Setor",
+      "valorReal": "Setor",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "C2",
+      "linha": 2,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "valor": "Fator",
+      "valorReal": "Fator",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "A3",
+      "linha": 3,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "valor": "2",
+      "valorReal": 2,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "B3",
+      "linha": 3,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "ACQUAMANIA",
+      "valorReal": "ACQUAMANIA",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "C3",
+      "linha": 3,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "valor": "0",
+      "valorReal": 0,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A4",
+      "linha": 4,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "valor": "3",
+      "valorReal": 3,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "B4",
+      "linha": 4,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "ADMINISTRACAO/G.OPERACIONAL",
+      "valorReal": "ADMINISTRACAO/G.OPERACIONAL",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "C4",
+      "linha": 4,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "valor": "1",
+      "valorReal": 1,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A5",
+      "linha": 5,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "valor": "4",
+      "valorReal": 4,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "B5",
+      "linha": 5,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "BAR DA PISCINA",
+      "valorReal": "BAR DA PISCINA",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "C5",
+      "linha": 5,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "valor": "1",
+      "valorReal": 1,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A6",
+      "linha": 6,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "valor": "5",
+      "valorReal": 5,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "B6",
+      "linha": 6,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "CAFE DA MANHA",
+      "valorReal": "CAFE DA MANHA",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "C6",
+      "linha": 6,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "valor": "1",
+      "valorReal": 1,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A7",
+      "linha": 7,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "valor": "6",
+      "valorReal": 6,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "B7",
+      "linha": 7,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "CAMBUZA",
+      "valorReal": "CAMBUZA",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "C7",
+      "linha": 7,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "valor": "1",
+      "valorReal": 1,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A8",
+      "linha": 8,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "valor": "28",
+      "valorReal": 28,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "B8",
+      "linha": 8,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "CONFEITARIA",
+      "valorReal": "CONFEITARIA",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "C8",
+      "linha": 8,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "valor": "1",
+      "valorReal": 1,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A9",
+      "linha": 9,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "valor": "43",
+      "valorReal": 43,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "B9",
+      "linha": 9,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "CONTROLADORIA",
+      "valorReal": "CONTROLADORIA",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "C9",
+      "linha": 9,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "valor": "1",
+      "valorReal": 1,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A10",
+      "linha": 10,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "valor": "8",
+      "valorReal": 8,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "B10",
+      "linha": 10,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "COZINHA/COPA",
+      "valorReal": "COZINHA/COPA",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "C10",
+      "linha": 10,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "valor": "1",
+      "valorReal": 1,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A11",
+      "linha": 11,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "valor": "10",
+      "valorReal": 10,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "B11",
+      "linha": 11,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "DEPARTAMENTO COMERCIAL",
+      "valorReal": "DEPARTAMENTO COMERCIAL",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "C11",
+      "linha": 11,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "valor": "1",
+      "valorReal": 1,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A12",
+      "linha": 12,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "valor": "9",
+      "valorReal": 9,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "B12",
+      "linha": 12,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "DEPARTAMENTO DE COMPRAS",
+      "valorReal": "DEPARTAMENTO DE COMPRAS",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "C12",
+      "linha": 12,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "valor": "1",
+      "valorReal": 1,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A13",
+      "linha": 13,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "valor": "59",
+      "valorReal": 59,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "B13",
+      "linha": 13,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "DEPARTAMENTO DE MARKETING",
+      "valorReal": "DEPARTAMENTO DE MARKETING",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "C13",
+      "linha": 13,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "valor": "1",
+      "valorReal": 1,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A14",
+      "linha": 14,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "valor": "11",
+      "valorReal": 11,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "B14",
+      "linha": 14,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "DEPARTAMENTO DE RESERVAS",
+      "valorReal": "DEPARTAMENTO DE RESERVAS",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "C14",
+      "linha": 14,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "valor": "1",
+      "valorReal": 1,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A15",
+      "linha": 15,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "valor": "72",
+      "valorReal": 72,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "B15",
+      "linha": 15,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "DIESEL GERADOR",
+      "valorReal": "DIESEL GERADOR",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "C15",
+      "linha": 15,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "valor": "1",
+      "valorReal": 1,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A16",
+      "linha": 16,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "valor": "56",
+      "valorReal": 56,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "B16",
+      "linha": 16,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "DIRETORIA",
+      "valorReal": "DIRETORIA",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "C16",
+      "linha": 16,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "valor": "1",
+      "valorReal": 1,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A17",
+      "linha": 17,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "valor": "75",
+      "valorReal": 75,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "B17",
+      "linha": 17,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "ELETROELETRONICOS EM GERAL",
+      "valorReal": "ELETROELETRONICOS EM GERAL",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "C17",
+      "linha": 17,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "valor": "1",
+      "valorReal": 1,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A18",
+      "linha": 18,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "valor": "53",
+      "valorReal": 53,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "B18",
+      "linha": 18,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "ENDOMARKETING",
+      "valorReal": "ENDOMARKETING",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "C18",
+      "linha": 18,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "valor": "1",
+      "valorReal": 1,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A19",
+      "linha": 19,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "valor": "30",
+      "valorReal": 30,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "B19",
+      "linha": 19,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "ENXOVAL DE A&B LOUCAS E UTENSILIOS",
+      "valorReal": "ENXOVAL DE A&B LOUCAS E UTENSILIOS",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "C19",
+      "linha": 19,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "valor": "1",
+      "valorReal": 1,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A20",
+      "linha": 20,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "valor": "31",
+      "valorReal": 31,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "B20",
+      "linha": 20,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "ENXOVAL DE CAMA E BANHO",
+      "valorReal": "ENXOVAL DE CAMA E BANHO",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "C20",
+      "linha": 20,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "valor": "1",
+      "valorReal": 1,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A21",
+      "linha": 21,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "valor": "77",
+      "valorReal": 77,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "B21",
+      "linha": 21,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "EQUIP. E MAT. DE INFORMATICA EM GERAL",
+      "valorReal": "EQUIP. E MAT. DE INFORMATICA EM GERAL",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "C21",
+      "linha": 21,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "valor": "1",
+      "valorReal": 1,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A22",
+      "linha": 22,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "valor": "74",
+      "valorReal": 74,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "B22",
+      "linha": 22,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "EQUIPAMENTOS DE USO GERAL",
+      "valorReal": "EQUIPAMENTOS DE USO GERAL",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "C22",
+      "linha": 22,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "valor": "1",
+      "valorReal": 1,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A23",
+      "linha": 23,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "valor": "13",
+      "valorReal": 13,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "B23",
+      "linha": 23,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "EVENTOS",
+      "valorReal": "EVENTOS",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "C23",
+      "linha": 23,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "valor": "1",
+      "valorReal": 1,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A24",
+      "linha": 24,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "valor": "14",
+      "valorReal": 14,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "B24",
+      "linha": 24,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "FINANCEIRO",
+      "valorReal": "FINANCEIRO",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "C24",
+      "linha": 24,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "valor": "1",
+      "valorReal": 1,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A25",
+      "linha": 25,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "valor": "15",
+      "valorReal": 15,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "B25",
+      "linha": 25,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "FRIGOBAR",
+      "valorReal": "FRIGOBAR",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "C25",
+      "linha": 25,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "valor": "1",
+      "valorReal": 1,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A26",
+      "linha": 26,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "valor": "73",
+      "valorReal": 73,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "B26",
+      "linha": 26,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "GAS GLP",
+      "valorReal": "GAS GLP",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "C26",
+      "linha": 26,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "valor": "1",
+      "valorReal": 1,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A27",
+      "linha": 27,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "valor": "16",
+      "valorReal": 16,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "B27",
+      "linha": 27,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "GOVERNANCA",
+      "valorReal": "GOVERNANCA",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "C27",
+      "linha": 27,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "valor": "1",
+      "valorReal": 1,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A28",
+      "linha": 28,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "valor": "66",
+      "valorReal": 66,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "B28",
+      "linha": 28,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "HORTA",
+      "valorReal": "HORTA",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "C28",
+      "linha": 28,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "valor": "1",
+      "valorReal": 1,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A29",
+      "linha": 29,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "valor": "52",
+      "valorReal": 52,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "B29",
+      "linha": 29,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "INVESTIMENTO/REFORMA ACQUAMANIA",
+      "valorReal": "INVESTIMENTO/REFORMA ACQUAMANIA",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "C29",
+      "linha": 29,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "valor": "1",
+      "valorReal": 1,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A30",
+      "linha": 30,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "valor": "48",
+      "valorReal": 48,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "B30",
+      "linha": 30,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "JARDINAGEM",
+      "valorReal": "JARDINAGEM",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "C30",
+      "linha": 30,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "valor": "1",
+      "valorReal": 1,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A31",
+      "linha": 31,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "valor": "17",
+      "valorReal": 17,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "B31",
+      "linha": 31,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "LAVANDERIA",
+      "valorReal": "LAVANDERIA",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "C31",
+      "linha": 31,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "valor": "1",
+      "valorReal": 1,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A32",
+      "linha": 32,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "valor": "19",
+      "valorReal": 19,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "B32",
+      "linha": 32,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "MANUTENCAO",
+      "valorReal": "MANUTENCAO",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "C32",
+      "linha": 32,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "valor": "1",
+      "valorReal": 1,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A33",
+      "linha": 33,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "valor": "76",
+      "valorReal": 76,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "B33",
+      "linha": 33,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "MOVEIS EM GERAL",
+      "valorReal": "MOVEIS EM GERAL",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "C33",
+      "linha": 33,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "valor": "1",
+      "valorReal": 1,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A34",
+      "linha": 34,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "valor": "29",
+      "valorReal": 29,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "B34",
+      "linha": 34,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "PADARIA",
+      "valorReal": "PADARIA",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "C34",
+      "linha": 34,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "valor": "1",
+      "valorReal": 1,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A35",
+      "linha": 35,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "valor": "44",
+      "valorReal": 44,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "B35",
+      "linha": 35,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "PORTARIA DE SERVICO",
+      "valorReal": "PORTARIA DE SERVICO",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "C35",
+      "linha": 35,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "valor": "1",
+      "valorReal": 1,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A36",
+      "linha": 36,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "valor": "20",
+      "valorReal": 20,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "B36",
+      "linha": 36,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "RECEPCAO",
+      "valorReal": "RECEPCAO",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "C36",
+      "linha": 36,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "valor": "1",
+      "valorReal": 1,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A37",
+      "linha": 37,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "valor": "21",
+      "valorReal": 21,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "B37",
+      "linha": 37,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "RECREACAO",
+      "valorReal": "RECREACAO",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "C37",
+      "linha": 37,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "valor": "1",
+      "valorReal": 1,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A38",
+      "linha": 38,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "valor": "22",
+      "valorReal": 22,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "B38",
+      "linha": 38,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "RECURSOS HUMANOS",
+      "valorReal": "RECURSOS HUMANOS",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "C38",
+      "linha": 38,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "valor": "1",
+      "valorReal": 1,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A39",
+      "linha": 39,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "valor": "24",
+      "valorReal": 24,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "B39",
+      "linha": 39,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "REFEITORIO",
+      "valorReal": "REFEITORIO",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "C39",
+      "linha": 39,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "valor": "1",
+      "valorReal": 1,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A40",
+      "linha": 40,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "valor": "25",
+      "valorReal": 25,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "B40",
+      "linha": 40,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "RESTAURANTE ALEGRO",
+      "valorReal": "RESTAURANTE ALEGRO",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "C40",
+      "linha": 40,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "valor": "1",
+      "valorReal": 1,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A41",
+      "linha": 41,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "valor": "26",
+      "valorReal": 26,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "B41",
+      "linha": 41,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "RESTAURANTE TERRAZA",
+      "valorReal": "RESTAURANTE TERRAZA",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "C41",
+      "linha": 41,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "valor": "1",
+      "valorReal": 1,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A42",
+      "linha": 42,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "valor": "57",
+      "valorReal": 57,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "B42",
+      "linha": 42,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "SETOR DE QUALIDADE",
+      "valorReal": "SETOR DE QUALIDADE",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "C42",
+      "linha": 42,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "valor": "1",
+      "valorReal": 1,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A43",
+      "linha": 43,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "valor": "54",
+      "valorReal": 54,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "B43",
+      "linha": 43,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "UNIFORMES E EPIS",
+      "valorReal": "UNIFORMES E EPIS",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "C43",
+      "linha": 43,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "valor": "1",
+      "valorReal": 1,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A44",
+      "linha": 44,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "valor": "27",
+      "valorReal": 27,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "B44",
+      "linha": 44,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "ZELADORIA",
+      "valorReal": "ZELADORIA",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "C44",
+      "linha": 44,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "valor": "1",
+      "valorReal": 1,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A45",
+      "linha": 45,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "valor": "79",
+      "valorReal": 79,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "B45",
+      "linha": 45,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "DECORACAO EM GERAL",
+      "valorReal": "DECORACAO EM GERAL",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "C45",
+      "linha": 45,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "valor": "1",
+      "valorReal": 1,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A46",
+      "linha": 46,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "valor": "77",
+      "valorReal": 77,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "B46",
+      "linha": 46,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "EQUIP. E MAT. DE INFORMATICA EM GERAL",
+      "valorReal": "EQUIP. E MAT. DE INFORMATICA EM GERAL",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "C46",
+      "linha": 46,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "valor": "1",
+      "valorReal": 1,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A47",
+      "linha": 47,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "valor": "94",
+      "valorReal": 94,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "B47",
+      "linha": 47,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "INVESTIMENTO PISCINA AQUECIDA",
+      "valorReal": "INVESTIMENTO PISCINA AQUECIDA",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "C47",
+      "linha": 47,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "valor": "1",
+      "valorReal": 1,
+      "tipoValor": "number"
+    }
+  ],
+  "resumo": {
+    "totalCelulasComFormula": 0,
+    "totalCelulasComValor": 141,
+    "formulasUsadas": {},
+    "dependenciasExternas": []
+  }
+}

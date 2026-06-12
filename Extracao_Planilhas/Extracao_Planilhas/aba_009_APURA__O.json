@@ -1,0 +1,15 @@
+{
+  "id": 1834627391,
+  "nome": "APURAÇÃO",
+  "indice": 9,
+  "totalLinhas": 0,
+  "totalColunas": 0,
+  "cabecalhos": [],
+  "celulas": [],
+  "resumo": {
+    "totalCelulasComFormula": 0,
+    "totalCelulasComValor": 0,
+    "formulasUsadas": {},
+    "dependenciasExternas": []
+  }
+}

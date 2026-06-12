@@ -79,6 +79,16 @@ type PrevRealRow = {
   total_diferenca: number;
 };
 
+type DesbravadorParsedLine = {
+  descricao: string;
+  valor: number;
+};
+
+type ParsedImportSummary = {
+  lines_count: number;
+  total: number;
+};
+
 const getNormalizedOccupancyPercent = (value: any) => {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return 100;
@@ -150,6 +160,158 @@ const getAncestors = (code: string): string[] => {
 const sanitizeMonthBudget = (value: any) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const parseDesbravadorPdfLines = (rawText: string) => {
+  const lines = String(rawText || "")
+    .split(/\r?\n/)
+    .map((line) => line.replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+
+  const parsedLines: DesbravadorParsedLine[] = [];
+  const amountRegex = /^(.+?)\s+(-?\d{1,3}(?:\.\d{3})*,\d{2})$/;
+
+  for (const line of lines) {
+    const match = line.match(amountRegex);
+    if (!match) continue;
+    const descricao = String(match[1] || "").trim();
+    const valor = Number(toAmount(match[2] || ""));
+    if (!descricao || !Number.isFinite(valor)) continue;
+    parsedLines.push({ descricao, valor });
+  }
+
+  const uniqueByDescricao = new Map<string, number>();
+  for (const item of parsedLines) {
+    const current = uniqueByDescricao.get(item.descricao) || 0;
+    uniqueByDescricao.set(item.descricao, current + item.valor);
+  }
+
+  const consolidated = Array.from(uniqueByDescricao.entries()).map(([descricao, valor]) => ({
+    descricao,
+    valor,
+  }));
+
+  return consolidated.sort((a, b) => Math.abs(b.valor) - Math.abs(a.valor));
+};
+
+const normalizeExcelHeader = (value: any) =>
+  String(value || "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+
+const parseExcelAmount = (value: any) => {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  const text = String(value ?? "").trim();
+  if (!text) return NaN;
+  const normalized = text.replace(/\s/g, "").replace(/\./g, "").replace(",", ".");
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : NaN;
+};
+
+const parseDesbravadorExcelLines = (rows: any[][]) => {
+  const safeRows = Array.isArray(rows) ? rows : [];
+  if (!safeRows.length) return [] as DesbravadorParsedLine[];
+
+  let headerIdx = -1;
+  let descriptionCol = -1;
+  let amountCol = -1;
+
+  for (let i = 0; i < Math.min(safeRows.length, 20); i += 1) {
+    const row = safeRows[i] || [];
+    const normalizedHeaders = row.map((cell) => normalizeExcelHeader(cell));
+    const foundDescription = normalizedHeaders.findIndex((cell) =>
+      /descricao|historico|conta|categoria|item|nome/.test(cell)
+    );
+    const foundAmount = normalizedHeaders.findIndex((cell) =>
+      /valor|realizado|total|montante|saldo|vr/.test(cell)
+    );
+    if (foundDescription >= 0 && foundAmount >= 0) {
+      headerIdx = i;
+      descriptionCol = foundDescription;
+      amountCol = foundAmount;
+      break;
+    }
+  }
+
+  const startDataIdx = headerIdx >= 0 ? headerIdx + 1 : 0;
+  const parsedLines: DesbravadorParsedLine[] = [];
+
+  for (let i = startDataIdx; i < safeRows.length; i += 1) {
+    const row = safeRows[i] || [];
+    const descricaoRaw =
+      descriptionCol >= 0
+        ? row[descriptionCol]
+        : row.find((cell) => String(cell || "").trim().length > 0);
+    const valorRaw =
+      amountCol >= 0
+        ? row[amountCol]
+        : [...row].reverse().find((cell) => String(cell || "").trim().length > 0);
+
+    const descricao = String(descricaoRaw || "").trim();
+    const valor = parseExcelAmount(valorRaw);
+
+    if (!descricao || !Number.isFinite(valor)) continue;
+    parsedLines.push({ descricao, valor });
+  }
+
+  const uniqueByDescricao = new Map<string, number>();
+  for (const line of parsedLines) {
+    uniqueByDescricao.set(line.descricao, (uniqueByDescricao.get(line.descricao) || 0) + line.valor);
+  }
+
+  return Array.from(uniqueByDescricao.entries())
+    .map(([descricao, valor]) => ({ descricao, valor }))
+    .sort((a, b) => Math.abs(b.valor) - Math.abs(a.valor));
+};
+
+const parseDesbravadorExcelLinesWithColumns = (
+  rows: any[][],
+  descriptionColumnIndex: number,
+  valueColumnIndex: number
+) => {
+  const safeRows = Array.isArray(rows) ? rows : [];
+  const parsedLines: DesbravadorParsedLine[] = [];
+
+  for (const row of safeRows) {
+    const descricao = String(row?.[descriptionColumnIndex] ?? "").trim();
+    const valor = parseExcelAmount(row?.[valueColumnIndex]);
+    if (!descricao || !Number.isFinite(valor)) continue;
+    parsedLines.push({ descricao, valor });
+  }
+
+  const uniqueByDescricao = new Map<string, number>();
+  for (const line of parsedLines) {
+    uniqueByDescricao.set(line.descricao, (uniqueByDescricao.get(line.descricao) || 0) + line.valor);
+  }
+
+  return Array.from(uniqueByDescricao.entries())
+    .map(([descricao, valor]) => ({ descricao, valor }))
+    .sort((a, b) => Math.abs(b.valor) - Math.abs(a.valor));
+};
+
+const buildImportPreviewPayload = (
+  lines: DesbravadorParsedLine[],
+  fileName: string,
+  month?: string,
+  year?: string
+) => {
+  const summary: ParsedImportSummary = {
+    lines_count: lines.length,
+    total: lines.reduce((sum, line) => sum + line.valor, 0),
+  };
+
+  return {
+    success: true,
+    report_name: fileName || "relatorio-desbravador",
+    period: {
+      month: Number(month) || null,
+      year: Number(year) || null,
+    },
+    summary,
+    lines,
+  };
 };
 
 const getMonthDateRange = (year: number, month: number) => {
@@ -1281,6 +1443,103 @@ export function createApp() {
     } catch (error: any) {
       if (req.file?.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
       res.status(500).json({ error: error?.message || "Erro ao importar CRDs" });
+    }
+  });
+
+  // ====================================================
+  // IMPORTAÇÃO DE RELATÓRIOS (DESBRAVADOR)
+  // ====================================================
+  app.post("/api/import/desbravador/preview", upload.single("report_pdf"), async (req, res) => {
+    if (!req.file) return res.status(400).json({ error: "Relatório PDF não enviado" });
+    if (req.file.mimetype !== "application/pdf") {
+      if (req.file.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+      return res.status(400).json({ error: "Formato inválido. Envie um PDF." });
+    }
+
+    const { month, year } = req.body as { month?: string; year?: string };
+
+    try {
+      const fileBuffer = fs.readFileSync(req.file.path);
+      const pdfParse = await loadPdfParse();
+      const parsed = await pdfParse(fileBuffer);
+      const parsedLines = parseDesbravadorPdfLines(parsed.text || "");
+      res.json(buildImportPreviewPayload(parsedLines, req.file.originalname || "relatorio-desbravador.pdf", month, year));
+    } catch (error: any) {
+      res.status(500).json({
+        success: false,
+        error: error?.message || "Não foi possível processar o relatório PDF do Desbravador.",
+      });
+    } finally {
+      if (req.file?.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+    }
+  });
+
+  app.post("/api/import/desbravador/preview-excel", upload.single("report_excel"), async (req, res) => {
+    if (!req.file) return res.status(400).json({ error: "Relatório Excel não enviado" });
+    const allowedMimes = new Set([
+      "application/vnd.ms-excel",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "application/octet-stream",
+    ]);
+    const isExcelByExt = /\.(xlsx|xls)$/i.test(String(req.file.originalname || ""));
+    if (!allowedMimes.has(req.file.mimetype) && !isExcelByExt) {
+      if (req.file.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+      return res.status(400).json({ error: "Formato inválido. Envie um arquivo .xlsx ou .xls." });
+    }
+
+    const {
+      month,
+      year,
+      description_column_index,
+      value_column_index,
+    } = req.body as {
+      month?: string;
+      year?: string;
+      description_column_index?: string;
+      value_column_index?: string;
+    };
+
+    try {
+      const workbook = xlsx.readFile(req.file.path);
+      const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+      const rows = xlsx.utils.sheet_to_json(firstSheet, { header: 1, defval: "" }) as any[][];
+      const sampleHeaderRow = (rows || []).find((row) => Array.isArray(row) && row.some((cell) => String(cell || "").trim().length > 0)) || [];
+      const columns = (sampleHeaderRow as any[]).map((name, index) => ({
+        index,
+        name: String(name || `Coluna ${index + 1}`).trim() || `Coluna ${index + 1}`,
+      }));
+
+      const parsedDescriptionCol = Number(description_column_index);
+      const parsedValueCol = Number(value_column_index);
+      const hasManualMapping = Number.isInteger(parsedDescriptionCol) && Number.isInteger(parsedValueCol);
+      const parsedLines = hasManualMapping
+        ? parseDesbravadorExcelLinesWithColumns(rows, parsedDescriptionCol, parsedValueCol)
+        : parseDesbravadorExcelLines(rows);
+
+      const normalizedHeaders = (sampleHeaderRow as any[]).map((cell) => normalizeExcelHeader(cell));
+      const suggestedDescriptionCol = normalizedHeaders.findIndex((cell) =>
+        /descricao|historico|conta|categoria|item|nome/.test(cell)
+      );
+      const suggestedValueCol = normalizedHeaders.findIndex((cell) =>
+        /valor|realizado|total|montante|saldo|vr/.test(cell)
+      );
+
+      res.json({
+        ...buildImportPreviewPayload(parsedLines, req.file.originalname || "relatorio-desbravador.xlsx", month, year),
+        mapping: {
+          columns,
+          used_manual_mapping: hasManualMapping,
+          description_column_index: hasManualMapping ? parsedDescriptionCol : suggestedDescriptionCol,
+          value_column_index: hasManualMapping ? parsedValueCol : suggestedValueCol,
+        },
+      });
+    } catch (error: any) {
+      res.status(500).json({
+        success: false,
+        error: error?.message || "Não foi possível processar o relatório Excel do Desbravador.",
+      });
+    } finally {
+      if (req.file?.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
     }
   });
 

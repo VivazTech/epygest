@@ -1,0 +1,1510 @@
+{
+  "id": 1657726297,
+  "nome": "Calculos",
+  "indice": 6,
+  "totalLinhas": 62,
+  "totalColunas": 1,
+  "cabecalhos": [],
+  "celulas": [
+    {
+      "celula": "A5",
+      "linha": 5,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "='Síntese'!C48",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "aba_externa",
+          "abaOrigem": "Calculos",
+          "abaDestino": "Síntese",
+          "celula": "C48",
+          "referencia": "Síntese!C48"
+        }
+      ],
+      "valorCalculado": "ARRENDAMENTO ALUGUEL (522)",
+      "valorReal": "ARRENDAMENTO ALUGUEL (522)"
+    },
+    {
+      "celula": "A6",
+      "linha": 6,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "='Síntese'!C61",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "aba_externa",
+          "abaOrigem": "Calculos",
+          "abaDestino": "Síntese",
+          "celula": "C61",
+          "referencia": "Síntese!C61"
+        }
+      ],
+      "valorCalculado": "HONORÁRIOS ADVOCATICIOS (400)",
+      "valorReal": "HONORÁRIOS ADVOCATICIOS (400)"
+    },
+    {
+      "celula": "A7",
+      "linha": 7,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "='Síntese'!C72",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "aba_externa",
+          "abaOrigem": "Calculos",
+          "abaDestino": "Síntese",
+          "celula": "C72",
+          "referencia": "Síntese!C72"
+        }
+      ],
+      "valorCalculado": "PGRS (662)",
+      "valorReal": "PGRS (662)"
+    },
+    {
+      "celula": "A8",
+      "linha": 8,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "='Síntese'!C70",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "aba_externa",
+          "abaOrigem": "Calculos",
+          "abaDestino": "Síntese",
+          "celula": "C70",
+          "referencia": "Síntese!C70"
+        }
+      ],
+      "valorCalculado": "SERVICOS DE LIMPEZA (414)",
+      "valorReal": "SERVICOS DE LIMPEZA (414)"
+    },
+    {
+      "celula": "A9",
+      "linha": 9,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "='Síntese'!C73",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "aba_externa",
+          "abaOrigem": "Calculos",
+          "abaDestino": "Síntese",
+          "celula": "C73",
+          "referencia": "Síntese!C73"
+        }
+      ],
+      "valorCalculado": "ACIFI ASSOC COMERCIAL (393)",
+      "valorReal": "ACIFI ASSOC COMERCIAL (393)"
+    },
+    {
+      "celula": "A10",
+      "linha": 10,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "='Síntese'!C74",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "aba_externa",
+          "abaOrigem": "Calculos",
+          "abaDestino": "Síntese",
+          "celula": "C74",
+          "referencia": "Síntese!C74"
+        }
+      ],
+      "valorCalculado": "ALIMENTAÇÃO - REFEITÓRIO (SEM CRD)",
+      "valorReal": "ALIMENTAÇÃO - REFEITÓRIO (SEM CRD)"
+    },
+    {
+      "celula": "A11",
+      "linha": 11,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "='Síntese'!C75",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "aba_externa",
+          "abaOrigem": "Calculos",
+          "abaDestino": "Síntese",
+          "celula": "C75",
+          "referencia": "Síntese!C75"
+        }
+      ],
+      "valorCalculado": "ALUGUEL IMPRESSORAS (384)",
+      "valorReal": "ALUGUEL IMPRESSORAS (384)"
+    },
+    {
+      "celula": "A12",
+      "linha": 12,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "='Síntese'!C76",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "aba_externa",
+          "abaOrigem": "Calculos",
+          "abaDestino": "Síntese",
+          "celula": "C76",
+          "referencia": "Síntese!C76"
+        }
+      ],
+      "valorCalculado": "ANÁLISE POÇO/PISCINA/ETE (385)",
+      "valorReal": "ANÁLISE POÇO/PISCINA/ETE (385)"
+    },
+    {
+      "celula": "A13",
+      "linha": 13,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "='Síntese'!C77",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "aba_externa",
+          "abaOrigem": "Calculos",
+          "abaDestino": "Síntese",
+          "celula": "C77",
+          "referencia": "Síntese!C77"
+        }
+      ],
+      "valorCalculado": "MANUTENÇÃO AR CONDICIONADO (381)",
+      "valorReal": "MANUTENÇÃO AR CONDICIONADO (381)"
+    },
+    {
+      "celula": "A14",
+      "linha": 14,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "='Síntese'!C78",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "aba_externa",
+          "abaOrigem": "Calculos",
+          "abaDestino": "Síntese",
+          "celula": "C78",
+          "referencia": "Síntese!C78"
+        }
+      ],
+      "valorCalculado": "ASSOC BRAS ABIH (380)",
+      "valorReal": "ASSOC BRAS ABIH (380)"
+    },
+    {
+      "celula": "A15",
+      "linha": 15,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "='Síntese'!C79",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "aba_externa",
+          "abaOrigem": "Calculos",
+          "abaDestino": "Síntese",
+          "celula": "C79",
+          "referencia": "Síntese!C79"
+        }
+      ],
+      "valorCalculado": "CONSULTORIAS MENSAIS (371)",
+      "valorReal": "CONSULTORIAS MENSAIS (371)"
+    },
+    {
+      "celula": "A16",
+      "linha": 16,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "='Síntese'!C80",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "aba_externa",
+          "abaOrigem": "Calculos",
+          "abaDestino": "Síntese",
+          "celula": "C80",
+          "referencia": "Síntese!C80"
+        }
+      ],
+      "valorCalculado": "CONSUMO INTERNO (SEM CRD)",
+      "valorReal": "CONSUMO INTERNO (SEM CRD)"
+    },
+    {
+      "celula": "A17",
+      "linha": 17,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "='Síntese'!C81",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "aba_externa",
+          "abaOrigem": "Calculos",
+          "abaDestino": "Síntese",
+          "celula": "C81",
+          "referencia": "Síntese!C81"
+        }
+      ],
+      "valorCalculado": "CONTRATO MANUTENÇÃO COMPUTADOR (375)",
+      "valorReal": "CONTRATO MANUTENÇÃO COMPUTADOR (375)"
+    },
+    {
+      "celula": "A18",
+      "linha": 18,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "='Síntese'!C82",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "aba_externa",
+          "abaOrigem": "Calculos",
+          "abaDestino": "Síntese",
+          "celula": "C82",
+          "referencia": "Síntese!C82"
+        }
+      ],
+      "valorCalculado": "CONTRATO MANUTENÇAO TELEFONE (374)",
+      "valorReal": "CONTRATO MANUTENÇAO TELEFONE (374)"
+    },
+    {
+      "celula": "A19",
+      "linha": 19,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "='Síntese'!C83",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "aba_externa",
+          "abaOrigem": "Calculos",
+          "abaDestino": "Síntese",
+          "celula": "C83",
+          "referencia": "Síntese!C83"
+        }
+      ],
+      "valorCalculado": "TAXA TURISMO (370)",
+      "valorReal": "TAXA TURISMO (370)"
+    },
+    {
+      "celula": "A20",
+      "linha": 20,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "='Síntese'!C84",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "aba_externa",
+          "abaOrigem": "Calculos",
+          "abaDestino": "Síntese",
+          "celula": "C84",
+          "referencia": "Síntese!C84"
+        }
+      ],
+      "valorCalculado": "DEDETIZAÇÃO/FOSSA (410)",
+      "valorReal": "DEDETIZAÇÃO/FOSSA (410)"
+    },
+    {
+      "celula": "A21",
+      "linha": 21,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "='Síntese'!C85",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "aba_externa",
+          "abaOrigem": "Calculos",
+          "abaDestino": "Síntese",
+          "celula": "C85",
+          "referencia": "Síntese!C85"
+        }
+      ],
+      "valorCalculado": "SISTEMA DE GESTÃO (376)",
+      "valorReal": "SISTEMA DE GESTÃO (376)"
+    },
+    {
+      "celula": "A22",
+      "linha": 22,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "='Síntese'!C86",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "aba_externa",
+          "abaOrigem": "Calculos",
+          "abaDestino": "Síntese",
+          "celula": "C86",
+          "referencia": "Síntese!C86"
+        }
+      ],
+      "valorCalculado": "DESP CONSULTORIA AMBIENTAL (372)",
+      "valorReal": "DESP CONSULTORIA AMBIENTAL (372)"
+    },
+    {
+      "celula": "A23",
+      "linha": 23,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "='Síntese'!C87",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "aba_externa",
+          "abaOrigem": "Calculos",
+          "abaDestino": "Síntese",
+          "celula": "C87",
+          "referencia": "Síntese!C87"
+        }
+      ],
+      "valorCalculado": "DESPESAS COZINHA (395)",
+      "valorReal": "DESPESAS COZINHA (395)"
+    },
+    {
+      "celula": "A24",
+      "linha": 24,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "='Síntese'!C88",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "aba_externa",
+          "abaOrigem": "Calculos",
+          "abaDestino": "Síntese",
+          "celula": "C88",
+          "referencia": "Síntese!C88"
+        }
+      ],
+      "valorCalculado": "DESPESAS MENSAIS RH (398)",
+      "valorReal": "DESPESAS MENSAIS RH (398)"
+    },
+    {
+      "celula": "A25",
+      "linha": 25,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "='Síntese'!C89",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "aba_externa",
+          "abaOrigem": "Calculos",
+          "abaDestino": "Síntese",
+          "celula": "C89",
+          "referencia": "Síntese!C89"
+        }
+      ],
+      "valorCalculado": "COMBUSTIVEIS (490)",
+      "valorReal": "COMBUSTIVEIS (490)"
+    },
+    {
+      "celula": "A26",
+      "linha": 26,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "='Síntese'!C90",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "aba_externa",
+          "abaOrigem": "Calculos",
+          "abaDestino": "Síntese",
+          "celula": "C90",
+          "referencia": "Síntese!C90"
+        }
+      ],
+      "valorCalculado": "ECAD CENTRAL DE ARRECADAÇÃO (392)",
+      "valorReal": "ECAD CENTRAL DE ARRECADAÇÃO (392)"
+    },
+    {
+      "celula": "A27",
+      "linha": 27,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "='Síntese'!C91",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "aba_externa",
+          "abaOrigem": "Calculos",
+          "abaDestino": "Síntese",
+          "celula": "C91",
+          "referencia": "Síntese!C91"
+        }
+      ],
+      "valorCalculado": "GAS A GRANEL (491)",
+      "valorReal": "GAS A GRANEL (491)"
+    },
+    {
+      "celula": "A28",
+      "linha": 28,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "='Síntese'!C92",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "aba_externa",
+          "abaOrigem": "Calculos",
+          "abaDestino": "Síntese",
+          "celula": "C92",
+          "referencia": "Síntese!C92"
+        }
+      ],
+      "valorCalculado": "HONORARIOS CONTABEIS (373)",
+      "valorReal": "HONORARIOS CONTABEIS (373)"
+    },
+    {
+      "celula": "A29",
+      "linha": 29,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "='Síntese'!C93",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "aba_externa",
+          "abaOrigem": "Calculos",
+          "abaDestino": "Síntese",
+          "celula": "C93",
+          "referencia": "Síntese!C93"
+        }
+      ],
+      "valorCalculado": "ENERGIA (367)",
+      "valorReal": "ENERGIA (367)"
+    },
+    {
+      "celula": "A30",
+      "linha": 30,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "='Síntese'!C94",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "aba_externa",
+          "abaOrigem": "Calculos",
+          "abaDestino": "Síntese",
+          "celula": "C94",
+          "referencia": "Síntese!C94"
+        }
+      ],
+      "valorCalculado": "SEGURO VIDA EM GRUPO (350)",
+      "valorReal": "SEGURO VIDA EM GRUPO (350)"
+    },
+    {
+      "celula": "A31",
+      "linha": 31,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "='Síntese'!C95",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "aba_externa",
+          "abaOrigem": "Calculos",
+          "abaDestino": "Síntese",
+          "celula": "C95",
+          "referencia": "Síntese!C95"
+        }
+      ],
+      "valorCalculado": "SERVICO ASSINATURA TV (391)",
+      "valorReal": "SERVICO ASSINATURA TV (391)"
+    },
+    {
+      "celula": "A32",
+      "linha": 32,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "='Síntese'!C96",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "aba_externa",
+          "abaOrigem": "Calculos",
+          "abaDestino": "Síntese",
+          "celula": "C96",
+          "referencia": "Síntese!C96"
+        }
+      ],
+      "valorCalculado": "SERVIÇO INTERNET (383)",
+      "valorReal": "SERVIÇO INTERNET (383)"
+    },
+    {
+      "celula": "A33",
+      "linha": 33,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "='Síntese'!C97",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "aba_externa",
+          "abaOrigem": "Calculos",
+          "abaDestino": "Síntese",
+          "celula": "C97",
+          "referencia": "Síntese!C97"
+        }
+      ],
+      "valorCalculado": "SERVIÇOS JARDINAGEM (394)",
+      "valorReal": "SERVIÇOS JARDINAGEM (394)"
+    },
+    {
+      "celula": "A34",
+      "linha": 34,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "='Síntese'!C98",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "aba_externa",
+          "abaOrigem": "Calculos",
+          "abaDestino": "Síntese",
+          "celula": "C98",
+          "referencia": "Síntese!C98"
+        }
+      ],
+      "valorCalculado": "SERVIÇOS SEGURANÇA (386)",
+      "valorReal": "SERVIÇOS SEGURANÇA (386)"
+    },
+    {
+      "celula": "A35",
+      "linha": 35,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "='Síntese'!C99",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "aba_externa",
+          "abaOrigem": "Calculos",
+          "abaDestino": "Síntese",
+          "celula": "C99",
+          "referencia": "Síntese!C99"
+        }
+      ],
+      "valorCalculado": "SINDICATO HOTEIS E BARES (379)",
+      "valorReal": "SINDICATO HOTEIS E BARES (379)"
+    },
+    {
+      "celula": "A36",
+      "linha": 36,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "='Síntese'!C100",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "aba_externa",
+          "abaOrigem": "Calculos",
+          "abaDestino": "Síntese",
+          "celula": "C100",
+          "referencia": "Síntese!C100"
+        }
+      ],
+      "valorCalculado": "CONSERTO MÁQUINAS DIVERSAS (404)",
+      "valorReal": "CONSERTO MÁQUINAS DIVERSAS (404)"
+    },
+    {
+      "celula": "A37",
+      "linha": 37,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "='Síntese'!C101",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "aba_externa",
+          "abaOrigem": "Calculos",
+          "abaDestino": "Síntese",
+          "celula": "C101",
+          "referencia": "Síntese!C101"
+        }
+      ],
+      "valorCalculado": "GERADOR (406)",
+      "valorReal": "GERADOR (406)"
+    },
+    {
+      "celula": "A38",
+      "linha": 38,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "='Síntese'!C102",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "aba_externa",
+          "abaOrigem": "Calculos",
+          "abaDestino": "Síntese",
+          "celula": "C102",
+          "referencia": "Síntese!C102"
+        }
+      ],
+      "valorCalculado": "MANUTENÇÃO ELEVADORES (377)",
+      "valorReal": "MANUTENÇÃO ELEVADORES (377)"
+    },
+    {
+      "celula": "A39",
+      "linha": 39,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "='Síntese'!C103",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "aba_externa",
+          "abaOrigem": "Calculos",
+          "abaDestino": "Síntese",
+          "celula": "C103",
+          "referencia": "Síntese!C103"
+        }
+      ],
+      "valorCalculado": "MANUTENÇÃO SERVIÇOS (416)",
+      "valorReal": "MANUTENÇÃO SERVIÇOS (416)"
+    },
+    {
+      "celula": "A40",
+      "linha": 40,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "='Síntese'!C104",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "aba_externa",
+          "abaOrigem": "Calculos",
+          "abaDestino": "Síntese",
+          "celula": "C104",
+          "referencia": "Síntese!C104"
+        }
+      ],
+      "valorCalculado": "MANUTENÇAO LAVANDERIA (389)",
+      "valorReal": "MANUTENÇAO LAVANDERIA (389)"
+    },
+    {
+      "celula": "A41",
+      "linha": 41,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "='Síntese'!C105",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "aba_externa",
+          "abaOrigem": "Calculos",
+          "abaDestino": "Síntese",
+          "celula": "C105",
+          "referencia": "Síntese!C105"
+        }
+      ],
+      "valorCalculado": "MOTORES E BOMBAS (403)",
+      "valorReal": "MOTORES E BOMBAS (403)"
+    },
+    {
+      "celula": "A42",
+      "linha": 42,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "='Síntese'!C106",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "aba_externa",
+          "abaOrigem": "Calculos",
+          "abaDestino": "Síntese",
+          "celula": "C106",
+          "referencia": "Síntese!C106"
+        }
+      ],
+      "valorCalculado": "ASSINATURA JORNAIS/REVISTAS E OUTROS (361)",
+      "valorReal": "ASSINATURA JORNAIS/REVISTAS E OUTROS (361)"
+    },
+    {
+      "celula": "A43",
+      "linha": 43,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "='Síntese'!C107",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "aba_externa",
+          "abaOrigem": "Calculos",
+          "abaDestino": "Síntese",
+          "celula": "C107",
+          "referencia": "Síntese!C107"
+        }
+      ],
+      "valorCalculado": "DESPESA COMERCIAL MENSAL E MARKETING (352)",
+      "valorReal": "DESPESA COMERCIAL MENSAL E MARKETING (352)"
+    },
+    {
+      "celula": "A44",
+      "linha": 44,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "='Síntese'!C108",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "aba_externa",
+          "abaOrigem": "Calculos",
+          "abaDestino": "Síntese",
+          "celula": "C108",
+          "referencia": "Síntese!C108"
+        }
+      ],
+      "valorCalculado": "PATROCINIO/ ANUNCIO (358)",
+      "valorReal": "PATROCINIO/ ANUNCIO (358)"
+    },
+    {
+      "celula": "A45",
+      "linha": 45,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "='Síntese'!C110",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "aba_externa",
+          "abaOrigem": "Calculos",
+          "abaDestino": "Síntese",
+          "celula": "C110",
+          "referencia": "Síntese!C110"
+        }
+      ],
+      "valorCalculado": "REDES DE INCENDIO E BOILERS (345)",
+      "valorReal": "REDES DE INCENDIO E BOILERS (345)"
+    },
+    {
+      "celula": "A46",
+      "linha": 46,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "='Síntese'!C111",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "aba_externa",
+          "abaOrigem": "Calculos",
+          "abaDestino": "Síntese",
+          "celula": "C111",
+          "referencia": "Síntese!C111"
+        }
+      ],
+      "valorCalculado": "REFORMA CASAS (635)",
+      "valorReal": "REFORMA CASAS (635)"
+    },
+    {
+      "celula": "A47",
+      "linha": 47,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "='Síntese'!C112",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "aba_externa",
+          "abaOrigem": "Calculos",
+          "abaDestino": "Síntese",
+          "celula": "C112",
+          "referencia": "Síntese!C112"
+        }
+      ],
+      "valorCalculado": "SEGURO PREDIO (348)",
+      "valorReal": "SEGURO PREDIO (348)"
+    },
+    {
+      "celula": "A48",
+      "linha": 48,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "='Síntese'!C113",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "aba_externa",
+          "abaOrigem": "Calculos",
+          "abaDestino": "Síntese",
+          "celula": "C113",
+          "referencia": "Síntese!C113"
+        }
+      ],
+      "valorCalculado": "SEGURO VEICULO (349)",
+      "valorReal": "SEGURO VEICULO (349)"
+    },
+    {
+      "celula": "A49",
+      "linha": 49,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "='Síntese'!C114",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "aba_externa",
+          "abaOrigem": "Calculos",
+          "abaDestino": "Síntese",
+          "celula": "C114",
+          "referencia": "Síntese!C114"
+        }
+      ],
+      "valorCalculado": "ALVARA POLICIAL (327)",
+      "valorReal": "ALVARA POLICIAL (327)"
+    },
+    {
+      "celula": "A50",
+      "linha": 50,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "='Síntese'!C115",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "aba_externa",
+          "abaOrigem": "Calculos",
+          "abaDestino": "Síntese",
+          "celula": "C115",
+          "referencia": "Síntese!C115"
+        }
+      ],
+      "valorCalculado": "ALVARA PREFEITURA (325)",
+      "valorReal": "ALVARA PREFEITURA (325)"
+    },
+    {
+      "celula": "A51",
+      "linha": 51,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "='Síntese'!C116",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "aba_externa",
+          "abaOrigem": "Calculos",
+          "abaDestino": "Síntese",
+          "celula": "C116",
+          "referencia": "Síntese!C116"
+        }
+      ],
+      "valorCalculado": "IPTU (323)",
+      "valorReal": "IPTU (323)"
+    },
+    {
+      "celula": "A52",
+      "linha": 52,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "='Síntese'!C117",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "aba_externa",
+          "abaOrigem": "Calculos",
+          "abaDestino": "Síntese",
+          "celula": "C117",
+          "referencia": "Síntese!C117"
+        }
+      ],
+      "valorCalculado": "VIAGENS COMERCIAIS (354)",
+      "valorReal": "VIAGENS COMERCIAIS (354)"
+    },
+    {
+      "celula": "A53",
+      "linha": 53,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "='Síntese'!C118",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "aba_externa",
+          "abaOrigem": "Calculos",
+          "abaDestino": "Síntese",
+          "celula": "C118",
+          "referencia": "Síntese!C118"
+        }
+      ],
+      "valorCalculado": "INSUMOS REFORMAS HOTEL VIVAZ (575)",
+      "valorReal": "INSUMOS REFORMAS HOTEL VIVAZ (575)"
+    },
+    {
+      "celula": "A54",
+      "linha": 54,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "='Síntese'!C119",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "aba_externa",
+          "abaOrigem": "Calculos",
+          "abaDestino": "Síntese",
+          "celula": "C119",
+          "referencia": "Síntese!C119"
+        }
+      ],
+      "valorCalculado": "ENXOVAL DE APTOS (CAMA E BANHO) (506)",
+      "valorReal": "ENXOVAL DE APTOS (CAMA E BANHO) (506)"
+    },
+    {
+      "celula": "A55",
+      "linha": 55,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "='Síntese'!C120",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "aba_externa",
+          "abaOrigem": "Calculos",
+          "abaDestino": "Síntese",
+          "celula": "C120",
+          "referencia": "Síntese!C120"
+        }
+      ],
+      "valorCalculado": "REPASSE AQUAMANIA - PASSAPORTES E CONSUMO (422)",
+      "valorReal": "REPASSE AQUAMANIA - PASSAPORTES E CONSUMO (422)"
+    },
+    {
+      "celula": "A56",
+      "linha": 56,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "='Síntese'!C121",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "aba_externa",
+          "abaOrigem": "Calculos",
+          "abaDestino": "Síntese",
+          "celula": "C121",
+          "referencia": "Síntese!C121"
+        }
+      ],
+      "valorCalculado": "EVENTOS DE CALENDÁRIO (NATAL/REVEILLION/PASCOA) (428)",
+      "valorReal": "EVENTOS DE CALENDÁRIO (NATAL/REVEILLION/PASCOA) (428)"
+    },
+    {
+      "celula": "A57",
+      "linha": 57,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "='Síntese'!C122",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "aba_externa",
+          "abaOrigem": "Calculos",
+          "abaDestino": "Síntese",
+          "celula": "C122",
+          "referencia": "Síntese!C122"
+        }
+      ],
+      "valorCalculado": "EQUIPAMENTOS E MATERIAL DE INFORMATICA (588)",
+      "valorReal": "EQUIPAMENTOS E MATERIAL DE INFORMATICA (588)"
+    },
+    {
+      "celula": "A58",
+      "linha": 58,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "='Síntese'!C123",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "aba_externa",
+          "abaOrigem": "Calculos",
+          "abaDestino": "Síntese",
+          "celula": "C123",
+          "referencia": "Síntese!C123"
+        }
+      ],
+      "valorCalculado": "TELEFONE (366)",
+      "valorReal": "TELEFONE (366)"
+    },
+    {
+      "celula": "A59",
+      "linha": 59,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "=#REF!",
+      "tipoFormula": "outro",
+      "dependencias": [],
+      "valorCalculado": "#REF!",
+      "valorReal": "#REF!"
+    },
+    {
+      "celula": "A60",
+      "linha": 60,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "='Síntese'!C124",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "aba_externa",
+          "abaOrigem": "Calculos",
+          "abaDestino": "Síntese",
+          "celula": "C124",
+          "referencia": "Síntese!C124"
+        }
+      ],
+      "valorCalculado": "USO E CONSUMO (SEM CRD)",
+      "valorReal": "USO E CONSUMO (SEM CRD)"
+    },
+    {
+      "celula": "A61",
+      "linha": 61,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "='Síntese'!C125",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "aba_externa",
+          "abaOrigem": "Calculos",
+          "abaDestino": "Síntese",
+          "celula": "C125",
+          "referencia": "Síntese!C125"
+        }
+      ],
+      "valorCalculado": "AQUAMANIA",
+      "valorReal": "AQUAMANIA"
+    },
+    {
+      "celula": "A62",
+      "linha": 62,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "formula": "='Síntese'!C126",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "aba_externa",
+          "abaOrigem": "Calculos",
+          "abaDestino": "Síntese",
+          "celula": "C126",
+          "referencia": "Síntese!C126"
+        }
+      ],
+      "valorCalculado": "ADMINISTRACAO/G.OPERACIONAL",
+      "valorReal": "ADMINISTRACAO/G.OPERACIONAL"
+    }
+  ],
+  "resumo": {
+    "totalCelulasComFormula": 58,
+    "totalCelulasComValor": 0,
+    "formulasUsadas": {},
+    "dependenciasExternas": [
+      {
+        "tipo": "aba_externa",
+        "abaOrigem": "Calculos",
+        "abaDestino": "Síntese",
+        "celula": "C48",
+        "referencia": "Síntese!C48"
+      },
+      {
+        "tipo": "aba_externa",
+        "abaOrigem": "Calculos",
+        "abaDestino": "Síntese",
+        "celula": "C61",
+        "referencia": "Síntese!C61"
+      },
+      {
+        "tipo": "aba_externa",
+        "abaOrigem": "Calculos",
+        "abaDestino": "Síntese",
+        "celula": "C72",
+        "referencia": "Síntese!C72"
+      },
+      {
+        "tipo": "aba_externa",
+        "abaOrigem": "Calculos",
+        "abaDestino": "Síntese",
+        "celula": "C70",
+        "referencia": "Síntese!C70"
+      },
+      {
+        "tipo": "aba_externa",
+        "abaOrigem": "Calculos",
+        "abaDestino": "Síntese",
+        "celula": "C73",
+        "referencia": "Síntese!C73"
+      },
+      {
+        "tipo": "aba_externa",
+        "abaOrigem": "Calculos",
+        "abaDestino": "Síntese",
+        "celula": "C74",
+        "referencia": "Síntese!C74"
+      },
+      {
+        "tipo": "aba_externa",
+        "abaOrigem": "Calculos",
+        "abaDestino": "Síntese",
+        "celula": "C75",
+        "referencia": "Síntese!C75"
+      },
+      {
+        "tipo": "aba_externa",
+        "abaOrigem": "Calculos",
+        "abaDestino": "Síntese",
+        "celula": "C76",
+        "referencia": "Síntese!C76"
+      },
+      {
+        "tipo": "aba_externa",
+        "abaOrigem": "Calculos",
+        "abaDestino": "Síntese",
+        "celula": "C77",
+        "referencia": "Síntese!C77"
+      },
+      {
+        "tipo": "aba_externa",
+        "abaOrigem": "Calculos",
+        "abaDestino": "Síntese",
+        "celula": "C78",
+        "referencia": "Síntese!C78"
+      },
+      {
+        "tipo": "aba_externa",
+        "abaOrigem": "Calculos",
+        "abaDestino": "Síntese",
+        "celula": "C79",
+        "referencia": "Síntese!C79"
+      },
+      {
+        "tipo": "aba_externa",
+        "abaOrigem": "Calculos",
+        "abaDestino": "Síntese",
+        "celula": "C80",
+        "referencia": "Síntese!C80"
+      },
+      {
+        "tipo": "aba_externa",
+        "abaOrigem": "Calculos",
+        "abaDestino": "Síntese",
+        "celula": "C81",
+        "referencia": "Síntese!C81"
+      },
+      {
+        "tipo": "aba_externa",
+        "abaOrigem": "Calculos",
+        "abaDestino": "Síntese",
+        "celula": "C82",
+        "referencia": "Síntese!C82"
+      },
+      {
+        "tipo": "aba_externa",
+        "abaOrigem": "Calculos",
+        "abaDestino": "Síntese",
+        "celula": "C83",
+        "referencia": "Síntese!C83"
+      },
+      {
+        "tipo": "aba_externa",
+        "abaOrigem": "Calculos",
+        "abaDestino": "Síntese",
+        "celula": "C84",
+        "referencia": "Síntese!C84"
+      },
+      {
+        "tipo": "aba_externa",
+        "abaOrigem": "Calculos",
+        "abaDestino": "Síntese",
+        "celula": "C85",
+        "referencia": "Síntese!C85"
+      },
+      {
+        "tipo": "aba_externa",
+        "abaOrigem": "Calculos",
+        "abaDestino": "Síntese",
+        "celula": "C86",
+        "referencia": "Síntese!C86"
+      },
+      {
+        "tipo": "aba_externa",
+        "abaOrigem": "Calculos",
+        "abaDestino": "Síntese",
+        "celula": "C87",
+        "referencia": "Síntese!C87"
+      },
+      {
+        "tipo": "aba_externa",
+        "abaOrigem": "Calculos",
+        "abaDestino": "Síntese",
+        "celula": "C88",
+        "referencia": "Síntese!C88"
+      },
+      {
+        "tipo": "aba_externa",
+        "abaOrigem": "Calculos",
+        "abaDestino": "Síntese",
+        "celula": "C89",
+        "referencia": "Síntese!C89"
+      },
+      {
+        "tipo": "aba_externa",
+        "abaOrigem": "Calculos",
+        "abaDestino": "Síntese",
+        "celula": "C90",
+        "referencia": "Síntese!C90"
+      },
+      {
+        "tipo": "aba_externa",
+        "abaOrigem": "Calculos",
+        "abaDestino": "Síntese",
+        "celula": "C91",
+        "referencia": "Síntese!C91"
+      },
+      {
+        "tipo": "aba_externa",
+        "abaOrigem": "Calculos",
+        "abaDestino": "Síntese",
+        "celula": "C92",
+        "referencia": "Síntese!C92"
+      },
+      {
+        "tipo": "aba_externa",
+        "abaOrigem": "Calculos",
+        "abaDestino": "Síntese",
+        "celula": "C93",
+        "referencia": "Síntese!C93"
+      },
+      {
+        "tipo": "aba_externa",
+        "abaOrigem": "Calculos",
+        "abaDestino": "Síntese",
+        "celula": "C94",
+        "referencia": "Síntese!C94"
+      },
+      {
+        "tipo": "aba_externa",
+        "abaOrigem": "Calculos",
+        "abaDestino": "Síntese",
+        "celula": "C95",
+        "referencia": "Síntese!C95"
+      },
+      {
+        "tipo": "aba_externa",
+        "abaOrigem": "Calculos",
+        "abaDestino": "Síntese",
+        "celula": "C96",
+        "referencia": "Síntese!C96"
+      },
+      {
+        "tipo": "aba_externa",
+        "abaOrigem": "Calculos",
+        "abaDestino": "Síntese",
+        "celula": "C97",
+        "referencia": "Síntese!C97"
+      },
+      {
+        "tipo": "aba_externa",
+        "abaOrigem": "Calculos",
+        "abaDestino": "Síntese",
+        "celula": "C98",
+        "referencia": "Síntese!C98"
+      },
+      {
+        "tipo": "aba_externa",
+        "abaOrigem": "Calculos",
+        "abaDestino": "Síntese",
+        "celula": "C99",
+        "referencia": "Síntese!C99"
+      },
+      {
+        "tipo": "aba_externa",
+        "abaOrigem": "Calculos",
+        "abaDestino": "Síntese",
+        "celula": "C100",
+        "referencia": "Síntese!C100"
+      },
+      {
+        "tipo": "aba_externa",
+        "abaOrigem": "Calculos",
+        "abaDestino": "Síntese",
+        "celula": "C101",
+        "referencia": "Síntese!C101"
+      },
+      {
+        "tipo": "aba_externa",
+        "abaOrigem": "Calculos",
+        "abaDestino": "Síntese",
+        "celula": "C102",
+        "referencia": "Síntese!C102"
+      },
+      {
+        "tipo": "aba_externa",
+        "abaOrigem": "Calculos",
+        "abaDestino": "Síntese",
+        "celula": "C103",
+        "referencia": "Síntese!C103"
+      },
+      {
+        "tipo": "aba_externa",
+        "abaOrigem": "Calculos",
+        "abaDestino": "Síntese",
+        "celula": "C104",
+        "referencia": "Síntese!C104"
+      },
+      {
+        "tipo": "aba_externa",
+        "abaOrigem": "Calculos",
+        "abaDestino": "Síntese",
+        "celula": "C105",
+        "referencia": "Síntese!C105"
+      },
+      {
+        "tipo": "aba_externa",
+        "abaOrigem": "Calculos",
+        "abaDestino": "Síntese",
+        "celula": "C106",
+        "referencia": "Síntese!C106"
+      },
+      {
+        "tipo": "aba_externa",
+        "abaOrigem": "Calculos",
+        "abaDestino": "Síntese",
+        "celula": "C107",
+        "referencia": "Síntese!C107"
+      },
+      {
+        "tipo": "aba_externa",
+        "abaOrigem": "Calculos",
+        "abaDestino": "Síntese",
+        "celula": "C108",
+        "referencia": "Síntese!C108"
+      },
+      {
+        "tipo": "aba_externa",
+        "abaOrigem": "Calculos",
+        "abaDestino": "Síntese",
+        "celula": "C110",
+        "referencia": "Síntese!C110"
+      },
+      {
+        "tipo": "aba_externa",
+        "abaOrigem": "Calculos",
+        "abaDestino": "Síntese",
+        "celula": "C111",
+        "referencia": "Síntese!C111"
+      },
+      {
+        "tipo": "aba_externa",
+        "abaOrigem": "Calculos",
+        "abaDestino": "Síntese",
+        "celula": "C112",
+        "referencia": "Síntese!C112"
+      },
+      {
+        "tipo": "aba_externa",
+        "abaOrigem": "Calculos",
+        "abaDestino": "Síntese",
+        "celula": "C113",
+        "referencia": "Síntese!C113"
+      },
+      {
+        "tipo": "aba_externa",
+        "abaOrigem": "Calculos",
+        "abaDestino": "Síntese",
+        "celula": "C114",
+        "referencia": "Síntese!C114"
+      },
+      {
+        "tipo": "aba_externa",
+        "abaOrigem": "Calculos",
+        "abaDestino": "Síntese",
+        "celula": "C115",
+        "referencia": "Síntese!C115"
+      },
+      {
+        "tipo": "aba_externa",
+        "abaOrigem": "Calculos",
+        "abaDestino": "Síntese",
+        "celula": "C116",
+        "referencia": "Síntese!C116"
+      },
+      {
+        "tipo": "aba_externa",
+        "abaOrigem": "Calculos",
+        "abaDestino": "Síntese",
+        "celula": "C117",
+        "referencia": "Síntese!C117"
+      },
+      {
+        "tipo": "aba_externa",
+        "abaOrigem": "Calculos",
+        "abaDestino": "Síntese",
+        "celula": "C118",
+        "referencia": "Síntese!C118"
+      },
+      {
+        "tipo": "aba_externa",
+        "abaOrigem": "Calculos",
+        "abaDestino": "Síntese",
+        "celula": "C119",
+        "referencia": "Síntese!C119"
+      },
+      {
+        "tipo": "aba_externa",
+        "abaOrigem": "Calculos",
+        "abaDestino": "Síntese",
+        "celula": "C120",
+        "referencia": "Síntese!C120"
+      },
+      {
+        "tipo": "aba_externa",
+        "abaOrigem": "Calculos",
+        "abaDestino": "Síntese",
+        "celula": "C121",
+        "referencia": "Síntese!C121"
+      },
+      {
+        "tipo": "aba_externa",
+        "abaOrigem": "Calculos",
+        "abaDestino": "Síntese",
+        "celula": "C122",
+        "referencia": "Síntese!C122"
+      },
+      {
+        "tipo": "aba_externa",
+        "abaOrigem": "Calculos",
+        "abaDestino": "Síntese",
+        "celula": "C123",
+        "referencia": "Síntese!C123"
+      },
+      {
+        "tipo": "aba_externa",
+        "abaOrigem": "Calculos",
+        "abaDestino": "Síntese",
+        "celula": "C124",
+        "referencia": "Síntese!C124"
+      },
+      {
+        "tipo": "aba_externa",
+        "abaOrigem": "Calculos",
+        "abaDestino": "Síntese",
+        "celula": "C125",
+        "referencia": "Síntese!C125"
+      },
+      {
+        "tipo": "aba_externa",
+        "abaOrigem": "Calculos",
+        "abaDestino": "Síntese",
+        "celula": "C126",
+        "referencia": "Síntese!C126"
+      }
+    ]
+  }
+}

@@ -1,0 +1,196 @@
+{
+  "id": 1919127486,
+  "nome": "Informações importantes",
+  "indice": 8,
+  "totalLinhas": 28,
+  "totalColunas": 4,
+  "cabecalhos": [],
+  "celulas": [
+    {
+      "celula": "A6",
+      "linha": 6,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "valor": "Despesas Patrócinio ",
+      "valorReal": "Despesas Patrócinio ",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "A8",
+      "linha": 8,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "valor": "2024",
+      "valorReal": 2024,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A9",
+      "linha": 9,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "valor": "R$ 262.941,75",
+      "valorReal": 262941.75,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A12",
+      "linha": 12,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "valor": "Despesas Operacionais ",
+      "valorReal": "Despesas Operacionais ",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "D12",
+      "linha": 12,
+      "coluna": 4,
+      "colunaLetra": "D",
+      "valor": "Total",
+      "valorReal": "Total",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "A13",
+      "linha": 13,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "valor": "Atualizei o Aluguel ",
+      "valorReal": "Atualizei o Aluguel ",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "B13",
+      "linha": 13,
+      "coluna": 2,
+      "colunaLetra": "B",
+      "valor": "Valor Atual",
+      "valorReal": "Valor Atual",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "C13",
+      "linha": 13,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "valor": "R$ 221.766,09",
+      "valorReal": 221766.09,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "D13",
+      "linha": 13,
+      "coluna": 4,
+      "colunaLetra": "D",
+      "formula": "=C13*12",
+      "tipoFormula": "outro",
+      "dependencias": [
+        {
+          "tipo": "local",
+          "celulas": [
+            "C13"
+          ]
+        }
+      ],
+      "valorCalculado": "R$ 2.661.193,08",
+      "valorReal": 2661193.08
+    },
+    {
+      "celula": "A14",
+      "linha": 14,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "valor": "Inseri despesas Eletrônicos ",
+      "valorReal": "Inseri despesas Eletrônicos ",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "A15",
+      "linha": 15,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "valor": "Despesas de Equipamentos ",
+      "valorReal": "Despesas de Equipamentos ",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "A16",
+      "linha": 16,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "valor": "Despesas de Decoração",
+      "valorReal": "Despesas de Decoração",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "C16",
+      "linha": 16,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "valor": "R$ 24.000,00",
+      "valorReal": 24000,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A17",
+      "linha": 17,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "valor": "Audutoria de processos ",
+      "valorReal": "Audutoria de processos ",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "C17",
+      "linha": 17,
+      "coluna": 3,
+      "colunaLetra": "C",
+      "valor": "1200",
+      "valorReal": 1200,
+      "tipoValor": "number"
+    },
+    {
+      "celula": "A18",
+      "linha": 18,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "valor": "Treinametos",
+      "valorReal": "Treinametos",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "A25",
+      "linha": 25,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "valor": "Linhas Estouradas Orçamento ",
+      "valorReal": "Linhas Estouradas Orçamento ",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "A27",
+      "linha": 27,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "valor": "Folha ",
+      "valorReal": "Folha ",
+      "tipoValor": "string"
+    },
+    {
+      "celula": "A28",
+      "linha": 28,
+      "coluna": 1,
+      "colunaLetra": "A",
+      "valor": "Imposto",
+      "valorReal": "Imposto",
+      "tipoValor": "string"
+    }
+  ],
+  "resumo": {
+    "totalCelulasComFormula": 1,
+    "totalCelulasComValor": 18,
+    "formulasUsadas": {},
+    "dependenciasExternas": []
+  }
+}

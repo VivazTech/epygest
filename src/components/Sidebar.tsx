@@ -16,7 +16,8 @@ import {
   PlugZap,
   Rows4,
   PanelLeftClose,
-  PanelLeftOpen
+  PanelLeftOpen,
+  ChevronDown
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 
@@ -52,7 +53,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
   collapsed,
   onToggleCollapsed
 }) => {
+  const constructionGroupIds = ['dashboard', 'analise', 'planejamento'];
   const filteredMenu = menuItems.filter(item => item.roles.includes(user?.role));
+  const constructionMenu = filteredMenu.filter((item) => constructionGroupIds.includes(item.id));
+  const primaryMenu = filteredMenu.filter((item) => !constructionGroupIds.includes(item.id));
+  const [constructionExpanded, setConstructionExpanded] = React.useState(
+    constructionMenu.some((item) => item.id === activeTab)
+  );
+
+  React.useEffect(() => {
+    if (constructionMenu.some((item) => item.id === activeTab)) {
+      setConstructionExpanded(true);
+    }
+  }, [activeTab, constructionMenu]);
 
   return (
     <div className={cn(
@@ -70,7 +83,49 @@ export const Sidebar: React.FC<SidebarProps> = ({
       </div>
 
       <nav className="flex-1 py-6 px-3 space-y-1 overflow-y-auto no-scrollbar">
-        {filteredMenu.map((item) => (
+        {constructionMenu.length > 0 && (
+          <div className="space-y-1">
+            <button
+              onClick={() => setConstructionExpanded((prev) => !prev)}
+              className={cn(
+                "w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group text-white/80 hover:bg-white/5 hover:text-white"
+              )}
+            >
+              <PlugZap className="w-5 h-5 min-w-5 min-h-5 shrink-0 transition-transform duration-200 group-hover:scale-110" />
+              <span className={cn("font-medium text-sm flex-1 text-left", collapsed && "hidden")}>
+                Em construção
+              </span>
+              <ChevronDown
+                className={cn(
+                  "w-4 h-4 transition-transform duration-200",
+                  constructionExpanded && "rotate-180",
+                  collapsed && "hidden"
+                )}
+              />
+            </button>
+
+            {!collapsed && constructionExpanded && constructionMenu.map((item) => (
+              <button
+                key={item.id}
+                onClick={() => setActiveTab(item.id)}
+                className={cn(
+                  "w-full flex items-center gap-3 pl-11 pr-4 py-2.5 rounded-xl transition-all duration-200 group",
+                  activeTab === item.id 
+                    ? "bg-emerald-500 text-white shadow-lg shadow-emerald-900/20" 
+                    : "text-white/80 hover:bg-white/5 hover:text-white"
+                )}
+              >
+                <item.icon className={cn(
+                  "w-4 h-4 min-w-4 min-h-4 shrink-0 transition-transform duration-200",
+                  activeTab === item.id ? "scale-110" : "group-hover:scale-110"
+                )} />
+                <span className="font-medium text-sm">{item.label}</span>
+              </button>
+            ))}
+          </div>
+        )}
+
+        {primaryMenu.map((item) => (
           <button
             key={item.id}
             onClick={() => setActiveTab(item.id)}

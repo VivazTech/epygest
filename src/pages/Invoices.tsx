@@ -38,6 +38,7 @@ export const Invoices: React.FC = () => {
   const [requesterSectorId, setRequesterSectorId] = useState<string>('');
   const [userRole, setUserRole] = useState<string>('viewer');
   const [allowedSectorIds, setAllowedSectorIds] = useState<string[]>([]);
+  const [selectedSectorIds, setSelectedSectorIds] = useState<string[]>([]);
   const [showModal, setShowModal] = useState(false);
   const [showReceiptModal, setShowReceiptModal] = useState(false);
   const [selectedInvoiceId, setSelectedInvoiceId] = useState<number | null>(null);
@@ -380,19 +381,55 @@ export const Invoices: React.FC = () => {
   const isRequester = actingSector === 'requester';
   const requesterSector = sectors.find((s) => String(s.id) === requesterSectorId);
   const isManager = userRole === 'manager';
+  const hasGlobalSectorView = userRole === 'admin' || userRole === 'finance' || userRole === 'controle';
+  const toggleSectorSelection = (sectorId: string) => {
+    setSelectedSectorIds((prev) =>
+      prev.includes(sectorId)
+        ? prev.filter((id) => id !== sectorId)
+        : [...prev, sectorId]
+    );
+  };
   const budgetSectors = isManager
     ? sectors.filter((s) => allowedSectorIds.includes(String(s.id)))
     : sectors;
   const visibleInvoices = invoices;
   const canSeeSectorValues = (sectorId?: number | string) => {
     const currentSectorId = String(sectorId ?? '');
+    if (hasGlobalSectorView) return true;
     if (isManager) return allowedSectorIds.includes(currentSectorId);
     return !isRequester || currentSectorId === requesterSectorId;
   };
   const getSectorBudget = (sector: any) => Number(sector?.budget_month ?? sector?.budget_limit ?? 0);
+  const visibleSectorOptions = useMemo(
+    () => sectors.filter((sector) => canSeeSectorValues(sector.id)),
+    [sectors, actingSector, requesterSectorId, allowedSectorIds, userRole]
+  );
+  const canFilterSectors = visibleSectorOptions.length > 1;
+  const selectedSectorSet = useMemo(
+    () => new Set(selectedSectorIds),
+    [selectedSectorIds]
+  );
+  const filteredInvoices = useMemo(
+    () =>
+      visibleInvoices.filter((invoice) => {
+        if (!canSeeSectorValues(invoice.sector_id)) return false;
+        if (!canFilterSectors || selectedSectorIds.length === 0) return true;
+        return selectedSectorSet.has(String(invoice.sector_id));
+      }),
+    [visibleInvoices, actingSector, requesterSectorId, allowedSectorIds, userRole, canFilterSectors, selectedSectorIds, selectedSectorSet]
+  );
+  const filteredBudgetSectors = useMemo(
+    () =>
+      budgetSectors.filter((sector) => {
+        if (!canSeeSectorValues(sector.id)) return false;
+        if (!canFilterSectors || selectedSectorIds.length === 0) return true;
+        return selectedSectorSet.has(String(sector.id));
+      }),
+    [budgetSectors, actingSector, requesterSectorId, allowedSectorIds, userRole, canFilterSectors, selectedSectorIds, selectedSectorSet]
+  );
   const scopedInvoices = useMemo(
-    () => visibleInvoices.filter((invoice) => canSeeSectorValues(invoice.sector_id)),
-    [visibleInvoices, actingSector, requesterSectorId, allowedSectorIds, userRole]
+    () => filteredInvoices,
+    [filteredInvoices]
   );
 
   const metrics = useMemo(() => {
@@ -505,8 +542,43 @@ export const Invoices: React.FC = () => {
         <span className="text-xs text-slate-400">Orçamento, lista e ações usam esta competência.</span>
       </div>
 
+      {canFilterSectors && (
+        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs font-bold uppercase tracking-wider text-slate-500">Setores visíveis</span>
+            {visibleSectorOptions.map((sector) => {
+              const id = String(sector.id);
+              const active = selectedSectorIds.length === 0 || selectedSectorSet.has(id);
+              return (
+                <button
+                  key={id}
+                  onClick={() => toggleSectorSelection(id)}
+                  className={cn(
+                    "px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors",
+                    active
+                      ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                      : "bg-white text-slate-500 border-slate-200 hover:bg-slate-50"
+                  )}
+                >
+                  {sector.name}
+                </button>
+              );
+            })}
+            <button
+              onClick={() => setSelectedSectorIds([])}
+              className="ml-auto px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 transition-colors"
+            >
+              Limpar seleção
+            </button>
+          </div>
+          <p className="mt-2 text-[11px] text-slate-400">
+            Com nenhum setor selecionado, o sistema mostra todos os setores disponíveis para seu perfil.
+          </p>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {budgetSectors.map(sector => (
+        {filteredBudgetSectors.map(sector => (
           <div
             key={sector.id}
             className={cn(
@@ -618,7 +690,7 @@ export const Invoices: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50">
-              {visibleInvoices.map((invoice) => (
+              {filteredInvoices.map((invoice) => (
                 <tr key={invoice.id} className="hover:bg-slate-50/50 transition-colors group">
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-3">
