@@ -70,13 +70,11 @@ export const UsuariosPage: React.FC = () => {
     }
     if (!window.confirm(`Deseja realmente excluir o usuário "${user.name}"?`)) return;
 
+    // A autorização é feita no servidor a partir do cookie de sessão (token),
+    // não de campos enviados pelo cliente.
     const res = await fetch(`/api/users/${user.id}`, {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        actor_role: currentUserRole,
-        actor_id: currentUserId,
-      }),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {

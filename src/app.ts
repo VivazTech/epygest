@@ -2,8 +2,23 @@ import express from "express";
 import multer from "multer";
 import fs from "node:fs";
 import path from "node:path";
+import crypto from "node:crypto";
+import cookieParser from "cookie-parser";
+import helmet from "helmet";
+import rateLimit from "express-rate-limit";
 import xlsx from "xlsx";
 import { supabase } from "./lib/supabase.js";
+import {
+  SESSION_COOKIE,
+  hashPassword,
+  verifyPassword,
+  isBcryptHash,
+  validatePasswordStrength,
+  signSession,
+  sessionCookieOptions,
+  requireAuth,
+  requireRole,
+} from "./lib/auth.js";
 
 // Importa direto o parser para evitar o modo debug do index.js (que tenta abrir ./test/data/*)
 const loadPdfParse = async () => {
@@ -334,58 +349,59 @@ export function createApp() {
   const app = express();
 
   if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
-  const upload = multer({ dest: uploadDir });
+  // Limite de tamanho para evitar DoS/esgotamento de disco. Excel/PDF grandes cabem em 20MB.
+  const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
+  const upload = multer({ dest: uploadDir, limits: { fileSize: MAX_UPLOAD_BYTES } });
+
+  // ---------- Storage de documentos (bucket privado + signed URLs) ----------
+  // O bucket "invoice-files" deve estar configurado como PRIVADO no Supabase.
+  const STORAGE_BUCKET = "invoice-files";
+  const STORAGE_PREFIXES = ["invoices", "receipts", "boletos"];
+  const SIGNED_URL_TTL = 60 * 60; // 1 hora
+
+  // Faz upload com nome aleatório (sem usar o nome enviado pelo cliente) e retorna o object path.
+  const uploadDocument = async (
+    buffer: Buffer,
+    prefix: (typeof STORAGE_PREFIXES)[number],
+    ext: string,
+    contentType: string
+  ): Promise<string> => {
+    const safeExt = String(ext).toLowerCase().replace(/[^a-z0-9]/g, "") || "bin";
+    const objectPath = `${prefix}/${crypto.randomUUID()}.${safeExt}`;
+    const { error } = await supabase.storage
+      .from(STORAGE_BUCKET)
+      .upload(objectPath, buffer, { contentType, upsert: false });
+    if (error) throw error;
+    return objectPath;
+  };
+
+  // Cabeçalhos de segurança (CSP desativado: o app serve HTML/JS inline via Vite/SPA).
+  app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false }));
+
+  // CORS restrito a uma allowlist; permite envio de cookies de sessão.
+  const corsOrigins = String(process.env.CORS_ORIGINS || process.env.APP_URL || "")
+    .split(",")
+    .map((o) => o.trim())
+    .filter(Boolean);
+  app.use((req, res, next) => {
+    const origin = req.headers.origin;
+    if (origin && corsOrigins.includes(origin)) {
+      res.setHeader("Access-Control-Allow-Origin", origin);
+      res.setHeader("Access-Control-Allow-Credentials", "true");
+      res.setHeader("Vary", "Origin");
+      res.setHeader("Access-Control-Allow-Methods", "GET,POST,PATCH,PUT,DELETE,OPTIONS");
+      res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+    }
+    if (req.method === "OPTIONS") return res.sendStatus(204);
+    next();
+  });
 
   app.use(express.json());
+  app.use(cookieParser());
   app.use("/uploads", express.static(uploadDir));
 
-  // ====================================================
-  // PLANILHAS (Extracao_Planilhas)
-  // ====================================================
-  const planilhasDir = path.resolve(process.cwd(), "Extracao_Planilhas");
-  const planilhaFilePattern = /^aba_\d{3}_[A-Za-z0-9_]+\.json$/;
-
-  app.get("/api/planilhas", (_req, res) => {
-    try {
-      const files = fs
-        .readdirSync(planilhasDir)
-        .filter((f) => planilhaFilePattern.test(f))
-        .sort();
-      res.json(files);
-    } catch (err: any) {
-      res.status(500).json({ error: "Não foi possível listar as planilhas", message: err?.message });
-    }
-  });
-
-  app.get("/api/planilhas/:arquivo", (req, res) => {
-    const { arquivo } = req.params;
-    if (!planilhaFilePattern.test(arquivo)) {
-      return res.status(400).json({ error: "Arquivo inválido" });
-    }
-    const filePath = path.join(planilhasDir, arquivo);
-    if (!fs.existsSync(filePath)) {
-      return res.status(404).json({ error: "Planilha não encontrada" });
-    }
-    res.setHeader("Content-Type", "application/json; charset=utf-8");
-    fs.createReadStream(filePath).pipe(res);
-  });
-
-  // ====================================================
-  // AUTH
-  // ====================================================
-  app.post("/api/auth/login", async (req, res) => {
-    const { email, password } = req.body;
-    const { data: user, error } = await supabase
-      .from("users")
-      .select("*")
-      .eq("email", email)
-      .eq("password", password)
-      .single();
-
-    if (error || !user) {
-      return res.status(401).json({ error: "Credenciais inválidas" });
-    }
-
+  // Helper para montar os setores do usuário (usado em login e /me).
+  const buildUserSession = async (user: any) => {
     const { data: userSectorLinks } = await supabase
       .from("user_sectors")
       .select("sector_id")
@@ -409,20 +425,119 @@ export function createApp() {
 
     const sectorNames = (sectorRows ?? []).map((row: any) => String(row.name || ""));
     const { password: _pwd, ...userWithoutPassword } = user;
-    res.json({
-      ...userWithoutPassword,
-      sector_ids: fallbackSectorIds,
-      sector_names: sectorNames,
-    });
+    return { ...userWithoutPassword, sector_ids: fallbackSectorIds, sector_names: sectorNames };
+  };
+
+  // ====================================================
+  // AUTH (rotas públicas)
+  // ====================================================
+  // Rate limiting contra brute-force/credential stuffing.
+  const loginLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 10,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: "Muitas tentativas de login. Tente novamente em alguns minutos." },
   });
 
-  app.get("/api/users", async (_req, res) => {
+  app.post("/api/auth/login", loginLimiter, async (req, res) => {
+    const email = String(req.body?.email || "").trim().toLowerCase();
+    const password = String(req.body?.password || "");
+    if (!email || !password) {
+      return res.status(400).json({ error: "Informe e-mail e senha." });
+    }
+
+    const { data: user, error } = await supabase
+      .from("users")
+      .select("*")
+      .eq("email", email)
+      .single();
+
+    // Mensagem genérica: não revela se o e-mail existe.
+    if (error || !user) {
+      return res.status(401).json({ error: "Credenciais inválidas" });
+    }
+
+    const ok = await verifyPassword(password, String(user.password || ""));
+    if (!ok) {
+      return res.status(401).json({ error: "Credenciais inválidas" });
+    }
+
+    // Migração lazy: se a senha estava em texto puro, re-grava como hash bcrypt.
+    if (!isBcryptHash(String(user.password || ""))) {
+      try {
+        const hashed = await hashPassword(password);
+        await supabase.from("users").update({ password: hashed }).eq("id", user.id);
+      } catch (err) {
+        console.error("Falha ao migrar senha para hash:", err);
+      }
+    }
+
+    const sessionData = await buildUserSession(user);
+    const token = signSession({ id: user.id, email: user.email, role: user.role, name: user.name });
+    res.cookie(SESSION_COOKIE, token, sessionCookieOptions());
+    res.json(sessionData);
+  });
+
+  app.post("/api/auth/logout", (_req, res) => {
+    res.clearCookie(SESSION_COOKIE, { ...sessionCookieOptions(), maxAge: undefined });
+    res.json({ success: true });
+  });
+
+  app.get("/api/auth/me", requireAuth, async (req, res) => {
+    const { data: user, error } = await supabase
+      .from("users")
+      .select("*")
+      .eq("id", req.user!.id)
+      .single();
+    if (error || !user) return res.status(401).json({ error: "Sessão inválida" });
+    res.json(await buildUserSession(user));
+  });
+
+  // ====================================================
+  // A partir daqui, TODAS as rotas exigem autenticação.
+  // ====================================================
+  app.use("/api", requireAuth);
+
+  // ====================================================
+  // PLANILHAS (Extracao_Planilhas)
+  // ====================================================
+  const planilhasDir = path.resolve(process.cwd(), "Extracao_Planilhas");
+  const planilhaFilePattern = /^aba_\d{3}_[A-Za-z0-9_]+\.json$/;
+
+  app.get("/api/planilhas", (_req, res) => {
+    try {
+      const files = fs
+        .readdirSync(planilhasDir)
+        .filter((f) => planilhaFilePattern.test(f))
+        .sort();
+      res.json(files);
+    } catch (err: any) {
+      console.error("Erro ao listar planilhas:", err);
+      res.status(500).json({ error: "Não foi possível listar as planilhas" });
+    }
+  });
+
+  app.get("/api/planilhas/:arquivo", (req, res) => {
+    const { arquivo } = req.params;
+    if (!planilhaFilePattern.test(arquivo)) {
+      return res.status(400).json({ error: "Arquivo inválido" });
+    }
+    const filePath = path.join(planilhasDir, arquivo);
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ error: "Planilha não encontrada" });
+    }
+    res.setHeader("Content-Type", "application/json; charset=utf-8");
+    fs.createReadStream(filePath).pipe(res);
+  });
+
+  app.get("/api/users", requireRole("admin"), async (_req, res) => {
     const { data, error } = await supabase
       .from("users")
       .select("id, name, email, role, sector_id, created_at")
       .order("name");
 
-    if (error) return res.status(500).json({ error: error.message });
+    if (error) { console.error(error); return res.status(500).json({ error: "Erro interno ao processar a solicitação." }); }
 
     const userIds = (data ?? []).map((user: any) => user.id);
     let sectorLinksByUserId = new Map<string, Array<{ id: number; name: string }>>();
@@ -505,7 +620,7 @@ export function createApp() {
     );
   });
 
-  app.post("/api/users", async (req, res) => {
+  app.post("/api/users", requireRole("admin"), async (req, res) => {
     const { name, email, password, role, sector_id, sector_ids } = req.body as {
       name?: string;
       email?: string;
@@ -523,6 +638,17 @@ export function createApp() {
       return res.status(400).json({ error: "role inválido" });
     }
 
+    // Validação de formato e política de senha.
+    const normalizedEmail = String(email).trim().toLowerCase();
+    if (String(name).trim().length < 2 || String(name).length > 120) {
+      return res.status(400).json({ error: "Nome inválido." });
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail) || normalizedEmail.length > 160) {
+      return res.status(400).json({ error: "E-mail inválido." });
+    }
+    const pwdError = validatePasswordStrength(String(password));
+    if (pwdError) return res.status(400).json({ error: pwdError });
+
     const normalizedSectorIds = Array.from(
       new Set(
         (Array.isArray(sector_ids) ? sector_ids : [sector_id])
@@ -531,12 +657,13 @@ export function createApp() {
       )
     );
 
+    const hashedPassword = await hashPassword(String(password));
     const { data, error } = await supabase
       .from("users")
       .insert({
         name: String(name).trim(),
-        email: String(email).trim().toLowerCase(),
-        password: String(password),
+        email: normalizedEmail,
+        password: hashedPassword,
         role,
         sector_id: normalizedSectorIds.length ? normalizedSectorIds[0] : null,
       })
@@ -544,17 +671,17 @@ export function createApp() {
       .single();
 
     if (error) {
-      const detail = String(error.message || "");
-      if (detail.toLowerCase().includes("role") || detail.toLowerCase().includes("check")) {
+      console.error("Erro ao criar usuário:", error);
+      const detail = String(error.message || "").toLowerCase();
+      if (detail.includes("duplicate") || detail.includes("unique")) {
+        return res.status(409).json({ error: "Já existe um usuário com este e-mail." });
+      }
+      if (detail.includes("role") || detail.includes("check")) {
         return res.status(400).json({
-          error:
-            "Não foi possível criar usuário: o banco ainda não aceita o perfil 'controle'. Atualize a constraint de role no Supabase.",
-          detail,
+          error: "O banco ainda não aceita esse perfil. Atualize a constraint de role no Supabase.",
         });
       }
-      return res.status(400).json({
-        error: detail || "Não foi possível criar usuário",
-      });
+      return res.status(400).json({ error: "Não foi possível criar o usuário." });
     }
 
     if (normalizedSectorIds.length) {
@@ -566,10 +693,9 @@ export function createApp() {
         );
 
       if (userSectorsError) {
+        console.error("Erro ao salvar setores do usuário:", userSectorsError);
         return res.status(500).json({
-          error:
-            "Usuário criado, mas não foi possível salvar múltiplos setores. Execute a migração user_sectors no Supabase.",
-          detail: userSectorsError.message,
+          error: "Usuário criado, mas não foi possível salvar os setores. Verifique a migração user_sectors.",
         });
       }
     }
@@ -577,7 +703,7 @@ export function createApp() {
     res.json({ id: data.id });
   });
 
-  app.patch("/api/users/:id", async (req, res) => {
+  app.patch("/api/users/:id", requireRole("admin"), async (req, res) => {
     const { id } = req.params;
     const { name, email, password, role, sector_id, sector_ids } = req.body as {
       name?: string;
@@ -599,6 +725,14 @@ export function createApp() {
       return res.status(400).json({ error: "id do usuário é obrigatório" });
     }
 
+    const normalizedEmail = String(email).trim().toLowerCase();
+    if (String(name).trim().length < 2 || String(name).length > 120) {
+      return res.status(400).json({ error: "Nome inválido." });
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail) || normalizedEmail.length > 160) {
+      return res.status(400).json({ error: "E-mail inválido." });
+    }
+
     const normalizedSectorIds = Array.from(
       new Set(
         (Array.isArray(sector_ids) ? sector_ids : [sector_id])
@@ -609,25 +743,32 @@ export function createApp() {
 
     const payload: any = {
       name: String(name).trim(),
-      email: String(email).trim().toLowerCase(),
+      email: normalizedEmail,
       role,
       sector_id: normalizedSectorIds.length ? normalizedSectorIds[0] : null,
     };
-    if (password && String(password).trim()) payload.password = String(password);
+    // Só atualiza a senha se enviada — e aplicando política + hash.
+    if (password && String(password).trim()) {
+      const pwdError = validatePasswordStrength(String(password));
+      if (pwdError) return res.status(400).json({ error: pwdError });
+      payload.password = await hashPassword(String(password));
+    }
 
     const { error } = await supabase
       .from("users")
       .update(payload)
       .eq("id", id);
 
-    if (error) return res.status(400).json({ error: error.message || "Não foi possível atualizar usuário" });
+    if (error) {
+      console.error("Erro ao atualizar usuário:", error);
+      return res.status(400).json({ error: "Não foi possível atualizar o usuário." });
+    }
 
     const { error: deleteLinksError } = await supabase.from("user_sectors").delete().eq("user_id", id);
     if (deleteLinksError) {
+      console.error("Erro ao limpar setores do usuário:", deleteLinksError);
       return res.status(500).json({
-        error:
-          "Usuário atualizado, mas não foi possível atualizar vínculos de setores. Execute a migração user_sectors no Supabase.",
-        detail: deleteLinksError.message,
+        error: "Usuário atualizado, mas não foi possível atualizar os setores.",
       });
     }
 
@@ -640,10 +781,9 @@ export function createApp() {
         );
 
       if (upsertLinksError) {
+        console.error("Erro ao salvar setores do usuário:", upsertLinksError);
         return res.status(500).json({
-          error:
-            "Usuário atualizado, mas não foi possível salvar múltiplos setores. Execute a migração user_sectors no Supabase.",
-          detail: upsertLinksError.message,
+          error: "Usuário atualizado, mas não foi possível salvar os setores.",
         });
       }
     }
@@ -651,22 +791,15 @@ export function createApp() {
     res.json({ success: true });
   });
 
-  app.delete("/api/users/:id", async (req, res) => {
+  app.delete("/api/users/:id", requireRole("admin"), async (req, res) => {
     const { id } = req.params;
-    const { actor_role, actor_id } = req.body as {
-      actor_role?: "admin" | "finance" | "controle" | "manager" | "viewer";
-      actor_id?: number;
-    };
-
-    if (actor_role !== "admin") {
-      return res.status(403).json({ error: "Apenas administradores podem excluir usuários" });
-    }
 
     if (!id || String(id).trim() === "") {
       return res.status(400).json({ error: "id do usuário é obrigatório" });
     }
 
-    if (actor_id !== undefined && actor_id !== null && String(actor_id) === String(id)) {
+    // O ator é o usuário autenticado (token), nunca um campo do corpo da requisição.
+    if (String(req.user!.id) === String(id)) {
       return res.status(400).json({ error: "Você não pode excluir seu próprio usuário" });
     }
 
@@ -675,7 +808,10 @@ export function createApp() {
       .delete()
       .eq("id", id);
 
-    if (error) return res.status(400).json({ error: error.message || "Não foi possível excluir usuário" });
+    if (error) {
+      console.error("Erro ao excluir usuário:", error);
+      return res.status(400).json({ error: "Não foi possível excluir o usuário." });
+    }
     res.json({ success: true });
   });
 
@@ -689,10 +825,10 @@ export function createApp() {
       .select("id", { head: true, count: "exact" });
 
     if (error) {
+      console.error("Health check Supabase falhou:", error);
       return res.status(500).json({
         ok: false,
         message: "Falha ao conectar no Supabase",
-        error: error.message,
         latency_ms: Date.now() - startedAt,
       });
     }
@@ -758,7 +894,7 @@ export function createApp() {
       .select("*, categories(name), sectors(name)")
       .order("date", { ascending: false });
 
-    if (error) return res.status(500).json({ error: error.message });
+    if (error) { console.error(error); return res.status(500).json({ error: "Erro interno ao processar a solicitação." }); }
 
     const records = (data ?? []).map((r: any) => ({
       ...r,
@@ -785,7 +921,7 @@ export function createApp() {
       .select("*")
       .order("name");
 
-    if (error) return res.status(500).json({ error: error.message });
+    if (error) { console.error(error); return res.status(500).json({ error: "Erro interno ao processar a solicitação." }); }
 
     const { data: crdData, error: crdError } = await supabase
       .from("crds")
@@ -906,7 +1042,7 @@ export function createApp() {
       .select("*, sectors(name), crds(id, code, name, sector_id, sectors(name))")
       .order("date", { ascending: false });
 
-    if (error) return res.status(500).json({ error: error.message });
+    if (error) { console.error(error); return res.status(500).json({ error: "Erro interno ao processar a solicitação." }); }
 
     res.json(
       (data ?? []).map((r: any) => ({
@@ -947,7 +1083,7 @@ export function createApp() {
       .select("id")
       .single();
 
-    if (error) return res.status(500).json({ error: error.message });
+    if (error) { console.error(error); return res.status(500).json({ error: "Erro interno ao processar a solicitação." }); }
     res.json({ id: data.id });
   });
 
@@ -958,7 +1094,7 @@ export function createApp() {
       return res.status(400).json({ error: "Status inválido" });
 
     const { error } = await supabase.from("requisitions").update({ status }).eq("id", id);
-    if (error) return res.status(500).json({ error: error.message });
+    if (error) { console.error(error); return res.status(500).json({ error: "Erro interno ao processar a solicitação." }); }
     res.json({ success: true });
   });
 
@@ -979,7 +1115,7 @@ export function createApp() {
       .lte("due_date", dateTo)
       .order("due_date", { ascending: true });
 
-    if (error) return res.status(500).json({ error: error.message });
+    if (error) { console.error(error); return res.status(500).json({ error: "Erro interno ao processar a solicitação." }); }
 
     res.json(
       (data ?? []).map((i: any) => ({
@@ -1009,7 +1145,7 @@ export function createApp() {
     if (payment_method) query = query.eq("payment_method", payment_method);
 
     const { data, error } = await query;
-    if (error) return res.status(500).json({ error: error.message });
+    if (error) { console.error(error); return res.status(500).json({ error: "Erro interno ao processar a solicitação." }); }
 
     const rows = (data ?? []).map((i: any) => ({ ...i, sector_name: i.sectors?.name ?? null }));
     const header = [
@@ -1028,22 +1164,21 @@ export function createApp() {
   app.post("/api/invoices/extract", upload.single("invoice_pdf"), async (req, res) => {
     if (!req.file) return res.status(400).json({ error: "PDF não enviado" });
 
+    if (req.file.mimetype !== "application/pdf") {
+      if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+      return res.status(400).json({ success: false, error: "Formato inválido. Envie a nota em PDF." });
+    }
+
     try {
       const fileBuffer = fs.readFileSync(req.file.path);
-      const storagePath = `invoices/${Date.now()}-${req.file.originalname || "nota.pdf"}`;
 
-      const { error: uploadError } = await supabase.storage.from("invoice-files").upload(storagePath, fileBuffer, {
-        contentType: "application/pdf",
-        upsert: true,
-      });
-      if (uploadError) {
-        return res.status(500).json({
-          success: false,
-          error: `Não foi possível salvar o PDF no storage: ${uploadError.message}`,
-        });
+      let storagePath: string;
+      try {
+        storagePath = await uploadDocument(fileBuffer, "invoices", "pdf", "application/pdf");
+      } catch (uploadError) {
+        console.error("Erro ao salvar PDF no storage:", uploadError);
+        return res.status(500).json({ success: false, error: "Não foi possível salvar o PDF." });
       }
-
-      const { data: urlData } = supabase.storage.from("invoice-files").getPublicUrl(storagePath);
 
       let parseWarning = "";
       let parseErrorDetail = "";
@@ -1102,12 +1237,13 @@ export function createApp() {
           due_date: toIsoDate(due_dateRaw),
           amount: toAmount(amountRaw),
         },
-        file_path: urlData.publicUrl,
+        file_path: storagePath,
       });
     } catch (error: any) {
+      console.error("Erro ao processar PDF de nota:", error);
       res.status(500).json({
         success: false,
-        error: error?.message || "Não foi possível processar o PDF.",
+        error: "Não foi possível processar o PDF.",
       });
     } finally {
       if (req.file?.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
@@ -1124,15 +1260,17 @@ export function createApp() {
       return res.status(400).json({ error: "Formato inválido. Envie PDF, PNG ou JPG." });
     }
 
-    const fileBuffer = fs.readFileSync(req.file.path);
-    const ext = req.file.mimetype.split("/")[1];
-    const storagePath = `receipts/${Date.now()}.${ext}`;
-    await supabase.storage.from("invoice-files").upload(storagePath, fileBuffer, {
-      contentType: req.file.mimetype, upsert: true,
-    });
-    const { data: urlData } = supabase.storage.from("invoice-files").getPublicUrl(storagePath);
-    fs.unlinkSync(req.file.path);
-    res.json({ file_path: urlData.publicUrl });
+    try {
+      const fileBuffer = fs.readFileSync(req.file.path);
+      const ext = req.file.mimetype === "application/pdf" ? "pdf" : req.file.mimetype.split("/")[1];
+      const storagePath = await uploadDocument(fileBuffer, "receipts", ext, req.file.mimetype);
+      res.json({ file_path: storagePath });
+    } catch (error) {
+      console.error("Erro ao salvar comprovante:", error);
+      res.status(500).json({ error: "Não foi possível salvar o comprovante." });
+    } finally {
+      if (req.file?.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+    }
   });
 
   // Upload boleto
@@ -1143,14 +1281,34 @@ export function createApp() {
       return res.status(400).json({ error: "Formato inválido. Envie o boleto em PDF." });
     }
 
-    const fileBuffer = fs.readFileSync(req.file.path);
-    const storagePath = `boletos/${Date.now()}.pdf`;
-    await supabase.storage.from("invoice-files").upload(storagePath, fileBuffer, {
-      contentType: "application/pdf", upsert: true,
-    });
-    const { data: urlData } = supabase.storage.from("invoice-files").getPublicUrl(storagePath);
-    fs.unlinkSync(req.file.path);
-    res.json({ file_path: urlData.publicUrl });
+    try {
+      const fileBuffer = fs.readFileSync(req.file.path);
+      const storagePath = await uploadDocument(fileBuffer, "boletos", "pdf", "application/pdf");
+      res.json({ file_path: storagePath });
+    } catch (error) {
+      console.error("Erro ao salvar boleto:", error);
+      res.status(500).json({ error: "Não foi possível salvar o boleto." });
+    } finally {
+      if (req.file?.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+    }
+  });
+
+  // Gera uma URL assinada (curta) para abrir um documento do bucket privado.
+  app.get("/api/storage/signed-url", async (req, res) => {
+    const objectPath = String(req.query?.path || "");
+    const prefix = objectPath.split("/")[0];
+    // Só assina caminhos dentro dos prefixos conhecidos (evita acesso arbitrário ao bucket).
+    if (!STORAGE_PREFIXES.includes(prefix) || objectPath.includes("..")) {
+      return res.status(400).json({ error: "Caminho inválido" });
+    }
+    const { data, error } = await supabase.storage
+      .from(STORAGE_BUCKET)
+      .createSignedUrl(objectPath, SIGNED_URL_TTL);
+    if (error || !data?.signedUrl) {
+      console.error("Erro ao gerar signed URL:", error);
+      return res.status(404).json({ error: "Arquivo não encontrado" });
+    }
+    res.json({ url: data.signedUrl });
   });
 
   // Criar nota fiscal
@@ -1178,7 +1336,7 @@ export function createApp() {
       .select("id")
       .single();
 
-    if (error) return res.status(500).json({ error: error.message });
+    if (error) { console.error(error); return res.status(500).json({ error: "Erro interno ao processar a solicitação." }); }
     res.json({ id: data.id });
   });
 
@@ -1208,7 +1366,7 @@ export function createApp() {
         approved_at: new Date().toISOString(),
         approved_by_sector: actorSector || "CONTROLE",
       }).eq("id", id);
-      if (error) return res.status(500).json({ error: error.message });
+      if (error) { console.error(error); return res.status(500).json({ error: "Erro interno ao processar a solicitação." }); }
       return res.json({ success: true });
     }
 
@@ -1222,7 +1380,7 @@ export function createApp() {
         paid_by_sector: actorSector || "FINANCEIRO",
         payment_receipt_path: payment_receipt_path || null,
       }).eq("id", id);
-      if (error) return res.status(500).json({ error: error.message });
+      if (error) { console.error(error); return res.status(500).json({ error: "Erro interno ao processar a solicitação." }); }
       return res.json({ success: true });
     }
 
@@ -1237,7 +1395,7 @@ export function createApp() {
         cancelled_by_sector: actorSector || "SOLICITANTE",
         cancel_reason: cancel_reason || null,
       }).eq("id", id);
-      if (error) return res.status(500).json({ error: error.message });
+      if (error) { console.error(error); return res.status(500).json({ error: "Erro interno ao processar a solicitação." }); }
       return res.json({ success: true });
     }
 
@@ -1249,7 +1407,7 @@ export function createApp() {
   // ====================================================
   app.get("/api/categories", async (_req, res) => {
     const { data, error } = await supabase.from("categories").select("*");
-    if (error) return res.status(500).json({ error: error.message });
+    if (error) { console.error(error); return res.status(500).json({ error: "Erro interno ao processar a solicitação." }); }
     res.json(data);
   });
 
@@ -1262,7 +1420,7 @@ export function createApp() {
       .select("*")
       .order("active", { ascending: false })
       .order("name");
-    if (error) return res.status(500).json({ error: error.message });
+    if (error) { console.error(error); return res.status(500).json({ error: "Erro interno ao processar a solicitação." }); }
     res.json(data);
   });
 
@@ -1294,7 +1452,7 @@ export function createApp() {
       query = query.eq("sector_id", Number(sector_id));
 
     const { data, error } = await query;
-    if (error) return res.status(500).json({ error: error.message });
+    if (error) { console.error(error); return res.status(500).json({ error: "Erro interno ao processar a solicitação." }); }
 
     res.json(
       (data ?? []).map((r: any) => ({
@@ -1472,8 +1630,9 @@ export function createApp() {
         created_groups: createdGroups.length,
       });
     } catch (error: any) {
+      console.error("Erro ao importar CRDs:", error);
       if (req.file?.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
-      res.status(500).json({ error: error?.message || "Erro ao importar CRDs" });
+      res.status(500).json({ error: "Erro ao importar CRDs." });
     }
   });
 
@@ -1496,9 +1655,10 @@ export function createApp() {
       const parsedLines = parseDesbravadorPdfLines(parsed.text || "");
       res.json(buildImportPreviewPayload(parsedLines, req.file.originalname || "relatorio-desbravador.pdf", month, year));
     } catch (error: any) {
+      console.error("Erro ao processar PDF do Desbravador:", error);
       res.status(500).json({
         success: false,
-        error: error?.message || "Não foi possível processar o relatório PDF do Desbravador.",
+        error: "Não foi possível processar o relatório PDF do Desbravador.",
       });
     } finally {
       if (req.file?.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
@@ -1565,9 +1725,10 @@ export function createApp() {
         },
       });
     } catch (error: any) {
+      console.error("Erro ao processar Excel do Desbravador:", error);
       res.status(500).json({
         success: false,
-        error: error?.message || "Não foi possível processar o relatório Excel do Desbravador.",
+        error: "Não foi possível processar o relatório Excel do Desbravador.",
       });
     } finally {
       if (req.file?.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
@@ -1599,7 +1760,7 @@ export function createApp() {
       .eq("active", true)
       .order("code");
 
-    if (error) return res.status(500).json({ error: error.message });
+    if (error) { console.error(error); return res.status(500).json({ error: "Erro interno ao processar a solicitação." }); }
 
     const { data: allCrds } = await supabase
       .from("crds")
@@ -1731,7 +1892,8 @@ export function createApp() {
             "Tabela crd_monthly_values não encontrada. Execute a migração SQL de valores mensais da Síntase.",
         });
       }
-      return res.status(500).json({ error: error.message });
+      console.error("Erro ao salvar célula da Síntase:", error);
+      return res.status(500).json({ error: "Não foi possível salvar a alteração." });
     }
 
     res.json({
@@ -1753,7 +1915,7 @@ export function createApp() {
       .select("year, occupancy_percent")
       .eq("year", selectedYear)
       .limit(1);
-    if (error) return res.status(500).json({ error: error.message });
+    if (error) { console.error(error); return res.status(500).json({ error: "Erro interno ao processar a solicitação." }); }
     const occupancyPercent = data?.length
       ? getNormalizedOccupancyPercent((data[0] as any).occupancy_percent)
       : 100;
@@ -1775,7 +1937,7 @@ export function createApp() {
         },
         { onConflict: "year" }
       );
-    if (error) return res.status(500).json({ error: error.message });
+    if (error) { console.error(error); return res.status(500).json({ error: "Erro interno ao processar a solicitação." }); }
     res.json({ success: true, year: Number(year), occupancy_percent: occupancyPercent });
   });
 
@@ -1954,8 +2116,17 @@ export function createApp() {
   // ====================================================
   app.get("/api/scenarios", async (_req, res) => {
     const { data, error } = await supabase.from("scenarios").select("*");
-    if (error) return res.status(500).json({ error: error.message });
+    if (error) { console.error(error); return res.status(500).json({ error: "Erro interno ao processar a solicitação." }); }
     res.json(data);
+  });
+
+  // Tratador de erros de upload (ex.: arquivo acima do limite) e fallback genérico.
+  app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+    if (err && (err as any).code === "LIMIT_FILE_SIZE") {
+      return res.status(413).json({ error: "Arquivo muito grande. O limite é de 20 MB." });
+    }
+    console.error("Erro não tratado:", err);
+    res.status(500).json({ error: "Erro interno do servidor." });
   });
 
   return app;

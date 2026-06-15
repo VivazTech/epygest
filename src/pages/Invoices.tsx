@@ -306,6 +306,24 @@ export const Invoices: React.FC = () => {
     setShowReceiptModal(true);
   };
 
+  // Abre um documento do storage privado: resolve uma URL assinada de curta duração.
+  // Mantém compatibilidade com registros antigos que guardavam a URL completa.
+  const openDocument = async (storagePath?: string | null) => {
+    if (!storagePath) return;
+    if (/^https?:\/\//i.test(storagePath)) {
+      window.open(storagePath, '_blank', 'noopener');
+      return;
+    }
+    try {
+      const res = await fetch(`/api/storage/signed-url?path=${encodeURIComponent(storagePath)}`);
+      const data = await res.json();
+      if (!res.ok || !data?.url) throw new Error(data?.error || 'Arquivo indisponível');
+      window.open(data.url, '_blank', 'noopener');
+    } catch (error: any) {
+      alert(error.message || 'Não foi possível abrir o documento.');
+    }
+  };
+
   const submitReceiptAndPay = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedInvoiceId) return;
@@ -742,26 +760,22 @@ export const Invoices: React.FC = () => {
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-2">
                       {invoice.file_path ? (
-                        <a
-                          href={invoice.file_path.startsWith('/') ? invoice.file_path : `/${invoice.file_path}`}
-                          target="_blank"
-                          rel="noreferrer"
+                        <button
+                          onClick={() => openDocument(invoice.file_path)}
                           className="text-xs font-medium text-blue-700 bg-blue-50 px-2 py-1 rounded-lg hover:bg-blue-100 transition-colors"
                         >
                           Ver NF
-                        </a>
+                        </button>
                       ) : (
                         <span className="text-xs text-slate-400">NF --</span>
                       )}
                       {invoice.payment_receipt_path ? (
-                        <a
-                          href={invoice.payment_receipt_path.startsWith('/') ? invoice.payment_receipt_path : `/${invoice.payment_receipt_path}`}
-                          target="_blank"
-                          rel="noreferrer"
+                        <button
+                          onClick={() => openDocument(invoice.payment_receipt_path)}
                           className="text-xs font-medium text-emerald-700 bg-emerald-50 px-2 py-1 rounded-lg hover:bg-emerald-100 transition-colors"
                         >
                           Ver Comp.
-                        </a>
+                        </button>
                       ) : (
                         <span className="text-xs text-slate-400">Comp. --</span>
                       )}
@@ -770,15 +784,13 @@ export const Invoices: React.FC = () => {
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-2">
                       {(invoice.file_path && (actingSector === 'controle' || actingSector === 'financeiro')) && (
-                        <a
-                          href={invoice.file_path.startsWith('/') ? invoice.file_path : `/${invoice.file_path}`}
-                          target="_blank"
-                          rel="noreferrer"
+                        <button
+                          onClick={() => openDocument(invoice.file_path)}
                           className="inline-flex items-center px-3 py-1.5 text-xs font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors"
                           title="Visualizar nota fiscal"
                         >
                           Ver Nota Fiscal
-                        </a>
+                        </button>
                       )}
                       {(actingSector === 'controle' && (invoice.flow_stage || 'control_pending') === 'control_pending') && (
                         <button 

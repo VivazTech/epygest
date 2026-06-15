@@ -27,19 +27,41 @@ export default function App() {
   const [loginForm, setLoginForm] = useState({ email: '', password: '' });
   const [loginLoading, setLoginLoading] = useState(false);
   const [loginError, setLoginError] = useState('');
+  const [bootstrapping, setBootstrapping] = useState(true);
 
+  // Restaura a sessão a partir do cookie httpOnly validado pelo servidor (/api/auth/me),
+  // não confiando no localStorage como fonte de verdade da autenticação.
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem('user');
-      if (!raw) return;
-      const parsed = JSON.parse(raw);
-      if (parsed?.id && parsed?.name && parsed?.role) setUser(parsed);
-    } catch {
-      // sessão inválida no storage, ignora
-    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch('/api/auth/me');
+        if (!res.ok) throw new Error('no session');
+        const data = await res.json();
+        if (!cancelled && data?.id && data?.role) {
+          setUser(data);
+          localStorage.setItem('user', JSON.stringify(data)); // cache só para a UI
+        }
+      } catch {
+        if (!cancelled) {
+          setUser(null);
+          localStorage.removeItem('user');
+        }
+      } finally {
+        if (!cancelled) setBootstrapping(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    try {
+      await fetch('/api/auth/logout', { method: 'POST' });
+    } catch {
+      // mesmo se falhar a chamada, limpamos o estado local
+    }
     setUser(null);
     setLoginForm({ email: '', password: '' });
     setActiveTab('dashboard');
@@ -122,6 +144,14 @@ export default function App() {
       default: return <Dashboard />;
     }
   };
+
+  if (bootstrapping) {
+    return (
+      <div className="min-h-screen bg-[#F8FAFC] font-sans text-slate-900 flex items-center justify-center p-6">
+        <p className="text-sm font-medium text-slate-400">Carregando...</p>
+      </div>
+    );
+  }
 
   if (!user) {
     return (
