@@ -1,6 +1,52 @@
 import React, { useState } from 'react';
-import { Upload, FileSpreadsheet, FileText, Loader2, CheckCircle2, AlertTriangle } from 'lucide-react';
+import {
+  Upload,
+  FileSpreadsheet,
+  FileText,
+  Loader2,
+  CheckCircle2,
+  AlertTriangle,
+  Boxes,
+  FileBarChart,
+  ClipboardList,
+  Layers,
+  Settings2,
+} from 'lucide-react';
 import { formatCurrency } from '../lib/utils';
+
+// Fontes de importação a configurar (somente os cards por enquanto; a configuração vem depois).
+const IMPORT_SOURCES = [
+  {
+    key: 'consumo_interno',
+    title: 'Consumo interno',
+    description: 'Relatório de consumo interno por setor e mês.',
+    icon: Boxes,
+  },
+  {
+    key: 'extrato_mensal',
+    title: 'Extrato Mensal',
+    description: 'Extrato financeiro mensal consolidado.',
+    icon: FileBarChart,
+  },
+  {
+    key: 'rel_crd',
+    title: 'Rel. CRD',
+    description: 'Relatório de CRDs (realizado por conta).',
+    icon: FileText,
+  },
+  {
+    key: 'rds',
+    title: 'Relatório Diário de Situação',
+    description: 'RDS — situação diária de diárias e receitas.',
+    icon: ClipboardList,
+  },
+  {
+    key: 'requisicoes_sintetica',
+    title: 'Requisições Sintética por Grupo de Itens',
+    description: 'Requisições agregadas por grupo de itens.',
+    icon: Layers,
+  },
+];
 
 type ParsedLine = {
   descricao: string;
@@ -10,6 +56,75 @@ type ParsedLine = {
 type ExcelColumn = {
   index: number;
   name: string;
+};
+
+type ConsumoLine = {
+  cliente_id: number | string | null;
+  cliente_nome: string;
+  produto_codigo: number | string;
+  produto: string;
+  unidade: string;
+  nf: number | string | null;
+  data: string;
+  data_iso: string;
+  quantidade: number;
+  vl_unitario: number;
+  vl_total: number;
+  vl_desconto: number;
+  taxa_servico: number;
+  vl_liquido: number;
+  forma_pgto: string;
+};
+
+type ConsumoSummary = {
+  lines_count: number;
+  clientes_count: number;
+  total_quantidade: number;
+  total_liquido: number;
+};
+
+type ExtratoEmployee = {
+  matricula: number | string | null;
+  nome: string;
+  situacao: string;
+  cpf: string;
+  cargo_cod: number | string | null;
+  cargo: string;
+  salario: number;
+  proventos: number;
+  descontos: number;
+  liquido: number;
+  base_inss: number;
+  base_fgts: number;
+  base_irrf: number;
+};
+
+type ExtratoSummary = {
+  funcionarios: number;
+  total_proventos: number;
+  total_descontos: number;
+  total_liquido: number;
+};
+
+type RelCrdAccount = {
+  nivel: number;
+  codigo: string;
+  nome: string;
+  lancamentos: number;
+  cancelamentos: number;
+  saldo_lanc: number;
+  baixas: number;
+  estorno: number;
+  baixas_liquido: number;
+  lanc_liquido: number;
+};
+
+type RelCrdSummary = {
+  contas: number;
+  grupos: number;
+  total_lancamentos: number;
+  total_baixas: number;
+  total_lanc_liquido: number;
 };
 
 export const ImportacaoPage: React.FC = () => {
@@ -26,6 +141,108 @@ export const ImportacaoPage: React.FC = () => {
   const [summaryTotal, setSummaryTotal] = useState(0);
   const [summaryCount, setSummaryCount] = useState(0);
   const [error, setError] = useState('');
+
+  // Estado da pré-visualização do Consumo Interno (somente exibição por enquanto).
+  const [consumoLoading, setConsumoLoading] = useState(false);
+  const [consumoFileName, setConsumoFileName] = useState('');
+  const [consumoError, setConsumoError] = useState('');
+  const [consumoLines, setConsumoLines] = useState<ConsumoLine[]>([]);
+  const [consumoSummary, setConsumoSummary] = useState<ConsumoSummary | null>(null);
+
+  // Estado da pré-visualização do Extrato Mensal (somente exibição por enquanto).
+  const [extratoLoading, setExtratoLoading] = useState(false);
+  const [extratoFileName, setExtratoFileName] = useState('');
+  const [extratoError, setExtratoError] = useState('');
+  const [extratoEmployees, setExtratoEmployees] = useState<ExtratoEmployee[]>([]);
+  const [extratoSummary, setExtratoSummary] = useState<ExtratoSummary | null>(null);
+
+  // Estado da pré-visualização do Rel. CRD (somente exibição por enquanto).
+  const [relCrdLoading, setRelCrdLoading] = useState(false);
+  const [relCrdFileName, setRelCrdFileName] = useState('');
+  const [relCrdError, setRelCrdError] = useState('');
+  const [relCrdAccounts, setRelCrdAccounts] = useState<RelCrdAccount[]>([]);
+  const [relCrdSummary, setRelCrdSummary] = useState<RelCrdSummary | null>(null);
+
+  const uploadRelCrd = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setRelCrdLoading(true);
+    setRelCrdError('');
+    setRelCrdFileName(file.name);
+    const formData = new FormData();
+    formData.append('relcrd_file', file);
+    try {
+      const res = await fetch('/api/import/rel-crd/preview', { method: 'POST', body: formData });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setRelCrdError(data.error || 'Falha ao processar o Rel. CRD.');
+        setRelCrdAccounts([]);
+        setRelCrdSummary(null);
+        return;
+      }
+      setRelCrdAccounts(Array.isArray(data.accounts) ? data.accounts : []);
+      setRelCrdSummary(data.summary || null);
+    } catch (err: any) {
+      setRelCrdError(err?.message || 'Erro inesperado ao importar o arquivo.');
+    } finally {
+      setRelCrdLoading(false);
+      if (event?.target) event.target.value = '';
+    }
+  };
+
+  const uploadExtratoMensal = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setExtratoLoading(true);
+    setExtratoError('');
+    setExtratoFileName(file.name);
+    const formData = new FormData();
+    formData.append('extrato_file', file);
+    try {
+      const res = await fetch('/api/import/extrato-mensal/preview', { method: 'POST', body: formData });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setExtratoError(data.error || 'Falha ao processar o Extrato Mensal.');
+        setExtratoEmployees([]);
+        setExtratoSummary(null);
+        return;
+      }
+      setExtratoEmployees(Array.isArray(data.employees) ? data.employees : []);
+      setExtratoSummary(data.summary || null);
+    } catch (err: any) {
+      setExtratoError(err?.message || 'Erro inesperado ao importar o arquivo.');
+    } finally {
+      setExtratoLoading(false);
+      if (event?.target) event.target.value = '';
+    }
+  };
+
+  const uploadConsumoInterno = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setConsumoLoading(true);
+    setConsumoError('');
+    setConsumoFileName(file.name);
+    const formData = new FormData();
+    formData.append('consumo_file', file);
+    try {
+      const res = await fetch('/api/import/consumo-interno/preview', { method: 'POST', body: formData });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setConsumoError(data.error || 'Falha ao processar o relatório de Consumo Interno.');
+        setConsumoLines([]);
+        setConsumoSummary(null);
+        return;
+      }
+      setConsumoLines(Array.isArray(data.lines) ? data.lines : []);
+      setConsumoSummary(data.summary || null);
+    } catch (err: any) {
+      setConsumoError(err?.message || 'Erro inesperado ao importar o arquivo.');
+    } finally {
+      setConsumoLoading(false);
+      if (event?.target) event.target.value = '';
+    }
+  };
 
   const importDesbravadorFile = async (
     event: React.ChangeEvent<HTMLInputElement>,
@@ -124,6 +341,223 @@ export const ImportacaoPage: React.FC = () => {
           Previsto vem da Síntase (planilhas importadas manualmente) e realizado vem dos relatórios em PDF do sistema Desbravador.
         </p>
       </div>
+
+      {/* Fontes de importação (cards) — configuração será definida depois */}
+      <div className="space-y-3">
+        <h3 className="text-sm font-bold text-slate-800">Relatórios para importar</h3>
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+          {IMPORT_SOURCES.map((source) => {
+            const Icon = source.icon;
+            return (
+              <div
+                key={source.key}
+                className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 flex flex-col gap-3"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="w-11 h-11 rounded-xl bg-[#004D40]/5 text-[#004D40] flex items-center justify-center">
+                    <Icon className="w-5 h-5" />
+                  </div>
+                  {source.key === 'consumo_interno' || source.key === 'extrato_mensal' ? (
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-full px-2 py-0.5">
+                      Extração ativa
+                    </span>
+                  ) : (
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-amber-600 bg-amber-50 border border-amber-100 rounded-full px-2 py-0.5">
+                      A configurar
+                    </span>
+                  )}
+                </div>
+                <div className="flex-1">
+                  <h4 className="text-sm font-bold text-slate-900 leading-snug">{source.title}</h4>
+                  <p className="text-xs text-slate-500 mt-1">{source.description}</p>
+                </div>
+                {source.key === 'consumo_interno' ? (
+                  <label className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl border border-[#004D40] bg-white text-sm font-bold text-[#004D40] cursor-pointer hover:bg-emerald-50 transition-colors">
+                    {consumoLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+                    {consumoLoading ? 'Processando...' : 'Enviar arquivo (.xls)'}
+                    <input
+                      type="file"
+                      accept=".xls,.xlsx,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                      onChange={uploadConsumoInterno}
+                      disabled={consumoLoading}
+                      className="hidden"
+                    />
+                  </label>
+                ) : source.key === 'extrato_mensal' ? (
+                  <label className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl border border-[#004D40] bg-white text-sm font-bold text-[#004D40] cursor-pointer hover:bg-emerald-50 transition-colors">
+                    {extratoLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+                    {extratoLoading ? 'Processando...' : 'Enviar arquivo (.xls)'}
+                    <input
+                      type="file"
+                      accept=".xls,.xlsx,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                      onChange={uploadExtratoMensal}
+                      disabled={extratoLoading}
+                      className="hidden"
+                    />
+                  </label>
+                ) : (
+                  <button
+                    type="button"
+                    disabled
+                    title="Configuração da importação será definida em breve"
+                    className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl border border-slate-200 bg-slate-50 text-sm font-bold text-slate-400 cursor-not-allowed"
+                  >
+                    <Settings2 className="w-4 h-4" />
+                    Configurar importação
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Pré-visualização do Consumo Interno (somente leitura por enquanto) */}
+      {(consumoFileName || consumoError) && (
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+          <div className="px-4 py-3 border-b border-slate-100 flex flex-wrap gap-3 items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Boxes className="w-4 h-4 text-[#004D40]" />
+              <p className="text-sm font-bold text-slate-800">Consumo Interno — dados extraídos</p>
+            </div>
+            {consumoSummary && (
+              <div className="text-xs text-slate-600 flex flex-wrap gap-x-4 gap-y-1">
+                <span>Clientes: <span className="font-bold">{consumoSummary.clientes_count}</span></span>
+                <span>Itens: <span className="font-bold">{consumoSummary.lines_count}</span></span>
+                <span>Qtd total: <span className="font-bold">{consumoSummary.total_quantidade}</span></span>
+                <span>Total líquido: <span className="font-bold">{formatCurrency(consumoSummary.total_liquido)}</span></span>
+              </div>
+            )}
+          </div>
+
+          {consumoFileName && !consumoError && (
+            <div className="px-4 py-2 text-xs text-emerald-700 bg-emerald-50/60 border-b border-emerald-100 flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4" />
+              Arquivo processado: {consumoFileName}
+            </div>
+          )}
+          {consumoError && (
+            <div className="px-4 py-2 text-xs text-red-700 bg-red-50 border-b border-red-100 flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4" />
+              {consumoError}
+            </div>
+          )}
+
+          {consumoLines.length > 0 && (
+            <div className="overflow-auto max-h-[520px]">
+              <table className="w-full text-left border-collapse min-w-[1100px]">
+                <thead className="sticky top-0">
+                  <tr className="bg-slate-50 border-b border-slate-200">
+                    {['Cliente', 'Produto', 'Un.', 'NF', 'Data', 'Qtd', 'Vl. unit.', 'Vl. total', 'Desc.', 'Taxa serv.', 'Vl. líquido', 'Forma pgto.'].map((h) => (
+                      <th
+                        key={h}
+                        className={`px-3 py-2 text-[10px] font-bold text-slate-500 uppercase tracking-widest ${
+                          ['Qtd', 'Vl. unit.', 'Vl. total', 'Desc.', 'Taxa serv.', 'Vl. líquido'].includes(h) ? 'text-right' : ''
+                        }`}
+                      >
+                        {h}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {consumoLines.map((line, idx) => (
+                    <tr key={idx} className="hover:bg-slate-50/70">
+                      <td className="px-3 py-2 text-xs text-slate-700 whitespace-nowrap">
+                        <span className="text-slate-400">{line.cliente_id}</span> {line.cliente_nome}
+                      </td>
+                      <td className="px-3 py-2 text-xs text-slate-800">
+                        <span className="text-slate-400">{line.produto_codigo}</span> {line.produto}
+                      </td>
+                      <td className="px-3 py-2 text-xs text-slate-600">{line.unidade}</td>
+                      <td className="px-3 py-2 text-xs text-slate-600">{line.nf}</td>
+                      <td className="px-3 py-2 text-xs text-slate-600 whitespace-nowrap">{line.data}</td>
+                      <td className="px-3 py-2 text-xs text-right tabular-nums text-slate-700">{line.quantidade}</td>
+                      <td className="px-3 py-2 text-xs text-right tabular-nums text-slate-700">{formatCurrency(line.vl_unitario)}</td>
+                      <td className="px-3 py-2 text-xs text-right tabular-nums text-slate-700">{formatCurrency(line.vl_total)}</td>
+                      <td className="px-3 py-2 text-xs text-right tabular-nums text-slate-500">{formatCurrency(line.vl_desconto)}</td>
+                      <td className="px-3 py-2 text-xs text-right tabular-nums text-slate-500">{formatCurrency(line.taxa_servico)}</td>
+                      <td className="px-3 py-2 text-xs text-right tabular-nums font-semibold text-slate-900">{formatCurrency(line.vl_liquido)}</td>
+                      <td className="px-3 py-2 text-xs text-slate-600 whitespace-nowrap">{line.forma_pgto}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Pré-visualização do Extrato Mensal (somente leitura por enquanto) */}
+      {(extratoFileName || extratoError) && (
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+          <div className="px-4 py-3 border-b border-slate-100 flex flex-wrap gap-3 items-center justify-between">
+            <div className="flex items-center gap-2">
+              <FileBarChart className="w-4 h-4 text-[#004D40]" />
+              <p className="text-sm font-bold text-slate-800">Extrato Mensal — folha por funcionário</p>
+            </div>
+            {extratoSummary && (
+              <div className="text-xs text-slate-600 flex flex-wrap gap-x-4 gap-y-1">
+                <span>Funcionários: <span className="font-bold">{extratoSummary.funcionarios}</span></span>
+                <span>Proventos: <span className="font-bold">{formatCurrency(extratoSummary.total_proventos)}</span></span>
+                <span>Descontos: <span className="font-bold">{formatCurrency(extratoSummary.total_descontos)}</span></span>
+                <span>Líquido: <span className="font-bold">{formatCurrency(extratoSummary.total_liquido)}</span></span>
+              </div>
+            )}
+          </div>
+
+          {extratoFileName && !extratoError && (
+            <div className="px-4 py-2 text-xs text-emerald-700 bg-emerald-50/60 border-b border-emerald-100 flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4" />
+              Arquivo processado: {extratoFileName}
+            </div>
+          )}
+          {extratoError && (
+            <div className="px-4 py-2 text-xs text-red-700 bg-red-50 border-b border-red-100 flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4" />
+              {extratoError}
+            </div>
+          )}
+
+          {extratoEmployees.length > 0 && (
+            <div className="overflow-auto max-h-[520px]">
+              <table className="w-full text-left border-collapse min-w-[1100px]">
+                <thead className="sticky top-0">
+                  <tr className="bg-slate-50 border-b border-slate-200">
+                    {['Matríc.', 'Funcionário', 'Cargo', 'Situação', 'Salário', 'Proventos', 'Descontos', 'Líquido', 'Base INSS', 'Base FGTS', 'Base IRRF'].map((h) => (
+                      <th
+                        key={h}
+                        className={`px-3 py-2 text-[10px] font-bold text-slate-500 uppercase tracking-widest ${
+                          ['Salário', 'Proventos', 'Descontos', 'Líquido', 'Base INSS', 'Base FGTS', 'Base IRRF'].includes(h) ? 'text-right' : ''
+                        }`}
+                      >
+                        {h}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {extratoEmployees.map((emp, idx) => (
+                    <tr key={idx} className="hover:bg-slate-50/70">
+                      <td className="px-3 py-2 text-xs text-slate-500 tabular-nums">{emp.matricula}</td>
+                      <td className="px-3 py-2 text-xs text-slate-800 whitespace-nowrap">{emp.nome}</td>
+                      <td className="px-3 py-2 text-xs text-slate-600 whitespace-nowrap">{emp.cargo}</td>
+                      <td className="px-3 py-2 text-xs text-slate-600">{emp.situacao}</td>
+                      <td className="px-3 py-2 text-xs text-right tabular-nums text-slate-700">{formatCurrency(emp.salario)}</td>
+                      <td className="px-3 py-2 text-xs text-right tabular-nums text-emerald-700">{formatCurrency(emp.proventos)}</td>
+                      <td className="px-3 py-2 text-xs text-right tabular-nums text-red-600">{formatCurrency(emp.descontos)}</td>
+                      <td className="px-3 py-2 text-xs text-right tabular-nums font-semibold text-slate-900">{formatCurrency(emp.liquido)}</td>
+                      <td className="px-3 py-2 text-xs text-right tabular-nums text-slate-500">{formatCurrency(emp.base_inss)}</td>
+                      <td className="px-3 py-2 text-xs text-right tabular-nums text-slate-500">{formatCurrency(emp.base_fgts)}</td>
+                      <td className="px-3 py-2 text-xs text-right tabular-nums text-slate-500">{formatCurrency(emp.base_irrf)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 space-y-3">

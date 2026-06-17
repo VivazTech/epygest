@@ -20,6 +20,19 @@ import {
   FORMULA_DESCRIPTIONS,
   TIPO_FORMULA_LABELS,
 } from '../lib/planilhas';
+import { OrcamentoLive } from './OrcamentoLive';
+import { AjustesLive } from './AjustesLive';
+import { SintasePage } from './Sintase';
+import { PrevRealPage } from './PrevReal';
+
+// Abas que já são funcionalidades vivas (calculadas/editáveis do banco), por índice.
+// As demais continuam como espelho estático do JSON extraído.
+const LIVE_SHEETS: Record<number, React.FC> = {
+  1: SintasePage,   // Síntese  -> tela calculada existente
+  2: PrevRealPage,  // Prev x Real 2026 -> tela calculada existente (previsto x realizado)
+  3: AjustesLive,   // Ajustes -> grade editável conta x mês
+  4: OrcamentoLive, // Orçamento 2026
+};
 
 const ROW_H = 30;
 const COL_W = 132;
@@ -103,7 +116,7 @@ const SheetRow = React.memo<RowProps>(({ rowIdx, totalColunas, rowCells, selecte
 });
 SheetRow.displayName = 'SheetRow';
 
-export const PlanilhasPage: React.FC<PlanilhasPageProps> = ({ indice, targetCell, onNavigate }) => {
+const StaticSheetViewer: React.FC<PlanilhasPageProps> = ({ indice, targetCell, onNavigate }) => {
   const meta = PLANILHAS.find((p) => p.indice === indice) ?? PLANILHAS[0];
   const [data, setData] = useState<PlanilhaData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -569,4 +582,11 @@ export const PlanilhasPage: React.FC<PlanilhasPageProps> = ({ indice, targetCell
       </div>
     </div>
   );
+};
+
+// Decide entre a funcionalidade viva (ex.: Orçamento) e o espelho estático do JSON.
+export const PlanilhasPage: React.FC<PlanilhasPageProps> = (props) => {
+  const Live = LIVE_SHEETS[props.indice];
+  if (Live) return <Live />;
+  return <StaticSheetViewer {...props} />;
 };

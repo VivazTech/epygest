@@ -441,42 +441,52 @@ export function createApp() {
   });
 
   app.post("/api/auth/login", loginLimiter, async (req, res) => {
-    const email = String(req.body?.email || "").trim().toLowerCase();
-    const password = String(req.body?.password || "");
-    if (!email || !password) {
-      return res.status(400).json({ error: "Informe e-mail e senha." });
-    }
-
-    const { data: user, error } = await supabase
-      .from("users")
-      .select("*")
-      .eq("email", email)
-      .single();
-
-    // Mensagem genérica: não revela se o e-mail existe.
-    if (error || !user) {
-      return res.status(401).json({ error: "Credenciais inválidas" });
-    }
-
-    const ok = await verifyPassword(password, String(user.password || ""));
-    if (!ok) {
-      return res.status(401).json({ error: "Credenciais inválidas" });
-    }
-
-    // Migração lazy: se a senha estava em texto puro, re-grava como hash bcrypt.
-    if (!isBcryptHash(String(user.password || ""))) {
-      try {
-        const hashed = await hashPassword(password);
-        await supabase.from("users").update({ password: hashed }).eq("id", user.id);
-      } catch (err) {
-        console.error("Falha ao migrar senha para hash:", err);
+    try {
+      const email = String(req.body?.email || "").trim().toLowerCase();
+      const password = String(req.body?.password || "");
+      if (!email || !password) {
+        return res.status(400).json({ error: "Informe e-mail e senha." });
       }
-    }
 
-    const sessionData = await buildUserSession(user);
-    const token = signSession({ id: user.id, email: user.email, role: user.role, name: user.name });
-    res.cookie(SESSION_COOKIE, token, sessionCookieOptions());
-    res.json(sessionData);
+      const { data: user, error } = await supabase
+        .from("users")
+        .select("*")
+        .eq("email", email)
+        .single();
+
+      // Mensagem genérica: não revela se o e-mail existe.
+      if (error || !user) {
+        return res.status(401).json({ error: "Credenciais inválidas" });
+      }
+
+      const ok = await verifyPassword(password, String(user.password || ""));
+      if (!ok) {
+        return res.status(401).json({ error: "Credenciais inválidas" });
+      }
+
+      // Gera o token ANTES de qualquer escrita: se JWT_SECRET estiver ausente,
+      // falha de forma clara (500) em vez de deixar a requisição travada.
+      const token = signSession({ id: user.id, email: user.email, role: user.role, name: user.name });
+
+      // Migração lazy: se a senha estava em texto puro, re-grava como hash bcrypt.
+      if (!isBcryptHash(String(user.password || ""))) {
+        try {
+          const hashed = await hashPassword(password);
+          await supabase.from("users").update({ password: hashed }).eq("id", user.id);
+        } catch (err) {
+          console.error("Falha ao migrar senha para hash:", err);
+        }
+      }
+
+      const sessionData = await buildUserSession(user);
+      res.cookie(SESSION_COOKIE, token, sessionCookieOptions());
+      res.json(sessionData);
+    } catch (err) {
+      console.error("Erro no login:", err);
+      res.status(500).json({
+        error: "Erro interno na autenticação. Verifique se JWT_SECRET está configurado no servidor.",
+      });
+    }
   });
 
   app.post("/api/auth/logout", (_req, res) => {
@@ -1736,6 +1746,313 @@ export function createApp() {
   });
 
   // ====================================================
+  // IMPORTAÇÃO: CONSUMO INTERNO (relatório "Consumo por cliente" do Desbravador, .xls)
+  // Por enquanto apenas extrai e devolve os dados para visualização (não persiste).
+  // ====================================================
+  app.post("/api/import/consumo-interno/preview", upload.single("consumo_file"), async (req, res) => {
+    if (!req.file) return res.status(400).json({ error: "Arquivo não enviado" });
+    const isExcel = /\.(xlsx|xls)$/i.test(req.file.originalname || "");
+    if (!isExcel) {
+      if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+      return res.status(400).json({ error: "Envie o relatório em Excel (.xls ou .xlsx)." });
+    }
+
+    // Serial de data do Excel (sistema 1900) -> dd/mm/aaaa e ISO.
+    const excelDate = (serial: any): { br: string; iso: string } => {
+      if (typeof serial !== "number" || !Number.isFinite(serial)) return { br: "", iso: "" };
+      const d = new Date(Math.round((serial - 25569) * 86400 * 1000));
+      if (Number.isNaN(d.getTime())) return { br: "", iso: "" };
+      const dd = String(d.getUTCDate()).padStart(2, "0");
+      const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
+      const yyyy = d.getUTCFullYear();
+      return { br: `${dd}/${mm}/${yyyy}`, iso: `${yyyy}-${mm}-${dd}` };
+    };
+    const num = (v: any) => {
+      const n = Number(v);
+      return Number.isFinite(n) ? n : 0;
+    };
+
+    try {
+      const workbook = xlsx.readFile(req.file.path);
+      const sheet = workbook.Sheets[workbook.SheetNames[0]];
+      const rows = xlsx.utils.sheet_to_json(sheet, { header: 1, defval: "", raw: true }) as any[][];
+
+      let clienteId: any = null;
+      let clienteNome = "";
+      const lines: any[] = [];
+
+      for (const r of rows) {
+        if (!Array.isArray(r)) continue;
+        // Linha de cliente: "Cliente:" na coluna 0, id na 1, nome na 3.
+        if (String(r[0]).trim() === "Cliente:") {
+          clienteId = r[1] ?? null;
+          clienteNome = String(r[3] ?? "").trim();
+          continue;
+        }
+        // Linha de produto: código numérico na 0 e "-" na 1.
+        if (typeof r[0] === "number" && String(r[1]).trim() === "-" && String(r[2] ?? "").trim()) {
+          const d = excelDate(r[10]);
+          lines.push({
+            cliente_id: clienteId,
+            cliente_nome: clienteNome,
+            produto_codigo: r[0],
+            produto: String(r[2]).trim(),
+            unidade: String(r[6] ?? "").trim(),
+            nf: r[9] ?? null,
+            data: d.br,
+            data_iso: d.iso,
+            quantidade: num(r[12]),
+            vl_unitario: num(r[13]),
+            vl_total: num(r[14]),
+            vl_desconto: num(r[16]),
+            taxa_servico: num(r[18]),
+            vl_liquido: num(r[20]),
+            forma_pgto: String(r[22] ?? "").trim(),
+          });
+        }
+      }
+
+      const clientes = new Set(lines.map((l) => `${l.cliente_id}`));
+      const totalLiquido = lines.reduce((s, l) => s + l.vl_liquido, 0);
+      const totalQuantidade = lines.reduce((s, l) => s + l.quantidade, 0);
+
+      res.json({
+        success: true,
+        report_name: req.file.originalname || "consumo-interno.xls",
+        summary: {
+          lines_count: lines.length,
+          clientes_count: clientes.size,
+          total_quantidade: totalQuantidade,
+          total_liquido: totalLiquido,
+        },
+        lines,
+      });
+    } catch (error: any) {
+      console.error("Erro ao processar Consumo Interno:", error);
+      res.status(500).json({ success: false, error: "Não foi possível processar o relatório de Consumo Interno." });
+    } finally {
+      if (req.file?.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+    }
+  });
+
+  // ====================================================
+  // IMPORTAÇÃO: REL. CRD (Movimentação por Conta Financeira, .xls do Desbravador)
+  // Extrai a hierarquia do plano financeiro (conta + movimentos). Não persiste ainda.
+  // ====================================================
+  app.post("/api/import/rel-crd/preview", upload.single("relcrd_file"), async (req, res) => {
+    if (!req.file) return res.status(400).json({ error: "Arquivo não enviado" });
+    if (!/\.(xls|xlsx)$/i.test(req.file.originalname || "")) {
+      if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+      return res.status(400).json({ error: "Envie o relatório em Excel (.xls ou .xlsx)." });
+    }
+    // Aceita número ou texto BR ("2.345.821,13", "(85,00)", "-1.476,69").
+    const parseVal = (v: any): number => {
+      if (typeof v === "number") return Number.isFinite(v) ? v : 0;
+      let s = String(v ?? "").trim();
+      if (!s) return 0;
+      const paren = /^\(.*\)$/.test(s);
+      s = s.replace(/[()]/g, "").replace(/\./g, "").replace(",", ".").replace(/[^0-9.\-]/g, "");
+      let n = Number(s);
+      if (!Number.isFinite(n)) n = 0;
+      return paren ? -Math.abs(n) : n;
+    };
+    try {
+      const workbook = xlsx.readFile(req.file.path);
+      const sheet = workbook.Sheets[workbook.SheetNames[0]];
+      const rows = xlsx.utils.sheet_to_json(sheet, { header: 1, defval: "", raw: true }) as any[][];
+
+      const accounts: any[] = [];
+      for (const r of rows) {
+        const c0 = r[0];
+        if (typeof c0 !== "string") continue;
+        const t = c0.trim();
+        const m = /\(([^)]+)\)\s*$/.exec(t); // conta termina com "(codigo)"
+        if (!m) continue;
+        if (r[9] === "" && r[24] === "") continue; // precisa ter colunas de movimento
+        const lead = c0.length - c0.replace(/^\s+/, "").length; // espaços à esquerda = nível
+        accounts.push({
+          nivel: Math.floor(lead / 4) + 1,
+          codigo: m[1],
+          nome: t.replace(/\s*\([^)]+\)\s*$/, ""),
+          lancamentos: parseVal(r[9]),
+          cancelamentos: parseVal(r[11]),
+          saldo_lanc: parseVal(r[14]),
+          baixas: parseVal(r[16]),
+          estorno: parseVal(r[19]),
+          baixas_liquido: parseVal(r[21]),
+          lanc_liquido: parseVal(r[24]),
+        });
+      }
+
+      // Totais a partir dos grupos de nível 1 (evita dupla contagem da hierarquia).
+      const nivel1 = accounts.filter((a) => a.nivel === 1);
+      res.json({
+        success: true,
+        report_name: req.file.originalname || "rel-crd.xls",
+        summary: {
+          contas: accounts.length,
+          grupos: nivel1.length,
+          total_lancamentos: nivel1.reduce((s, a) => s + a.lancamentos, 0),
+          total_baixas: nivel1.reduce((s, a) => s + a.baixas, 0),
+          total_lanc_liquido: nivel1.reduce((s, a) => s + a.lanc_liquido, 0),
+        },
+        accounts,
+      });
+    } catch (error: any) {
+      console.error("Erro ao processar Rel. CRD:", error);
+      res.status(500).json({ success: false, error: "Não foi possível processar o Rel. CRD." });
+    } finally {
+      if (req.file?.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+    }
+  });
+
+  // ====================================================
+  // IMPORTAÇÃO: EXTRATO MENSAL (folha de pagamento, .xls BIFF do Desbravador)
+  // Estes .xls quebram o leitor do SheetJS (formato de número inválido + substream
+  // que ele não emite), então fazemos um walker BIFF8 próprio resolvendo o SST.
+  // Por enquanto apenas extrai e devolve por funcionário (não persiste).
+  // ====================================================
+  const decodeRK = (rk: number): number => {
+    const mult = (rk & 1) ? 0.01 : 1;
+    let n: number;
+    if (rk & 2) {
+      n = (rk | 0) >> 2;
+    } else {
+      const b = Buffer.alloc(8);
+      b.writeUInt32LE((rk >>> 0) & 0xfffffffc, 4);
+      n = b.readDoubleLE(0);
+    }
+    return n * mult;
+  };
+
+  // Lê um .xls do Desbravador em uma grade [linha][coluna], contornando o SheetJS.
+  const readDesbravadorXlsGrid = (filePath: string): any[][] => {
+    const buf = fs.readFileSync(filePath);
+    const wb = xlsx.read(buf, { type: "buffer", bookSST: true } as any);
+    const sst: string[] = (((wb as any).Strings) || []).map((s: any) =>
+      typeof s === "string" ? s : (s && s.t) || ""
+    );
+    const cfb: any = (xlsx as any).CFB.read(buf, { type: "buffer" });
+    const wbIdx = cfb.FullPaths.indexOf("Root Entry/Workbook");
+    if (wbIdx < 0) return [];
+    const data: Buffer = Buffer.from(cfb.FileIndex[wbIdx].content);
+    const grid: any[][] = [];
+    const put = (r: number, c: number, v: any) => {
+      if (!grid[r]) grid[r] = [];
+      grid[r][c] = v;
+    };
+    let l = 0;
+    while (l < data.length - 4) {
+      const type = data.readUInt16LE(l);
+      const len = data.readUInt16LE(l + 2);
+      const p = l + 4;
+      l = p + len;
+      if (p + len > data.length) break;
+      if (type === 0x00fd) {
+        put(data.readUInt16LE(p), data.readUInt16LE(p + 2), sst[data.readUInt32LE(p + 6)] ?? "");
+      } else if (type === 0x0203) {
+        put(data.readUInt16LE(p), data.readUInt16LE(p + 2), data.readDoubleLE(p + 6));
+      } else if (type === 0x027e) {
+        put(data.readUInt16LE(p), data.readUInt16LE(p + 2), decodeRK(data.readInt32LE(p + 6)));
+      } else if (type === 0x00bd) {
+        const r = data.readUInt16LE(p);
+        const cf = data.readUInt16LE(p + 2);
+        const n = (len - 6) / 6;
+        for (let i = 0; i < n; i++) put(r, cf + i, decodeRK(data.readInt32LE(p + 4 + i * 6 + 2)));
+      }
+    }
+    return grid;
+  };
+
+  app.post("/api/import/extrato-mensal/preview", upload.single("extrato_file"), async (req, res) => {
+    if (!req.file) return res.status(400).json({ error: "Arquivo não enviado" });
+    if (!/\.(xls|xlsx)$/i.test(req.file.originalname || "")) {
+      if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+      return res.status(400).json({ error: "Envie o relatório em Excel (.xls ou .xlsx)." });
+    }
+    try {
+      const grid = readDesbravadorXlsGrid(req.file.path);
+      const num = (v: any) => {
+        const n = Number(v);
+        return Number.isFinite(n) ? n : 0;
+      };
+      // Células populadas da linha, na ordem das colunas.
+      const cellsOf = (row: any[]) =>
+        (row || [])
+          .map((v, c) => ({ c, v }))
+          .filter((e) => e.v !== undefined && e.v !== null && String(e.v).trim() !== "");
+      // Valor logo após o rótulo informado (robusto a deslocamento de coluna).
+      const after = (cells: { c: number; v: any }[], label: string) => {
+        const i = cells.findIndex((e) => String(e.v).trim().toLowerCase().startsWith(label.toLowerCase()));
+        return i >= 0 && cells[i + 1] ? cells[i + 1].v : undefined;
+      };
+
+      const employees: any[] = [];
+      let cur: any = null;
+      for (const row of grid) {
+        const cells = cellsOf(row);
+        if (!cells.length) continue;
+        const first = String(cells[0].v).trim();
+        if (first.startsWith("Empr.:")) {
+          if (cur) employees.push(cur);
+          cur = {
+            matricula: after(cells, "Empr.:") ?? null,
+            nome: cells[2] ? String(cells[2].v).trim() : "",
+            situacao: String(after(cells, "Situação:") ?? "").trim(),
+            cpf: String(after(cells, "CPF:") ?? "").trim(),
+            cargo_cod: null,
+            cargo: "",
+            salario: 0,
+            proventos: 0,
+            descontos: 0,
+            liquido: 0,
+            base_inss: 0,
+            base_fgts: 0,
+            base_irrf: 0,
+          };
+          continue;
+        }
+        if (!cur) continue;
+        if (first.startsWith("Cargo:")) {
+          cur.cargo_cod = after(cells, "Cargo:") ?? null;
+          cur.cargo = cells[2] ? String(cells[2].v).trim() : "";
+          cur.salario = num(after(cells, "Salário:"));
+        } else if (first.startsWith("ND:")) {
+          cur.proventos = num(after(cells, "Proventos:"));
+          cur.descontos = num(after(cells, "Descontos:"));
+          cur.liquido = num(after(cells, "Líquido:"));
+        } else if (first.startsWith("NF:")) {
+          cur.base_inss = num(after(cells, "Base INSS:"));
+          cur.base_fgts = num(after(cells, "Base FGTS:"));
+          cur.base_irrf = num(after(cells, "Base IRRF:"));
+        }
+      }
+      if (cur) employees.push(cur);
+
+      const totalProventos = employees.reduce((s, e) => s + e.proventos, 0);
+      const totalDescontos = employees.reduce((s, e) => s + e.descontos, 0);
+      const totalLiquido = employees.reduce((s, e) => s + e.liquido, 0);
+
+      res.json({
+        success: true,
+        report_name: req.file.originalname || "extrato-mensal.xls",
+        summary: {
+          funcionarios: employees.length,
+          total_proventos: totalProventos,
+          total_descontos: totalDescontos,
+          total_liquido: totalLiquido,
+        },
+        employees,
+      });
+    } catch (error: any) {
+      console.error("Erro ao processar Extrato Mensal:", error);
+      res.status(500).json({ success: false, error: "Não foi possível processar o Extrato Mensal." });
+    } finally {
+      if (req.file?.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+    }
+  });
+
+  // ====================================================
   // SÍNTASE (VISÃO ANUAL DE ORÇAMENTO POR CRD)
   // ====================================================
   app.get("/api/sintase", async (req, res) => {
@@ -2109,6 +2426,499 @@ export function createApp() {
       rows,
       totals,
     });
+  });
+
+  // ====================================================
+  // ORÇAMENTO 2026 (editável + calculado)
+  // Replica a aba "Orçamento 2026": orçado por conta/mês (editável),
+  // comparado com o realizado do ano anterior e a variação percentual.
+  // ====================================================
+
+  // Soma o realizado (faturas + requisições) por crd_id e mês para um ano.
+  const computeRealizedByCrdMonth = async (
+    year: number,
+    crdData: any[]
+  ): Promise<Map<string, number>> => {
+    const dateFrom = `${year}-01-01`;
+    const dateTo = `${year}-12-31`;
+    const crdBySectorAndCode = new Map<string, number>();
+    for (const c of crdData ?? []) {
+      const sectorId = Number((c as any).sector_id);
+      const code = String((c as any).code || "").trim();
+      crdBySectorAndCode.set(`${sectorId}:${code}`, Number((c as any).id));
+    }
+
+    const realized = new Map<string, number>();
+    const add = (crdId: number, month: number, amount: any) => {
+      if (!Number.isFinite(crdId) || !Number.isFinite(month) || month < 1 || month > 12) return;
+      const key = `${crdId}:${month}`;
+      realized.set(key, (realized.get(key) || 0) + sanitizeMonthBudget(amount));
+    };
+
+    const { data: invoiceData } = await supabase
+      .from("invoices")
+      .select("amount, due_date, sector_id, crd, flow_stage")
+      .gte("due_date", dateFrom)
+      .lte("due_date", dateTo)
+      .neq("flow_stage", "cancelled");
+    for (const invoice of invoiceData ?? []) {
+      const date = new Date(String((invoice as any).due_date || ""));
+      if (Number.isNaN(date.getTime())) continue;
+      const sectorId = Number((invoice as any).sector_id);
+      const code = String((invoice as any).crd || "").trim();
+      if (!code || !Number.isFinite(sectorId)) continue;
+      const crdId = crdBySectorAndCode.get(`${sectorId}:${code}`);
+      if (!crdId) continue;
+      add(crdId, date.getMonth() + 1, (invoice as any).amount);
+    }
+
+    const { data: reqData } = await supabase
+      .from("requisitions")
+      .select("amount, date, status, crd_id")
+      .neq("status", "cancelled")
+      .gte("date", dateFrom)
+      .lte("date", dateTo);
+    for (const reqRow of reqData ?? []) {
+      const date = new Date(String((reqRow as any).date || ""));
+      if (Number.isNaN(date.getTime())) continue;
+      add(Number((reqRow as any).crd_id), date.getMonth() + 1, (reqRow as any).amount);
+    }
+
+    return realized;
+  };
+
+  app.get("/api/orcamento", async (req, res) => {
+    const { year, crd } = req.query as { year?: string; crd?: string };
+    const selectedYear = Number(year) || 2026;
+    const previousYear = selectedYear - 1;
+    const crdFilter = normalizeCrdFilterText(crd || "");
+
+    const { data: crdData, error } = await supabase
+      .from("crds")
+      .select("id, code, name, sector_id, previsto_mes, sectors(name)")
+      .eq("active", true)
+      .order("code");
+    if (error) {
+      console.error("Erro ao carregar CRDs do orçamento:", error);
+      return res.status(500).json({ error: "Erro interno ao processar a solicitação." });
+    }
+
+    // Orçado do ano (editável) a partir de crd_monthly_values, com fallback em previsto_mes.
+    const orcadoByKey = new Map<string, number>();
+    const { rows: monthlyRows } = await fetchMonthlyValuesByYear(selectedYear);
+    for (const row of (monthlyRows ?? []) as CrdMonthlyValueRow[]) {
+      orcadoByKey.set(`${row.crd_id}:${row.month}`, sanitizeMonthBudget(row.value));
+    }
+
+    // Realizado do ano anterior, para o comparativo (igual ao OFFSET de "Prev x Real 2025").
+    const realizedPrev = await computeRealizedByCrdMonth(previousYear, crdData ?? []);
+
+    const rows = (crdData ?? [])
+      .map((item: any) => {
+        const crdId = Number(item.id);
+        const monthlyBudget = sanitizeMonthBudget(item.previsto_mes);
+        const orcado = Array.from({ length: 12 }, (_, i) =>
+          orcadoByKey.get(`${crdId}:${i + 1}`) ?? monthlyBudget
+        );
+        const anterior = Array.from({ length: 12 }, (_, i) => realizedPrev.get(`${crdId}:${i + 1}`) || 0);
+        const total_orcado = orcado.reduce((s, v) => s + v, 0);
+        const total_anterior = anterior.reduce((s, v) => s + v, 0);
+        // Variação = orçado / realizado_anterior - 1 (N.A. quando não há base anterior).
+        const variacao = total_anterior !== 0 ? total_orcado / total_anterior - 1 : null;
+        return {
+          id: crdId,
+          crd: String(item.sectors?.name || "Sem CRD"),
+          grupo: String(item.code || ""),
+          detalhado: String(item.name || ""),
+          orcado,
+          anterior,
+          total_orcado,
+          total_anterior,
+          variacao,
+        };
+      })
+      .filter((row) => {
+        if (!crdFilter) return true;
+        return (
+          normalizeCrdFilterText(row.crd).includes(crdFilter) ||
+          row.grupo.toLowerCase().includes(crdFilter) ||
+          row.detalhado.toLowerCase().includes(crdFilter)
+        );
+      });
+
+    const totalsOrcadoMonths = Array.from({ length: 12 }, (_, i) =>
+      rows.reduce((s, r) => s + (r.orcado[i] || 0), 0)
+    );
+    const totalsAnteriorMonths = Array.from({ length: 12 }, (_, i) =>
+      rows.reduce((s, r) => s + (r.anterior[i] || 0), 0)
+    );
+    const totalOrcado = totalsOrcadoMonths.reduce((s, v) => s + v, 0);
+    const totalAnterior = totalsAnteriorMonths.reduce((s, v) => s + v, 0);
+
+    res.json({
+      year: selectedYear,
+      previous_year: previousYear,
+      filters: { crd: crdFilter || null },
+      rows,
+      totals: {
+        orcado_months: totalsOrcadoMonths,
+        anterior_months: totalsAnteriorMonths,
+        orcado: totalOrcado,
+        anterior: totalAnterior,
+        variacao: totalAnterior !== 0 ? totalOrcado / totalAnterior - 1 : null,
+      },
+    });
+  });
+
+  app.patch("/api/orcamento/cell", async (req, res) => {
+    const { crd_id, month, year, value } = req.body as {
+      crd_id?: number;
+      month?: number;
+      year?: number;
+      value?: number | string;
+    };
+    if (!Number.isFinite(Number(crd_id))) return res.status(400).json({ error: "crd_id inválido" });
+    if (!Number.isFinite(Number(month)) || Number(month) < 1 || Number(month) > 12) {
+      return res.status(400).json({ error: "month deve estar entre 1 e 12" });
+    }
+    if (!Number.isFinite(Number(year))) return res.status(400).json({ error: "year inválido" });
+
+    // O orçado é o valor base (sem fator de ocupação) — mesma tabela da Síntase.
+    const sanitizedValue = sanitizeMonthBudget(value);
+    const { error } = await supabase
+      .from("crd_monthly_values")
+      .upsert(
+        { crd_id: Number(crd_id), year: Number(year), month: Number(month), value: sanitizedValue },
+        { onConflict: "crd_id,year,month" }
+      );
+    if (error) {
+      console.error("Erro ao salvar célula do orçamento:", error);
+      return res.status(500).json({ error: "Não foi possível salvar a alteração." });
+    }
+    res.json({ success: true, saved: { crd_id: Number(crd_id), month: Number(month), year: Number(year), value: sanitizedValue } });
+  });
+
+  // Importa o orçado da planilha (aba_004_Or_amento_2026.json) para o banco.
+  // Lê as colunas "Prev" (G,J,M,...,AN = orçado de Jan a Dez), casa cada conta
+  // pelo código entre parênteses com crds.code e grava em crd_monthly_values.
+  const PREV_COLUMNS = [7, 10, 13, 16, 19, 22, 25, 28, 31, 34, 37, 40];
+  const normalizeName = (v: string) =>
+    String(v || "").normalize("NFD").replace(/[̀-ͯ]/g, "").trim().toLowerCase();
+
+  const baseAccountName = (s: string) => normalizeName(String(s || "").replace(/\s*\(\d+\)\s*$/, ""));
+
+  const parseOrcamentoSheet = (): Array<{
+    code: string;
+    name: string;
+    groupHint: string;
+    sectorHint: string;
+    months: number[];
+  }> => {
+    const filePath = path.join(planilhasDir, "aba_004_Or_amento_2026.json");
+    const j = JSON.parse(fs.readFileSync(filePath, "utf8"));
+    const byKey = new Map<string, any>();
+    for (const c of j.celulas) byKey.set(`${c.linha}:${c.coluna}`, c);
+    const textAt = (linha: number, coluna: number) => {
+      const c = byKey.get(`${linha}:${coluna}`);
+      return String(c?.valor ?? c?.valorCalculado ?? c?.valorReal ?? "");
+    };
+    const numAt = (linha: number, coluna: number) => {
+      const c = byKey.get(`${linha}:${coluna}`);
+      if (!c) return 0;
+      return sanitizeMonthBudget(c.valorReal ?? c.valorCalculado ?? c.valor);
+    };
+    const out: Array<{ code: string; name: string; groupHint: string; sectorHint: string; months: number[] }> = [];
+    for (let r = 1; r <= (j.totalLinhas || 0); r++) {
+      const name = textAt(r, 6); // coluna F
+      const codeMatch = name.match(/\((\d+)\)\s*$/);
+      if (!codeMatch) continue;
+      const groupHint = textAt(r, 2); // coluna B = macro/setor (FINANCEIRO, OPERACIONAL...)
+      const sectorHint = textAt(r, 3); // coluna C = subgrupo
+      const months = PREV_COLUMNS.map((col) => numAt(r, col));
+      out.push({ code: codeMatch[1], name, groupHint, sectorHint, months });
+    }
+    return out;
+  };
+
+  app.post("/api/orcamento/import", requireRole("admin"), async (req, res) => {
+    const year = Number((req.body as any)?.year) || 2026;
+    // Quando true, cria os CRDs (e setores) que existem na planilha mas não no banco.
+    const createMissing = (req.body as any)?.create_missing === true;
+    try {
+      const accounts = parseOrcamentoSheet();
+
+      const { data: allCrds, error: crdErr } = await supabase
+        .from("crds")
+        .select("id, code, name, sector_id, sectors(name)");
+      if (crdErr) {
+        console.error("Erro ao carregar CRDs para import:", crdErr);
+        return res.status(500).json({ error: "Erro ao carregar CRDs." });
+      }
+
+      // Índices de busca: por código e por nome-base (sem o "(código)").
+      const crdsByCode = new Map<string, any[]>();
+      const crdsByBaseName = new Map<string, any[]>();
+      for (const c of allCrds ?? []) {
+        const code = String((c as any).code || "").trim();
+        if (code) {
+          if (!crdsByCode.has(code)) crdsByCode.set(code, []);
+          crdsByCode.get(code)!.push(c);
+        }
+        const bn = baseAccountName((c as any).name);
+        if (bn) {
+          if (!crdsByBaseName.has(bn)) crdsByBaseName.set(bn, []);
+          crdsByBaseName.get(bn)!.push(c);
+        }
+      }
+
+      // Setores existentes (para criar CRDs faltantes mapeando pela coluna B).
+      const { data: sectorsData } = await supabase.from("sectors").select("id, name");
+      const sectorIdByName = new Map<string, number>();
+      for (const s of sectorsData ?? []) sectorIdByName.set(normalizeName((s as any).name), Number((s as any).id));
+
+      const resolveSectorId = async (groupHint: string): Promise<number | null> => {
+        const key = normalizeName(groupHint) || "sem grupo";
+        if (sectorIdByName.has(key)) return sectorIdByName.get(key)!;
+        // Cria o setor caso não exista (ex.: "Diretoria").
+        const niceName = (groupHint || "Sem grupo").trim();
+        const { data: created, error } = await supabase
+          .from("sectors")
+          .insert({ name: niceName, budget_limit: 0 })
+          .select("id")
+          .single();
+        if (error || !created) {
+          console.error("Falha ao criar setor:", niceName, error);
+          return sectorIdByName.get("sem grupo") ?? null;
+        }
+        sectorIdByName.set(key, Number(created.id));
+        return Number(created.id);
+      };
+
+      const upsertRows: Array<{ crd_id: number; year: number; month: number; value: number }> = [];
+      const matched: string[] = [];
+      const created: string[] = [];
+      const unmatched: Array<{ code: string; name: string; reason: string }> = [];
+
+      for (const acc of accounts) {
+        // Candidatos por nome-base OU código (união, sem duplicar por id).
+        const set = new Map<number, any>();
+        for (const c of crdsByBaseName.get(baseAccountName(acc.name)) || []) set.set(Number(c.id), c);
+        for (const c of crdsByCode.get(acc.code) || []) set.set(Number(c.id), c);
+        const candidates = [...set.values()];
+
+        let crdId: number | null = null;
+        if (candidates.length === 1) {
+          crdId = Number(candidates[0].id);
+          matched.push(acc.code);
+        } else if (candidates.length > 1) {
+          unmatched.push({ code: acc.code, name: acc.name, reason: "ambíguo (vários CRDs casam por nome/código)" });
+          continue;
+        } else if (createMissing) {
+          const sectorId = await resolveSectorId(acc.groupHint);
+          const { data: newCrd, error } = await supabase
+            .from("crds")
+            .insert({
+              code: acc.code,
+              name: acc.name,
+              sector_id: sectorId,
+              previsto_mes: 0,
+              active: true,
+            })
+            .select("id")
+            .single();
+          if (error || !newCrd) {
+            console.error("Falha ao criar CRD:", acc.name, error);
+            unmatched.push({ code: acc.code, name: acc.name, reason: "falha ao criar CRD" });
+            continue;
+          }
+          crdId = Number(newCrd.id);
+          created.push(acc.code);
+        } else {
+          unmatched.push({ code: acc.code, name: acc.name, reason: "sem CRD correspondente no banco" });
+          continue;
+        }
+
+        if (crdId !== null) {
+          acc.months.forEach((value, idx) => {
+            upsertRows.push({ crd_id: crdId as number, year, month: idx + 1, value });
+          });
+        }
+      }
+
+      // Grava em lotes para não estourar o limite de payload.
+      let written = 0;
+      const chunkSize = 500;
+      for (let i = 0; i < upsertRows.length; i += chunkSize) {
+        const chunk = upsertRows.slice(i, i + chunkSize);
+        const { error } = await supabase
+          .from("crd_monthly_values")
+          .upsert(chunk, { onConflict: "crd_id,year,month" });
+        if (error) {
+          console.error("Erro ao gravar lote do import:", error);
+          return res.status(500).json({ error: "Falha ao gravar os valores no banco.", written });
+        }
+        written += chunk.length;
+      }
+
+      res.json({
+        success: true,
+        year,
+        accounts_in_sheet: accounts.length,
+        matched: matched.length,
+        created: created.length,
+        unmatched_count: unmatched.length,
+        rows_written: written,
+        unmatched: unmatched.slice(0, 50),
+      });
+    } catch (err) {
+      console.error("Erro no import do orçamento:", err);
+      res.status(500).json({ error: "Não foi possível importar a planilha." });
+    }
+  });
+
+  // ====================================================
+  // AJUSTES (editável + calculado)
+  // Replica a aba "Ajustes": grade conta × mês de ajustes manuais.
+  // Cabeçalhos = datas de fim de mês (cadeia EOMONTH a partir de Jan).
+  // ====================================================
+
+  // Gera as 12 datas de fim de mês do ano (igual ao EOMONTH da planilha).
+  const monthEndDates = (year: number) =>
+    Array.from({ length: 12 }, (_, i) => {
+      const d = new Date(year, i + 1, 0);
+      return {
+        month: i + 1,
+        label: `Real${i + 1}`,
+        date: `${String(d.getDate()).padStart(2, "0")}/${String(i + 1).padStart(2, "0")}/${year}`,
+      };
+    });
+
+  // Extrai número de uma célula da planilha (aceita number ou string BR com parênteses negativos).
+  const cellToNumber = (c: any): number => {
+    if (!c) return 0;
+    const raw = c.valorReal ?? c.valorCalculado;
+    if (typeof raw === "number" && Number.isFinite(raw)) return raw;
+    let s = String(c.valor ?? "").trim();
+    if (!s) return 0;
+    const negative = /^\(.*\)$/.test(s);
+    s = s.replace(/[()]/g, "").replace(/\./g, "").replace(",", ".").replace(/[^0-9.\-]/g, "");
+    const n = Number(s);
+    if (!Number.isFinite(n)) return 0;
+    return negative ? -Math.abs(n) : n;
+  };
+
+  app.get("/api/ajustes", async (req, res) => {
+    const year = Number((req.query as any)?.year) || 2026;
+    const { data, error } = await supabase
+      .from("orcamento_ajustes")
+      .select("account_name, month, value")
+      .eq("year", year);
+    if (error) {
+      console.error("Erro ao carregar ajustes:", error);
+      return res.status(500).json({ error: "Erro interno ao processar a solicitação." });
+    }
+
+    const byAccount = new Map<string, number[]>();
+    for (const row of data ?? []) {
+      const name = String((row as any).account_name || "");
+      if (!byAccount.has(name)) byAccount.set(name, Array.from({ length: 12 }, () => 0));
+      const m = Number((row as any).month);
+      if (m >= 1 && m <= 12) byAccount.get(name)![m - 1] = sanitizeMonthBudget((row as any).value);
+    }
+
+    const rows = Array.from(byAccount.entries())
+      .map(([account_name, values]) => ({
+        account_name,
+        values,
+        total: values.reduce((s, v) => s + v, 0),
+      }))
+      .sort((a, b) => a.account_name.localeCompare(b.account_name));
+
+    const totalsMonths = Array.from({ length: 12 }, (_, i) => rows.reduce((s, r) => s + (r.values[i] || 0), 0));
+
+    res.json({
+      year,
+      months: monthEndDates(year),
+      rows,
+      totals: { months: totalsMonths, total: totalsMonths.reduce((s, v) => s + v, 0) },
+    });
+  });
+
+  app.patch("/api/ajustes/cell", async (req, res) => {
+    const { account_name, month, year, value } = req.body as {
+      account_name?: string;
+      month?: number;
+      year?: number;
+      value?: number | string;
+    };
+    const name = String(account_name || "").trim();
+    if (!name) return res.status(400).json({ error: "account_name é obrigatório" });
+    if (!Number.isFinite(Number(month)) || Number(month) < 1 || Number(month) > 12) {
+      return res.status(400).json({ error: "month deve estar entre 1 e 12" });
+    }
+    if (!Number.isFinite(Number(year))) return res.status(400).json({ error: "year inválido" });
+
+    const sanitizedValue = sanitizeMonthBudget(value);
+    const { error } = await supabase
+      .from("orcamento_ajustes")
+      .upsert(
+        { account_name: name, year: Number(year), month: Number(month), value: sanitizedValue },
+        { onConflict: "account_name,year,month" }
+      );
+    if (error) {
+      console.error("Erro ao salvar ajuste:", error);
+      return res.status(500).json({ error: "Não foi possível salvar a alteração." });
+    }
+    res.json({ success: true, saved: { account_name: name, month: Number(month), year: Number(year), value: sanitizedValue } });
+  });
+
+  app.post("/api/ajustes/import", requireRole("admin"), async (req, res) => {
+    const year = Number((req.body as any)?.year) || 2026;
+    try {
+      const filePath = path.join(planilhasDir, "aba_003_Ajustes.json");
+      const j = JSON.parse(fs.readFileSync(filePath, "utf8"));
+      const byKey = new Map<string, any>();
+      for (const c of j.celulas) byKey.set(`${c.linha}:${c.coluna}`, c);
+
+      // Linhas de conta começam na linha 3 (linha 1 = rótulos, linha 2 = datas).
+      // Coluna B (2) = nome da conta; colunas C..N (3..14) = ajustes de Jan..Dez.
+      const VALUE_COLUMNS = [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14];
+      const merged = new Map<string, number[]>();
+      for (let r = 3; r <= (j.totalLinhas || 0); r++) {
+        const nameCell = byKey.get(`${r}:2`);
+        const name = String(nameCell?.valor ?? nameCell?.valorCalculado ?? "").trim();
+        if (!name) continue;
+        const months = VALUE_COLUMNS.map((col) => cellToNumber(byKey.get(`${r}:${col}`)));
+        // Mescla contas repetidas (a coluna A da planilha sinaliza duplicadas).
+        if (!merged.has(name)) merged.set(name, Array.from({ length: 12 }, () => 0));
+        const acc = merged.get(name)!;
+        months.forEach((v, i) => (acc[i] += v));
+      }
+
+      const upsertRows: Array<{ account_name: string; year: number; month: number; value: number }> = [];
+      for (const [account_name, months] of merged.entries()) {
+        months.forEach((value, i) => upsertRows.push({ account_name, year, month: i + 1, value }));
+      }
+
+      let written = 0;
+      const chunkSize = 500;
+      for (let i = 0; i < upsertRows.length; i += chunkSize) {
+        const chunk = upsertRows.slice(i, i + chunkSize);
+        const { error } = await supabase
+          .from("orcamento_ajustes")
+          .upsert(chunk, { onConflict: "account_name,year,month" });
+        if (error) {
+          console.error("Erro ao gravar lote de ajustes:", error);
+          return res.status(500).json({ error: "Falha ao gravar os ajustes no banco.", written });
+        }
+        written += chunk.length;
+      }
+
+      res.json({ success: true, year, accounts: merged.size, rows_written: written });
+    } catch (err) {
+      console.error("Erro no import de ajustes:", err);
+      res.status(500).json({ error: "Não foi possível importar a planilha de ajustes." });
+    }
   });
 
   // ====================================================
