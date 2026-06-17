@@ -11,6 +11,7 @@ import {
   ClipboardList,
   Layers,
   Settings2,
+  ArrowRightCircle,
 } from 'lucide-react';
 import { formatCurrency } from '../lib/utils';
 
@@ -83,6 +84,11 @@ type ConsumoSummary = {
   total_liquido: number;
 };
 
+type Periodo = { month: number; year: number } | null;
+
+const MESES = ['', 'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
+const periodoLabel = (p: Periodo) => (p && p.month >= 1 && p.month <= 12 ? `${MESES[p.month]}/${p.year}` : '—');
+
 type ExtratoEmployee = {
   matricula: number | string | null;
   nome: string;
@@ -142,12 +148,44 @@ export const ImportacaoPage: React.FC = () => {
   const [summaryCount, setSummaryCount] = useState(0);
   const [error, setError] = useState('');
 
-  // Estado da pré-visualização do Consumo Interno (somente exibição por enquanto).
+  // Estado da pré-visualização do Consumo Interno.
   const [consumoLoading, setConsumoLoading] = useState(false);
   const [consumoFileName, setConsumoFileName] = useState('');
   const [consumoError, setConsumoError] = useState('');
   const [consumoLines, setConsumoLines] = useState<ConsumoLine[]>([]);
   const [consumoSummary, setConsumoSummary] = useState<ConsumoSummary | null>(null);
+  const [consumoFile, setConsumoFile] = useState<File | null>(null);
+  const [consumoPeriod, setConsumoPeriod] = useState<Periodo>(null);
+  const [consumoDestino, setConsumoDestino] = useState<{ setor: string; conta: string } | null>(null);
+  const [consumoCommitting, setConsumoCommitting] = useState(false);
+  const [consumoCommitMsg, setConsumoCommitMsg] = useState('');
+
+  const commitConsumoInterno = async () => {
+    if (consumoCommitting || !consumoFile) return;
+    if (!consumoPeriod) {
+      alert('Não foi possível detectar o mês do relatório.');
+      return;
+    }
+    setConsumoCommitting(true);
+    setConsumoCommitMsg('');
+    const formData = new FormData();
+    formData.append('consumo_file', consumoFile);
+    formData.append('month', String(consumoPeriod.month));
+    formData.append('year', String(consumoPeriod.year));
+    try {
+      const res = await fetch('/api/import/consumo-interno/commit', { method: 'POST', body: formData });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        alert(data.error || 'Falha ao enviar para Prev x Real.');
+        return;
+      }
+      setConsumoCommitMsg(
+        `Enviado: ${formatCurrency(data.total)} → ${data.destino.setor} › ${data.destino.conta} › Real de ${periodoLabel(data.period)}.`
+      );
+    } finally {
+      setConsumoCommitting(false);
+    }
+  };
 
   // Estado da pré-visualização do Extrato Mensal (somente exibição por enquanto).
   const [extratoLoading, setExtratoLoading] = useState(false);
@@ -223,6 +261,8 @@ export const ImportacaoPage: React.FC = () => {
     setConsumoLoading(true);
     setConsumoError('');
     setConsumoFileName(file.name);
+    setConsumoFile(file);
+    setConsumoCommitMsg('');
     const formData = new FormData();
     formData.append('consumo_file', file);
     try {
@@ -232,10 +272,14 @@ export const ImportacaoPage: React.FC = () => {
         setConsumoError(data.error || 'Falha ao processar o relatório de Consumo Interno.');
         setConsumoLines([]);
         setConsumoSummary(null);
+        setConsumoPeriod(null);
+        setConsumoDestino(null);
         return;
       }
       setConsumoLines(Array.isArray(data.lines) ? data.lines : []);
       setConsumoSummary(data.summary || null);
+      setConsumoPeriod(data.period || null);
+      setConsumoDestino(data.destino || null);
     } catch (err: any) {
       setConsumoError(err?.message || 'Erro inesperado ao importar o arquivo.');
     } finally {
@@ -357,7 +401,7 @@ export const ImportacaoPage: React.FC = () => {
                   <div className="w-11 h-11 rounded-xl bg-[#004D40]/5 text-[#004D40] flex items-center justify-center">
                     <Icon className="w-5 h-5" />
                   </div>
-                  {source.key === 'consumo_interno' || source.key === 'extrato_mensal' ? (
+                  {source.key === 'consumo_interno' || source.key === 'extrato_mensal' || source.key === 'rel_crd' ? (
                     <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-full px-2 py-0.5">
                       Extração ativa
                     </span>
@@ -392,6 +436,18 @@ export const ImportacaoPage: React.FC = () => {
                       accept=".xls,.xlsx,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                       onChange={uploadExtratoMensal}
                       disabled={extratoLoading}
+                      className="hidden"
+                    />
+                  </label>
+                ) : source.key === 'rel_crd' ? (
+                  <label className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl border border-[#004D40] bg-white text-sm font-bold text-[#004D40] cursor-pointer hover:bg-emerald-50 transition-colors">
+                    {relCrdLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+                    {relCrdLoading ? 'Processando...' : 'Enviar arquivo (.xls)'}
+                    <input
+                      type="file"
+                      accept=".xls,.xlsx,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                      onChange={uploadRelCrd}
+                      disabled={relCrdLoading}
                       className="hidden"
                     />
                   </label>
@@ -440,6 +496,36 @@ export const ImportacaoPage: React.FC = () => {
             <div className="px-4 py-2 text-xs text-red-700 bg-red-50 border-b border-red-100 flex items-center gap-2">
               <AlertTriangle className="w-4 h-4" />
               {consumoError}
+            </div>
+          )}
+
+          {/* Envio do total para a Prev x Real (Controle › CONSUMO INTERNO (SEM CRD) › Real) */}
+          {consumoSummary && !consumoError && (
+            <div className="px-4 py-3 border-b border-slate-100 bg-slate-50/60 flex flex-wrap items-center justify-between gap-3">
+              <div className="text-xs text-slate-600 space-y-0.5">
+                <p>
+                  Mês detectado: <span className="font-bold text-slate-900">{periodoLabel(consumoPeriod)}</span>
+                  <span className="mx-2 text-slate-300">|</span>
+                  Total a enviar: <span className="font-bold text-slate-900">{formatCurrency(consumoSummary.total_liquido)}</span>
+                </p>
+                <p className="text-[11px] text-slate-500">
+                  Destino: Prev x Real › <b>{consumoDestino?.setor ?? 'Controle'}</b> › <b>{consumoDestino?.conta ?? 'CONSUMO INTERNO (SEM CRD)'}</b> › Real
+                </p>
+                {consumoCommitMsg && (
+                  <p className="text-[11px] font-semibold text-emerald-700 inline-flex items-center gap-1">
+                    <CheckCircle2 className="w-3.5 h-3.5" /> {consumoCommitMsg}
+                  </p>
+                )}
+              </div>
+              <button
+                onClick={commitConsumoInterno}
+                disabled={consumoCommitting || !consumoPeriod}
+                title={!consumoPeriod ? 'Mês não detectado no relatório' : 'Envia o total como realizado do mês'}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-[#004D40] text-white text-sm font-bold hover:bg-[#003d33] disabled:opacity-60 transition-colors"
+              >
+                {consumoCommitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowRightCircle className="w-4 h-4" />}
+                {consumoCommitting ? 'Enviando...' : 'Enviar para Prev x Real'}
+              </button>
             </div>
           )}
 
@@ -550,6 +636,81 @@ export const ImportacaoPage: React.FC = () => {
                       <td className="px-3 py-2 text-xs text-right tabular-nums text-slate-500">{formatCurrency(emp.base_inss)}</td>
                       <td className="px-3 py-2 text-xs text-right tabular-nums text-slate-500">{formatCurrency(emp.base_fgts)}</td>
                       <td className="px-3 py-2 text-xs text-right tabular-nums text-slate-500">{formatCurrency(emp.base_irrf)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Pré-visualização do Rel. CRD (somente leitura por enquanto) */}
+      {(relCrdFileName || relCrdError) && (
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+          <div className="px-4 py-3 border-b border-slate-100 flex flex-wrap gap-3 items-center justify-between">
+            <div className="flex items-center gap-2">
+              <FileText className="w-4 h-4 text-[#004D40]" />
+              <p className="text-sm font-bold text-slate-800">Rel. CRD — movimentação por conta financeira</p>
+            </div>
+            {relCrdSummary && (
+              <div className="text-xs text-slate-600 flex flex-wrap gap-x-4 gap-y-1">
+                <span>Contas: <span className="font-bold">{relCrdSummary.contas}</span></span>
+                <span>Grupos: <span className="font-bold">{relCrdSummary.grupos}</span></span>
+                <span>Lançamentos: <span className="font-bold">{formatCurrency(relCrdSummary.total_lancamentos)}</span></span>
+                <span>Baixas: <span className="font-bold">{formatCurrency(relCrdSummary.total_baixas)}</span></span>
+                <span>Lanç. líquido: <span className="font-bold">{formatCurrency(relCrdSummary.total_lanc_liquido)}</span></span>
+              </div>
+            )}
+          </div>
+
+          {relCrdFileName && !relCrdError && (
+            <div className="px-4 py-2 text-xs text-emerald-700 bg-emerald-50/60 border-b border-emerald-100 flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4" />
+              Arquivo processado: {relCrdFileName}
+            </div>
+          )}
+          {relCrdError && (
+            <div className="px-4 py-2 text-xs text-red-700 bg-red-50 border-b border-red-100 flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4" />
+              {relCrdError}
+            </div>
+          )}
+
+          {relCrdAccounts.length > 0 && (
+            <div className="overflow-auto max-h-[520px]">
+              <table className="w-full text-left border-collapse min-w-[1150px]">
+                <thead className="sticky top-0">
+                  <tr className="bg-slate-50 border-b border-slate-200">
+                    {['Cód.', 'Conta', 'Lançamentos', 'Cancelam.', 'Saldo lanç.', 'Baixas', 'Estorno', 'Baixas líq.', 'Lanç. líquido'].map((h) => (
+                      <th
+                        key={h}
+                        className={`px-3 py-2 text-[10px] font-bold text-slate-500 uppercase tracking-widest ${
+                          !['Cód.', 'Conta'].includes(h) ? 'text-right' : ''
+                        }`}
+                      >
+                        {h}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {relCrdAccounts.map((acc, idx) => (
+                    <tr key={idx} className={`hover:bg-slate-50/70 ${acc.nivel === 1 ? 'bg-slate-100 font-bold' : acc.nivel === 2 ? 'bg-slate-50/60' : ''}`}>
+                      <td className="px-3 py-2 text-xs text-slate-500 tabular-nums">{acc.codigo}</td>
+                      <td
+                        className={`px-3 py-2 text-xs whitespace-nowrap ${acc.nivel === 1 ? 'text-slate-900 font-bold' : acc.nivel === 2 ? 'text-slate-800 font-semibold' : 'text-slate-700'}`}
+                        style={{ paddingLeft: `${0.75 + (acc.nivel - 1) * 1.25}rem` }}
+                      >
+                        {acc.nome}
+                      </td>
+                      <td className="px-3 py-2 text-xs text-right tabular-nums text-slate-700">{formatCurrency(acc.lancamentos)}</td>
+                      <td className="px-3 py-2 text-xs text-right tabular-nums text-slate-500">{formatCurrency(acc.cancelamentos)}</td>
+                      <td className="px-3 py-2 text-xs text-right tabular-nums text-slate-700">{formatCurrency(acc.saldo_lanc)}</td>
+                      <td className="px-3 py-2 text-xs text-right tabular-nums text-slate-700">{formatCurrency(acc.baixas)}</td>
+                      <td className="px-3 py-2 text-xs text-right tabular-nums text-slate-500">{formatCurrency(acc.estorno)}</td>
+                      <td className="px-3 py-2 text-xs text-right tabular-nums text-slate-700">{formatCurrency(acc.baixas_liquido)}</td>
+                      <td className={`px-3 py-2 text-xs text-right tabular-nums font-semibold ${acc.lanc_liquido < 0 ? 'text-red-600' : 'text-slate-900'}`}>{formatCurrency(acc.lanc_liquido)}</td>
                     </tr>
                   ))}
                 </tbody>

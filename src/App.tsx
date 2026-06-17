@@ -17,6 +17,7 @@ import { ConfiguracoesPage as Configuracoes } from './pages/Configuracoes';
 import { UsuariosPage as Usuarios } from './pages/Usuarios';
 import { PlanilhasPage } from './pages/Planilhas';
 import { PLANILHAS } from './lib/planilhas';
+import { FolhaPagamentoPage, MESES_FOLHA } from './pages/FolhaPagamento';
 
 export default function App() {
   const isSupabaseTestRoute = window.location.pathname === '/teste-supabase';
@@ -125,6 +126,11 @@ export default function App() {
           }}
         />
       );
+    }
+
+    if (activeTab.startsWith('folha-')) {
+      const mes = Number(activeTab.slice('folha-'.length));
+      return <FolhaPagamentoPage key={mes} month={mes} />;
     }
 
     switch (activeTab) {
@@ -250,6 +256,8 @@ export default function App() {
             <span className="text-slate-900 text-sm font-bold capitalize">
               {activeTab.startsWith('planilha-')
                 ? `Planilhas / ${PLANILHAS.find((p) => `planilha-${p.indice}` === activeTab)?.nome ?? ''}`
+                : activeTab.startsWith('folha-')
+                ? `Folha de Pagamento / ${MESES_FOLHA[Number(activeTab.slice('folha-'.length))] ?? ''}`
                 : activeTab.replace('-', ' ')}
             </span>
           </div>
@@ -265,7 +273,7 @@ export default function App() {
           </div>
         </header>
 
-        <div className={activeTab === 'notas' || activeTab === 'cadastros' || activeTab === 'sintase' || activeTab === 'prev-real' || activeTab === 'dre' || activeTab.startsWith('planilha-') ? "p-8 w-full max-w-none" : "p-8 max-w-7xl mx-auto"}>
+        <div className={activeTab === 'notas' || activeTab === 'cadastros' || activeTab === 'sintase' || activeTab === 'prev-real' || activeTab === 'dre' || activeTab.startsWith('planilha-') || activeTab.startsWith('folha-') ? "p-8 w-full max-w-none" : "p-8 max-w-7xl mx-auto"}>
           {renderContent()}
         </div>
       </main>

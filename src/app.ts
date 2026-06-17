@@ -1749,15 +1749,12 @@ export function createApp() {
   // IMPORTAÇÃO: CONSUMO INTERNO (relatório "Consumo por cliente" do Desbravador, .xls)
   // Por enquanto apenas extrai e devolve os dados para visualização (não persiste).
   // ====================================================
-  app.post("/api/import/consumo-interno/preview", upload.single("consumo_file"), async (req, res) => {
-    if (!req.file) return res.status(400).json({ error: "Arquivo não enviado" });
-    const isExcel = /\.(xlsx|xls)$/i.test(req.file.originalname || "");
-    if (!isExcel) {
-      if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
-      return res.status(400).json({ error: "Envie o relatório em Excel (.xls ou .xlsx)." });
-    }
+  // Conta/setor de destino do Consumo Interno na Prev x Real.
+  const CONSUMO_INTERNO_CRD_NOME = "CONSUMO INTERNO (SEM CRD)";
+  const CONSUMO_INTERNO_SETOR = "Controle";
 
-    // Serial de data do Excel (sistema 1900) -> dd/mm/aaaa e ISO.
+  // Faz o parse do .xls de Consumo Interno: linhas + resumo + período detectado.
+  const parseConsumoInternoFile = (filePath: string) => {
     const excelDate = (serial: any): { br: string; iso: string } => {
       if (typeof serial !== "number" || !Number.isFinite(serial)) return { br: "", iso: "" };
       const d = new Date(Math.round((serial - 25569) * 86400 * 1000));
@@ -1772,64 +1769,173 @@ export function createApp() {
       return Number.isFinite(n) ? n : 0;
     };
 
-    try {
-      const workbook = xlsx.readFile(req.file.path);
-      const sheet = workbook.Sheets[workbook.SheetNames[0]];
-      const rows = xlsx.utils.sheet_to_json(sheet, { header: 1, defval: "", raw: true }) as any[][];
+    const workbook = xlsx.readFile(filePath);
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    const rows = xlsx.utils.sheet_to_json(sheet, { header: 1, defval: "", raw: true }) as any[][];
 
-      let clienteId: any = null;
-      let clienteNome = "";
-      const lines: any[] = [];
-
-      for (const r of rows) {
-        if (!Array.isArray(r)) continue;
-        // Linha de cliente: "Cliente:" na coluna 0, id na 1, nome na 3.
-        if (String(r[0]).trim() === "Cliente:") {
-          clienteId = r[1] ?? null;
-          clienteNome = String(r[3] ?? "").trim();
-          continue;
-        }
-        // Linha de produto: código numérico na 0 e "-" na 1.
-        if (typeof r[0] === "number" && String(r[1]).trim() === "-" && String(r[2] ?? "").trim()) {
-          const d = excelDate(r[10]);
-          lines.push({
-            cliente_id: clienteId,
-            cliente_nome: clienteNome,
-            produto_codigo: r[0],
-            produto: String(r[2]).trim(),
-            unidade: String(r[6] ?? "").trim(),
-            nf: r[9] ?? null,
-            data: d.br,
-            data_iso: d.iso,
-            quantidade: num(r[12]),
-            vl_unitario: num(r[13]),
-            vl_total: num(r[14]),
-            vl_desconto: num(r[16]),
-            taxa_servico: num(r[18]),
-            vl_liquido: num(r[20]),
-            forma_pgto: String(r[22] ?? "").trim(),
-          });
-        }
+    let clienteId: any = null;
+    let clienteNome = "";
+    const lines: any[] = [];
+    for (const r of rows) {
+      if (!Array.isArray(r)) continue;
+      if (String(r[0]).trim() === "Cliente:") {
+        clienteId = r[1] ?? null;
+        clienteNome = String(r[3] ?? "").trim();
+        continue;
       }
+      if (typeof r[0] === "number" && String(r[1]).trim() === "-" && String(r[2] ?? "").trim()) {
+        const d = excelDate(r[10]);
+        lines.push({
+          cliente_id: clienteId,
+          cliente_nome: clienteNome,
+          produto_codigo: r[0],
+          produto: String(r[2]).trim(),
+          unidade: String(r[6] ?? "").trim(),
+          nf: r[9] ?? null,
+          data: d.br,
+          data_iso: d.iso,
+          quantidade: num(r[12]),
+          vl_unitario: num(r[13]),
+          vl_total: num(r[14]),
+          vl_desconto: num(r[16]),
+          taxa_servico: num(r[18]),
+          vl_liquido: num(r[20]),
+          forma_pgto: String(r[22] ?? "").trim(),
+        });
+      }
+    }
 
-      const clientes = new Set(lines.map((l) => `${l.cliente_id}`));
-      const totalLiquido = lines.reduce((s, l) => s + l.vl_liquido, 0);
-      const totalQuantidade = lines.reduce((s, l) => s + l.quantidade, 0);
+    // Período = mês/ano mais frequente entre as datas dos lançamentos.
+    const monthCount = new Map<string, number>();
+    for (const l of lines) {
+      if (l.data_iso) {
+        const ym = String(l.data_iso).slice(0, 7);
+        monthCount.set(ym, (monthCount.get(ym) || 0) + 1);
+      }
+    }
+    let topYm = "";
+    let topN = -1;
+    for (const [ym, n] of monthCount) if (n > topN) { topN = n; topYm = ym; }
+    const period = topYm ? { year: Number(topYm.slice(0, 4)), month: Number(topYm.slice(5, 7)) } : null;
 
+    const totalLiquido = lines.reduce((s, l) => s + l.vl_liquido, 0);
+    const totalQuantidade = lines.reduce((s, l) => s + l.quantidade, 0);
+    const clientes = new Set(lines.map((l) => `${l.cliente_id}`));
+
+    return {
+      lines,
+      period,
+      summary: {
+        lines_count: lines.length,
+        clientes_count: clientes.size,
+        total_quantidade: totalQuantidade,
+        total_liquido: totalLiquido,
+      },
+    };
+  };
+
+  // Encontra (ou cria) o setor pelo nome.
+  const resolveSectorIdByName = async (sectorName: string): Promise<number | null> => {
+    const { data: sectors } = await supabase.from("sectors").select("id, name");
+    const found = (sectors ?? []).find((s: any) => normalizeName(s.name) === normalizeName(sectorName));
+    if (found) return Number((found as any).id);
+    const { data: created, error } = await supabase
+      .from("sectors")
+      .insert({ name: sectorName, budget_limit: 0 })
+      .select("id")
+      .single();
+    if (error || !created) {
+      console.error("Falha ao criar setor:", sectorName, error);
+      return null;
+    }
+    return Number(created.id);
+  };
+
+  // Encontra (ou cria) a CRD por nome dentro de um setor.
+  const resolveCrdByNameAndSector = async (name: string, sectorName: string, code: string): Promise<number | null> => {
+    const sectorId = await resolveSectorIdByName(sectorName);
+    const { data: crds } = await supabase.from("crds").select("id, name, sector_id");
+    const matches = (crds ?? []).filter((c: any) => normalizeName(c.name) === normalizeName(name));
+    const chosen =
+      matches.find((c: any) => sectorId != null && Number(c.sector_id) === sectorId) || matches[0];
+    if (chosen) return Number((chosen as any).id);
+    const { data: created, error } = await supabase
+      .from("crds")
+      .insert({ code, name, sector_id: sectorId, previsto_mes: 0, active: true })
+      .select("id")
+      .single();
+    if (error || !created) {
+      console.error("Falha ao criar CRD:", name, error);
+      return null;
+    }
+    return Number(created.id);
+  };
+
+  app.post("/api/import/consumo-interno/preview", upload.single("consumo_file"), async (req, res) => {
+    if (!req.file) return res.status(400).json({ error: "Arquivo não enviado" });
+    if (!/\.(xlsx|xls)$/i.test(req.file.originalname || "")) {
+      if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+      return res.status(400).json({ error: "Envie o relatório em Excel (.xls ou .xlsx)." });
+    }
+    try {
+      const parsed = parseConsumoInternoFile(req.file.path);
       res.json({
         success: true,
         report_name: req.file.originalname || "consumo-interno.xls",
-        summary: {
-          lines_count: lines.length,
-          clientes_count: clientes.size,
-          total_quantidade: totalQuantidade,
-          total_liquido: totalLiquido,
-        },
-        lines,
+        period: parsed.period,
+        summary: parsed.summary,
+        lines: parsed.lines,
+        destino: { setor: CONSUMO_INTERNO_SETOR, conta: CONSUMO_INTERNO_CRD_NOME },
       });
     } catch (error: any) {
       console.error("Erro ao processar Consumo Interno:", error);
       res.status(500).json({ success: false, error: "Não foi possível processar o relatório de Consumo Interno." });
+    } finally {
+      if (req.file?.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+    }
+  });
+
+  // Envia o TOTAL do Consumo Interno como Realizado da conta "CONSUMO INTERNO (SEM CRD)"
+  // (setor Controle) no mês detectado — aparece em Prev x Real > Controle > ... > Real.
+  app.post("/api/import/consumo-interno/commit", requireRole("admin", "finance", "controle"), upload.single("consumo_file"), async (req, res) => {
+    if (!req.file) return res.status(400).json({ error: "Arquivo não enviado" });
+    if (!/\.(xlsx|xls)$/i.test(req.file.originalname || "")) {
+      if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+      return res.status(400).json({ error: "Envie o relatório em Excel (.xls ou .xlsx)." });
+    }
+    try {
+      const parsed = parseConsumoInternoFile(req.file.path);
+      // Mês/ano: do corpo (override) ou do período detectado.
+      const month = Number((req.body as any)?.month) || parsed.period?.month;
+      const year = Number((req.body as any)?.year) || parsed.period?.year;
+      if (!month || !year || month < 1 || month > 12) {
+        return res.status(400).json({ error: "Não foi possível determinar o mês do relatório. Informe mês e ano." });
+      }
+
+      const crdId = await resolveCrdByNameAndSector(CONSUMO_INTERNO_CRD_NOME, CONSUMO_INTERNO_SETOR, "CONSUMO-INTERNO");
+      if (!crdId) return res.status(500).json({ error: "Não foi possível resolver a conta de destino." });
+
+      const total = parsed.summary.total_liquido;
+      const { error } = await supabase
+        .from("crd_realizado")
+        .upsert(
+          { crd_id: crdId, year, month, source: "consumo_interno", value: total },
+          { onConflict: "crd_id,year,month,source" }
+        );
+      if (error) {
+        console.error("Erro ao gravar realizado do Consumo Interno:", error);
+        return res.status(500).json({ error: "Não foi possível gravar o realizado." });
+      }
+
+      res.json({
+        success: true,
+        destino: { setor: CONSUMO_INTERNO_SETOR, conta: CONSUMO_INTERNO_CRD_NOME },
+        period: { month, year },
+        total,
+      });
+    } catch (error: any) {
+      console.error("Erro no commit do Consumo Interno:", error);
+      res.status(500).json({ error: "Não foi possível enviar o Consumo Interno." });
     } finally {
       if (req.file?.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
     }
@@ -1964,6 +2070,65 @@ export function createApp() {
     return grid;
   };
 
+  // Extrai a folha por funcionário a partir da grade do Extrato Mensal.
+  const parseExtratoEmployees = (grid: any[][]): any[] => {
+    const num = (v: any) => {
+      const n = Number(v);
+      return Number.isFinite(n) ? n : 0;
+    };
+    const cellsOf = (row: any[]) =>
+      (row || [])
+        .map((v, c) => ({ c, v }))
+        .filter((e) => e.v !== undefined && e.v !== null && String(e.v).trim() !== "");
+    const after = (cells: { c: number; v: any }[], label: string) => {
+      const i = cells.findIndex((e) => String(e.v).trim().toLowerCase().startsWith(label.toLowerCase()));
+      return i >= 0 && cells[i + 1] ? cells[i + 1].v : undefined;
+    };
+
+    const employees: any[] = [];
+    let cur: any = null;
+    for (const row of grid) {
+      const cells = cellsOf(row);
+      if (!cells.length) continue;
+      const first = String(cells[0].v).trim();
+      if (first.startsWith("Empr.:")) {
+        if (cur) employees.push(cur);
+        cur = {
+          matricula: after(cells, "Empr.:") ?? null,
+          nome: cells[2] ? String(cells[2].v).trim() : "",
+          situacao: String(after(cells, "Situação:") ?? "").trim(),
+          cpf: String(after(cells, "CPF:") ?? "").trim(),
+          cargo_cod: null,
+          cargo: "",
+          salario: 0,
+          proventos: 0,
+          descontos: 0,
+          liquido: 0,
+          base_inss: 0,
+          base_fgts: 0,
+          base_irrf: 0,
+        };
+        continue;
+      }
+      if (!cur) continue;
+      if (first.startsWith("Cargo:")) {
+        cur.cargo_cod = after(cells, "Cargo:") ?? null;
+        cur.cargo = cells[2] ? String(cells[2].v).trim() : "";
+        cur.salario = num(after(cells, "Salário:"));
+      } else if (first.startsWith("ND:")) {
+        cur.proventos = num(after(cells, "Proventos:"));
+        cur.descontos = num(after(cells, "Descontos:"));
+        cur.liquido = num(after(cells, "Líquido:"));
+      } else if (first.startsWith("NF:")) {
+        cur.base_inss = num(after(cells, "Base INSS:"));
+        cur.base_fgts = num(after(cells, "Base FGTS:"));
+        cur.base_irrf = num(after(cells, "Base IRRF:"));
+      }
+    }
+    if (cur) employees.push(cur);
+    return employees;
+  };
+
   app.post("/api/import/extrato-mensal/preview", upload.single("extrato_file"), async (req, res) => {
     if (!req.file) return res.status(400).json({ error: "Arquivo não enviado" });
     if (!/\.(xls|xlsx)$/i.test(req.file.originalname || "")) {
@@ -1971,63 +2136,7 @@ export function createApp() {
       return res.status(400).json({ error: "Envie o relatório em Excel (.xls ou .xlsx)." });
     }
     try {
-      const grid = readDesbravadorXlsGrid(req.file.path);
-      const num = (v: any) => {
-        const n = Number(v);
-        return Number.isFinite(n) ? n : 0;
-      };
-      // Células populadas da linha, na ordem das colunas.
-      const cellsOf = (row: any[]) =>
-        (row || [])
-          .map((v, c) => ({ c, v }))
-          .filter((e) => e.v !== undefined && e.v !== null && String(e.v).trim() !== "");
-      // Valor logo após o rótulo informado (robusto a deslocamento de coluna).
-      const after = (cells: { c: number; v: any }[], label: string) => {
-        const i = cells.findIndex((e) => String(e.v).trim().toLowerCase().startsWith(label.toLowerCase()));
-        return i >= 0 && cells[i + 1] ? cells[i + 1].v : undefined;
-      };
-
-      const employees: any[] = [];
-      let cur: any = null;
-      for (const row of grid) {
-        const cells = cellsOf(row);
-        if (!cells.length) continue;
-        const first = String(cells[0].v).trim();
-        if (first.startsWith("Empr.:")) {
-          if (cur) employees.push(cur);
-          cur = {
-            matricula: after(cells, "Empr.:") ?? null,
-            nome: cells[2] ? String(cells[2].v).trim() : "",
-            situacao: String(after(cells, "Situação:") ?? "").trim(),
-            cpf: String(after(cells, "CPF:") ?? "").trim(),
-            cargo_cod: null,
-            cargo: "",
-            salario: 0,
-            proventos: 0,
-            descontos: 0,
-            liquido: 0,
-            base_inss: 0,
-            base_fgts: 0,
-            base_irrf: 0,
-          };
-          continue;
-        }
-        if (!cur) continue;
-        if (first.startsWith("Cargo:")) {
-          cur.cargo_cod = after(cells, "Cargo:") ?? null;
-          cur.cargo = cells[2] ? String(cells[2].v).trim() : "";
-          cur.salario = num(after(cells, "Salário:"));
-        } else if (first.startsWith("ND:")) {
-          cur.proventos = num(after(cells, "Proventos:"));
-          cur.descontos = num(after(cells, "Descontos:"));
-          cur.liquido = num(after(cells, "Líquido:"));
-        } else if (first.startsWith("NF:")) {
-          cur.base_inss = num(after(cells, "Base INSS:"));
-          cur.base_fgts = num(after(cells, "Base FGTS:"));
-          cur.base_irrf = num(after(cells, "Base IRRF:"));
-        }
-      }
-      if (cur) employees.push(cur);
+      const employees = parseExtratoEmployees(readDesbravadorXlsGrid(req.file.path));
 
       const totalProventos = employees.reduce((s, e) => s + e.proventos, 0);
       const totalDescontos = employees.reduce((s, e) => s + e.descontos, 0);
@@ -2047,6 +2156,99 @@ export function createApp() {
     } catch (error: any) {
       console.error("Erro ao processar Extrato Mensal:", error);
       res.status(500).json({ success: false, error: "Não foi possível processar o Extrato Mensal." });
+    } finally {
+      if (req.file?.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+    }
+  });
+
+  // ====================================================
+  // FOLHA DE PAGAMENTO (uma tela por mês; alimentada pelo Extrato Mensal)
+  // ====================================================
+  app.get("/api/folha", async (req, res) => {
+    const year = Number((req.query as any)?.year) || new Date().getFullYear();
+    const month = Number((req.query as any)?.month);
+    if (!month || month < 1 || month > 12) return res.status(400).json({ error: "month deve estar entre 1 e 12" });
+
+    const { data, error } = await supabase
+      .from("folha_pagamento")
+      .select("matricula, nome, cargo, situacao, cpf, salario, proventos, descontos, liquido, base_inss, base_fgts, base_irrf")
+      .eq("year", year)
+      .eq("month", month)
+      .order("nome");
+    if (error) {
+      console.error("Erro ao carregar folha:", error);
+      return res.status(500).json({ error: "Erro interno ao processar a solicitação." });
+    }
+
+    const employees = data ?? [];
+    const n = (v: any) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+    res.json({
+      year,
+      month,
+      employees,
+      summary: {
+        funcionarios: employees.length,
+        total_proventos: employees.reduce((s, e) => s + n((e as any).proventos), 0),
+        total_descontos: employees.reduce((s, e) => s + n((e as any).descontos), 0),
+        total_liquido: employees.reduce((s, e) => s + n((e as any).liquido), 0),
+      },
+    });
+  });
+
+  // Importa o Extrato Mensal (.xls) e grava a folha do mês (substitui o que existir).
+  app.post("/api/folha/import", requireRole("admin", "finance", "controle"), upload.single("extrato_file"), async (req, res) => {
+    if (!req.file) return res.status(400).json({ error: "Arquivo não enviado" });
+    if (!/\.(xls|xlsx)$/i.test(req.file.originalname || "")) {
+      if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+      return res.status(400).json({ error: "Envie o relatório em Excel (.xls ou .xlsx)." });
+    }
+    const year = Number((req.body as any)?.year) || new Date().getFullYear();
+    const month = Number((req.body as any)?.month);
+    if (!month || month < 1 || month > 12) {
+      if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+      return res.status(400).json({ error: "Informe o mês (1 a 12) para gravar a folha." });
+    }
+    try {
+      const employees = parseExtratoEmployees(readDesbravadorXlsGrid(req.file.path));
+      if (!employees.length) {
+        return res.status(400).json({ error: "Nenhum funcionário encontrado no arquivo." });
+      }
+
+      const rows = employees.map((e) => ({
+        year,
+        month,
+        matricula: String(e.matricula ?? "").trim() || "SEM-MATRICULA",
+        nome: String(e.nome ?? "").trim(),
+        cargo: String(e.cargo ?? "").trim(),
+        situacao: String(e.situacao ?? "").trim(),
+        cpf: String(e.cpf ?? "").trim(),
+        salario: e.salario || 0,
+        proventos: e.proventos || 0,
+        descontos: e.descontos || 0,
+        liquido: e.liquido || 0,
+        base_inss: e.base_inss || 0,
+        base_fgts: e.base_fgts || 0,
+        base_irrf: e.base_irrf || 0,
+      }));
+
+      // Substitui a folha do mês.
+      await supabase.from("folha_pagamento").delete().eq("year", year).eq("month", month);
+      const { error } = await supabase.from("folha_pagamento").insert(rows);
+      if (error) {
+        console.error("Erro ao gravar folha:", error);
+        return res.status(500).json({ error: "Não foi possível gravar a folha do mês." });
+      }
+
+      res.json({
+        success: true,
+        year,
+        month,
+        funcionarios: rows.length,
+        total_liquido: rows.reduce((s, r) => s + r.liquido, 0),
+      });
+    } catch (error: any) {
+      console.error("Erro ao importar folha:", error);
+      res.status(500).json({ error: "Não foi possível importar a folha." });
     } finally {
       if (req.file?.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
     }
@@ -2365,6 +2567,15 @@ export function createApp() {
       const month = date.getMonth() + 1;
       const crdId = Number((reqRow as any).crd_id);
       addRealized(crdId, month, (reqRow as any).amount);
+    }
+
+    // Realizado importado (ex.: total do Consumo Interno por mês).
+    const { data: realizadoImport } = await supabase
+      .from("crd_realizado")
+      .select("crd_id, month, value")
+      .eq("year", selectedYear);
+    for (const row of realizadoImport ?? []) {
+      addRealized(Number((row as any).crd_id), Number((row as any).month), (row as any).value);
     }
 
     const rows = (crdData ?? [])

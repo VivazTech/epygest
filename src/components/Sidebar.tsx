@@ -18,10 +18,17 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   ChevronDown,
-  Table2
+  Table2,
+  Wallet,
+  CalendarDays
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { PLANILHAS } from '../lib/planilhas';
+
+const FOLHA_MESES = [
+  'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+  'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro',
+];
 
 interface SidebarProps {
   activeTab: string;
@@ -65,11 +72,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
   );
   const adminMenu = filteredMenu.filter((item) => adminGroupIds.includes(item.id));
   const showPlanilhas = planilhasRoles.includes(user?.role);
+  const folhaRoles = ['admin', 'finance', 'controle'];
+  const showFolha = folhaRoles.includes(user?.role);
   const [constructionExpanded, setConstructionExpanded] = React.useState(
     constructionMenu.some((item) => item.id === activeTab)
   );
   const [planilhasExpanded, setPlanilhasExpanded] = React.useState(
     activeTab.startsWith('planilha-')
+  );
+  const [folhaExpanded, setFolhaExpanded] = React.useState(
+    activeTab.startsWith('folha-')
   );
 
   React.useEffect(() => {
@@ -78,6 +90,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
     }
     if (activeTab.startsWith('planilha-')) {
       setPlanilhasExpanded(true);
+    }
+    if (activeTab.startsWith('folha-')) {
+      setFolhaExpanded(true);
     }
   }, [activeTab, constructionMenu]);
 
@@ -201,6 +216,57 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     activeTab === tabId ? "scale-110" : "group-hover:scale-110"
                   )} />
                   <span className="font-medium text-xs truncate text-left">{planilha.nome}</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        {showFolha && (
+          <div className="space-y-1">
+            <button
+              onClick={() => setFolhaExpanded((prev) => !prev)}
+              className={cn(
+                "w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group",
+                activeTab.startsWith('folha-')
+                  ? "text-white bg-white/10"
+                  : "text-white/80 hover:bg-white/5 hover:text-white"
+              )}
+            >
+              <Wallet className="w-5 h-5 min-w-5 min-h-5 shrink-0 transition-transform duration-200 group-hover:scale-110" />
+              <span className={cn("font-medium text-sm flex-1 text-left", collapsed && "hidden")}>
+                Folha de Pagamento
+              </span>
+              <ChevronDown
+                className={cn(
+                  "w-4 h-4 transition-transform duration-200",
+                  folhaExpanded && "rotate-180",
+                  collapsed && "hidden"
+                )}
+              />
+            </button>
+
+            {!collapsed && folhaExpanded && FOLHA_MESES.map((mes, idx) => {
+              const tabId = `folha-${idx + 1}`;
+              return (
+                <button
+                  key={tabId}
+                  onClick={() => setActiveTab(tabId)}
+                  className={cn(
+                    "w-full flex items-center gap-3 pl-11 pr-4 py-2 rounded-xl transition-all duration-200 group",
+                    activeTab === tabId
+                      ? "bg-emerald-500 text-white shadow-lg shadow-emerald-900/20"
+                      : "text-white/70 hover:bg-white/5 hover:text-white"
+                  )}
+                  title={mes}
+                >
+                  <CalendarDays className={cn(
+                    "w-4 h-4 min-w-4 min-h-4 shrink-0 transition-transform duration-200",
+                    activeTab === tabId ? "scale-110" : "group-hover:scale-110"
+                  )} />
+                  <span className="font-medium text-xs truncate text-left">
+                    {String(idx + 1).padStart(2, '0')} · {mes}
+                  </span>
                 </button>
               );
             })}
