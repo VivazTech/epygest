@@ -1,5 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Users, UserPlus, Edit2, Save, X, Trash2 } from 'lucide-react';
+import { useSearch } from '../context/SearchContext';
+import { matchesSearch } from '../lib/search';
 
 type UserRow = {
   id: number | string;
@@ -22,6 +24,7 @@ const roleLabel: Record<UserRow['role'], string> = {
 };
 
 export const UsuariosPage: React.FC = () => {
+  const { query } = useSearch();
   const [users, setUsers] = useState<UserRow[]>([]);
   const [sectors, setSectors] = useState<any[]>([]);
   const [currentUserRole, setCurrentUserRole] = useState<'admin' | 'finance' | 'controle' | 'manager' | 'viewer'>('viewer');
@@ -58,6 +61,21 @@ export const UsuariosPage: React.FC = () => {
     }
     loadAll();
   }, []);
+
+  const filteredUsers = useMemo(
+    () =>
+      users.filter((user) =>
+        matchesSearch(
+          query,
+          user.name,
+          user.email,
+          user.role,
+          user.sector_name,
+          ...(user.sector_names ?? [])
+        )
+      ),
+    [users, query]
+  );
 
   const deleteUser = async (user: UserRow) => {
     if (currentUserRole !== 'admin') {
@@ -236,7 +254,7 @@ export const UsuariosPage: React.FC = () => {
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {users.map((user) => {
+            {filteredUsers.map((user) => {
               const editing = editingId === user.id;
               return (
                 <tr key={user.id} className="hover:bg-slate-50/60 transition-colors">

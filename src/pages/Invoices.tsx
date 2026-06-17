@@ -13,8 +13,11 @@ import {
 } from 'lucide-react';
 import { cn, formatCurrency, formatDate } from '../lib/utils';
 import { ValueTrace } from '../components/ValueTrace';
+import { useSearch } from '../context/SearchContext';
+import { matchesSearch } from '../lib/search';
 
 export const Invoices: React.FC = () => {
+  const { query } = useSearch();
   const now = new Date();
   const initialMonth = (() => {
     const saved = localStorage.getItem('invoices:selectedMonth');
@@ -431,19 +434,33 @@ export const Invoices: React.FC = () => {
     () =>
       visibleInvoices.filter((invoice) => {
         if (!canSeeSectorValues(invoice.sector_id)) return false;
-        if (!canFilterSectors || selectedSectorIds.length === 0) return true;
-        return selectedSectorSet.has(String(invoice.sector_id));
+        if (canFilterSectors && selectedSectorIds.length > 0 && !selectedSectorSet.has(String(invoice.sector_id))) {
+          return false;
+        }
+        return matchesSearch(
+          query,
+          invoice.invoice_number,
+          invoice.provider_name,
+          invoice.sector_name,
+          invoice.crd,
+          invoice.payment_method,
+          invoice.status,
+          invoice.flow_stage,
+          invoice.amount
+        );
       }),
-    [visibleInvoices, actingSector, requesterSectorId, allowedSectorIds, userRole, canFilterSectors, selectedSectorIds, selectedSectorSet]
+    [visibleInvoices, actingSector, requesterSectorId, allowedSectorIds, userRole, canFilterSectors, selectedSectorIds, selectedSectorSet, query]
   );
   const filteredBudgetSectors = useMemo(
     () =>
       budgetSectors.filter((sector) => {
         if (!canSeeSectorValues(sector.id)) return false;
-        if (!canFilterSectors || selectedSectorIds.length === 0) return true;
-        return selectedSectorSet.has(String(sector.id));
+        if (canFilterSectors && selectedSectorIds.length > 0 && !selectedSectorSet.has(String(sector.id))) {
+          return false;
+        }
+        return matchesSearch(query, sector.name);
       }),
-    [budgetSectors, actingSector, requesterSectorId, allowedSectorIds, userRole, canFilterSectors, selectedSectorIds, selectedSectorSet]
+    [budgetSectors, actingSector, requesterSectorId, allowedSectorIds, userRole, canFilterSectors, selectedSectorIds, selectedSectorSet, query]
   );
   const scopedInvoices = useMemo(
     () => filteredInvoices,

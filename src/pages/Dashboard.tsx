@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { IndicatorCard } from '../components/IndicatorCard';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
@@ -7,6 +7,8 @@ import {
 import { Calendar, Filter, ChevronDown, Download, ArrowUpRight } from 'lucide-react';
 import { formatCurrency } from '../lib/utils';
 import { ValueTrace } from '../components/ValueTrace';
+import { useSearch } from '../context/SearchContext';
+import { matchesSearch } from '../lib/search';
 
 const chartData = [
   { name: 'Jan', receita: 180000, despesa: 140000 },
@@ -24,7 +26,17 @@ const pieData = [
 ];
 
 export const Dashboard: React.FC = () => {
+  const { query } = useSearch();
   const [indicators, setIndicators] = useState<any>(null);
+
+  const filteredChartData = useMemo(
+    () => chartData.filter((item) => matchesSearch(query, item.name, item.receita, item.despesa)),
+    [query]
+  );
+  const filteredPieData = useMemo(
+    () => pieData.filter((item) => matchesSearch(query, item.name, item.value)),
+    [query]
+  );
 
   useEffect(() => {
     fetch('/api/dashboard/indicators')
@@ -118,7 +130,7 @@ export const Dashboard: React.FC = () => {
           
           <div className="h-[300px] w-full">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={chartData} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
+              <BarChart data={filteredChartData.length ? filteredChartData : chartData} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                 <XAxis 
                   dataKey="name" 
@@ -149,7 +161,7 @@ export const Dashboard: React.FC = () => {
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
                 <Pie
-                  data={pieData}
+                  data={filteredPieData.length ? filteredPieData : pieData}
                   cx="50%"
                   cy="50%"
                   innerRadius={60}
@@ -157,7 +169,7 @@ export const Dashboard: React.FC = () => {
                   paddingAngle={8}
                   dataKey="value"
                 >
-                  {pieData.map((entry, index) => (
+                  {(filteredPieData.length ? filteredPieData : pieData).map((entry, index) => (
                     <Cell key={`cell-${index}`} fill={entry.color} />
                   ))}
                 </Pie>
@@ -171,7 +183,7 @@ export const Dashboard: React.FC = () => {
           </div>
           
           <div className="mt-6 space-y-3">
-            {pieData.map((item) => (
+            {(filteredPieData.length ? filteredPieData : pieData).map((item) => (
               <div key={item.name} className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <div className="w-2 h-2 rounded-full" style={{ backgroundColor: item.color }}></div>

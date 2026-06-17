@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { 
   Target, 
   TrendingUp, 
@@ -23,6 +23,8 @@ import {
 } from 'recharts';
 import { cn, formatCurrency, formatPercent } from '../lib/utils';
 import { ValueTrace } from '../components/ValueTrace';
+import { useSearch } from '../context/SearchContext';
+import { matchesSearch } from '../lib/search';
 
 const planningData = [
   { name: 'Jan', realizado: 180000, planejado: 175000 },
@@ -34,7 +36,12 @@ const planningData = [
 ];
 
 export const PlanningPage: React.FC = () => {
+  const { query } = useSearch();
   const [scenario, setScenario] = useState('Regular');
+  const filteredPlanningData = useMemo(
+    () => planningData.filter((item) => matchesSearch(query, item.name, item.realizado, item.planejado)),
+    [query]
+  );
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
@@ -127,7 +134,7 @@ export const PlanningPage: React.FC = () => {
           
           <div className="h-[350px] w-full">
             <ResponsiveContainer width="100%" height="100%">
-              <ComposedChart data={planningData} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
+              <ComposedChart data={filteredPlanningData.length ? filteredPlanningData : planningData} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                 <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 12 }} dy={10} />
                 <YAxis axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 12 }} />

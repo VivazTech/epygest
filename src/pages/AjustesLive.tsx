@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { RefreshCcw, DownloadCloud, Plus, AlertTriangle } from 'lucide-react';
 import { formatCurrency } from '../lib/utils';
+import { useSearch } from '../context/SearchContext';
+import { matchesSearch } from '../lib/search';
 
 interface AjustesRow {
   account_name: string;
@@ -22,6 +24,7 @@ interface AjustesResponse {
 }
 
 export const AjustesLive: React.FC = () => {
+  const { query } = useSearch();
   const [year, setYear] = useState('2026');
   const [loading, setLoading] = useState(false);
   const [savingCell, setSavingCell] = useState(false);
@@ -69,8 +72,9 @@ export const AjustesLive: React.FC = () => {
     for (const name of extraRows) {
       if (!existing.has(name)) base.push({ account_name: name, values: Array(12).fill(0), total: 0 });
     }
-    return base;
-  }, [data, extraRows]);
+    if (!query.trim()) return base;
+    return base.filter((row) => matchesSearch(query, row.account_name, row.total));
+  }, [data, extraRows, query]);
 
   // Contas que aparecem mais de uma vez (réplica da coluna A = MATCH/duplicado).
   const duplicateNames = useMemo(() => {

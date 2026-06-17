@@ -9,6 +9,8 @@ import {
   Info,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { useSearch } from '../context/SearchContext';
+import { matchesSearch } from '../lib/search';
 import {
   PLANILHAS,
   PlanilhaData,
@@ -117,6 +119,7 @@ const SheetRow = React.memo<RowProps>(({ rowIdx, totalColunas, rowCells, selecte
 SheetRow.displayName = 'SheetRow';
 
 const StaticSheetViewer: React.FC<PlanilhasPageProps> = ({ indice, targetCell, onNavigate }) => {
+  const { query } = useSearch();
   const meta = PLANILHAS.find((p) => p.indice === indice) ?? PLANILHAS[0];
   const [data, setData] = useState<PlanilhaData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -259,13 +262,29 @@ const StaticSheetViewer: React.FC<PlanilhasPageProps> = ({ indice, targetCell, o
   const totalLinhas = data?.totalLinhas ?? 0;
   const totalColunas = data?.totalColunas ?? 0;
 
-  const startRow = Math.max(1, Math.floor(scrollTop / ROW_H) - OVERSCAN + 1);
+  const visibleRowNumbers = useMemo(() => {
+    if (!data) return [];
+    if (!query.trim()) {
+      return Array.from({ length: totalLinhas }, (_, index) => index + 1);
+    }
+    const rows = new Set<number>();
+    for (const cell of data.celulas) {
+      if (matchesSearch(query, displayValue(cell))) {
+        rows.add(cell.linha);
+      }
+    }
+    return Array.from(rows).sort((a, b) => a - b);
+  }, [data, query, totalLinhas]);
+
+  const startRowIndex = Math.max(0, Math.floor(scrollTop / ROW_H) - OVERSCAN);
   const visibleCount = Math.ceil(viewportH / ROW_H) + OVERSCAN * 2;
-  const endRow = Math.min(totalLinhas, startRow + visibleCount);
+  const endRowIndex = Math.min(visibleRowNumbers.length, startRowIndex + visibleCount);
 
   const rows = [];
   if (data) {
-    for (let r = startRow; r <= endRow; r++) {
+    for (let index = startRowIndex; index < endRowIndex; index++) {
+      const r = visibleRowNumbers[index];
+      if (!r) continue;
       rows.push(
         <SheetRow
           key={r}
@@ -303,7 +322,7 @@ const StaticSheetViewer: React.FC<PlanilhasPageProps> = ({ indice, targetCell, o
         {data && (
           <div className="flex flex-wrap gap-2">
             <span className="px-3 py-1.5 rounded-xl bg-white border border-slate-200 text-xs font-bold text-slate-600">
-              {totalLinhas.toLocaleString('pt-BR')} linhas × {totalColunas} colunas
+              {(query.trim() ? visibleRowNumbers.length : totalLinhas).toLocaleString('pt-BR')} linhas × {totalColunas} colunas
             </span>
             <span className="px-3 py-1.5 rounded-xl bg-white border border-slate-200 text-xs font-bold text-slate-600">
               {data.celulas.length.toLocaleString('pt-BR')} células
@@ -439,9 +458,9 @@ const StaticSheetViewer: React.FC<PlanilhasPageProps> = ({ indice, targetCell, o
               </div>
 
               {/* Janela virtualizada de linhas */}
-              <div style={{ height: (startRow - 1) * ROW_H }} />
+              <div style={{ height: startRowIndex * ROW_H }} />
               {rows}
-              <div style={{ height: Math.max(0, totalLinhas - endRow) * ROW_H }} />
+              <div style={{ height: Math.max(0, visibleRowNumbers.length - endRowIndex) * ROW_H }} />
             </div>
           </div>
         )}

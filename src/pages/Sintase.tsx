@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { RefreshCcw, ChevronDown, ChevronRight } from 'lucide-react';
 import { formatCurrency } from '../lib/utils';
 import { ValueTrace } from '../components/ValueTrace';
+import { useSearch } from '../context/SearchContext';
+import { matchesSearch } from '../lib/search';
 
 type SintaseApiResponse = {
   year: number;
@@ -22,6 +24,7 @@ type SintaseApiResponse = {
 const monthHeaders = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
 
 export const SintasePage: React.FC = () => {
+  const { query } = useSearch();
   const currentYear = new Date().getFullYear();
   const [year, setYear] = useState(String(currentYear));
   const [crdFilter, setCrdFilter] = useState('');
@@ -101,9 +104,13 @@ export const SintasePage: React.FC = () => {
 
   const visibleRows = useMemo(() => {
     const allRows = data?.rows || [];
-    if (userRole !== 'manager') return allRows;
-    return allRows.filter((row) => allowedSectorNames.includes(String(row.crd || '').trim()));
-  }, [data, userRole, allowedSectorNames]);
+    const scoped =
+      userRole !== 'manager'
+        ? allRows
+        : allRows.filter((row) => allowedSectorNames.includes(String(row.crd || '').trim()));
+    if (!query.trim()) return scoped;
+    return scoped.filter((row) => matchesSearch(query, row.crd, row.grupo, row.detalhado));
+  }, [data, userRole, allowedSectorNames, query]);
 
   const visibleTotals = useMemo(() => {
     const months = Array.from({ length: 12 }, (_, idx) =>
@@ -153,6 +160,11 @@ export const SintasePage: React.FC = () => {
       return;
     }
 
+    if (query.trim()) {
+      setExpandedCrds(new Set(rowsByCrd.map((item) => item.crdName)));
+      return;
+    }
+
     // Sem filtro, preserva os grupos já abertos após recarregar dados
     // (ex.: depois de editar uma célula).
     setExpandedCrds((prev) => {
@@ -161,7 +173,7 @@ export const SintasePage: React.FC = () => {
       const next = new Set(Array.from(prev).filter((name) => available.has(name)));
       return next;
     });
-  }, [rowsByCrd, crdFilter]);
+  }, [rowsByCrd, crdFilter, query]);
 
   const toggleCrd = (crdName: string) => {
     setExpandedCrds((prev) => {

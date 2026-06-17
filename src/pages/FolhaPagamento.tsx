@@ -1,6 +1,8 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { RefreshCcw, Upload, Loader2, CheckCircle2, AlertTriangle, Users } from 'lucide-react';
 import { formatCurrency } from '../lib/utils';
+import { useSearch } from '../context/SearchContext';
+import { matchesSearch } from '../lib/search';
 
 export const MESES_FOLHA = [
   '', 'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
@@ -39,6 +41,7 @@ interface FolhaPagamentoPageProps {
 }
 
 export const FolhaPagamentoPage: React.FC<FolhaPagamentoPageProps> = ({ month }) => {
+  const { query } = useSearch();
   const [year, setYear] = useState('2026');
   const [loading, setLoading] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -110,7 +113,13 @@ export const FolhaPagamentoPage: React.FC<FolhaPagamentoPageProps> = ({ month })
   };
 
   const canImport = userRole === 'admin' || userRole === 'finance' || userRole === 'controle';
-  const employees = data?.employees ?? [];
+  const employees = useMemo(
+    () =>
+      (data?.employees ?? []).filter((emp) =>
+        matchesSearch(query, emp.matricula, emp.nome, emp.cargo, emp.situacao, emp.cpf)
+      ),
+    [data, query]
+  );
 
   return (
     <div className="space-y-6">

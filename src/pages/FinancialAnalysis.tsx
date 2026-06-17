@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { 
   BarChart3, 
   TrendingUp, 
@@ -20,6 +20,8 @@ import {
 } from 'recharts';
 import { cn, formatCurrency, formatPercent } from '../lib/utils';
 import { ValueTrace } from '../components/ValueTrace';
+import { useSearch } from '../context/SearchContext';
+import { matchesSearch } from '../lib/search';
 
 const analysisData = [
   { category: 'Receitas', valor: 265000, av: 100, ah: 5.2 },
@@ -31,6 +33,12 @@ const analysisData = [
 ];
 
 export const FinancialAnalysisPage: React.FC = () => {
+  const { query } = useSearch();
+  const filteredAnalysisData = useMemo(
+    () => analysisData.filter((item) => matchesSearch(query, item.category, item.valor, item.av, item.ah)),
+    [query]
+  );
+
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
       <div className="flex items-center justify-between">
@@ -103,7 +111,7 @@ export const FinancialAnalysisPage: React.FC = () => {
           <h3 className="font-bold text-slate-800 mb-6">Análise de Margem por Categoria</h3>
           <div className="h-[300px] w-full">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={analysisData} layout="vertical" margin={{ left: 40 }}>
+              <BarChart data={filteredAnalysisData.length ? filteredAnalysisData : analysisData} layout="vertical" margin={{ left: 40 }}>
                 <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f1f5f9" />
                 <XAxis type="number" hide />
                 <YAxis 
@@ -118,7 +126,7 @@ export const FinancialAnalysisPage: React.FC = () => {
                   contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
                 />
                 <Bar dataKey="valor" radius={[0, 4, 4, 0]} barSize={24}>
-                  {analysisData.map((entry, index) => (
+                  {(filteredAnalysisData.length ? filteredAnalysisData : analysisData).map((entry, index) => (
                     <Cell key={`cell-${index}`} fill={entry.valor > 0 ? '#10b981' : '#f43f5e'} />
                   ))}
                 </Bar>
@@ -150,7 +158,7 @@ export const FinancialAnalysisPage: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50">
-                {analysisData.map((item, idx) => (
+                {(filteredAnalysisData.length ? filteredAnalysisData : analysisData).map((item, idx) => (
                   <tr key={idx} className="hover:bg-slate-50/50 transition-colors">
                     <td className="px-6 py-3 text-sm font-medium text-slate-700">{item.category}</td>
                     <td className={cn(

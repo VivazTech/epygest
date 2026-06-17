@@ -1,5 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Settings2, Save, RotateCcw, Monitor, Bell, ShieldCheck } from 'lucide-react';
+import { useSearch } from '../context/SearchContext';
+import { matchesSearch } from '../lib/search';
 
 type SettingsState = {
   companyName: string;
@@ -26,8 +28,13 @@ const defaultSettings: SettingsState = {
 };
 
 export const ConfiguracoesPage: React.FC = () => {
+  const { query } = useSearch();
   const [settings, setSettings] = useState<SettingsState>(defaultSettings);
   const [savedAt, setSavedAt] = useState<string | null>(null);
+  const showSection = useMemo(
+    () => (title: string, ...labels: string[]) => matchesSearch(query, title, ...labels),
+    [query]
+  );
 
   useEffect(() => {
     try {
@@ -86,6 +93,7 @@ export const ConfiguracoesPage: React.FC = () => {
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {showSection('Preferências gerais', 'Nome da empresa', 'Ano padrão', 'Moeda', settings.companyName) && (
         <section className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5 space-y-4">
           <div className="flex items-center gap-2">
             <Settings2 className="w-4 h-4 text-slate-500" />
@@ -134,7 +142,9 @@ export const ConfiguracoesPage: React.FC = () => {
             </div>
           </div>
         </section>
+        )}
 
+        {showSection('Interface e experiência', 'Tabelas compactas', 'Abrir CRD filtrado', 'Idioma') && (
         <section className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5 space-y-4">
           <div className="flex items-center gap-2">
             <Monitor className="w-4 h-4 text-slate-500" />
@@ -175,7 +185,9 @@ export const ConfiguracoesPage: React.FC = () => {
             </label>
           </div>
         </section>
+        )}
 
+        {showSection('Notificações', 'Receber alertas por e-mail') && (
         <section className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5 space-y-4">
           <div className="flex items-center gap-2">
             <Bell className="w-4 h-4 text-slate-500" />
@@ -190,7 +202,9 @@ export const ConfiguracoesPage: React.FC = () => {
             />
           </label>
         </section>
+        )}
 
+        {showSection('Controle financeiro', 'Exigir aprovação para pagamentos') && (
         <section className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5 space-y-4">
           <div className="flex items-center gap-2">
             <ShieldCheck className="w-4 h-4 text-slate-500" />
@@ -205,6 +219,7 @@ export const ConfiguracoesPage: React.FC = () => {
             />
           </label>
         </section>
+        )}
       </div>
     </div>
   );

@@ -18,6 +18,9 @@ import { UsuariosPage as Usuarios } from './pages/Usuarios';
 import { PlanilhasPage } from './pages/Planilhas';
 import { PLANILHAS } from './lib/planilhas';
 import { FolhaPagamentoPage, MESES_FOLHA } from './pages/FolhaPagamento';
+import { SearchProvider, useSearch } from './context/SearchContext';
+import { SearchBar } from './components/SearchBar';
+import { getSearchPlaceholder } from './lib/search';
 
 export default function App() {
   const isSupabaseTestRoute = window.location.pathname === '/teste-supabase';
@@ -238,22 +241,60 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-[#F8FAFC] font-sans text-slate-900">
-      <Sidebar
+    <SearchProvider>
+      <AppShell
         activeTab={activeTab}
         setActiveTab={handleSetActiveTab}
         user={user}
-        onLogout={handleLogout} 
-        collapsed={sidebarCollapsed}
+        onLogout={handleLogout}
+        sidebarCollapsed={sidebarCollapsed}
         onToggleCollapsed={() => setSidebarCollapsed((prev) => !prev)}
+        renderContent={renderContent}
       />
-      
-      <main className={sidebarCollapsed ? "pl-20 min-h-screen" : "pl-64 min-h-screen"}>
-        <header className="h-20 bg-white/80 backdrop-blur-md border-b border-slate-100 flex items-center justify-between px-8 sticky top-0 z-40">
-          <div className="flex items-center gap-2">
+    </SearchProvider>
+  );
+}
+
+function AppShell({
+  activeTab,
+  setActiveTab,
+  user,
+  onLogout,
+  sidebarCollapsed,
+  onToggleCollapsed,
+  renderContent,
+}: {
+  activeTab: string;
+  setActiveTab: (tab: string) => void;
+  user: any;
+  onLogout: () => void;
+  sidebarCollapsed: boolean;
+  onToggleCollapsed: () => void;
+  renderContent: () => React.ReactNode;
+}) {
+  const { query, setQuery } = useSearch();
+
+  React.useEffect(() => {
+    setQuery('');
+  }, [activeTab, setQuery]);
+
+  return (
+    <div className="min-h-screen bg-[#F8FAFC] font-sans text-slate-900">
+      <Sidebar
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+        user={user}
+        onLogout={onLogout}
+        collapsed={sidebarCollapsed}
+        onToggleCollapsed={onToggleCollapsed}
+      />
+
+      <main className={sidebarCollapsed ? 'pl-20 min-h-screen' : 'pl-64 min-h-screen'}>
+        <header className="h-20 bg-white/80 backdrop-blur-md border-b border-slate-100 flex items-center gap-4 px-8 sticky top-0 z-40">
+          <div className="flex items-center gap-2 min-w-0 shrink-0">
             <span className="text-slate-400 text-sm font-medium">EpyGest</span>
             <span className="text-slate-300">/</span>
-            <span className="text-slate-900 text-sm font-bold capitalize">
+            <span className="text-slate-900 text-sm font-bold capitalize truncate">
               {activeTab.startsWith('planilha-')
                 ? `Planilhas / ${PLANILHAS.find((p) => `planilha-${p.indice}` === activeTab)?.nome ?? ''}`
                 : activeTab.startsWith('folha-')
@@ -261,8 +302,15 @@ export default function App() {
                 : activeTab.replace('-', ' ')}
             </span>
           </div>
-          
-          <div className="flex items-center gap-4">
+
+          <SearchBar
+            value={query}
+            onChange={setQuery}
+            placeholder={getSearchPlaceholder(activeTab)}
+            className="flex-1 max-w-xl mx-auto hidden md:block"
+          />
+
+          <div className="flex items-center gap-4 shrink-0">
             <div className="text-right hidden sm:block">
               <p className="text-xs font-bold text-slate-900">{user.name}</p>
               <p className="text-[10px] text-slate-400 font-bold uppercase tracking-tighter">{user.role}</p>
@@ -273,7 +321,15 @@ export default function App() {
           </div>
         </header>
 
-        <div className={activeTab === 'notas' || activeTab === 'cadastros' || activeTab === 'sintase' || activeTab === 'prev-real' || activeTab === 'dre' || activeTab.startsWith('planilha-') || activeTab.startsWith('folha-') ? "p-8 w-full max-w-none" : "p-8 max-w-7xl mx-auto"}>
+        <div className="px-8 pt-4 md:hidden">
+          <SearchBar
+            value={query}
+            onChange={setQuery}
+            placeholder={getSearchPlaceholder(activeTab)}
+          />
+        </div>
+
+        <div className={activeTab === 'notas' || activeTab === 'cadastros' || activeTab === 'sintase' || activeTab === 'prev-real' || activeTab === 'dre' || activeTab.startsWith('planilha-') || activeTab.startsWith('folha-') ? 'p-8 pt-4 md:pt-8 w-full max-w-none' : 'p-8 pt-4 md:pt-8 max-w-7xl mx-auto'}>
           {renderContent()}
         </div>
       </main>

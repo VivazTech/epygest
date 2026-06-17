@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { RefreshCcw, ChevronDown, ChevronRight, TrendingUp, TrendingDown, DownloadCloud } from 'lucide-react';
 import { formatCurrency } from '../lib/utils';
+import { useSearch } from '../context/SearchContext';
+import { matchesSearch } from '../lib/search';
 
 interface OrcamentoRow {
   id: number;
@@ -39,6 +41,7 @@ const formatVariacao = (v: number | null): string => {
 };
 
 export const OrcamentoLive: React.FC = () => {
+  const { query } = useSearch();
   const [year, setYear] = useState('2026');
   const [crdFilter, setCrdFilter] = useState('');
   const [crdOptions, setCrdOptions] = useState<string[]>([]);
@@ -94,8 +97,11 @@ export const OrcamentoLive: React.FC = () => {
   }, []);
 
   const rowsByCrd = useMemo(() => {
+    const sourceRows = (data?.rows ?? []).filter((row) =>
+      matchesSearch(query, row.crd, row.grupo, row.detalhado)
+    );
     const grouped = new Map<string, OrcamentoRow[]>();
-    for (const row of data?.rows ?? []) {
+    for (const row of sourceRows) {
       if (!grouped.has(row.crd)) grouped.set(row.crd, []);
       grouped.get(row.crd)!.push(row);
     }
@@ -106,7 +112,12 @@ export const OrcamentoLive: React.FC = () => {
       const variacao = totalAnterior !== 0 ? total / totalAnterior - 1 : null;
       return { crdName, rows, months, total, totalAnterior, variacao };
     });
-  }, [data]);
+  }, [data, query]);
+
+  useEffect(() => {
+    if (!query.trim()) return;
+    setExpanded(new Set(rowsByCrd.map((group) => group.crdName)));
+  }, [query, rowsByCrd]);
 
   const toggleCrd = (crdName: string) => {
     setExpanded((prev) => {

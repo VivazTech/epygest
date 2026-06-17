@@ -1,6 +1,8 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Calendar, ChevronDown, ChevronRight } from 'lucide-react';
 import { cn, formatCurrency } from '../lib/utils';
+import { useSearch } from '../context/SearchContext';
+import { filterTreeByLabel } from '../lib/search';
 
 type MonthData = {
   actual: number;
@@ -341,6 +343,7 @@ const dreRows: DRERow[] = [
 ];
 
 export const DREPage: React.FC = () => {
+  const { query } = useSearch();
   const [expanded, setExpanded] = useState<Record<string, boolean>>({
     'receita-diarias': true,
     'receita-ab': true,
@@ -351,6 +354,21 @@ export const DREPage: React.FC = () => {
     'despesas-diversas-op': true,
     'folha-pagamento': true,
   });
+
+  const filteredDreRows = useMemo(() => filterTreeByLabel(dreRows, query), [query]);
+
+  useEffect(() => {
+    if (!query.trim()) return;
+    const next: Record<string, boolean> = {};
+    const collect = (rows: DRERow[]) => {
+      for (const row of rows) {
+        if (row.children?.length) next[row.id] = true;
+        if (row.children) collect(row.children);
+      }
+    };
+    collect(filteredDreRows);
+    setExpanded((prev) => ({ ...prev, ...next }));
+  }, [query, filteredDreRows]);
 
   const totalReceitaByMonth = useMemo(() => {
     const receitas = dreRows.find((row) => row.id === 'receita-liquida');
@@ -461,7 +479,7 @@ export const DREPage: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {dreRows.map((row) => renderRow(row))}
+              {filteredDreRows.map((row) => renderRow(row))}
             </tbody>
           </table>
         </div>

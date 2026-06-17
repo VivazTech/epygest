@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   Upload,
   FileSpreadsheet,
@@ -14,6 +14,8 @@ import {
   ArrowRightCircle,
 } from 'lucide-react';
 import { formatCurrency } from '../lib/utils';
+import { useSearch } from '../context/SearchContext';
+import { matchesSearch } from '../lib/search';
 
 // Fontes de importação a configurar (somente os cards por enquanto; a configuração vem depois).
 const IMPORT_SOURCES = [
@@ -134,6 +136,7 @@ type RelCrdSummary = {
 };
 
 export const ImportacaoPage: React.FC = () => {
+  const { query } = useSearch();
   const [month, setMonth] = useState(String(new Date().getMonth() + 1));
   const [year, setYear] = useState(String(new Date().getFullYear()));
   const [loadingImport, setLoadingImport] = useState(false);
@@ -200,6 +203,45 @@ export const ImportacaoPage: React.FC = () => {
   const [relCrdError, setRelCrdError] = useState('');
   const [relCrdAccounts, setRelCrdAccounts] = useState<RelCrdAccount[]>([]);
   const [relCrdSummary, setRelCrdSummary] = useState<RelCrdSummary | null>(null);
+
+  const filteredImportSources = useMemo(
+    () => IMPORT_SOURCES.filter((source) => matchesSearch(query, source.title, source.description, source.key)),
+    [query]
+  );
+  const filteredParsedLines = useMemo(
+    () => parsedLines.filter((line) => matchesSearch(query, line.descricao, line.valor)),
+    [parsedLines, query]
+  );
+  const filteredConsumoLines = useMemo(
+    () =>
+      consumoLines.filter((line) =>
+        matchesSearch(
+          query,
+          line.cliente_nome,
+          line.produto,
+          line.unidade,
+          line.nf,
+          line.data,
+          line.forma_pgto,
+          line.vl_liquido
+        )
+      ),
+    [consumoLines, query]
+  );
+  const filteredExtratoEmployees = useMemo(
+    () =>
+      extratoEmployees.filter((emp) =>
+        matchesSearch(query, emp.matricula, emp.nome, emp.cargo, emp.situacao, emp.cpf, emp.liquido)
+      ),
+    [extratoEmployees, query]
+  );
+  const filteredRelCrdAccounts = useMemo(
+    () =>
+      relCrdAccounts.filter((acc) =>
+        matchesSearch(query, acc.codigo, acc.nome, acc.lancamentos, acc.lanc_liquido)
+      ),
+    [relCrdAccounts, query]
+  );
 
   const uploadRelCrd = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -390,7 +432,7 @@ export const ImportacaoPage: React.FC = () => {
       <div className="space-y-3">
         <h3 className="text-sm font-bold text-slate-800">Relatórios para importar</h3>
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
-          {IMPORT_SOURCES.map((source) => {
+          {filteredImportSources.map((source) => {
             const Icon = source.icon;
             return (
               <div
@@ -547,7 +589,7 @@ export const ImportacaoPage: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {consumoLines.map((line, idx) => (
+                  {filteredConsumoLines.map((line, idx) => (
                     <tr key={idx} className="hover:bg-slate-50/70">
                       <td className="px-3 py-2 text-xs text-slate-700 whitespace-nowrap">
                         <span className="text-slate-400">{line.cliente_id}</span> {line.cliente_nome}
@@ -623,7 +665,7 @@ export const ImportacaoPage: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {extratoEmployees.map((emp, idx) => (
+                  {filteredExtratoEmployees.map((emp, idx) => (
                     <tr key={idx} className="hover:bg-slate-50/70">
                       <td className="px-3 py-2 text-xs text-slate-500 tabular-nums">{emp.matricula}</td>
                       <td className="px-3 py-2 text-xs text-slate-800 whitespace-nowrap">{emp.nome}</td>
@@ -695,7 +737,7 @@ export const ImportacaoPage: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {relCrdAccounts.map((acc, idx) => (
+                  {filteredRelCrdAccounts.map((acc, idx) => (
                     <tr key={idx} className={`hover:bg-slate-50/70 ${acc.nivel === 1 ? 'bg-slate-100 font-bold' : acc.nivel === 2 ? 'bg-slate-50/60' : ''}`}>
                       <td className="px-3 py-2 text-xs text-slate-500 tabular-nums">{acc.codigo}</td>
                       <td
@@ -845,14 +887,14 @@ export const ImportacaoPage: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {parsedLines.length === 0 && (
+              {filteredParsedLines.length === 0 && (
                 <tr>
                   <td colSpan={2} className="px-4 py-8 text-center text-sm text-slate-400">
                     Faça upload de um PDF ou Excel do Desbravador para visualizar os lançamentos mapeados.
                   </td>
                 </tr>
               )}
-              {parsedLines.map((line, idx) => (
+              {filteredParsedLines.map((line, idx) => (
                 <tr key={`${line.descricao}-${idx}`} className="hover:bg-slate-50/70">
                   <td className="px-4 py-2 text-sm text-slate-700">{line.descricao}</td>
                   <td className={`px-4 py-2 text-sm text-right font-semibold tabular-nums ${line.valor < 0 ? 'text-red-600' : 'text-slate-800'}`}>

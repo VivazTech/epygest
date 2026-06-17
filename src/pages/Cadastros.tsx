@@ -2,7 +2,6 @@ import React, { useState, useEffect, useMemo } from 'react';
 import {
   Database,
   Plus,
-  Search,
   Edit2,
   Trash2,
   Layers,
@@ -15,8 +14,11 @@ import {
 } from 'lucide-react';
 import { cn, formatCurrency } from '../lib/utils';
 import { ValueTrace } from '../components/ValueTrace';
+import { useSearch } from '../context/SearchContext';
+import { matchesSearch } from '../lib/search';
 
 export const CadastrosPage: React.FC = () => {
+  const { query } = useSearch();
   const [activeTab, setActiveTab] = useState('categorias');
   const [categories, setCategories] = useState<any[]>([]);
   const [sectors, setSectors] = useState<any[]>([]);
@@ -52,7 +54,6 @@ export const CadastrosPage: React.FC = () => {
   const [isImportingCrd, setIsImportingCrd] = useState(false);
   const [reqForm, setReqForm] = useState({ crd_id: '', date: '', amount: '', description: '' });
   const [expandedGroups, setExpandedGroups] = useState<Set<number>>(new Set());
-  const [crdSearch, setCrdSearch] = useState('');
 
   const toggleGroup = (sectorId: number) => {
     setExpandedGroups((prev) => {
@@ -79,19 +80,36 @@ export const CadastrosPage: React.FC = () => {
   }, [crds, sectors]);
 
   const filteredCrdGroups = useMemo(() => {
-    if (!crdSearch.trim()) return crdsByGroup;
-    const q = crdSearch.trim().toLowerCase();
+    if (!query.trim()) return crdsByGroup;
     return crdsByGroup
       .map((g) => ({
         ...g,
-        items: g.items.filter(
-          (c: any) =>
-            c.name?.toLowerCase().includes(q) ||
-            c.code?.toLowerCase().includes(q)
+        items: g.items.filter((c: any) =>
+          matchesSearch(query, c.name, c.code, g.sector.name)
         ),
       }))
-      .filter((g) => g.items.length > 0 || g.sector.name?.toLowerCase().includes(q));
-  }, [crdsByGroup, crdSearch]);
+      .filter((g) => g.items.length > 0 || matchesSearch(query, g.sector.name));
+  }, [crdsByGroup, query]);
+
+  const filteredCategories = useMemo(
+    () => categories.filter((cat) => matchesSearch(query, cat.name, cat.type, cat.key)),
+    [categories, query]
+  );
+  const filteredSectors = useMemo(
+    () => sectors.filter((sector) => matchesSearch(query, sector.name, sector.budget_limit)),
+    [sectors, query]
+  );
+  const filteredPaymentMethods = useMemo(
+    () => paymentMethods.filter((pm) => matchesSearch(query, pm.name, pm.key)),
+    [paymentMethods, query]
+  );
+  const filteredRequisitions = useMemo(
+    () =>
+      requisitions.filter((r) =>
+        matchesSearch(query, r.crd_code, r.crd_name, r.sector_name, r.description, r.date, r.amount, r.status)
+      ),
+    [requisitions, query]
+  );
 
   const refreshCrds = () => fetch('/api/crds').then(res => res.json()).then(data => setCrds(data));
   const refreshSectors = () => fetch('/api/sectors').then(res => res.json()).then(data => setSectors(data));
@@ -342,16 +360,6 @@ export const CadastrosPage: React.FC = () => {
             <div className="w-full text-xs text-slate-500">
               Grupo = Setor/centro de custo. Detalhado/Subgrupo = nome do CRD (ex.: Bar da Piscina, Cafe da manha, cambuza, frigobar).
             </div>
-            <div className="relative flex-1 max-w-md">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-              <input
-                type="text"
-                value={crdSearch}
-                onChange={(e) => setCrdSearch(e.target.value)}
-                placeholder="Buscar grupo ou CRD..."
-                className="w-full pl-10 pr-4 py-2 bg-slate-50 border-none rounded-xl text-sm focus:ring-2 focus:ring-emerald-500/20 transition-all"
-              />
-            </div>
             <div className="flex flex-wrap items-center gap-2">
               <select
                 value={newCrdForm.natureza}
@@ -448,7 +456,7 @@ export const CadastrosPage: React.FC = () => {
           <div className="divide-y divide-slate-100">
             {filteredCrdGroups.length === 0 && (
               <div className="px-6 py-12 text-center text-sm text-slate-400">
-                {crdSearch ? 'Nenhum resultado encontrado.' : 'Nenhum CRD cadastrado.'}
+                {query ? 'Nenhum resultado encontrado.' : 'Nenhum CRD cadastrado.'}
               </div>
             )}
             {filteredCrdGroups.map((group) => {
@@ -617,16 +625,8 @@ export const CadastrosPage: React.FC = () => {
       {activeTab !== 'crd' && (
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
         <div className="p-4 border-b border-slate-50 flex items-center justify-between">
-          <div className="relative flex-1 max-w-md">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-            <input
-              type="text"
-              placeholder="Buscar..."
-              className="w-full pl-10 pr-4 py-2 bg-slate-50 border-none rounded-xl text-sm focus:ring-2 focus:ring-emerald-500/20 transition-all"
-            />
-          </div>
           {activeTab === 'formas-pagamento' && (
-            <div className="flex items-center gap-2 ml-4">
+            <div className="flex items-center gap-2 ml-auto">
               <input
                 value={newKey}
                 onChange={(e) => setNewKey(e.target.value)}
@@ -703,7 +703,7 @@ export const CadastrosPage: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50">
-              {activeTab === 'categorias' && categories.map((cat) => (
+              {activeTab === 'categorias' && filteredCategories.map((cat) => (
                 <tr key={cat.id} className="hover:bg-slate-50/50 transition-colors group">
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-3">
@@ -730,7 +730,7 @@ export const CadastrosPage: React.FC = () => {
                   </td>
                 </tr>
               ))}
-              {activeTab === 'setores' && sectors.map((sector) => (
+              {activeTab === 'setores' && filteredSectors.map((sector) => (
                 <tr key={sector.id} className="hover:bg-slate-50/50 transition-colors group">
                   <td className="px-6 py-4">
                     <span className="text-sm font-medium text-slate-700">{sector.name}</span>
@@ -751,7 +751,7 @@ export const CadastrosPage: React.FC = () => {
                   </td>
                 </tr>
               ))}
-              {activeTab === 'formas-pagamento' && paymentMethods.map((pm) => (
+              {activeTab === 'formas-pagamento' && filteredPaymentMethods.map((pm) => (
                 <tr key={pm.id} className="hover:bg-slate-50/50 transition-colors group">
                   <td className="px-6 py-4">
                     <span className="text-sm font-medium text-slate-700">{pm.name}</span>
@@ -772,7 +772,7 @@ export const CadastrosPage: React.FC = () => {
                   </td>
                 </tr>
               ))}
-              {activeTab === 'requisicoes' && requisitions.map((r) => (
+              {activeTab === 'requisicoes' && filteredRequisitions.map((r) => (
                 <tr key={r.id} className="hover:bg-slate-50/50 transition-colors group">
                   <td className="px-6 py-4">
                     <div className="space-y-1">

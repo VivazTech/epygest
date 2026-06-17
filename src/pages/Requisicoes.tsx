@@ -1,9 +1,12 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Plus, Archive, XCircle } from 'lucide-react';
 import { cn, formatCurrency } from '../lib/utils';
 import { ValueTrace } from '../components/ValueTrace';
+import { useSearch } from '../context/SearchContext';
+import { matchesSearch } from '../lib/search';
 
 export const RequisicoesPage: React.FC = () => {
+  const { query } = useSearch();
   const [requisitions, setRequisitions] = useState<any[]>([]);
   const [crds, setCrds] = useState<any[]>([]);
   const [form, setForm] = useState({
@@ -58,6 +61,23 @@ export const RequisicoesPage: React.FC = () => {
     });
     loadData();
   };
+
+  const filteredRequisitions = useMemo(
+    () =>
+      requisitions.filter((r) =>
+        matchesSearch(
+          query,
+          r.crd_code,
+          r.crd_name,
+          r.sector_name,
+          r.description,
+          r.date,
+          r.amount,
+          r.status
+        )
+      ),
+    [requisitions, query]
+  );
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
@@ -128,7 +148,7 @@ export const RequisicoesPage: React.FC = () => {
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-50">
-            {requisitions.map((r) => (
+            {filteredRequisitions.map((r) => (
               <tr key={r.id} className="hover:bg-slate-50/50 transition-colors">
                 <td className="px-6 py-4 text-sm font-medium text-slate-700">
                   {(r.crd_code || 'CRD')} - {r.crd_name || 'Sem descrição'}
