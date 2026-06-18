@@ -23,3 +23,9 @@ export const formatPercent = (value: number) => {
 export const formatDate = (date: string | Date) => {
   return new Intl.DateTimeFormat('pt-BR').format(new Date(date));
 };
+
+// Monta uma mensagem de erro clara a partir da resposta da API (erro + detalhe técnico, se houver).
+export const formatApiError = (data: any, fallback: string) => {
+  const base = (data && data.error) || fallback;
+  return data && data.detail ? `${base} — ${data.detail}` : base;
+};

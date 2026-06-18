@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { RefreshCcw, Upload, Loader2, CheckCircle2, AlertTriangle, Users } from 'lucide-react';
-import { formatCurrency } from '../lib/utils';
+import { formatCurrency, formatApiError } from '../lib/utils';
 import { useSearch } from '../context/SearchContext';
 import { matchesSearch } from '../lib/search';
 
@@ -56,7 +56,7 @@ export const FolhaPagamentoPage: React.FC<FolhaPagamentoPageProps> = ({ month })
       const res = await fetch(`/api/folha?year=${encodeURIComponent(year)}&month=${month}`);
       const json = await res.json();
       if (!res.ok) {
-        setError(json.error || 'Erro ao carregar a folha.');
+        setError(formatApiError(json, 'Erro ao carregar a folha.'));
         setData(null);
         return;
       }
@@ -102,7 +102,7 @@ export const FolhaPagamentoPage: React.FC<FolhaPagamentoPageProps> = ({ month })
       const res = await fetch('/api/folha/import', { method: 'POST', body: formData });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setError(json.error || 'Falha ao importar o Extrato.');
+        setError(formatApiError(json, 'Falha ao importar o Extrato.'));
         return;
       }
       await loadData();

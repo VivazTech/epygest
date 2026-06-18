@@ -1879,6 +1879,13 @@ export function createApp() {
     }
     try {
       const parsed = parseConsumoInternoFile(req.file.path);
+      if (!parsed.lines.length) {
+        return res.status(422).json({
+          success: false,
+          error:
+            "O arquivo foi lido, mas nenhum item de consumo foi reconhecido. Confira se este é o relatório 'Consumo por cliente' do Desbravador — o layout parece diferente do esperado.",
+        });
+      }
       res.json({
         success: true,
         report_name: req.file.originalname || "consumo-interno.xls",
@@ -1889,7 +1896,11 @@ export function createApp() {
       });
     } catch (error: any) {
       console.error("Erro ao processar Consumo Interno:", error);
-      res.status(500).json({ success: false, error: "Não foi possível processar o relatório de Consumo Interno." });
+      res.status(500).json({
+        success: false,
+        error: "Falha ao processar o relatório de Consumo Interno.",
+        detail: error?.message ? String(error.message).slice(0, 300) : undefined,
+      });
     } finally {
       if (req.file?.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
     }
@@ -1990,6 +2001,14 @@ export function createApp() {
         });
       }
 
+      if (!accounts.length) {
+        return res.status(422).json({
+          success: false,
+          error:
+            "O arquivo foi lido, mas nenhuma conta foi reconhecida. Confira se este é o relatório 'Movimentação por Conta Financeira' (Rel. CRD) do Desbravador — o layout parece diferente do esperado.",
+        });
+      }
+
       // Totais a partir dos grupos de nível 1 (evita dupla contagem da hierarquia).
       const nivel1 = accounts.filter((a) => a.nivel === 1);
       res.json({
@@ -2006,7 +2025,11 @@ export function createApp() {
       });
     } catch (error: any) {
       console.error("Erro ao processar Rel. CRD:", error);
-      res.status(500).json({ success: false, error: "Não foi possível processar o Rel. CRD." });
+      res.status(500).json({
+        success: false,
+        error: "Falha ao processar o Rel. CRD.",
+        detail: error?.message ? String(error.message).slice(0, 300) : undefined,
+      });
     } finally {
       if (req.file?.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
     }
@@ -2129,6 +2152,33 @@ export function createApp() {
     return employees;
   };
 
+  // Detecta o mês/ano do Extrato: 1) competência (data serial no cabeçalho); 2) nome do arquivo (MMAAAA).
+  const detectExtratoPeriod = (grid: any[][], fileName: string): { month: number; year: number } | null => {
+    for (const row of grid) {
+      const cells = (row || [])
+        .map((v, c) => ({ c, v }))
+        .filter((e) => e.v !== undefined && e.v !== null && String(e.v).trim() !== "");
+      const i = cells.findIndex((e) => String(e.v).trim().toLowerCase().startsWith("compet"));
+      if (i >= 0) {
+        for (let k = i + 1; k < cells.length; k++) {
+          const n = Number(cells[k].v);
+          if (Number.isFinite(n) && n > 20000 && n < 80000) {
+            const d = new Date(Math.round((n - 25569) * 86400 * 1000));
+            if (!Number.isNaN(d.getTime())) return { month: d.getUTCMonth() + 1, year: d.getUTCFullYear() };
+          }
+        }
+      }
+    }
+    // Fallback: "...042026..." -> mês 04, ano 2026.
+    const m = String(fileName || "").match(/(\d{2})[\s._-]?(\d{4})/);
+    if (m) {
+      const month = Number(m[1]);
+      const year = Number(m[2]);
+      if (month >= 1 && month <= 12 && year > 2000 && year < 2100) return { month, year };
+    }
+    return null;
+  };
+
   app.post("/api/import/extrato-mensal/preview", upload.single("extrato_file"), async (req, res) => {
     if (!req.file) return res.status(400).json({ error: "Arquivo não enviado" });
     if (!/\.(xls|xlsx)$/i.test(req.file.originalname || "")) {
@@ -2136,7 +2186,22 @@ export function createApp() {
       return res.status(400).json({ error: "Envie o relatório em Excel (.xls ou .xlsx)." });
     }
     try {
-      const employees = parseExtratoEmployees(readDesbravadorXlsGrid(req.file.path));
+      const grid = readDesbravadorXlsGrid(req.file.path);
+      if (!grid.length) {
+        return res.status(422).json({
+          success: false,
+          error: "Não consegui ler o conteúdo do Excel. O arquivo pode estar corrompido ou em um formato não suportado.",
+        });
+      }
+      const employees = parseExtratoEmployees(grid);
+      if (!employees.length) {
+        return res.status(422).json({
+          success: false,
+          error:
+            "O arquivo foi lido, mas nenhum funcionário foi reconhecido. Confira se este é o relatório 'Extrato Mensal' (folha de pagamento) do Desbravador — o layout parece diferente do esperado.",
+        });
+      }
+      const period = detectExtratoPeriod(grid, req.file.originalname || "");
 
       const totalProventos = employees.reduce((s, e) => s + e.proventos, 0);
       const totalDescontos = employees.reduce((s, e) => s + e.descontos, 0);
@@ -2145,6 +2210,8 @@ export function createApp() {
       res.json({
         success: true,
         report_name: req.file.originalname || "extrato-mensal.xls",
+        period,
+        destino: { secao: "Folha de Pagamento" },
         summary: {
           funcionarios: employees.length,
           total_proventos: totalProventos,
@@ -2155,7 +2222,11 @@ export function createApp() {
       });
     } catch (error: any) {
       console.error("Erro ao processar Extrato Mensal:", error);
-      res.status(500).json({ success: false, error: "Não foi possível processar o Extrato Mensal." });
+      res.status(500).json({
+        success: false,
+        error: "Falha ao processar o Extrato Mensal.",
+        detail: error?.message ? String(error.message).slice(0, 300) : undefined,
+      });
     } finally {
       if (req.file?.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
     }
@@ -2209,9 +2280,18 @@ export function createApp() {
       return res.status(400).json({ error: "Informe o mês (1 a 12) para gravar a folha." });
     }
     try {
-      const employees = parseExtratoEmployees(readDesbravadorXlsGrid(req.file.path));
+      const grid = readDesbravadorXlsGrid(req.file.path);
+      if (!grid.length) {
+        return res.status(422).json({
+          error: "Não consegui ler o conteúdo do Excel. O arquivo pode estar corrompido ou em formato não suportado.",
+        });
+      }
+      const employees = parseExtratoEmployees(grid);
       if (!employees.length) {
-        return res.status(400).json({ error: "Nenhum funcionário encontrado no arquivo." });
+        return res.status(422).json({
+          error:
+            "Nenhum funcionário foi reconhecido no arquivo. Confira se este é o relatório 'Extrato Mensal' do Desbravador.",
+        });
       }
 
       const rows = employees.map((e) => ({
@@ -2236,7 +2316,30 @@ export function createApp() {
       const { error } = await supabase.from("folha_pagamento").insert(rows);
       if (error) {
         console.error("Erro ao gravar folha:", error);
-        return res.status(500).json({ error: "Não foi possível gravar a folha do mês." });
+        return res.status(500).json({
+          error: "Não foi possível gravar a folha do mês no banco.",
+          detail: error.message ? String(error.message).slice(0, 300) : undefined,
+        });
+      }
+
+      const totalLiquido = rows.reduce((s, r) => s + r.liquido, 0);
+
+      // Lança o líquido total como Realizado na linha "Folha de pagamento" do Setor RH
+      // (aparece em Prev x Real > RH > Folha de pagamento > Real do mês).
+      let realizadoCrdId: number | null = null;
+      try {
+        realizadoCrdId = await resolveCrdByNameAndSector("Folha de pagamento", "RH", "RH-FOLHA-PAGAMENTO");
+        if (realizadoCrdId) {
+          const { error: realErr } = await supabase
+            .from("crd_realizado")
+            .upsert(
+              { crd_id: realizadoCrdId, year, month, source: "folha_pagamento", value: totalLiquido },
+              { onConflict: "crd_id,year,month,source" }
+            );
+          if (realErr) console.error("Erro ao lançar realizado da folha:", realErr);
+        }
+      } catch (e) {
+        console.error("Falha ao lançar realizado da folha no RH:", e);
       }
 
       res.json({
@@ -2244,11 +2347,17 @@ export function createApp() {
         year,
         month,
         funcionarios: rows.length,
-        total_liquido: rows.reduce((s, r) => s + r.liquido, 0),
+        total_liquido: totalLiquido,
+        realizado: realizadoCrdId
+          ? { setor: "RH", conta: "Folha de pagamento", valor: totalLiquido }
+          : null,
       });
     } catch (error: any) {
       console.error("Erro ao importar folha:", error);
-      res.status(500).json({ error: "Não foi possível importar a folha." });
+      res.status(500).json({
+        error: "Falha ao importar a folha.",
+        detail: error?.message ? String(error.message).slice(0, 300) : undefined,
+      });
     } finally {
       if (req.file?.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
     }

@@ -13,7 +13,7 @@ import {
   Settings2,
   ArrowRightCircle,
 } from 'lucide-react';
-import { formatCurrency } from '../lib/utils';
+import { formatCurrency, formatApiError } from '../lib/utils';
 import { useSearch } from '../context/SearchContext';
 import { matchesSearch } from '../lib/search';
 
@@ -179,7 +179,7 @@ export const ImportacaoPage: React.FC = () => {
       const res = await fetch('/api/import/consumo-interno/commit', { method: 'POST', body: formData });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        alert(data.error || 'Falha ao enviar para Prev x Real.');
+        alert(formatApiError(data, 'Falha ao enviar para Prev x Real.'));
         return;
       }
       setConsumoCommitMsg(
@@ -190,12 +190,50 @@ export const ImportacaoPage: React.FC = () => {
     }
   };
 
-  // Estado da pré-visualização do Extrato Mensal (somente exibição por enquanto).
+  // Estado da pré-visualização do Extrato Mensal.
   const [extratoLoading, setExtratoLoading] = useState(false);
   const [extratoFileName, setExtratoFileName] = useState('');
   const [extratoError, setExtratoError] = useState('');
   const [extratoEmployees, setExtratoEmployees] = useState<ExtratoEmployee[]>([]);
   const [extratoSummary, setExtratoSummary] = useState<ExtratoSummary | null>(null);
+  const [extratoFile, setExtratoFile] = useState<File | null>(null);
+  const [extratoPeriod, setExtratoPeriod] = useState<Periodo>(null);
+  const [extratoMonth, setExtratoMonth] = useState<string>(''); // mês selecionado (obrigatório)
+  const [extratoYear, setExtratoYear] = useState<string>(String(new Date().getFullYear()));
+  const [extratoCommitting, setExtratoCommitting] = useState(false);
+  const [extratoCommitMsg, setExtratoCommitMsg] = useState('');
+
+  const commitExtratoToFolha = async () => {
+    if (extratoCommitting || !extratoFile) return;
+    const mes = Number(extratoMonth);
+    const ano = Number(extratoYear);
+    if (!mes || mes < 1 || mes > 12 || !ano) {
+      alert('Selecione o mês (e ano) para enviar à Folha de Pagamento.');
+      return;
+    }
+    setExtratoCommitting(true);
+    setExtratoCommitMsg('');
+    const formData = new FormData();
+    formData.append('extrato_file', extratoFile);
+    formData.append('month', String(mes));
+    formData.append('year', String(ano));
+    try {
+      const res = await fetch('/api/folha/import', { method: 'POST', body: formData });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        alert(formatApiError(data, 'Falha ao enviar para a Folha de Pagamento.'));
+        return;
+      }
+      setExtratoCommitMsg(
+        `Enviado: ${data.funcionarios} funcionário(s) → Folha de Pagamento › ${periodoLabel({ month: mes, year: ano })}.` +
+          (data.realizado
+            ? ` Líquido ${formatCurrency(data.realizado.valor)} lançado no Real de RH › Folha de pagamento.`
+            : '')
+      );
+    } finally {
+      setExtratoCommitting(false);
+    }
+  };
 
   // Estado da pré-visualização do Rel. CRD (somente exibição por enquanto).
   const [relCrdLoading, setRelCrdLoading] = useState(false);
@@ -255,7 +293,7 @@ export const ImportacaoPage: React.FC = () => {
       const res = await fetch('/api/import/rel-crd/preview', { method: 'POST', body: formData });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setRelCrdError(data.error || 'Falha ao processar o Rel. CRD.');
+        setRelCrdError(formatApiError(data, 'Falha ao processar o Rel. CRD.'));
         setRelCrdAccounts([]);
         setRelCrdSummary(null);
         return;
@@ -276,19 +314,27 @@ export const ImportacaoPage: React.FC = () => {
     setExtratoLoading(true);
     setExtratoError('');
     setExtratoFileName(file.name);
+    setExtratoFile(file);
+    setExtratoCommitMsg('');
     const formData = new FormData();
     formData.append('extrato_file', file);
     try {
       const res = await fetch('/api/import/extrato-mensal/preview', { method: 'POST', body: formData });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setExtratoError(data.error || 'Falha ao processar o Extrato Mensal.');
+        setExtratoError(formatApiError(data, 'Falha ao processar o Extrato Mensal.'));
         setExtratoEmployees([]);
         setExtratoSummary(null);
+        setExtratoPeriod(null);
         return;
       }
       setExtratoEmployees(Array.isArray(data.employees) ? data.employees : []);
       setExtratoSummary(data.summary || null);
+      const period = data.period || null;
+      setExtratoPeriod(period);
+      // Pré-preenche o mês/ano com o detectado (o usuário pode ajustar; é obrigatório ter um).
+      setExtratoMonth(period?.month ? String(period.month) : '');
+      if (period?.year) setExtratoYear(String(period.year));
     } catch (err: any) {
       setExtratoError(err?.message || 'Erro inesperado ao importar o arquivo.');
     } finally {
@@ -311,7 +357,7 @@ export const ImportacaoPage: React.FC = () => {
       const res = await fetch('/api/import/consumo-interno/preview', { method: 'POST', body: formData });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setConsumoError(data.error || 'Falha ao processar o relatório de Consumo Interno.');
+        setConsumoError(formatApiError(data, 'Falha ao processar o relatório de Consumo Interno.'));
         setConsumoLines([]);
         setConsumoSummary(null);
         setConsumoPeriod(null);
@@ -366,7 +412,7 @@ export const ImportacaoPage: React.FC = () => {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setError(data.error || 'Falha ao processar relatório do Desbravador.');
+        setError(formatApiError(data, 'Falha ao processar relatório do Desbravador.'));
         return;
       }
 
@@ -644,6 +690,61 @@ export const ImportacaoPage: React.FC = () => {
             <div className="px-4 py-2 text-xs text-red-700 bg-red-50 border-b border-red-100 flex items-center gap-2">
               <AlertTriangle className="w-4 h-4" />
               {extratoError}
+            </div>
+          )}
+
+          {/* Envio para a Folha de Pagamento do mês (detectado ou selecionado — obrigatório) */}
+          {extratoSummary && !extratoError && (
+            <div className="px-4 py-3 border-b border-slate-100 bg-slate-50/60 flex flex-wrap items-center justify-between gap-3">
+              <div className="text-xs text-slate-600 space-y-1">
+                <p>
+                  {extratoPeriod ? (
+                    <>Mês detectado: <span className="font-bold text-slate-900">{periodoLabel(extratoPeriod)}</span></>
+                  ) : (
+                    <span className="text-amber-700 font-semibold inline-flex items-center gap-1">
+                      <AlertTriangle className="w-3.5 h-3.5" /> Mês não detectado — selecione manualmente.
+                    </span>
+                  )}
+                </p>
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] text-slate-500">Enviar para o mês:</span>
+                  <select
+                    value={extratoMonth}
+                    onChange={(e) => setExtratoMonth(e.target.value)}
+                    className={`px-2 py-1.5 bg-white border rounded-lg text-xs ${extratoMonth ? 'border-slate-200' : 'border-amber-400'}`}
+                  >
+                    <option value="">Selecione o mês…</option>
+                    {MESES.slice(1).map((m, i) => (
+                      <option key={i + 1} value={String(i + 1)}>{String(i + 1).padStart(2, '0')} · {m}</option>
+                    ))}
+                  </select>
+                  <input
+                    type="number"
+                    min={2000}
+                    max={2100}
+                    value={extratoYear}
+                    onChange={(e) => setExtratoYear(e.target.value)}
+                    className="w-20 px-2 py-1.5 bg-white border border-slate-200 rounded-lg text-xs"
+                  />
+                </div>
+                <p className="text-[11px] text-slate-500">
+                  Destino: <b>Folha de Pagamento</b> › {extratoMonth ? periodoLabel({ month: Number(extratoMonth), year: Number(extratoYear) }) : '—'} (substitui a folha do mês).
+                </p>
+                {extratoCommitMsg && (
+                  <p className="text-[11px] font-semibold text-emerald-700 inline-flex items-center gap-1">
+                    <CheckCircle2 className="w-3.5 h-3.5" /> {extratoCommitMsg}
+                  </p>
+                )}
+              </div>
+              <button
+                onClick={commitExtratoToFolha}
+                disabled={extratoCommitting || !extratoMonth}
+                title={!extratoMonth ? 'Selecione o mês para enviar' : 'Envia a folha para o mês'}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-[#004D40] text-white text-sm font-bold hover:bg-[#003d33] disabled:opacity-60 transition-colors"
+              >
+                {extratoCommitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowRightCircle className="w-4 h-4" />}
+                {extratoCommitting ? 'Enviando...' : 'Enviar para Folha de Pagamento'}
+              </button>
             </div>
           )}
 
