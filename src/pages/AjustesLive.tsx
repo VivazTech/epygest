@@ -190,20 +190,20 @@ export const AjustesLive: React.FC = () => {
         </div>
       </div>
 
-      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-auto">
+      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm table-scroll-panel">
         <table className="w-full text-left border-collapse min-w-[1600px]">
           <thead>
             <tr className="bg-slate-100/70">
-              <th className="sticky left-0 z-20 bg-slate-100/90 px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-widest min-w-[280px]">
+              <th className="th-sticky-corner px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-widest min-w-[280px]">
                 Contas
               </th>
               {months.map((m) => (
-                <th key={m.month} className="px-3 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-right">
+                <th key={m.month} className="th-sticky-top px-3 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-right">
                   <div>{m.label}</div>
                   <div className="text-[9px] text-slate-400 font-medium normal-case">{m.date}</div>
                 </th>
               ))}
-              <th className="px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-right">Total</th>
+              <th className="th-sticky-top px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-right">Total</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">

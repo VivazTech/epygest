@@ -31,6 +31,7 @@ export const UsuariosPage: React.FC = () => {
   const [currentUserId, setCurrentUserId] = useState<number | string | null>(null);
   const [editingId, setEditingId] = useState<number | string | null>(null);
   const [editForm, setEditForm] = useState<any>({});
+  const [showNewUserModal, setShowNewUserModal] = useState(false);
   const [newUser, setNewUser] = useState({
     name: '',
     email: '',
@@ -102,6 +103,20 @@ export const UsuariosPage: React.FC = () => {
     loadAll();
   };
 
+  const toggleSectorSelection = (current: string[], sectorId: string) => {
+    if (current.includes(sectorId)) return current.filter((id) => id !== sectorId);
+    return [...current, sectorId];
+  };
+
+  const resetNewUserForm = () => {
+    setNewUser({ name: '', email: '', password: '', role: 'viewer', sector_ids: [] });
+  };
+
+  const closeNewUserModal = () => {
+    setShowNewUserModal(false);
+    resetNewUserForm();
+  };
+
   const createUser = async () => {
     if (!newUser.name.trim() || !newUser.email.trim() || !newUser.password.trim()) {
       alert('Preencha nome, e-mail e senha.');
@@ -123,7 +138,7 @@ export const UsuariosPage: React.FC = () => {
       alert(data.error || 'Erro ao criar usuário');
       return;
     }
-    setNewUser({ name: '', email: '', password: '', role: 'viewer', sector_ids: [] });
+    closeNewUserModal();
     loadAll();
   };
 
@@ -164,11 +179,6 @@ export const UsuariosPage: React.FC = () => {
     loadAll();
   };
 
-  const toggleSectorSelection = (current: string[], sectorId: string) => {
-    if (current.includes(sectorId)) return current.filter((id) => id !== sectorId);
-    return [...current, sectorId];
-  };
-
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
       <div className="flex items-center justify-between">
@@ -176,70 +186,13 @@ export const UsuariosPage: React.FC = () => {
           <h2 className="text-2xl font-bold text-slate-900">Gestão de Usuários</h2>
           <p className="text-slate-500 text-sm">Cadastre usuários, defina perfis e setor responsável.</p>
         </div>
-      </div>
-
-      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4">
-        <div className="flex items-center gap-2 mb-3">
-          <UserPlus className="w-4 h-4 text-slate-500" />
-          <h3 className="text-sm font-bold text-slate-800">Novo usuário</h3>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <input
-            value={newUser.name}
-            onChange={(e) => setNewUser((p) => ({ ...p, name: e.target.value }))}
-            placeholder="Nome"
-            className="w-52 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
-          />
-          <input
-            value={newUser.email}
-            onChange={(e) => setNewUser((p) => ({ ...p, email: e.target.value }))}
-            placeholder="E-mail"
-            className="w-60 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
-          />
-          <input
-            type="password"
-            value={newUser.password}
-            onChange={(e) => setNewUser((p) => ({ ...p, password: e.target.value }))}
-            placeholder="Senha"
-            className="w-44 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
-          />
-          <select
-            value={newUser.role}
-            onChange={(e) => setNewUser((p) => ({ ...p, role: e.target.value }))}
-            className="w-44 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
-          >
-            <option value="viewer">Visualizador</option>
-            <option value="manager">Gestor</option>
-            <option value="finance">Financeiro</option>
-            <option value="controle">Controle</option>
-            <option value="admin">Administrador</option>
-          </select>
-          <div className="w-64 h-24 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm overflow-auto space-y-1">
-            {sectors.map((sector: any) => {
-              const sectorId = String(sector.id);
-              const checked = newUser.sector_ids.includes(sectorId);
-              return (
-                <label key={sector.id} className="flex items-center gap-2 text-xs text-slate-700">
-                  <input
-                    type="checkbox"
-                    checked={checked}
-                    onChange={() =>
-                      setNewUser((p) => ({ ...p, sector_ids: toggleSectorSelection(p.sector_ids, sectorId) }))
-                    }
-                  />
-                  <span>{sector.name}</span>
-                </label>
-              );
-            })}
-          </div>
-          <button
-            onClick={createUser}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-[#004D40] text-white text-sm font-bold hover:bg-[#003d33] transition-colors"
-          >
-            <Users className="w-4 h-4" />
-            Criar usuário
-          </button>
-        </div>
+        <button
+          onClick={() => setShowNewUserModal(true)}
+          className="inline-flex items-center gap-2 bg-[#004D40] text-white px-4 py-2.5 rounded-xl shadow-lg shadow-emerald-900/10 hover:bg-[#003d33] transition-colors"
+        >
+          <UserPlus className="w-4 h-4" />
+          <span className="font-bold text-sm">Adicionar usuário</span>
+        </button>
       </div>
 
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-auto">
@@ -371,6 +324,120 @@ export const UsuariosPage: React.FC = () => {
           </tbody>
         </table>
       </div>
+
+      {showNewUserModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white w-full max-w-lg rounded-3xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="p-6 border-b border-slate-100 flex justify-between items-center">
+              <div className="flex items-center gap-2">
+                <UserPlus className="w-5 h-5 text-slate-500" />
+                <h3 className="text-xl font-bold text-slate-900">Novo usuário</h3>
+              </div>
+              <button onClick={closeNewUserModal} className="text-slate-400 hover:text-slate-600 transition-colors">
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                createUser();
+              }}
+              className="p-6 space-y-4"
+            >
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Nome</label>
+                <input
+                  value={newUser.name}
+                  onChange={(e) => setNewUser((p) => ({ ...p, name: e.target.value }))}
+                  placeholder="Nome completo"
+                  className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">E-mail</label>
+                <input
+                  type="email"
+                  value={newUser.email}
+                  onChange={(e) => setNewUser((p) => ({ ...p, email: e.target.value }))}
+                  placeholder="usuario@vivazcataratas.com.br"
+                  className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Senha</label>
+                <input
+                  type="password"
+                  value={newUser.password}
+                  onChange={(e) => setNewUser((p) => ({ ...p, password: e.target.value }))}
+                  placeholder="Senha temporária"
+                  className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Perfil</label>
+                <select
+                  value={newUser.role}
+                  onChange={(e) => setNewUser((p) => ({ ...p, role: e.target.value }))}
+                  className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+                >
+                  <option value="viewer">Visualizador</option>
+                  <option value="manager">Gestor</option>
+                  <option value="finance">Financeiro</option>
+                  <option value="controle">Controle</option>
+                  <option value="admin">Administrador</option>
+                </select>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Setores</label>
+                <div className="max-h-36 px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm overflow-auto space-y-2">
+                  {sectors.length === 0 ? (
+                    <p className="text-xs text-slate-400">Nenhum setor cadastrado.</p>
+                  ) : (
+                    sectors.map((sector: any) => {
+                      const sectorId = String(sector.id);
+                      const checked = newUser.sector_ids.includes(sectorId);
+                      return (
+                        <label key={sector.id} className="flex items-center gap-2 text-sm text-slate-700">
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() =>
+                              setNewUser((p) => ({ ...p, sector_ids: toggleSectorSelection(p.sector_ids, sectorId) }))
+                            }
+                          />
+                          <span>{sector.name}</span>
+                        </label>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={closeNewUserModal}
+                  className="px-4 py-2.5 rounded-xl text-sm font-bold text-slate-600 hover:bg-slate-100 transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#004D40] text-white text-sm font-bold hover:bg-[#003d33] transition-colors"
+                >
+                  <Users className="w-4 h-4" />
+                  Criar usuário
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

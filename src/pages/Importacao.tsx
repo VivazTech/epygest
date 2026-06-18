@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Upload,
   FileSpreadsheet,
@@ -12,8 +12,10 @@ import {
   Layers,
   Settings2,
   ArrowRightCircle,
+  History,
+  RefreshCcw,
 } from 'lucide-react';
-import { formatCurrency, formatApiError } from '../lib/utils';
+import { formatCurrency, formatApiError, formatDate } from '../lib/utils';
 import { useSearch } from '../context/SearchContext';
 import { matchesSearch } from '../lib/search';
 
@@ -50,6 +52,29 @@ const IMPORT_SOURCES = [
     icon: Layers,
   },
 ];
+
+const IMPORT_HISTORY_LABELS: Record<string, string> = {
+  consumo_interno: 'Consumo interno',
+  extrato_mensal: 'Extrato mensal / Folha',
+  crds: 'CRDs',
+  orcamento: 'Orçamento',
+  ajustes: 'Ajustes',
+};
+
+type ImportHistoryRow = {
+  id: number;
+  source_type: string;
+  file_name?: string | null;
+  status: 'success' | 'error';
+  year?: number | null;
+  month?: number | null;
+  records_count?: number | null;
+  total_amount?: number | null;
+  user_name?: string | null;
+  user_email?: string | null;
+  error_message?: string | null;
+  created_at: string;
+};
 
 type ParsedLine = {
   descricao: string;
@@ -137,6 +162,10 @@ type RelCrdSummary = {
 
 export const ImportacaoPage: React.FC = () => {
   const { query } = useSearch();
+  const [historyRows, setHistoryRows] = useState<ImportHistoryRow[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState('');
+  const [historyFilter, setHistoryFilter] = useState('');
   const [month, setMonth] = useState(String(new Date().getMonth() + 1));
   const [year, setYear] = useState(String(new Date().getFullYear()));
   const [loadingImport, setLoadingImport] = useState(false);
@@ -185,6 +214,7 @@ export const ImportacaoPage: React.FC = () => {
       setConsumoCommitMsg(
         `Enviado: ${formatCurrency(data.total)} → ${data.destino.setor} › ${data.destino.conta} › Real de ${periodoLabel(data.period)}.`
       );
+      loadImportHistory();
     } finally {
       setConsumoCommitting(false);
     }
@@ -230,6 +260,7 @@ export const ImportacaoPage: React.FC = () => {
             ? ` Líquido ${formatCurrency(data.realizado.valor)} lançado no Real de RH › Folha de pagamento.`
             : '')
       );
+      loadImportHistory();
     } finally {
       setExtratoCommitting(false);
     }
@@ -241,6 +272,56 @@ export const ImportacaoPage: React.FC = () => {
   const [relCrdError, setRelCrdError] = useState('');
   const [relCrdAccounts, setRelCrdAccounts] = useState<RelCrdAccount[]>([]);
   const [relCrdSummary, setRelCrdSummary] = useState<RelCrdSummary | null>(null);
+
+  const loadImportHistory = async () => {
+    setHistoryLoading(true);
+    setHistoryError('');
+    try {
+      const params = new URLSearchParams();
+      params.set('limit', '100');
+      if (historyFilter) params.set('source_type', historyFilter);
+      const res = await fetch(`/api/import/history?${params.toString()}`);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setHistoryRows([]);
+        setHistoryError(formatApiError(data, 'Não foi possível carregar o histórico.'));
+        return;
+      }
+      setHistoryRows(Array.isArray(data) ? data : []);
+    } catch (err: any) {
+      setHistoryRows([]);
+      setHistoryError(err?.message || 'Erro ao carregar histórico.');
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadImportHistory();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [historyFilter]);
+
+  const filteredHistoryRows = useMemo(
+    () =>
+      historyRows.filter((row) =>
+        matchesSearch(
+          query,
+          IMPORT_HISTORY_LABELS[row.source_type] || row.source_type,
+          row.file_name,
+          row.user_name,
+          row.user_email,
+          row.error_message,
+          row.status
+        )
+      ),
+    [historyRows, query]
+  );
+
+  const periodoHistorico = (row: ImportHistoryRow) => {
+    if (!row.year) return '—';
+    if (row.month && row.month >= 1 && row.month <= 12) return `${MESES[row.month]}/${row.year}`;
+    return String(row.year);
+  };
 
   const filteredImportSources = useMemo(
     () => IMPORT_SOURCES.filter((source) => matchesSearch(query, source.title, source.description, source.key)),
@@ -1000,6 +1081,116 @@ export const ImportacaoPage: React.FC = () => {
                   <td className="px-4 py-2 text-sm text-slate-700">{line.descricao}</td>
                   <td className={`px-4 py-2 text-sm text-right font-semibold tabular-nums ${line.valor < 0 ? 'text-red-600' : 'text-slate-800'}`}>
                     {formatCurrency(line.valor)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        <div className="px-4 py-3 border-b border-slate-100 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <History className="w-4 h-4 text-slate-500" />
+            <p className="text-sm font-bold text-slate-800">Histórico de importações</p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              value={historyFilter}
+              onChange={(e) => setHistoryFilter(e.target.value)}
+              className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-700"
+            >
+              <option value="">Todos os tipos</option>
+              {Object.entries(IMPORT_HISTORY_LABELS).map(([key, label]) => (
+                <option key={key} value={key}>{label}</option>
+              ))}
+            </select>
+            <button
+              type="button"
+              onClick={loadImportHistory}
+              disabled={historyLoading}
+              className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-60 transition-colors"
+            >
+              <RefreshCcw className={`w-3.5 h-3.5 ${historyLoading ? 'animate-spin' : ''}`} />
+              Atualizar
+            </button>
+          </div>
+        </div>
+
+        {historyError && (
+          <div className="mx-4 mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800">
+            {historyError}
+          </div>
+        )}
+
+        <div className="overflow-auto max-h-[360px]">
+          <table className="w-full text-left border-collapse min-w-[920px]">
+            <thead>
+              <tr className="bg-slate-50 border-b border-slate-200">
+                <th className="px-4 py-2 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Data</th>
+                <th className="px-4 py-2 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Tipo</th>
+                <th className="px-4 py-2 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Arquivo</th>
+                <th className="px-4 py-2 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Período</th>
+                <th className="px-4 py-2 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-right">Registros</th>
+                <th className="px-4 py-2 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-right">Total</th>
+                <th className="px-4 py-2 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Usuário</th>
+                <th className="px-4 py-2 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Status</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {historyLoading && filteredHistoryRows.length === 0 && (
+                <tr>
+                  <td colSpan={8} className="px-4 py-8 text-center text-sm text-slate-400">
+                    <Loader2 className="w-5 h-5 animate-spin inline-block mr-2" />
+                    Carregando histórico...
+                  </td>
+                </tr>
+              )}
+              {!historyLoading && filteredHistoryRows.length === 0 && (
+                <tr>
+                  <td colSpan={8} className="px-4 py-8 text-center text-sm text-slate-400">
+                    Nenhuma importação registrada ainda.
+                  </td>
+                </tr>
+              )}
+              {filteredHistoryRows.map((row) => (
+                <tr key={row.id} className="hover:bg-slate-50/70">
+                  <td className="px-4 py-2 text-xs text-slate-600 whitespace-nowrap">
+                    {formatDate(row.created_at)}
+                  </td>
+                  <td className="px-4 py-2 text-sm font-medium text-slate-800">
+                    {IMPORT_HISTORY_LABELS[row.source_type] || row.source_type}
+                  </td>
+                  <td className="px-4 py-2 text-xs text-slate-600 max-w-[220px] truncate" title={row.file_name || ''}>
+                    {row.file_name || '—'}
+                  </td>
+                  <td className="px-4 py-2 text-xs text-slate-600">{periodoHistorico(row)}</td>
+                  <td className="px-4 py-2 text-sm text-right text-slate-700 tabular-nums">
+                    {row.records_count ?? '—'}
+                  </td>
+                  <td className="px-4 py-2 text-sm text-right font-semibold text-slate-800 tabular-nums">
+                    {row.total_amount != null ? formatCurrency(Number(row.total_amount)) : '—'}
+                  </td>
+                  <td className="px-4 py-2 text-xs text-slate-600">
+                    <span className="font-medium text-slate-700">{row.user_name || '—'}</span>
+                    {row.user_email ? <span className="block text-slate-400">{row.user_email}</span> : null}
+                  </td>
+                  <td className="px-4 py-2">
+                    {row.status === 'success' ? (
+                      <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-full px-2 py-0.5">
+                        <CheckCircle2 className="w-3 h-3" />
+                        Sucesso
+                      </span>
+                    ) : (
+                      <span
+                        className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-red-700 bg-red-50 border border-red-100 rounded-full px-2 py-0.5"
+                        title={row.error_message || 'Erro na importação'}
+                      >
+                        <AlertTriangle className="w-3 h-3" />
+                        Erro
+                      </span>
+                    )}
                   </td>
                 </tr>
               ))}

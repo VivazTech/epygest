@@ -19,6 +19,7 @@ import {
   requireAuth,
   requireRole,
 } from "./lib/auth.js";
+import { logImportHistory } from "./lib/importHistory.js";
 
 // Importa direto o parser para evitar o modo debug do index.js (que tenta abrir ./test/data/*)
 const loadPdfParse = async () => {
@@ -1633,6 +1634,18 @@ export function createApp() {
       if (upsertError) throw upsertError;
 
       fs.unlinkSync(req.file.path);
+      await logImportHistory({
+        source_type: "crds",
+        file_name: req.file.originalname,
+        status: "success",
+        records_count: payload.length,
+        user: req.user,
+        summary: {
+          imported: payload.length,
+          groups: uniqueGroupNames.length,
+          created_groups: createdGroups.length,
+        },
+      });
       res.json({
         success: true,
         imported: payload.length,
@@ -1642,6 +1655,13 @@ export function createApp() {
     } catch (error: any) {
       console.error("Erro ao importar CRDs:", error);
       if (req.file?.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+      await logImportHistory({
+        source_type: "crds",
+        file_name: req.file?.originalname,
+        status: "error",
+        user: req.user,
+        error_message: String(error?.message || "Erro ao importar CRDs.").slice(0, 500),
+      });
       res.status(500).json({ error: "Erro ao importar CRDs." });
     }
   });
@@ -1649,6 +1669,28 @@ export function createApp() {
   // ====================================================
   // IMPORTAÇÃO DE RELATÓRIOS (DESBRAVADOR)
   // ====================================================
+  app.get("/api/import/history", requireRole("admin", "finance", "controle"), async (req, res) => {
+    const { source_type, year, limit } = req.query as { source_type?: string; year?: string; limit?: string };
+    const max = Math.min(Math.max(Number(limit) || 50, 1), 200);
+
+    let query = supabase.from("import_history").select("*").order("created_at", { ascending: false }).limit(max);
+    if (source_type?.trim()) query = query.eq("source_type", source_type.trim());
+    if (year && Number.isFinite(Number(year))) query = query.eq("year", Number(year));
+
+    const { data, error } = await query;
+    if (error) {
+      const detail = String(error.message || "");
+      if (detail.toLowerCase().includes("import_history")) {
+        return res.status(503).json({
+          error: "Tabela import_history não encontrada. Execute sql/create_import_history.sql no Supabase.",
+          detail,
+        });
+      }
+      return res.status(500).json({ error: detail || "Erro ao carregar histórico de importações." });
+    }
+    res.json(data ?? []);
+  });
+
   app.post("/api/import/desbravador/preview", upload.single("report_pdf"), async (req, res) => {
     if (!req.file) return res.status(400).json({ error: "Relatório PDF não enviado" });
     if (req.file.mimetype !== "application/pdf") {
@@ -1935,8 +1977,33 @@ export function createApp() {
         );
       if (error) {
         console.error("Erro ao gravar realizado do Consumo Interno:", error);
+        await logImportHistory({
+          source_type: "consumo_interno",
+          file_name: req.file.originalname,
+          status: "error",
+          year,
+          month,
+          user: req.user,
+          error_message: String(error.message || "Não foi possível gravar o realizado.").slice(0, 500),
+        });
         return res.status(500).json({ error: "Não foi possível gravar o realizado." });
       }
+
+      await logImportHistory({
+        source_type: "consumo_interno",
+        file_name: req.file.originalname,
+        status: "success",
+        year,
+        month,
+        records_count: parsed.summary.lines_count,
+        total_amount: total,
+        user: req.user,
+        summary: {
+          destino: { setor: CONSUMO_INTERNO_SETOR, conta: CONSUMO_INTERNO_CRD_NOME },
+          lines_count: parsed.summary.lines_count,
+          clientes_count: parsed.summary.clientes_count,
+        },
+      });
 
       res.json({
         success: true,
@@ -1946,6 +2013,13 @@ export function createApp() {
       });
     } catch (error: any) {
       console.error("Erro no commit do Consumo Interno:", error);
+      await logImportHistory({
+        source_type: "consumo_interno",
+        file_name: req.file?.originalname,
+        status: "error",
+        user: req.user,
+        error_message: String(error?.message || "Não foi possível enviar o Consumo Interno.").slice(0, 500),
+      });
       res.status(500).json({ error: "Não foi possível enviar o Consumo Interno." });
     } finally {
       if (req.file?.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
@@ -2316,6 +2390,15 @@ export function createApp() {
       const { error } = await supabase.from("folha_pagamento").insert(rows);
       if (error) {
         console.error("Erro ao gravar folha:", error);
+        await logImportHistory({
+          source_type: "extrato_mensal",
+          file_name: req.file.originalname,
+          status: "error",
+          year,
+          month,
+          user: req.user,
+          error_message: String(error.message || "Não foi possível gravar a folha do mês no banco.").slice(0, 500),
+        });
         return res.status(500).json({
           error: "Não foi possível gravar a folha do mês no banco.",
           detail: error.message ? String(error.message).slice(0, 300) : undefined,
@@ -2342,6 +2425,23 @@ export function createApp() {
         console.error("Falha ao lançar realizado da folha no RH:", e);
       }
 
+      await logImportHistory({
+        source_type: "extrato_mensal",
+        file_name: req.file.originalname,
+        status: "success",
+        year,
+        month,
+        records_count: rows.length,
+        total_amount: totalLiquido,
+        user: req.user,
+        summary: {
+          funcionarios: rows.length,
+          realizado: realizadoCrdId
+            ? { setor: "RH", conta: "Folha de pagamento", valor: totalLiquido }
+            : null,
+        },
+      });
+
       res.json({
         success: true,
         year,
@@ -2354,6 +2454,15 @@ export function createApp() {
       });
     } catch (error: any) {
       console.error("Erro ao importar folha:", error);
+      await logImportHistory({
+        source_type: "extrato_mensal",
+        file_name: req.file?.originalname,
+        status: "error",
+        year: Number((req.body as any)?.year) || null,
+        month: Number((req.body as any)?.month) || null,
+        user: req.user,
+        error_message: String(error?.message || "Falha ao importar a folha.").slice(0, 500),
+      });
       res.status(500).json({
         error: "Falha ao importar a folha.",
         detail: error?.message ? String(error.message).slice(0, 300) : undefined,
@@ -3080,6 +3189,21 @@ export function createApp() {
         written += chunk.length;
       }
 
+      await logImportHistory({
+        source_type: "orcamento",
+        status: "success",
+        year,
+        records_count: written,
+        user: req.user,
+        summary: {
+          accounts_in_sheet: accounts.length,
+          matched: matched.length,
+          created: created.length,
+          unmatched_count: unmatched.length,
+          rows_written: written,
+        },
+      });
+
       res.json({
         success: true,
         year,
@@ -3090,8 +3214,15 @@ export function createApp() {
         rows_written: written,
         unmatched: unmatched.slice(0, 50),
       });
-    } catch (err) {
+    } catch (err: any) {
       console.error("Erro no import do orçamento:", err);
+      await logImportHistory({
+        source_type: "orcamento",
+        status: "error",
+        year,
+        user: req.user,
+        error_message: String(err?.message || "Não foi possível importar a planilha.").slice(0, 500),
+      });
       res.status(500).json({ error: "Não foi possível importar a planilha." });
     }
   });
@@ -3234,9 +3365,25 @@ export function createApp() {
         written += chunk.length;
       }
 
+      await logImportHistory({
+        source_type: "ajustes",
+        status: "success",
+        year,
+        records_count: merged.size,
+        user: req.user,
+        summary: { accounts: merged.size, rows_written: written },
+      });
+
       res.json({ success: true, year, accounts: merged.size, rows_written: written });
-    } catch (err) {
+    } catch (err: any) {
       console.error("Erro no import de ajustes:", err);
+      await logImportHistory({
+        source_type: "ajustes",
+        status: "error",
+        year,
+        user: req.user,
+        error_message: String(err?.message || "Não foi possível importar a planilha de ajustes.").slice(0, 500),
+      });
       res.status(500).json({ error: "Não foi possível importar a planilha de ajustes." });
     }
   });

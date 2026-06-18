@@ -327,18 +327,18 @@ export const SintasePage: React.FC = () => {
                 </button>
 
                 {isOpen && (
-                  <div className="overflow-auto bg-slate-50/40 border-t border-slate-100">
+                  <div className="table-scroll-panel bg-slate-50/40 border-t border-slate-100">
                     <table className="w-full text-left border-collapse min-w-[1500px]">
                       <thead>
                         <tr className="bg-slate-100/70">
-                          <th className="sticky left-0 z-20 bg-slate-100/90 px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Grupo</th>
-                          <th className="sticky left-[120px] z-20 bg-slate-100/90 px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Detalhado</th>
+                          <th className="th-sticky-corner px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Grupo</th>
+                          <th className="th-sticky-corner-2 px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Detalhado</th>
                           {monthHeaders.map((month) => (
-                            <th key={`${crdGroup.crdName}-${month}`} className="px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-right">
+                            <th key={`${crdGroup.crdName}-${month}`} className="th-sticky-top px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-right">
                               {month}
                             </th>
                           ))}
-                          <th className="px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-right">Total</th>
+                          <th className="th-sticky-top px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-right">Total</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">

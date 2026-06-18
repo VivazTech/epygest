@@ -289,27 +289,27 @@ export const PrevRealPage: React.FC = () => {
                 </button>
 
                 {isOpen && (
-                  <div className="overflow-auto bg-slate-50/40 border-t border-slate-100">
+                  <div className="table-scroll-panel bg-slate-50/40 border-t border-slate-100">
                     <table className="w-full text-left border-collapse min-w-[2800px]">
                       <thead>
                         <tr className="bg-slate-100/70">
-                          <th rowSpan={2} className="sticky left-0 z-30 bg-slate-100/95 px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-widest min-w-[120px]">Grupo</th>
-                          <th rowSpan={2} className="sticky left-[120px] z-30 bg-slate-100/95 px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-widest min-w-[260px]">Detalhado</th>
+                          <th rowSpan={2} className="th-sticky-corner px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-widest min-w-[120px]">Grupo</th>
+                          <th rowSpan={2} className="th-sticky-corner-2 px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-widest min-w-[260px]">Detalhado</th>
                           {monthHeaders.map((month) => (
-                            <th key={`${crdGroup.crdName}-${month}`} colSpan={3} className="px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center border-l border-slate-200">
+                            <th key={`${crdGroup.crdName}-${month}`} colSpan={3} className="th-sticky-top px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center border-l border-slate-200">
                               {month}
                             </th>
                           ))}
-                          <th rowSpan={2} className="px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-right">Total Prev.</th>
-                          <th rowSpan={2} className="px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-right">Total Real.</th>
-                          <th rowSpan={2} className="px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-right">Total Dif.</th>
+                          <th rowSpan={2} className="th-sticky-top px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-right">Total Prev.</th>
+                          <th rowSpan={2} className="th-sticky-top px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-right">Total Real.</th>
+                          <th rowSpan={2} className="th-sticky-top px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-right">Total Dif.</th>
                         </tr>
                         <tr className="bg-slate-100/70">
                           {monthHeaders.map((month) => (
                             <React.Fragment key={`${crdGroup.crdName}-${month}-sub`}>
-                              <th className="px-3 py-2 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-right border-l border-slate-200">Prev.</th>
-                              <th className="px-3 py-2 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-right">Real.</th>
-                              <th className="px-3 py-2 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-right">Dif.</th>
+                              <th className="th-sticky-top-sub px-3 py-2 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-right border-l border-slate-200">Prev.</th>
+                              <th className="th-sticky-top-sub px-3 py-2 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-right">Real.</th>
+                              <th className="th-sticky-top-sub px-3 py-2 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-right">Dif.</th>
                             </React.Fragment>
                           ))}
                         </tr>
