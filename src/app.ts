@@ -2226,6 +2226,51 @@ export function createApp() {
     return employees;
   };
 
+  // Extrai a seção "Resumo por Rubrica" do Extrato Mensal (totais por rubrica do mês).
+  // Cada linha tem dois lados: esquerda (cols 1/8/19/24/31) e direita (cols 34/38/53/65/73).
+  const parseExtratoRubricas = (grid: any[][]): any[] => {
+    const toNum = (v: any) => {
+      if (typeof v === "number") return Number.isFinite(v) ? v : 0;
+      let s = String(v ?? "").trim();
+      if (!s) return 0;
+      s = s.replace(/\./g, "").replace(",", ".").replace(/[^0-9.\-]/g, "");
+      const n = Number(s);
+      return Number.isFinite(n) ? n : 0;
+    };
+    // Localiza o início do "Resumo por Rubrica".
+    let start = -1;
+    for (let r = 0; r < grid.length; r++) {
+      if ((grid[r] || []).some((c) => String(c).trim() === "Resumo por Rubrica")) {
+        start = r;
+        break;
+      }
+    }
+    if (start < 0) return [];
+
+    const out: any[] = [];
+    const addSide = (row: any[], codeCol: number, nameCol: number, horasCol: number, valCol: number, tipoCol: number) => {
+      const codigo = row[codeCol];
+      const nome = String(row[nameCol] ?? "").trim();
+      const tipo = String(row[tipoCol] ?? "").trim().toUpperCase();
+      if ((typeof codigo !== "number" && !String(codigo ?? "").trim()) || !nome) return;
+      if (tipo !== "P" && tipo !== "D") return;
+      out.push({
+        codigo: String(codigo).trim(),
+        nome,
+        horas: String(row[horasCol] ?? "").trim(),
+        valor: toNum(row[valCol]),
+        tipo,
+        operacao: tipo === "D" ? "subtracao" : "soma", // padrão: P soma, D subtrai
+      });
+    };
+    for (let r = start + 1; r < grid.length; r++) {
+      const row = grid[r] || [];
+      addSide(row, 1, 8, 19, 24, 31); // lado esquerdo
+      addSide(row, 34, 38, 53, 65, 73); // lado direito
+    }
+    return out;
+  };
+
   // Detecta o mês/ano do Extrato: 1) competência (data serial no cabeçalho); 2) nome do arquivo (MMAAAA).
   const detectExtratoPeriod = (grid: any[][], fileName: string): { month: number; year: number } | null => {
     for (const row of grid) {
@@ -2405,6 +2450,32 @@ export function createApp() {
         });
       }
 
+      // Grava o "Resumo por Rubrica" do mês (substitui o que existir).
+      const rubricasParsed = parseExtratoRubricas(grid);
+      if (rubricasParsed.length) {
+        await supabase.from("folha_rubricas").delete().eq("year", year).eq("month", month);
+        const seen = new Set<string>();
+        const rubricaRows = rubricasParsed
+          .filter((rb) => {
+            const k = `${rb.codigo}|${rb.tipo}`;
+            if (seen.has(k)) return false;
+            seen.add(k);
+            return true;
+          })
+          .map((rb) => ({
+            year,
+            month,
+            codigo: rb.codigo,
+            nome: rb.nome,
+            horas: rb.horas,
+            valor: rb.valor,
+            tipo: rb.tipo,
+            operacao: rb.operacao,
+          }));
+        const { error: rubErr } = await supabase.from("folha_rubricas").insert(rubricaRows);
+        if (rubErr) console.error("Erro ao gravar rubricas da folha:", rubErr);
+      }
+
       const totalLiquido = rows.reduce((s, r) => s + r.liquido, 0);
 
       // Lança o líquido total como Realizado na linha "Folha de pagamento" do Setor RH
@@ -2470,6 +2541,237 @@ export function createApp() {
     } finally {
       if (req.file?.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
     }
+  });
+
+  // Calcula o total da folha a partir das rubricas (soma os "soma", subtrai os "subtracao").
+  const computeRubricasTotal = (rubricas: any[]) =>
+    rubricas.reduce(
+      (s, r) => s + (String(r.operacao) === "subtracao" ? -1 : 1) * (Number(r.valor) || 0),
+      0
+    );
+
+  // Rubricas do mês (Resumo por Rubrica) + total calculado.
+  app.get("/api/folha/rubricas", async (req, res) => {
+    const year = Number((req.query as any)?.year) || new Date().getFullYear();
+    const month = Number((req.query as any)?.month);
+    if (!month || month < 1 || month > 12) return res.status(400).json({ error: "month deve estar entre 1 e 12" });
+    const { data, error } = await supabase
+      .from("folha_rubricas")
+      .select("codigo, nome, horas, valor, tipo, operacao")
+      .eq("year", year)
+      .eq("month", month)
+      .order("tipo")
+      .order("codigo");
+    if (error) {
+      console.error("Erro ao carregar rubricas:", error);
+      return res.status(500).json({ error: "Erro interno ao processar a solicitação." });
+    }
+    const rubricas = data ?? [];
+    res.json({
+      year,
+      month,
+      rubricas,
+      total: computeRubricasTotal(rubricas),
+    });
+  });
+
+  // Define se uma rubrica soma ou subtrai do total da folha.
+  app.patch("/api/folha/rubricas/operacao", requireRole("admin", "finance", "controle"), async (req, res) => {
+    const { year, month, codigo, tipo, operacao } = req.body as {
+      year?: number; month?: number; codigo?: string; tipo?: string; operacao?: string;
+    };
+    if (!Number.isFinite(Number(year)) || !Number.isFinite(Number(month))) {
+      return res.status(400).json({ error: "year/month inválidos" });
+    }
+    if (!String(codigo ?? "").trim()) return res.status(400).json({ error: "codigo é obrigatório" });
+    if (operacao !== "soma" && operacao !== "subtracao") {
+      return res.status(400).json({ error: "operacao deve ser 'soma' ou 'subtracao'" });
+    }
+    const { error } = await supabase
+      .from("folha_rubricas")
+      .update({ operacao })
+      .eq("year", Number(year))
+      .eq("month", Number(month))
+      .eq("codigo", String(codigo))
+      .eq("tipo", String(tipo ?? "P"));
+    if (error) {
+      console.error("Erro ao atualizar operação da rubrica:", error);
+      return res.status(500).json({ error: "Não foi possível salvar a alteração." });
+    }
+    res.json({ success: true });
+  });
+
+  // Envia o total das rubricas para o PREVISTO e o REALIZADO de RH > Folha de pagamento.
+  app.post("/api/folha/rubricas/enviar", requireRole("admin", "finance", "controle"), async (req, res) => {
+    const year = Number((req.body as any)?.year);
+    const month = Number((req.body as any)?.month);
+    if (!year || !month || month < 1 || month > 12) {
+      return res.status(400).json({ error: "Informe ano e mês (1 a 12)." });
+    }
+    const { data: rubricas, error } = await supabase
+      .from("folha_rubricas")
+      .select("valor, operacao")
+      .eq("year", year)
+      .eq("month", month);
+    if (error) {
+      console.error("Erro ao carregar rubricas para envio:", error);
+      return res.status(500).json({ error: "Erro ao carregar as rubricas." });
+    }
+    if (!rubricas?.length) {
+      return res.status(422).json({ error: "Nenhuma rubrica importada para este mês. Importe o Extrato primeiro." });
+    }
+    const total = computeRubricasTotal(rubricas);
+
+    const crdId = await resolveCrdByNameAndSector("Folha de pagamento", "RH", "RH-FOLHA-PAGAMENTO");
+    if (!crdId) return res.status(500).json({ error: "Não foi possível resolver a conta RH > Folha de pagamento." });
+
+    // Previsto (crd_monthly_values) e Realizado (crd_realizado) do mês.
+    const { error: prevErr } = await supabase
+      .from("crd_monthly_values")
+      .upsert({ crd_id: crdId, year, month, value: total }, { onConflict: "crd_id,year,month" });
+    const { error: realErr } = await supabase
+      .from("crd_realizado")
+      .upsert({ crd_id: crdId, year, month, source: "folha_pagamento", value: total }, { onConflict: "crd_id,year,month,source" });
+    if (prevErr || realErr) {
+      console.error("Erro ao gravar previsto/realizado da folha:", prevErr || realErr);
+      return res.status(500).json({ error: "Não foi possível gravar no previsto/realizado." });
+    }
+
+    res.json({
+      success: true,
+      total,
+      destino: { setor: "RH", conta: "Folha de pagamento" },
+      period: { month, year },
+    });
+  });
+
+  // ====================================================
+  // CUSTO DA FOLHA (15 linhas agregadas a partir das rubricas + FGTS manual)
+  // ====================================================
+  // Classifica uma rubrica em uma das linhas do custo (proposta; revisável).
+  const classifyRubrica = (nome: string, tipo: string): string => {
+    const norm = String(nome || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+    const inssKey = norm.replace(/[^a-z0-9]/g, "");
+    const has13 = /(^|[^0-9])13([^0-9]|$)|13o|decimo terceiro/.test(norm);
+    if (/1\/3/.test(nome)) return "um_terco_ferias";
+    if (/inss/.test(inssKey)) {
+      if (has13) return "inss_13";
+      if (/feria/.test(norm)) return "inss_prov_ferias";
+      return "inss";
+    }
+    if (has13) return "decimo_terceiro";
+    if (/feria|abono/.test(norm)) return "ferias";
+    if (/comiss/.test(norm)) return "comissao";
+    if (/produtiv/.test(norm)) return "produtividade";
+    return tipo === "P" ? "proventos" : "retornos";
+  };
+
+  app.get("/api/folha/custo", async (req, res) => {
+    const year = Number((req.query as any)?.year) || new Date().getFullYear();
+    const month = Number((req.query as any)?.month);
+    if (!month || month < 1 || month > 12) return res.status(400).json({ error: "month deve estar entre 1 e 12" });
+
+    const { data: rubricas, error } = await supabase
+      .from("folha_rubricas")
+      .select("codigo, nome, valor, tipo")
+      .eq("year", year)
+      .eq("month", month);
+    if (error) {
+      console.error("Erro ao carregar rubricas (custo):", error);
+      return res.status(500).json({ error: "Erro interno ao processar a solicitação." });
+    }
+
+    const { data: manualRows } = await supabase
+      .from("folha_custo_manual")
+      .select("fgts, fgts_prov_ferias, fgts_prov_13")
+      .eq("year", year)
+      .eq("month", month)
+      .limit(1);
+    const manual = (manualRows && manualRows[0]) || { fgts: 0, fgts_prov_ferias: 0, fgts_prov_13: 0 };
+
+    const groups: Record<string, { valor: number; codigos: any[] }> = {};
+    for (const rb of rubricas ?? []) {
+      const cat = classifyRubrica((rb as any).nome, (rb as any).tipo);
+      if (!groups[cat]) groups[cat] = { valor: 0, codigos: [] };
+      const v = Number((rb as any).valor) || 0;
+      groups[cat].valor += v;
+      groups[cat].codigos.push({ codigo: (rb as any).codigo, nome: (rb as any).nome, valor: v });
+    }
+    const g = (k: string) => groups[k] || { valor: 0, codigos: [] };
+
+    const proventos = g("proventos").valor;
+    const comissao = g("comissao").valor;
+    const produtividade = g("produtividade").valor;
+    const total_salario = proventos + comissao + produtividade;
+    const retornos = g("retornos").valor;
+    const decimo = g("decimo_terceiro").valor;
+    const ferias = g("ferias").valor;
+    const umTerco = g("um_terco_ferias").valor;
+    const inss = g("inss").valor;
+    const inss13 = g("inss_13").valor;
+    const inssProvFerias = g("inss_prov_ferias").valor;
+    const fgts = Number(manual.fgts) || 0;
+    const fgtsProvFerias = Number(manual.fgts_prov_ferias) || 0;
+    const fgtsProv13 = Number(manual.fgts_prov_13) || 0;
+
+    // Custo total: salário + provisões + encargos − retornos (o que volta à empresa).
+    const total_custo =
+      total_salario + decimo + ferias + umTerco + fgts + fgtsProvFerias + fgtsProv13 + inss + inss13 + inssProvFerias - retornos;
+
+    const linha = (key: string, label: string, valor: number, tipo: string, codigos?: any[]) => ({
+      key,
+      label,
+      valor,
+      tipo,
+      codigos: codigos || undefined,
+    });
+
+    res.json({
+      year,
+      month,
+      manual: { fgts, fgts_prov_ferias: fgtsProvFerias, fgts_prov_13: fgtsProv13 },
+      total_custo,
+      linhas: [
+        linha("proventos", "Proventos", proventos, "rubrica", g("proventos").codigos),
+        linha("comissao", "Comissão", comissao, "rubrica", g("comissao").codigos),
+        linha("produtividade", "Produtividade", produtividade, "rubrica", g("produtividade").codigos),
+        linha("total_salario", "Total Salário", total_salario, "subtotal"),
+        linha("retornos", "RETORNOS", retornos, "rubrica_sub", g("retornos").codigos),
+        linha("decimo_terceiro", "13º", decimo, "rubrica", g("decimo_terceiro").codigos),
+        linha("ferias", "Férias", ferias, "rubrica", g("ferias").codigos),
+        linha("um_terco_ferias", "1/3 Férias", umTerco, "rubrica", g("um_terco_ferias").codigos),
+        linha("fgts", "FGTS", fgts, "manual"),
+        linha("fgts_prov_ferias", "FGTS Prov. Férias", fgtsProvFerias, "manual"),
+        linha("fgts_prov_13", "FGTS Prov. 13º", fgtsProv13, "manual"),
+        linha("inss", "INSS", inss, "rubrica", g("inss").codigos),
+        linha("inss_13", "INSS 13º", inss13, "rubrica", g("inss_13").codigos),
+        linha("inss_prov_ferias", "INSS Prov. Férias", inssProvFerias, "rubrica", g("inss_prov_ferias").codigos),
+        linha("total_custo", "TOTAL CUSTO", total_custo, "total"),
+      ],
+    });
+  });
+
+  app.patch("/api/folha/custo/manual", requireRole("admin", "finance", "controle"), async (req, res) => {
+    const year = Number((req.body as any)?.year);
+    const month = Number((req.body as any)?.month);
+    if (!year || !month || month < 1 || month > 12) {
+      return res.status(400).json({ error: "Informe ano e mês (1 a 12)." });
+    }
+    const num = (v: any) => {
+      const n = Number(v);
+      return Number.isFinite(n) ? n : 0;
+    };
+    const row: any = { year, month };
+    if ((req.body as any)?.fgts !== undefined) row.fgts = num((req.body as any).fgts);
+    if ((req.body as any)?.fgts_prov_ferias !== undefined) row.fgts_prov_ferias = num((req.body as any).fgts_prov_ferias);
+    if ((req.body as any)?.fgts_prov_13 !== undefined) row.fgts_prov_13 = num((req.body as any).fgts_prov_13);
+
+    const { error } = await supabase.from("folha_custo_manual").upsert(row, { onConflict: "year,month" });
+    if (error) {
+      console.error("Erro ao salvar FGTS manual:", error);
+      return res.status(500).json({ error: "Não foi possível salvar." });
+    }
+    res.json({ success: true });
   });
 
   // ====================================================

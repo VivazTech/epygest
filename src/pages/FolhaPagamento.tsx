@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { RefreshCcw, Upload, Loader2, CheckCircle2, AlertTriangle, Users } from 'lucide-react';
+import { RefreshCcw, Upload, Loader2, CheckCircle2, AlertTriangle, Users, ArrowRightCircle, Plus, Minus, ChevronDown, ChevronRight, Calculator } from 'lucide-react';
 import { formatCurrency, formatApiError } from '../lib/utils';
 import { useSearch } from '../context/SearchContext';
 import { matchesSearch } from '../lib/search';
@@ -36,6 +36,31 @@ interface FolhaResponse {
   };
 }
 
+interface Rubrica {
+  codigo: string;
+  nome: string;
+  horas: string;
+  valor: number;
+  tipo: string; // P | D
+  operacao: 'soma' | 'subtracao';
+}
+
+interface CustoLinha {
+  key: string;
+  label: string;
+  valor: number;
+  tipo: 'rubrica' | 'rubrica_sub' | 'subtotal' | 'manual' | 'total';
+  codigos?: { codigo: string; nome: string; valor: number }[];
+}
+
+interface CustoResponse {
+  year: number;
+  month: number;
+  manual: { fgts: number; fgts_prov_ferias: number; fgts_prov_13: number };
+  total_custo: number;
+  linhas: CustoLinha[];
+}
+
 interface FolhaPagamentoPageProps {
   month: number;
 }
@@ -48,6 +73,66 @@ export const FolhaPagamentoPage: React.FC<FolhaPagamentoPageProps> = ({ month })
   const [data, setData] = useState<FolhaResponse | null>(null);
   const [error, setError] = useState('');
   const [userRole, setUserRole] = useState('viewer');
+  const [rubricas, setRubricas] = useState<Rubrica[]>([]);
+  const [rubricasTotal, setRubricasTotal] = useState(0);
+  const [sendingRubricas, setSendingRubricas] = useState(false);
+  const [rubricasMsg, setRubricasMsg] = useState('');
+  const [custo, setCusto] = useState<CustoResponse | null>(null);
+  const [custoDetalhe, setCustoDetalhe] = useState<string | null>(null);
+  const [fgtsEdit, setFgtsEdit] = useState<{ fgts: string; fgts_prov_ferias: string; fgts_prov_13: string }>({
+    fgts: '', fgts_prov_ferias: '', fgts_prov_13: '',
+  });
+  const [savingFgts, setSavingFgts] = useState(false);
+
+  const loadRubricas = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/folha/rubricas?year=${encodeURIComponent(year)}&month=${month}`);
+      const json = await res.json();
+      if (res.ok) {
+        setRubricas(Array.isArray(json.rubricas) ? json.rubricas : []);
+        setRubricasTotal(Number(json.total) || 0);
+      }
+    } catch {
+      // silencioso
+    }
+  }, [year, month]);
+
+  const loadCusto = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/folha/custo?year=${encodeURIComponent(year)}&month=${month}`);
+      const json = await res.json();
+      if (res.ok) {
+        setCusto(json);
+        setFgtsEdit({
+          fgts: String(json.manual?.fgts ?? 0),
+          fgts_prov_ferias: String(json.manual?.fgts_prov_ferias ?? 0),
+          fgts_prov_13: String(json.manual?.fgts_prov_13 ?? 0),
+        });
+      }
+    } catch {
+      // silencioso
+    }
+  }, [year, month]);
+
+  const saveFgts = async (campo: 'fgts' | 'fgts_prov_ferias' | 'fgts_prov_13') => {
+    if (savingFgts) return;
+    const valor = Number(String(fgtsEdit[campo]).replace(',', '.'));
+    if (!Number.isFinite(valor)) {
+      alert('Digite um valor numérico válido.');
+      return;
+    }
+    setSavingFgts(true);
+    try {
+      await fetch('/api/folha/custo/manual', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ year: Number(year), month, [campo]: valor }),
+      });
+      await loadCusto();
+    } finally {
+      setSavingFgts(false);
+    }
+  };
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -79,7 +164,56 @@ export const FolhaPagamentoPage: React.FC<FolhaPagamentoPageProps> = ({ month })
 
   useEffect(() => {
     loadData();
-  }, [loadData]);
+    loadRubricas();
+    loadCusto();
+  }, [loadData, loadRubricas, loadCusto]);
+
+  const toggleOperacao = async (rb: Rubrica) => {
+    const nova: 'soma' | 'subtracao' = rb.operacao === 'subtracao' ? 'soma' : 'subtracao';
+    setRubricas((prev) =>
+      prev.map((r) => (r.codigo === rb.codigo && r.tipo === rb.tipo ? { ...r, operacao: nova } : r))
+    );
+    setRubricasMsg('');
+    try {
+      await fetch('/api/folha/rubricas/operacao', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ year: Number(year), month, codigo: rb.codigo, tipo: rb.tipo, operacao: nova }),
+      });
+    } finally {
+      await loadRubricas();
+      await loadCusto();
+    }
+  };
+
+  const enviarRubricas = async () => {
+    if (sendingRubricas) return;
+    if (
+      !window.confirm(
+        `Enviar o total das rubricas (${formatCurrency(rubricasTotal)}) para o PREVISTO e o REALIZADO de RH › Folha de pagamento em ${MESES_FOLHA[month]}/${year}?`
+      )
+    )
+      return;
+    setSendingRubricas(true);
+    setRubricasMsg('');
+    try {
+      const res = await fetch('/api/folha/rubricas/enviar', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ year: Number(year), month }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        alert(formatApiError(json, 'Falha ao enviar para previsto/realizado.'));
+        return;
+      }
+      setRubricasMsg(
+        `Enviado ${formatCurrency(json.total)} → Previsto e Realizado de RH › Folha de pagamento (${MESES_FOLHA[month]}/${year}).`
+      );
+    } finally {
+      setSendingRubricas(false);
+    }
+  };
 
   const importExtrato = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -106,6 +240,8 @@ export const FolhaPagamentoPage: React.FC<FolhaPagamentoPageProps> = ({ month })
         return;
       }
       await loadData();
+      await loadRubricas();
+      await loadCusto();
     } finally {
       setImporting(false);
       if (event?.target) event.target.value = '';
@@ -169,6 +305,193 @@ export const FolhaPagamentoPage: React.FC<FolhaPagamentoPageProps> = ({ month })
         <div className="flex items-center gap-2 text-xs text-red-700 bg-red-50 border border-red-100 rounded-xl px-3 py-2">
           <AlertTriangle className="w-4 h-4" />
           {error}
+        </div>
+      )}
+
+      {/* Resumo por Rubrica (proventos/débitos do mês) — no topo, lado a lado */}
+      {rubricas.length > 0 && (
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+          <div className="px-4 py-3 border-b border-slate-100 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-bold text-slate-800">Resumo por Rubrica — {MESES_FOLHA[month]}/{year}</p>
+              <p className="text-[11px] text-slate-500">
+                Defina se cada rubrica <b>soma</b> (recebido) ou <b>subtrai</b> (retorna à empresa) no total da folha.
+              </p>
+            </div>
+            <div className="flex items-center gap-3">
+              <div className="text-right">
+                <p className="text-[10px] uppercase tracking-wider font-bold text-slate-400">Total da folha (rubricas)</p>
+                <p className={`text-lg font-extrabold ${rubricasTotal < 0 ? 'text-red-600' : 'text-slate-900'}`}>
+                  {formatCurrency(rubricasTotal)}
+                </p>
+              </div>
+              {canImport && (
+                <button
+                  onClick={enviarRubricas}
+                  disabled={sendingRubricas}
+                  title="Envia o total para Previsto e Realizado de RH › Folha de pagamento"
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-[#004D40] text-white text-sm font-bold hover:bg-[#003d33] disabled:opacity-60 transition-colors"
+                >
+                  {sendingRubricas ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowRightCircle className="w-4 h-4" />}
+                  {sendingRubricas ? 'Enviando...' : 'Enviar para Previsto e Realizado'}
+                </button>
+              )}
+            </div>
+          </div>
+
+          {rubricasMsg && (
+            <div className="px-4 py-2 text-[11px] text-emerald-700 bg-emerald-50/60 border-b border-emerald-100 flex items-center gap-1">
+              <CheckCircle2 className="w-3.5 h-3.5" /> {rubricasMsg}
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-px bg-slate-100">
+            {(['P', 'D'] as const).map((tp) => {
+              const lista = rubricas.filter((r) => r.tipo === tp);
+              return (
+                <div key={tp} className="bg-white">
+                  <div className="px-4 py-2 bg-slate-50 border-b border-slate-100 text-[10px] font-bold uppercase tracking-widest text-slate-500">
+                    {tp === 'P' ? 'Proventos (P) — o que o funcionário recebeu' : 'Débitos (D) — o que retorna à empresa'}
+                  </div>
+                  <div className="divide-y divide-slate-50 max-h-[360px] overflow-auto">
+                    {lista.map((rb) => (
+                      <div key={`${rb.tipo}-${rb.codigo}`} className="flex items-center gap-2 px-4 py-2">
+                        <span className="text-[10px] text-slate-400 tabular-nums w-10 shrink-0">{rb.codigo}</span>
+                        <span className="text-xs text-slate-800 flex-1 truncate" title={rb.nome}>{rb.nome}</span>
+                        <span className="text-[10px] text-slate-400 tabular-nums w-16 text-right shrink-0">{rb.horas}</span>
+                        <span className="text-xs tabular-nums w-24 text-right shrink-0 font-semibold text-slate-900">{formatCurrency(rb.valor)}</span>
+                        {canImport ? (
+                          <button
+                            onClick={() => toggleOperacao(rb)}
+                            title="Clique para alternar soma/subtração"
+                            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-bold shrink-0 transition-colors ${
+                              rb.operacao === 'subtracao'
+                                ? 'bg-red-50 text-red-600 hover:bg-red-100'
+                                : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                            }`}
+                          >
+                            {rb.operacao === 'subtracao' ? <Minus className="w-3 h-3" /> : <Plus className="w-3 h-3" />}
+                            {rb.operacao === 'subtracao' ? 'Subtrai' : 'Soma'}
+                          </button>
+                        ) : (
+                          <span className={`text-[10px] font-bold shrink-0 ${rb.operacao === 'subtracao' ? 'text-red-600' : 'text-emerald-700'}`}>
+                            {rb.operacao === 'subtracao' ? '−' : '+'}
+                          </span>
+                        )}
+                      </div>
+                    ))}
+                    {lista.length === 0 && (
+                      <div className="px-4 py-3 text-xs text-slate-400">Nenhuma rubrica deste tipo.</div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Custo da Folha — 15 linhas agregadas */}
+      {custo && custo.linhas.some((l) => l.tipo !== 'manual' && l.valor !== 0) && (
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+          <div className="px-4 py-3 border-b border-slate-100 flex items-center gap-2">
+            <Calculator className="w-4 h-4 text-[#004D40]" />
+            <div>
+              <p className="text-sm font-bold text-slate-800">Custo da Folha — {MESES_FOLHA[month]}/{year}</p>
+              <p className="text-[11px] text-slate-500">
+                Linhas somadas das rubricas (clique para ver os códigos). FGTS e provisões de FGTS são manuais.
+                RETORNOS subtrai; TOTAL CUSTO = salário + provisões + encargos − retornos.
+              </p>
+            </div>
+          </div>
+          <div className="divide-y divide-slate-100">
+            {custo.linhas.map((l) => {
+              const isTotal = l.tipo === 'total';
+              const isSub = l.tipo === 'subtotal';
+              const isManual = l.tipo === 'manual';
+              const isRet = l.tipo === 'rubrica_sub';
+              const hasDetail = Array.isArray(l.codigos) && l.codigos.length > 0;
+              const expanded = custoDetalhe === l.key;
+              return (
+                <div key={l.key} className={isTotal ? 'bg-[#004D40]/5' : isSub ? 'bg-slate-50' : ''}>
+                  <div className="flex items-center justify-between gap-3 px-4 py-2">
+                    <button
+                      onClick={() => hasDetail && setCustoDetalhe(expanded ? null : l.key)}
+                      className={`flex items-center gap-1.5 text-left ${hasDetail ? 'hover:text-[#004D40]' : 'cursor-default'}`}
+                    >
+                      {hasDetail ? (
+                        expanded ? <ChevronDown className="w-3.5 h-3.5 text-slate-400" /> : <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
+                      ) : (
+                        <span className="w-3.5" />
+                      )}
+                      <span
+                        className={
+                          isTotal
+                            ? 'text-sm font-extrabold text-[#004D40] uppercase'
+                            : isSub
+                            ? 'text-sm font-bold text-slate-900'
+                            : 'text-sm text-slate-700'
+                        }
+                      >
+                        {l.label}
+                      </span>
+                      {hasDetail && <span className="text-[10px] text-slate-400">({l.codigos!.length})</span>}
+                    </button>
+
+                    {isManual ? (
+                      canImport ? (
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={fgtsEdit[l.key as 'fgts' | 'fgts_prov_ferias' | 'fgts_prov_13']}
+                          onChange={(e) =>
+                            setFgtsEdit((p) => ({ ...p, [l.key]: e.target.value }))
+                          }
+                          onBlur={() => saveFgts(l.key as 'fgts' | 'fgts_prov_ferias' | 'fgts_prov_13')}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+                          }}
+                          className="w-32 px-2 py-1 text-right text-sm bg-amber-50 border border-amber-200 rounded-lg tabular-nums"
+                          title="Valor manual (FGTS)"
+                        />
+                      ) : (
+                        <span className="text-sm tabular-nums text-slate-700">{formatCurrency(l.valor)}</span>
+                      )
+                    ) : (
+                      <span
+                        className={
+                          isTotal
+                            ? 'text-base font-extrabold text-[#004D40] tabular-nums'
+                            : isSub
+                            ? 'text-sm font-bold text-slate-900 tabular-nums'
+                            : isRet
+                            ? 'text-sm font-semibold text-red-600 tabular-nums'
+                            : 'text-sm text-slate-800 tabular-nums'
+                        }
+                      >
+                        {isRet && l.valor !== 0 ? '− ' : ''}
+                        {formatCurrency(l.valor)}
+                      </span>
+                    )}
+                  </div>
+
+                  {expanded && hasDetail && (
+                    <div className="px-9 pb-3 -mt-1">
+                      <div className="rounded-lg border border-slate-100 bg-slate-50/60 divide-y divide-slate-100 max-h-56 overflow-auto">
+                        {l.codigos!.map((c) => (
+                          <div key={c.codigo} className="flex items-center justify-between gap-2 px-3 py-1 text-[11px]">
+                            <span className="text-slate-400 tabular-nums w-12 shrink-0">{c.codigo}</span>
+                            <span className="text-slate-700 flex-1 truncate" title={c.nome}>{c.nome}</span>
+                            <span className="text-slate-600 tabular-nums">{formatCurrency(c.valor)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
 
