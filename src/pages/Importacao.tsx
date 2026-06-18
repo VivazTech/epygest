@@ -255,7 +255,10 @@ export const ImportacaoPage: React.FC = () => {
         return;
       }
       setExtratoCommitMsg(
-        `Enviado: ${data.funcionarios} funcionário(s) → Folha de Pagamento › ${periodoLabel({ month: mes, year: ano })}.` +
+        `Enviado: ${data.funcionarios} funcionário(s), ${data.rubricas ?? 0} rubrica(s)` +
+          (data.rubricas_cadastradas ? `, ${data.rubricas_cadastradas} nova(s) no cadastro de apuração` : '') +
+          ` → Folha de Pagamento › ${periodoLabel({ month: mes, year: ano })}.` +
+          ` Vá em Folha › Apuração de Folha, selecione o mês e clique em Processar mês.` +
           (data.realizado
             ? ` Líquido ${formatCurrency(data.realizado.valor)} lançado no Real de RH › Folha de pagamento.`
             : '')

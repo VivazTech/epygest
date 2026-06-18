@@ -29,3 +29,18 @@ export const formatApiError = (data: any, fallback: string) => {
   const base = (data && data.error) || fallback;
   return data && data.detail ? `${base} — ${data.detail}` : base;
 };
+
+/** fetch + parse JSON com mensagem clara quando o servidor devolve HTML. */
+export async function fetchJson<T = unknown>(url: string, init?: RequestInit): Promise<{ res: Response; json: T }> {
+  const res = await fetch(url, init);
+  const text = await res.text();
+  try {
+    const json = (text ? JSON.parse(text) : {}) as T;
+    return { res, json };
+  } catch {
+    const hint = text.trimStart().startsWith("<!")
+      ? " O servidor retornou HTML em vez de JSON — reinicie com npm run dev."
+      : "";
+    throw new Error(`Resposta inválida em ${url.split("?")[0]}.${hint}`);
+  }
+}

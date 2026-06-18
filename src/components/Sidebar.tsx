@@ -20,7 +20,8 @@ import {
   ChevronDown,
   Table2,
   Wallet,
-  CalendarDays
+  CalendarDays,
+  Calculator,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { PLANILHAS } from '../lib/planilhas';
@@ -81,7 +82,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     activeTab.startsWith('planilha-')
   );
   const [folhaExpanded, setFolhaExpanded] = React.useState(
-    activeTab.startsWith('folha-')
+    activeTab.startsWith('folha-') || activeTab === 'folha-apuracao'
   );
 
   React.useEffect(() => {
@@ -91,7 +92,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     if (activeTab.startsWith('planilha-')) {
       setPlanilhasExpanded(true);
     }
-    if (activeTab.startsWith('folha-')) {
+    if (activeTab.startsWith('folha-') || activeTab === 'folha-apuracao') {
       setFolhaExpanded(true);
     }
   }, [activeTab, constructionMenu]);
@@ -228,7 +229,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               onClick={() => setFolhaExpanded((prev) => !prev)}
               className={cn(
                 "w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group",
-                activeTab.startsWith('folha-')
+                activeTab.startsWith('folha-') || activeTab === 'folha-apuracao'
                   ? "text-white bg-white/10"
                   : "text-white/80 hover:bg-white/5 hover:text-white"
               )}
@@ -245,6 +246,24 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 )}
               />
             </button>
+
+            {!collapsed && folhaExpanded && (
+              <button
+                onClick={() => setActiveTab('folha-apuracao')}
+                className={cn(
+                  "w-full flex items-center gap-3 pl-11 pr-4 py-2 rounded-xl transition-all duration-200 group",
+                  activeTab === 'folha-apuracao'
+                    ? "bg-emerald-500 text-white shadow-lg shadow-emerald-900/20"
+                    : "text-white/70 hover:bg-white/5 hover:text-white"
+                )}
+              >
+                <Calculator className={cn(
+                  "w-4 h-4 min-w-4 min-h-4 shrink-0",
+                  activeTab === 'folha-apuracao' ? "scale-110" : "group-hover:scale-110"
+                )} />
+                <span className="font-medium text-xs truncate text-left">Apuração de Folha</span>
+              </button>
+            )}
 
             {!collapsed && folhaExpanded && FOLHA_MESES.map((mes, idx) => {
               const tabId = `folha-${idx + 1}`;

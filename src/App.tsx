@@ -18,6 +18,7 @@ import { UsuariosPage as Usuarios } from './pages/Usuarios';
 import { PlanilhasPage } from './pages/Planilhas';
 import { PLANILHAS } from './lib/planilhas';
 import { FolhaPagamentoPage, MESES_FOLHA } from './pages/FolhaPagamento';
+import { FolhaApuracaoPage } from './pages/FolhaApuracao';
 import { SearchProvider, useSearch } from './context/SearchContext';
 import { SearchBar } from './components/SearchBar';
 import { getSearchPlaceholder } from './lib/search';
@@ -131,9 +132,15 @@ export default function App() {
       );
     }
 
+    if (activeTab === 'folha-apuracao') {
+      return <FolhaApuracaoPage />;
+    }
+
     if (activeTab.startsWith('folha-')) {
       const mes = Number(activeTab.slice('folha-'.length));
-      return <FolhaPagamentoPage key={mes} month={mes} />;
+      if (mes >= 1 && mes <= 12) {
+        return <FolhaPagamentoPage key={mes} month={mes} />;
+      }
     }
 
     switch (activeTab) {

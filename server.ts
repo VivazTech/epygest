@@ -7,6 +7,11 @@ async function startServer() {
   const app = createApp();
   const PORT = Number(process.env.PORT) || 3000;
 
+  // Rotas /api sem handler → JSON (evita HTML do Vite quando o servidor não recarregou)
+  app.use("/api", (_req, res) => {
+    res.status(404).json({ error: "Rota da API não encontrada. Reinicie o servidor (npm run dev)." });
+  });
+
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
       server: { middlewareMode: true },

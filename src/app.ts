@@ -20,6 +20,17 @@ import {
   requireRole,
 } from "./lib/auth.js";
 import { logImportHistory } from "./lib/importHistory.js";
+import {
+  classificarLancamentosImportacao,
+  calcularApuracaoMensal,
+  calcularTotalProventos,
+  inferirParametroRubrica,
+  lancamentosDaImportacao,
+  listarRubricasNovasParaCadastro,
+  type RubricaParametro,
+  type EncargosParametro,
+  type FolhaConfig,
+} from "./lib/folhaApuracao.js";
 
 // Importa direto o parser para evitar o modo debug do index.js (que tenta abrir ./test/data/*)
 const loadPdfParse = async () => {
@@ -2271,6 +2282,86 @@ export function createApp() {
     return out;
   };
 
+  // Extrai rubricas linha a linha por funcionário (entre Empr. e ND:/NF:).
+  const parseExtratoEmployeeRubricas = (grid: any[][]): any[] => {
+    const toNum = (v: any) => {
+      if (typeof v === "number") return Number.isFinite(v) ? v : 0;
+      let s = String(v ?? "").trim();
+      if (!s) return 0;
+      s = s.replace(/\./g, "").replace(",", ".").replace(/[^0-9.\-]/g, "");
+      const n = Number(s);
+      return Number.isFinite(n) ? n : 0;
+    };
+    const cellsOf = (row: any[]) =>
+      (row || [])
+        .map((v, c) => ({ c, v }))
+        .filter((e) => e.v !== undefined && e.v !== null && String(e.v).trim() !== "");
+    const after = (cells: { c: number; v: any }[], label: string) => {
+      const i = cells.findIndex((e) => String(e.v).trim().toLowerCase().startsWith(label.toLowerCase()));
+      return i >= 0 && cells[i + 1] ? cells[i + 1].v : undefined;
+    };
+
+    const out: any[] = [];
+    let emp: any = null;
+    for (const row of grid) {
+      const cells = cellsOf(row);
+      if (!cells.length) continue;
+      const first = String(cells[0].v).trim();
+      if (first.startsWith("Empr.:")) {
+        emp = {
+          matricula: String(after(cells, "Empr.:") ?? "").trim(),
+          nome: cells[2] ? String(cells[2].v).trim() : "",
+          situacao: String(after(cells, "Situação:") ?? "").trim(),
+          cpf: String(after(cells, "CPF:") ?? "").trim(),
+          cargo: "",
+        };
+        continue;
+      }
+      if (!emp) continue;
+      if (first.startsWith("Cargo:")) {
+        emp.cargo = cells[2] ? String(cells[2].v).trim() : "";
+        continue;
+      }
+      if (first.startsWith("ND:") || first.startsWith("NF:")) continue;
+
+      const codigoRaw = cells[0].v;
+      const codigoStr = String(codigoRaw ?? "").trim();
+      const isCode = /^\d{1,5}$/.test(codigoStr) || (typeof codigoRaw === "number" && codigoRaw > 0 && codigoRaw < 100000);
+      if (!isCode) continue;
+
+      let tipo = "";
+      let valor = 0;
+      let horas = "";
+      let descricao = "";
+      for (const cell of cells.slice(1)) {
+        const s = String(cell.v).trim();
+        const upper = s.toUpperCase();
+        if (upper === "P" || upper === "D") tipo = upper;
+        else if (typeof cell.v === "number" && Math.abs(cell.v) >= 0.001 && cell.v !== codigoRaw) {
+          if (Math.abs(cell.v) >= Math.abs(valor)) valor = toNum(cell.v);
+        } else if (s.length > 2 && !/^\d+([.,]\d+)?$/.test(s)) {
+          if (!descricao || s.length > descricao.length) descricao = s;
+        } else if (/^\d+([.,]\d+)?$/.test(s) && !horas) {
+          horas = s;
+        }
+      }
+      if (!tipo || !valor) continue;
+      out.push({
+        matricula: emp.matricula,
+        nome: emp.nome,
+        cpf: emp.cpf,
+        situacao: emp.situacao,
+        cargo: emp.cargo,
+        codigo: codigoStr || String(codigoRaw),
+        nome_rubrica: descricao,
+        horas,
+        valor,
+        tipo,
+      });
+    }
+    return out;
+  };
+
   // Detecta o mês/ano do Extrato: 1) competência (data serial no cabeçalho); 2) nome do arquivo (MMAAAA).
   const detectExtratoPeriod = (grid: any[][], fileName: string): { month: number; year: number } | null => {
     for (const row of grid) {
@@ -2476,6 +2567,114 @@ export function createApp() {
         if (rubErr) console.error("Erro ao gravar rubricas da folha:", rubErr);
       }
 
+      // Parser de detalhe (reutilizado no cadastro e no v2)
+      const detalheRubricas = parseExtratoEmployeeRubricas(grid);
+
+      // Mapeamento importação → cadastro de parâmetros (folha_rubricas_parametros)
+      let rubricasCadastradasNaImportacao = 0;
+      try {
+        const { data: paramsExistentes } = await supabase.from("folha_rubricas_parametros").select("codigo_rubrica");
+        const codigosCadastrados = new Set(
+          (paramsExistentes ?? []).map((p: any) => String(p.codigo_rubrica).trim())
+        );
+        const rubricasUnicas = rubricasParsed.map((rb) => ({
+          codigo: String(rb.codigo).trim(),
+          nome: String(rb.nome ?? "").trim(),
+          tipo: String(rb.tipo ?? "").trim(),
+        }));
+        for (const d of detalheRubricas) {
+          rubricasUnicas.push({
+            codigo: String(d.codigo).trim(),
+            nome: String(d.nome_rubrica ?? "").trim(),
+            tipo: String(d.tipo ?? "").trim(),
+          });
+        }
+        const novasParametros = listarRubricasNovasParaCadastro(rubricasUnicas, codigosCadastrados);
+        if (novasParametros.length) {
+          const { error: paramErr } = await supabase.from("folha_rubricas_parametros").insert(
+            novasParametros.map((p) => ({ ...p, updated_at: new Date().toISOString() }))
+          );
+          if (paramErr) console.error("Erro ao cadastrar parâmetros de rubricas na importação:", paramErr);
+          else rubricasCadastradasNaImportacao = novasParametros.length;
+        }
+      } catch (e) {
+        console.error("Falha ao mapear rubricas na importação (folha_rubricas_parametros):", e);
+      }
+
+      // Metadados da importação para o módulo de apuração (v1 — sempre grava)
+      let detalheRubricasCount = detalheRubricas.length;
+      const { error: impMetaErr } = await supabase.from("folha_importacoes").upsert(
+        {
+          nome_arquivo: req.file.originalname,
+          competencia_mes: month,
+          competencia_ano: year,
+          data_importacao: new Date().toISOString(),
+          usuario_id: req.user?.id ?? null,
+          status: "importado",
+          total_funcionarios: rows.length,
+          total_rubricas: rubricasParsed.length,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "competencia_ano,competencia_mes" }
+      );
+      if (impMetaErr) {
+        console.error("Erro ao registrar folha_importacoes:", impMetaErr);
+      }
+
+      // Complementos v2 (funcionários, lançamentos detalhados, situações)
+      try {
+        await supabase.from("folha_lancamentos_importados").delete().eq("competencia_ano", year).eq("competencia_mes", month);
+        if (detalheRubricas.length) {
+          const detRows = detalheRubricas.map((d) => ({
+            competencia_ano: year,
+            competencia_mes: month,
+            codigo_funcionario: d.matricula,
+            nome_funcionario: d.nome,
+            cpf_funcionario: d.cpf,
+            cargo_nome: d.cargo,
+            situacao: d.situacao,
+            codigo_rubrica: d.codigo,
+            descricao_rubrica: d.nome_rubrica,
+            tipo_original: d.tipo,
+            quantidade: d.horas,
+            valor_original: d.valor,
+          }));
+          await supabase.from("folha_lancamentos_importados").insert(detRows);
+        }
+
+        for (const r of rows) {
+          const mat = String(r.matricula || "SEM-MATRICULA");
+          await supabase.from("folha_funcionarios").upsert(
+            {
+              codigo_funcionario: mat,
+              nome: r.nome,
+              cpf: r.cpf,
+              cargo_nome: r.cargo,
+              situacao_atual: r.situacao,
+              salario_base: r.salario,
+              ativo: true,
+              updated_at: new Date().toISOString(),
+            },
+            { onConflict: "codigo_funcionario" }
+          );
+        }
+        const situacoes = new Map<string, number>();
+        for (const r of rows) {
+          const sit = String(r.situacao || "Outros").trim() || "Outros";
+          situacoes.set(sit, (situacoes.get(sit) || 0) + 1);
+        }
+        await supabase.from("folha_situacoes_resumo").delete().eq("competencia_ano", year).eq("competencia_mes", month);
+        const sitRows = Array.from(situacoes.entries()).map(([situacao, quantidade]) => ({
+          competencia_ano: year,
+          competencia_mes: month,
+          situacao,
+          quantidade,
+        }));
+        if (sitRows.length) await supabase.from("folha_situacoes_resumo").insert(sitRows);
+      } catch (e) {
+        console.error("Falha ao registrar dados de apuração v2 (execute sql/folha_apuracao_module_v2.sql):", e);
+      }
+
       const totalLiquido = rows.reduce((s, r) => s + r.liquido, 0);
 
       // Lança o líquido total como Realizado na linha "Folha de pagamento" do Setor RH
@@ -2518,7 +2717,11 @@ export function createApp() {
         year,
         month,
         funcionarios: rows.length,
+        rubricas: rubricasParsed.length,
+        rubricas_cadastradas: rubricasCadastradasNaImportacao,
+        lancamentos_detalhe: detalheRubricasCount,
         total_liquido: totalLiquido,
+        apuracao_pronta: rubricasParsed.length > 0,
         realizado: realizadoCrdId
           ? { setor: "RH", conta: "Folha de pagamento", valor: totalLiquido }
           : null,
@@ -2772,6 +2975,824 @@ export function createApp() {
       return res.status(500).json({ error: "Não foi possível salvar." });
     }
     res.json({ success: true });
+  });
+
+  // ====================================================
+  // APURAÇÃO DE FOLHA (classificação, cálculo mensal, síntese)
+  // ====================================================
+  const folhaApuracaoRoles = requireRole("admin", "finance", "controle");
+
+  const loadRubricaParamsMap = async (): Promise<Map<string, RubricaParametro>> => {
+    const { data, error } = await supabase
+      .from("folha_rubricas_parametros")
+      .select("*")
+      .eq("ativo", true);
+    if (error) throw error;
+    const map = new Map<string, RubricaParametro>();
+    for (const row of data ?? []) {
+      map.set(String((row as any).codigo_rubrica).trim(), row as RubricaParametro);
+    }
+    return map;
+  };
+
+  const loadEncargosAno = async (year: number): Promise<EncargosParametro | null> => {
+    const { data, error } = await supabase
+      .from("folha_parametros_encargos")
+      .select("*")
+      .eq("ano", year)
+      .eq("ativo", true)
+      .limit(1)
+      .maybeSingle();
+    if (error) throw error;
+    if (!data) return null;
+    return data as EncargosParametro;
+  };
+
+  const loadFolhaConfig = async (): Promise<FolhaConfig> => {
+    const { data } = await supabase.from("folha_config").select("*").eq("id", 1).maybeSingle();
+    return {
+      comissao_produtividade_separadas: data?.comissao_produtividade_separadas !== false,
+      incluir_retorno_total_custo: Boolean(data?.incluir_retorno_total_custo),
+    };
+  };
+
+  const loadIgnoredRubricas = async (): Promise<Set<string>> => {
+    const { data } = await supabase.from("folha_rubricas_ignoradas").select("codigo_rubrica");
+    return new Set((data ?? []).map((r: any) => String(r.codigo_rubrica).trim()));
+  };
+
+  /** Cria parâmetros de rubricas a partir dos dados já importados (folha_rubricas + detalhe). */
+  const sincronizarCadastroRubricasCompetencia = async (year: number, month: number): Promise<number> => {
+    const [{ data: rubricas }, { data: paramsExistentes }, { data: detalhe }] = await Promise.all([
+      supabase.from("folha_rubricas").select("codigo, nome, tipo").eq("year", year).eq("month", month),
+      supabase.from("folha_rubricas_parametros").select("codigo_rubrica"),
+      supabase
+        .from("folha_lancamentos_importados")
+        .select("codigo_rubrica, descricao_rubrica, tipo_original")
+        .eq("competencia_ano", year)
+        .eq("competencia_mes", month),
+    ]);
+    const codigosCadastrados = new Set((paramsExistentes ?? []).map((p: any) => String(p.codigo_rubrica).trim()));
+    const rubricasUnicas: { codigo: string; nome: string; tipo: string }[] = [];
+    for (const rb of rubricas ?? []) {
+      rubricasUnicas.push({
+        codigo: String((rb as any).codigo).trim(),
+        nome: String((rb as any).nome ?? "").trim(),
+        tipo: String((rb as any).tipo ?? "").trim(),
+      });
+    }
+    for (const d of detalhe ?? []) {
+      rubricasUnicas.push({
+        codigo: String((d as any).codigo_rubrica).trim(),
+        nome: String((d as any).descricao_rubrica ?? "").trim(),
+        tipo: String((d as any).tipo_original ?? "").trim(),
+      });
+    }
+    const novas = listarRubricasNovasParaCadastro(rubricasUnicas, codigosCadastrados);
+    if (!novas.length) return 0;
+    const { error } = await supabase.from("folha_rubricas_parametros").insert(
+      novas.map((p) => ({ ...p, updated_at: new Date().toISOString() }))
+    );
+    if (error) {
+      console.error("Erro ao sincronizar cadastro de rubricas:", error);
+      return 0;
+    }
+    return novas.length;
+  };
+
+  const logFolhaAuditoria = async (
+    year: number,
+    month: number,
+    acao: string,
+    usuarioId: number | string | null | undefined,
+    detalhes: Record<string, unknown>
+  ) => {
+    try {
+      await supabase.from("folha_apuracao_auditoria").insert({
+        competencia_ano: year,
+        competencia_mes: month,
+        acao,
+        usuario_id: usuarioId ?? null,
+        detalhes,
+      });
+    } catch (e) {
+      console.error("Falha ao registrar auditoria folha:", e);
+    }
+  };
+
+  // CRUD parâmetros de rubricas
+  app.get("/api/folha/apuracao/rubricas", folhaApuracaoRoles, async (_req, res) => {
+    const { data, error } = await supabase
+      .from("folha_rubricas_parametros")
+      .select("*")
+      .order("codigo_rubrica");
+    if (error) {
+      console.error("Erro ao listar rubricas parâmetros:", error);
+      return res.status(500).json({ error: "Tabela folha_rubricas_parametros indisponível. Execute sql/folha_apuracao_module.sql no Supabase." });
+    }
+    res.json(data ?? []);
+  });
+
+  app.post("/api/folha/apuracao/rubricas", folhaApuracaoRoles, async (req, res) => {
+    const body = req.body as any;
+    const codigo = String(body?.codigo_rubrica ?? "").trim();
+    if (!codigo) return res.status(400).json({ error: "Informe o código da rubrica." });
+    const row = {
+      codigo_rubrica: codigo,
+      descricao: String(body?.descricao ?? codigo).trim(),
+      categoria: String(body?.categoria ?? "neutro"),
+      entra_provento: Boolean(body?.entra_provento),
+      entra_retorno: Boolean(body?.entra_retorno),
+      entra_comissao: Boolean(body?.entra_comissao),
+      entra_produtividade: Boolean(body?.entra_produtividade),
+      entra_base_salario: body?.entra_base_salario !== false,
+      entra_encargos: Boolean(body?.entra_encargos),
+      fator_provento: Number(body?.fator_provento ?? 1),
+      fator_retorno: Number(body?.fator_retorno ?? -1),
+      ativo: body?.ativo !== false,
+      observacoes: body?.observacoes ?? null,
+      updated_at: new Date().toISOString(),
+    };
+    const { data, error } = await supabase.from("folha_rubricas_parametros").upsert(row, { onConflict: "codigo_rubrica" }).select().single();
+    if (error) {
+      console.error("Erro ao salvar rubrica parâmetro:", error);
+      return res.status(500).json({ error: "Não foi possível salvar a rubrica." });
+    }
+    res.json(data);
+  });
+
+  app.patch("/api/folha/apuracao/rubricas/:id", folhaApuracaoRoles, async (req, res) => {
+    const id = Number(req.params.id);
+    if (!id) return res.status(400).json({ error: "ID inválido." });
+    const body = { ...(req.body as any), updated_at: new Date().toISOString() };
+    delete body.id;
+    delete body.codigo_rubrica;
+    const { data, error } = await supabase.from("folha_rubricas_parametros").update(body).eq("id", id).select().single();
+    if (error) return res.status(500).json({ error: "Não foi possível atualizar." });
+    res.json(data);
+  });
+
+  // CRUD parâmetros de encargos
+  app.get("/api/folha/apuracao/encargos", folhaApuracaoRoles, async (req, res) => {
+    const ano = Number((req.query as any)?.ano);
+    let q = supabase.from("folha_parametros_encargos").select("*").order("ano", { ascending: false });
+    if (ano) q = q.eq("ano", ano);
+    const { data, error } = await q;
+    if (error) return res.status(500).json({ error: "Execute sql/folha_apuracao_module.sql no Supabase." });
+    res.json(data ?? []);
+  });
+
+  app.post("/api/folha/apuracao/encargos", folhaApuracaoRoles, async (req, res) => {
+    const body = req.body as any;
+    const ano = Number(body?.ano);
+    if (!ano) return res.status(400).json({ error: "Informe o ano." });
+    const row = {
+      ano,
+      percentual_fgts: Number(body?.percentual_fgts ?? 0.08),
+      percentual_inss: Number(body?.percentual_inss ?? 0.20),
+      percentual_fgts_aprendiz: Number(body?.percentual_fgts_aprendiz ?? 0.02),
+      percentual_provisao_13: Number(body?.percentual_provisao_13 ?? 1 / 12),
+      percentual_provisao_ferias: Number(body?.percentual_provisao_ferias ?? 1 / 12),
+      percentual_um_terco_ferias: Number(body?.percentual_um_terco_ferias ?? 1 / 3),
+      ativo: body?.ativo !== false,
+      observacoes: body?.observacoes ?? null,
+      updated_at: new Date().toISOString(),
+    };
+    const { data, error } = await supabase.from("folha_parametros_encargos").upsert(row, { onConflict: "ano" }).select().single();
+    if (error) return res.status(500).json({ error: "Não foi possível salvar encargos." });
+    res.json(data);
+  });
+
+  // Rubricas não mapeadas (pendências)
+  app.get("/api/folha/apuracao/pendencias", folhaApuracaoRoles, async (req, res) => {
+    const year = Number((req.query as any)?.year) || new Date().getFullYear();
+    const month = Number((req.query as any)?.month);
+
+    const { data: rubricas, error } = await supabase
+      .from("folha_rubricas")
+      .select("codigo, nome, valor, tipo, year, month")
+      .eq("year", year);
+    if (error) return res.status(500).json({ error: "Erro ao carregar rubricas importadas." });
+
+    const paramsMap = await loadRubricaParamsMap();
+    const ignored = await loadIgnoredRubricas();
+    const grouped = new Map<string, { codigo: string; descricao: string; ocorrencias: number; valor_total: number; meses: Set<number>; tipo: string }>();
+
+    for (const rb of rubricas ?? []) {
+      const codigo = String((rb as any).codigo).trim();
+      if (paramsMap.has(codigo) || ignored.has(codigo)) continue;
+      if (month && Number((rb as any).month) !== month) continue;
+      const g = grouped.get(codigo) || {
+        codigo,
+        descricao: String((rb as any).nome ?? ""),
+        ocorrencias: 0,
+        valor_total: 0,
+        meses: new Set<number>(),
+        tipo: String((rb as any).tipo ?? ""),
+      };
+      g.ocorrencias += 1;
+      g.valor_total += Number((rb as any).valor) || 0;
+      g.meses.add(Number((rb as any).month));
+      grouped.set(codigo, g);
+    }
+
+    res.json(
+      Array.from(grouped.values()).map((g) => {
+        const mesesArr = Array.from(g.meses).sort((a, b) => a - b);
+        return {
+          codigo_rubrica: g.codigo,
+          descricao: g.descricao,
+          ocorrencias: g.ocorrencias,
+          valor_total: g.valor_total,
+          tipo_original: g.tipo,
+          meses: mesesArr,
+          primeira_competencia: mesesArr.length ? `${String(mesesArr[0]).padStart(2, "0")}/${year}` : null,
+          ultima_competencia: mesesArr.length ? `${String(mesesArr[mesesArr.length - 1]).padStart(2, "0")}/${year}` : null,
+        };
+      })
+    );
+  });
+
+  // Ignorar rubrica (não entra na apuração)
+  app.post("/api/folha/apuracao/rubricas/ignorar", folhaApuracaoRoles, async (req, res) => {
+    const codigo = String((req.body as any)?.codigo_rubrica ?? "").trim();
+    const descricao = String((req.body as any)?.descricao ?? codigo).trim();
+    if (!codigo) return res.status(400).json({ error: "Informe o código." });
+    const { error } = await supabase.from("folha_rubricas_ignoradas").upsert(
+      { codigo_rubrica: codigo, descricao, ignorado_por: req.user?.id ?? null, ignorado_em: new Date().toISOString() },
+      { onConflict: "codigo_rubrica" }
+    );
+    if (error) return res.status(500).json({ error: "Não foi possível ignorar rubrica." });
+    res.json({ success: true });
+  });
+
+  app.delete("/api/folha/apuracao/rubricas/ignorar/:codigo", folhaApuracaoRoles, async (req, res) => {
+    const codigo = String(req.params.codigo ?? "").trim();
+    await supabase.from("folha_rubricas_ignoradas").delete().eq("codigo_rubrica", codigo);
+    res.json({ success: true });
+  });
+
+  // Configurações globais
+  app.get("/api/folha/apuracao/config", folhaApuracaoRoles, async (_req, res) => {
+    res.json(await loadFolhaConfig());
+  });
+
+  app.patch("/api/folha/apuracao/config", folhaApuracaoRoles, async (req, res) => {
+    const body = req.body as any;
+    const { data, error } = await supabase
+      .from("folha_config")
+      .upsert(
+        {
+          id: 1,
+          comissao_produtividade_separadas: body?.comissao_produtividade_separadas !== false,
+          incluir_retorno_total_custo: Boolean(body?.incluir_retorno_total_custo),
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "id" }
+      )
+      .select()
+      .single();
+    if (error) return res.status(500).json({ error: "Execute sql/folha_apuracao_module_v2.sql." });
+    res.json(data);
+  });
+
+  // Mapear rubrica pendente rapidamente
+  app.post("/api/folha/apuracao/rubricas/mapear", folhaApuracaoRoles, async (req, res) => {
+    const body = req.body as any;
+    const codigo = String(body?.codigo_rubrica ?? "").trim();
+    const descricao = String(body?.descricao ?? codigo).trim();
+    if (!codigo) return res.status(400).json({ error: "Informe o código." });
+
+    const preset = body?.preset as string | undefined;
+    let param: Omit<RubricaParametro, "id">;
+    if (preset === "provento") {
+      param = { codigo_rubrica: codigo, descricao, categoria: "provento", entra_provento: true, entra_retorno: false, entra_comissao: false, entra_produtividade: false, fator_provento: 1, fator_retorno: -1, ativo: true };
+    } else if (preset === "desconto") {
+      param = { codigo_rubrica: codigo, descricao, categoria: "desconto", entra_provento: false, entra_retorno: true, entra_comissao: false, entra_produtividade: false, fator_provento: 1, fator_retorno: -1, ativo: true };
+    } else if (preset === "comissao") {
+      param = { codigo_rubrica: codigo, descricao, categoria: "comissao", entra_provento: false, entra_retorno: false, entra_comissao: true, entra_produtividade: false, fator_provento: 1, fator_retorno: -1, ativo: true };
+    } else if (preset === "produtividade") {
+      param = { codigo_rubrica: codigo, descricao, categoria: "produtividade", entra_provento: false, entra_retorno: false, entra_comissao: false, entra_produtividade: true, fator_provento: 1, fator_retorno: -1, ativo: true };
+    } else {
+      param = inferirParametroRubrica(codigo, descricao, body?.tipo_original);
+    }
+
+    const { data, error } = await supabase.from("folha_rubricas_parametros").upsert({ ...param, updated_at: new Date().toISOString() }, { onConflict: "codigo_rubrica" }).select().single();
+    if (error) return res.status(500).json({ error: "Não foi possível mapear rubrica." });
+    res.json(data);
+  });
+
+  // Conferência da importação
+  app.get("/api/folha/apuracao/conferencia", folhaApuracaoRoles, async (req, res) => {
+    const year = Number((req.query as any)?.year) || new Date().getFullYear();
+    const month = Number((req.query as any)?.month);
+    if (!month || month < 1 || month > 12) return res.status(400).json({ error: "Informe o mês (1-12)." });
+
+    const [{ data: funcionarios }, { data: rubricas }, { data: importacao }, { data: apuracao }, { data: detalhe }] = await Promise.all([
+      supabase.from("folha_pagamento").select("matricula, nome, situacao, proventos, descontos, liquido").eq("year", year).eq("month", month),
+      supabase.from("folha_rubricas").select("codigo, nome, valor, tipo").eq("year", year).eq("month", month),
+      supabase.from("folha_importacoes").select("*").eq("competencia_ano", year).eq("competencia_mes", month).maybeSingle(),
+      supabase.from("folha_apuracoes_mensais").select("*").eq("competencia_ano", year).eq("competencia_mes", month).maybeSingle(),
+      supabase.from("folha_lancamentos_importados").select("id").eq("competencia_ano", year).eq("competencia_mes", month),
+    ]);
+
+    const paramsMap = await loadRubricaParamsMap();
+    const ignored = await loadIgnoredRubricas();
+    const rubricasNaoMapeadas = (rubricas ?? []).filter((r: any) => {
+      const cod = String(r.codigo).trim();
+      return !paramsMap.has(cod) && !ignored.has(cod);
+    }).length;
+    const totalProventos = (funcionarios ?? []).reduce((s: number, f: any) => s + (Number(f.proventos) || 0), 0);
+    const totalDescontos = (funcionarios ?? []).reduce((s: number, f: any) => s + (Number(f.descontos) || 0), 0);
+
+    res.json({
+      year,
+      month,
+      importacao: importacao ?? null,
+      funcionarios: (funcionarios ?? []).length,
+      rubricas: (rubricas ?? []).length,
+      rubricas_nao_mapeadas: rubricasNaoMapeadas,
+      total_proventos_importados: totalProventos,
+      total_descontos_importados: totalDescontos,
+      linhas_detalhe_importadas: (detalhe ?? []).length,
+      apuracao: apuracao ?? null,
+      status: (funcionarios ?? []).length > 0 ? "importado" : "sem_dados",
+    });
+  });
+
+  // Processar / reprocessar apuração mensal
+  app.post("/api/folha/apuracao/processar", folhaApuracaoRoles, async (req, res) => {
+    const year = Number((req.body as any)?.year);
+    const month = Number((req.body as any)?.month);
+    const force = Boolean((req.body as any)?.force);
+    if (!year || !month || month < 1 || month > 12) {
+      return res.status(400).json({ error: "Informe ano e mês válidos." });
+    }
+
+    const { data: apExistente } = await supabase
+      .from("folha_apuracoes_mensais")
+      .select("bloqueado")
+      .eq("competencia_ano", year)
+      .eq("competencia_mes", month)
+      .maybeSingle();
+    if (apExistente?.bloqueado) {
+      if (!force) {
+        return res.status(403).json({ error: "Competência bloqueada. Apenas administradores podem reprocessar com confirmação." });
+      }
+      if (req.user?.role !== "admin") {
+        return res.status(403).json({ error: "Apenas administradores podem reprocessar competência bloqueada." });
+      }
+    }
+
+    const { data: importacao } = await supabase
+      .from("folha_importacoes")
+      .select("id, status")
+      .eq("competencia_ano", year)
+      .eq("competencia_mes", month)
+      .maybeSingle();
+
+    const encargos = await loadEncargosAno(year);
+    if (!encargos) {
+      return res.status(400).json({ error: `Cadastre os parâmetros de encargos para ${year}.` });
+    }
+
+    const config = await loadFolhaConfig();
+    const ignored = await loadIgnoredRubricas();
+
+    // Garante cadastro de rubricas a partir da importação (equivalente à tabela de classificação da planilha)
+    await sincronizarCadastroRubricasCompetencia(year, month);
+
+    const paramsMap = await loadRubricaParamsMap();
+
+    const { data: detalheImportado } = await supabase
+      .from("folha_lancamentos_importados")
+      .select("*")
+      .eq("competencia_ano", year)
+      .eq("competencia_mes", month);
+
+    const { data: rubricasResumo, error: rubErr } = await supabase
+      .from("folha_rubricas")
+      .select("codigo, nome, horas, valor, tipo")
+      .eq("year", year)
+      .eq("month", month);
+    if (rubErr) return res.status(500).json({ error: "Erro ao carregar rubricas do mês." });
+
+    const rawInputs = lancamentosDaImportacao(detalheImportado ?? [], rubricasResumo ?? []);
+    if (!rawInputs.length) {
+      return res.status(400).json({ error: "Não há dados importados para esta competência. Importe o extrato mensal primeiro." });
+    }
+
+    const rawLancamentos = rawInputs.filter(
+      (l) => !ignored.has(String(l.codigo_rubrica).trim())
+    );
+
+    const lancamentos = classificarLancamentosImportacao(rawLancamentos, paramsMap);
+
+    const { data: funcionarios } = await supabase
+      .from("folha_pagamento")
+      .select("matricula, nome, cargo, situacao, cpf")
+      .eq("year", year)
+      .eq("month", month);
+
+    const qtdFuncionarios = (funcionarios ?? []).length;
+    const qtdTrabalhando = (funcionarios ?? []).filter((f: any) =>
+      /trabalh/i.test(String(f.situacao ?? ""))
+    ).length;
+
+    const apuracao = calcularApuracaoMensal(year, month, lancamentos, encargos, qtdTrabalhando, qtdFuncionarios, config);
+
+    if (!force && apuracao.rubricas_nao_mapeadas > 0) {
+      return res.status(409).json({
+        error: `Existem ${apuracao.rubricas_nao_mapeadas} rubrica(s) sem mapeamento. Classifique-as ou confirme o cálculo mesmo assim.`,
+        rubricas_nao_mapeadas: apuracao.rubricas_nao_mapeadas,
+      });
+    }
+
+    await supabase.from("folha_lancamentos").delete().eq("competencia_ano", year).eq("competencia_mes", month);
+
+    const lancRows = lancamentos.map((l) => ({
+      importacao_id: importacao?.id ?? null,
+      competencia_ano: year,
+      competencia_mes: month,
+      codigo_funcionario: l.codigo_funcionario ?? null,
+      nome_funcionario: l.nome_funcionario ?? null,
+      cpf_funcionario: l.cpf_funcionario ?? null,
+      cargo_nome: l.cargo_nome ?? null,
+      setor_nome: l.setor_nome ?? null,
+      situacao: l.situacao ?? null,
+      codigo_rubrica: l.codigo_rubrica,
+      descricao_rubrica: l.descricao_rubrica,
+      tipo_original: l.tipo_original,
+      quantidade: l.quantidade,
+      valor_original: l.valor_original,
+      valor_provento: l.valor_provento,
+      valor_retorno: l.valor_retorno,
+      valor_comissao: l.valor_comissao,
+      valor_produtividade: l.valor_produtividade,
+      status_mapeamento: l.status_mapeamento,
+      updated_at: new Date().toISOString(),
+    }));
+    const { error: insErr } = await supabase.from("folha_lancamentos").insert(lancRows);
+    if (insErr) {
+      console.error("Erro ao gravar lançamentos:", insErr);
+      return res.status(500).json({ error: "Não foi possível gravar lançamentos." });
+    }
+
+    const apRow = {
+      ...apuracao,
+      status: "calculado",
+      calculado_por: req.user?.id ?? null,
+      calculado_em: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    const { data: saved, error: apErr } = await supabase
+      .from("folha_apuracoes_mensais")
+      .upsert(apRow, { onConflict: "competencia_ano,competencia_mes" })
+      .select()
+      .single();
+    if (apErr) {
+      console.error("Erro ao gravar apuração:", apErr);
+      return res.status(500).json({ error: "Não foi possível gravar a apuração mensal." });
+    }
+
+    await logFolhaAuditoria(year, month, apExistente ? "reprocessar" : "processar", req.user?.id, {
+      lancamentos: lancamentos.length,
+      rubricas_nao_mapeadas: apuracao.rubricas_nao_mapeadas,
+      encargos,
+      config,
+      origem: (detalheImportado?.length ?? 0) > 0 ? "detalhe_funcionario" : "resumo_rubrica",
+    });
+
+    res.json({
+      success: true,
+      apuracao: saved,
+      resumo: {
+        lancamentos_processados: lancamentos.length,
+        rubricas_processadas: new Set(lancamentos.map((l) => l.codigo_rubrica)).size,
+        rubricas_nao_mapeadas: apuracao.rubricas_nao_mapeadas,
+        total_proventos: apuracao.total_proventos,
+        total_retorno: apuracao.total_retorno,
+        total_comissao: apuracao.total_comissao,
+        total_produtividade: apuracao.total_produtividade,
+        total_custo: apuracao.total_custo,
+        calculado_em: apRow.calculado_em,
+      },
+    });
+  });
+
+  // Consultar apuração mensal + lançamentos (com filtros)
+  app.get("/api/folha/apuracao/competencias", folhaApuracaoRoles, async (req, res) => {
+    const year = Number((req.query as any)?.year) || new Date().getFullYear();
+    const [{ data: importacoes }, { data: apuracoes }] = await Promise.all([
+      supabase
+        .from("folha_importacoes")
+        .select("competencia_mes, competencia_ano, nome_arquivo, data_importacao, total_funcionarios, total_rubricas, status")
+        .eq("competencia_ano", year)
+        .order("competencia_mes"),
+      supabase
+        .from("folha_apuracoes_mensais")
+        .select("competencia_mes, status, calculado_em, total_custo")
+        .eq("competencia_ano", year)
+        .order("competencia_mes"),
+    ]);
+
+    const apMap = new Map((apuracoes ?? []).map((a: any) => [Number(a.competencia_mes), a]));
+    const meses = Array.from({ length: 12 }, (_, i) => {
+      const m = i + 1;
+      const imp = (importacoes ?? []).find((row: any) => Number(row.competencia_mes) === m);
+      const ap = apMap.get(m);
+      return {
+        month: m,
+        importado: Boolean(imp),
+        importacao: imp ?? null,
+        apurado: Boolean(ap),
+        apuracao: ap ?? null,
+      };
+    });
+
+    res.json({ year, meses });
+  });
+
+  app.get("/api/folha/apuracao", folhaApuracaoRoles, async (req, res) => {
+    const q = req.query as any;
+    const year = Number(q?.year) || new Date().getFullYear();
+    const month = Number(q?.month);
+    if (!month || month < 1 || month > 12) return res.status(400).json({ error: "Informe o mês (1-12)." });
+
+    const [
+      { data: apuracao },
+      { data: lancamentosRaw },
+      { data: situacoes, error: sitErr },
+      { count: funcCount },
+      { count: rubCount },
+      { data: importacao },
+      { count: detCount, error: detErr },
+      { data: detalheRows },
+      { data: rubricasRows },
+    ] = await Promise.all([
+      supabase.from("folha_apuracoes_mensais").select("*").eq("competencia_ano", year).eq("competencia_mes", month).maybeSingle(),
+      supabase.from("folha_lancamentos").select("*").eq("competencia_ano", year).eq("competencia_mes", month).order("codigo_rubrica"),
+      supabase.from("folha_situacoes_resumo").select("*").eq("competencia_ano", year).eq("competencia_mes", month),
+      supabase.from("folha_pagamento").select("*", { count: "exact", head: true }).eq("year", year).eq("month", month),
+      supabase.from("folha_rubricas").select("*", { count: "exact", head: true }).eq("year", year).eq("month", month),
+      supabase.from("folha_importacoes").select("*").eq("competencia_ano", year).eq("competencia_mes", month).maybeSingle(),
+      supabase.from("folha_lancamentos_importados").select("*", { count: "exact", head: true }).eq("competencia_ano", year).eq("competencia_mes", month),
+      supabase.from("folha_lancamentos_importados").select("*").eq("competencia_ano", year).eq("competencia_mes", month),
+      supabase.from("folha_rubricas").select("codigo, nome, horas, valor, tipo").eq("year", year).eq("month", month),
+    ]);
+
+    if (sitErr) console.warn("folha_situacoes_resumo indisponível:", sitErr.message);
+    if (detErr) console.warn("folha_lancamentos_importados indisponível:", detErr.message);
+
+    const dadosImportados = (funcCount ?? 0) > 0 || (rubCount ?? 0) > 0;
+
+    let proventosImportacao = 0;
+    let rubricasPendentesProvento = 0;
+    if (dadosImportados) {
+      try {
+        await sincronizarCadastroRubricasCompetencia(year, month);
+        const paramsMap = await loadRubricaParamsMap();
+        const ignored = await loadIgnoredRubricas();
+        const rawImport = lancamentosDaImportacao(detalheRows ?? [], rubricasRows ?? []).filter(
+          (l) => !ignored.has(String(l.codigo_rubrica).trim())
+        );
+        const classificados = classificarLancamentosImportacao(rawImport, paramsMap);
+        proventosImportacao = calcularTotalProventos(classificados);
+        rubricasPendentesProvento = new Set(
+          classificados.filter((l) => l.status_mapeamento === "pendente").map((l) => l.codigo_rubrica)
+        ).size;
+      } catch (e) {
+        console.warn("Prévia de proventos indisponível:", e);
+      }
+    }
+
+    let lancamentos = lancamentosRaw ?? [];
+    const filtroRubrica = String(q?.rubrica ?? "").trim();
+    const filtroTipo = String(q?.tipo ?? "").trim().toUpperCase();
+    const filtroFuncionario = String(q?.funcionario ?? "").trim().toLowerCase();
+    const filtroCargo = String(q?.cargo ?? "").trim().toLowerCase();
+    const filtroSetor = String(q?.setor ?? "").trim().toLowerCase();
+
+    if (filtroRubrica) lancamentos = lancamentos.filter((l: any) => String(l.codigo_rubrica).includes(filtroRubrica));
+    if (filtroTipo) lancamentos = lancamentos.filter((l: any) => String(l.tipo_original).toUpperCase() === filtroTipo);
+    if (filtroFuncionario) {
+      lancamentos = lancamentos.filter((l: any) =>
+        String(l.nome_funcionario ?? "").toLowerCase().includes(filtroFuncionario) ||
+        String(l.codigo_funcionario ?? "").toLowerCase().includes(filtroFuncionario)
+      );
+    }
+    if (filtroCargo) lancamentos = lancamentos.filter((l: any) => String(l.cargo_nome ?? "").toLowerCase().includes(filtroCargo));
+    if (filtroSetor) lancamentos = lancamentos.filter((l: any) => String(l.setor_nome ?? "").toLowerCase().includes(filtroSetor));
+
+    res.json({
+      year,
+      month,
+      apuracao: apuracao ?? null,
+      lancamentos,
+      situacoes: situacoes ?? [],
+      importacao: importacao ?? null,
+      import_status: {
+        dados_importados: dadosImportados,
+        funcionarios: funcCount ?? 0,
+        rubricas: rubCount ?? 0,
+        lancamentos_detalhe: detCount ?? 0,
+        proventos_calculados: proventosImportacao,
+        rubricas_pendentes: rubricasPendentesProvento,
+        pronto_para_processar: dadosImportados && (rubCount ?? 0) > 0,
+        aguardando_processamento: dadosImportados && !apuracao,
+      },
+    });
+  });
+
+  // Síntese anual com variação mês a mês
+  app.get("/api/folha/apuracao/sintese", folhaApuracaoRoles, async (req, res) => {
+    const year = Number((req.query as any)?.year) || new Date().getFullYear();
+    const { data, error } = await supabase
+      .from("folha_apuracoes_mensais")
+      .select("*")
+      .eq("competencia_ano", year)
+      .order("competencia_mes");
+    if (error) return res.status(500).json({ error: "Erro ao carregar síntese." });
+
+    const meses = Array.from({ length: 12 }, (_, i) => {
+      const m = i + 1;
+      const row = (data ?? []).find((d: any) => Number(d.competencia_mes) === m);
+      return row ? { month: m, ...row } : { month: m, competencia_mes: m, competencia_ano: year, total_custo: 0, status: "pendente" };
+    });
+
+    const mesesComVariacao = meses.map((row: any, idx: number) => {
+      const prev = idx > 0 ? meses[idx - 1] : null;
+      const custoAtual = Number(row.total_custo) || 0;
+      const custoPrev = prev ? Number((prev as any).total_custo) || 0 : 0;
+      const variacao_custo_pct = custoPrev ? ((custoAtual - custoPrev) / Math.abs(custoPrev)) * 100 : null;
+      const provisoes = (Number(row.provisao_13) || 0) + (Number(row.provisao_ferias) || 0) + (Number(row.provisao_um_terco_ferias) || 0);
+      return { ...row, provisoes, variacao_custo_pct };
+    });
+
+    const totais = mesesComVariacao.reduce(
+      (acc, row: any) => ({
+        total_custo: acc.total_custo + (Number(row.total_custo) || 0),
+        total_comissao: acc.total_comissao + (Number(row.total_comissao) || 0),
+        total_produtividade: acc.total_produtividade + (Number(row.total_produtividade) || 0),
+        total_proventos: acc.total_proventos + (Number(row.total_proventos) || 0),
+        total_retorno: acc.total_retorno + (Number(row.total_retorno) || 0),
+        total_salario: acc.total_salario + (Number(row.total_salario) || 0),
+        provisoes: acc.provisoes + (Number(row.provisoes) || 0),
+        fgts: acc.fgts + (Number(row.fgts) || 0),
+        inss: acc.inss + (Number(row.inss) || 0),
+      }),
+      { total_custo: 0, total_comissao: 0, total_produtividade: 0, total_proventos: 0, total_retorno: 0, total_salario: 0, provisoes: 0, fgts: 0, inss: 0 }
+    );
+
+    res.json({ year, meses: mesesComVariacao, totais });
+  });
+
+  // Relatório por rubrica
+  app.get("/api/folha/apuracao/relatorio/rubrica", folhaApuracaoRoles, async (req, res) => {
+    const year = Number((req.query as any)?.year) || new Date().getFullYear();
+    const month = Number((req.query as any)?.month);
+    if (!month) return res.status(400).json({ error: "Informe o mês." });
+    const { data: lancamentos } = await supabase
+      .from("folha_lancamentos")
+      .select("*")
+      .eq("competencia_ano", year)
+      .eq("competencia_mes", month);
+    const paramsMap = await loadRubricaParamsMap();
+    const grouped = new Map<string, any>();
+    for (const l of lancamentos ?? []) {
+      const cod = String((l as any).codigo_rubrica);
+      const g = grouped.get(cod) || {
+        codigo_rubrica: cod,
+        descricao: (l as any).descricao_rubrica,
+        categoria: paramsMap.get(cod)?.categoria ?? "—",
+        valor_total: 0,
+        ocorrencias: 0,
+        funcionarios: new Set<string>(),
+        setores: new Set<string>(),
+      };
+      g.valor_total += Number((l as any).valor_original) || 0;
+      g.ocorrencias += 1;
+      if ((l as any).nome_funcionario) g.funcionarios.add((l as any).nome_funcionario);
+      if ((l as any).setor_nome) g.setores.add((l as any).setor_nome);
+      grouped.set(cod, g);
+    }
+    res.json(Array.from(grouped.values()).map((g) => ({
+      ...g,
+      funcionarios: Array.from(g.funcionarios),
+      setores: Array.from(g.setores),
+    })));
+  });
+
+  // Relatório por setor (quando setor_nome disponível nos lançamentos)
+  app.get("/api/folha/apuracao/relatorio/setor", folhaApuracaoRoles, async (req, res) => {
+    const year = Number((req.query as any)?.year) || new Date().getFullYear();
+    const month = Number((req.query as any)?.month);
+    if (!month) return res.status(400).json({ error: "Informe o mês." });
+    const { data: lancamentos } = await supabase
+      .from("folha_lancamentos")
+      .select("*")
+      .eq("competencia_ano", year)
+      .eq("competencia_mes", month);
+    const grouped = new Map<string, any>();
+    for (const l of lancamentos ?? []) {
+      const setor = String((l as any).setor_nome || "Sem setor");
+      const g = grouped.get(setor) || {
+        setor,
+        total_proventos: 0,
+        total_retorno: 0,
+        total_comissao: 0,
+        total_produtividade: 0,
+        total_salario: 0,
+      };
+      g.total_proventos += Number((l as any).valor_provento) || 0;
+      g.total_retorno += Number((l as any).valor_retorno) || 0;
+      g.total_comissao += Number((l as any).valor_comissao) || 0;
+      g.total_produtividade += Number((l as any).valor_produtividade) || 0;
+      grouped.set(setor, g);
+    }
+    const rows = Array.from(grouped.values()).map((g) => ({
+      ...g,
+      total_salario: g.total_proventos + g.total_comissao + g.total_produtividade,
+    }));
+    res.json(rows);
+  });
+
+  // Auditoria
+  app.get("/api/folha/apuracao/auditoria", folhaApuracaoRoles, async (req, res) => {
+    const year = Number((req.query as any)?.year);
+    const month = Number((req.query as any)?.month);
+    let q = supabase.from("folha_apuracao_auditoria").select("*").order("created_at", { ascending: false }).limit(100);
+    if (year) q = q.eq("competencia_ano", year);
+    if (month) q = q.eq("competencia_mes", month);
+    const { data, error } = await q;
+    if (error) return res.status(500).json({ error: "Auditoria indisponível." });
+    res.json(data ?? []);
+  });
+
+  // Setores e cargos
+  app.get("/api/folha/apuracao/setores", folhaApuracaoRoles, async (_req, res) => {
+    const { data } = await supabase.from("folha_setores").select("*").eq("ativo", true).order("nome");
+    res.json(data ?? []);
+  });
+
+  app.post("/api/folha/apuracao/setores", folhaApuracaoRoles, async (req, res) => {
+    const body = req.body as any;
+    const { data, error } = await supabase.from("folha_setores").upsert({
+      nome: String(body?.nome ?? "").trim(),
+      codigo: body?.codigo ?? null,
+      ativo: body?.ativo !== false,
+      updated_at: new Date().toISOString(),
+    }).select().single();
+    if (error) return res.status(500).json({ error: "Erro ao salvar setor." });
+    res.json(data);
+  });
+
+  app.get("/api/folha/apuracao/cargos", folhaApuracaoRoles, async (_req, res) => {
+    const { data } = await supabase.from("folha_cargos").select("*").eq("ativo", true).order("nome");
+    res.json(data ?? []);
+  });
+
+  app.post("/api/folha/apuracao/cargos", folhaApuracaoRoles, async (req, res) => {
+    const body = req.body as any;
+    const { data, error } = await supabase.from("folha_cargos").insert({
+      nome: String(body?.nome ?? "").trim(),
+      codigo: body?.codigo ?? null,
+      cbo: body?.cbo ?? null,
+      setor_id: body?.setor_id ?? null,
+      ativo: true,
+    }).select().single();
+    if (error) return res.status(500).json({ error: "Erro ao salvar cargo." });
+    res.json(data);
+  });
+
+  // Sincronizar setores a partir de sectors existente
+  app.post("/api/folha/apuracao/setores/sync", folhaApuracaoRoles, async (_req, res) => {
+    const { data: sectors } = await supabase.from("sectors").select("id, name, code").eq("active", true);
+    let count = 0;
+    for (const s of sectors ?? []) {
+      await supabase.from("folha_setores").upsert(
+        { nome: (s as any).name, codigo: (s as any).code, sector_id: (s as any).id, ativo: true, updated_at: new Date().toISOString() },
+        { onConflict: "nome" }
+      );
+      count += 1;
+    }
+    res.json({ success: true, sincronizados: count });
+  });
+
+  // Bloquear / desbloquear competência
+  app.patch("/api/folha/apuracao/bloquear", folhaApuracaoRoles, async (req, res) => {
+    const year = Number((req.body as any)?.year);
+    const month = Number((req.body as any)?.month);
+    const bloqueado = Boolean((req.body as any)?.bloqueado);
+    if (!year || !month) return res.status(400).json({ error: "Informe ano e mês." });
+    const { error } = await supabase
+      .from("folha_apuracoes_mensais")
+      .update({ bloqueado, updated_at: new Date().toISOString() })
+      .eq("competencia_ano", year)
+      .eq("competencia_mes", month);
+    if (error) return res.status(500).json({ error: "Não foi possível atualizar bloqueio." });
+    await logFolhaAuditoria(year, month, bloqueado ? "bloquear" : "desbloquear", req.user?.id, { bloqueado });
+    res.json({ success: true, bloqueado });
   });
 
   // ====================================================
