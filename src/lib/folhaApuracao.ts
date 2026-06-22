@@ -154,21 +154,12 @@ export function lancamentosDaImportacao(
   const detalhe = detalheImportado ?? [];
   const resumo = rubricasResumo ?? [];
 
-  if (!detalhe.length) {
+  // O "Resumo por Rubrica" é a fonte oficial dos totais mensais — é exatamente o que a
+  // apuração da planilha agrega (Dados 2026 → SOMASES). O detalhe por funcionário é usado
+  // apenas como fallback (o parser por holerite pode duplicar/inflar valores).
+  if (resumo.length) {
     return resumo.map(mapLancamentoImportadoResumo);
   }
-  if (!resumo.length) {
-    return detalhe.map(mapLancamentoImportadoDetalhe);
-  }
-
-  const totalDetalhe = detalhe.reduce((s, r) => s + num(r.valor_original), 0);
-  const totalResumo = resumo.reduce((s, r) => s + num(r.valor), 0);
-
-  // Parser por funcionário incompleto → usa resumo do extrato (Resumo por Rubrica)
-  if (totalResumo > 0 && totalDetalhe < totalResumo * 0.95) {
-    return resumo.map(mapLancamentoImportadoResumo);
-  }
-
   return detalhe.map(mapLancamentoImportadoDetalhe);
 }
 

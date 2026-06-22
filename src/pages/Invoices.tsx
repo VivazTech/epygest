@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { cn, formatCurrency, formatDate } from '../lib/utils';
 import { ValueTrace } from '../components/ValueTrace';
+import { valueTrace } from '../lib/valueTraceMeta';
 import { useSearch } from '../context/SearchContext';
 import { matchesSearch } from '../lib/search';
 
@@ -191,7 +192,9 @@ export const Invoices: React.FC = () => {
         amount: data.extracted?.amount || prev.amount,
         issue_date: data.extracted?.issue_date || prev.issue_date,
         due_date: data.extracted?.due_date || prev.due_date,
-        file_path: data.file_path || prev.file_path
+        pix_key: data.extracted?.pix_key || prev.pix_key,
+        payment_method: data.extracted?.payment_method || prev.payment_method,
+        file_path: data.file_path || prev.file_path,
       }));
 
       if (data.warning) {
@@ -634,12 +637,15 @@ export const Invoices: React.FC = () => {
                   <>
                     <ValueTrace
                       displayValue={formatCurrency(sector.pending_amount || 0)}
-                      source={`Soma de compromissos do setor ${sector.name}`}
-                      calculation="Notas não canceladas (inclui pagas) + requisições em aberto"
+                      meta={valueTrace.sectors.pendingAmount(sector.name, Number(selectedMonth), Number(selectedYear))}
                     /> <span className="text-slate-300 font-normal">/ <ValueTrace
                       displayValue={formatCurrency(getSectorBudget(sector))}
-                      source={`Síntase do setor ${sector.name}`}
-                      calculation="Soma dos CRDs do setor no mês de referência da API /api/sectors"
+                      meta={valueTrace.sectors.budgetMonth(
+                        sector.name,
+                        Number(selectedMonth),
+                        Number(selectedYear),
+                        Number(sector.occupancy_percent ?? 100)
+                      )}
                     /></span>
                   </>
                 ) : (
@@ -651,15 +657,32 @@ export const Invoices: React.FC = () => {
               <div className="mt-3 grid grid-cols-1 gap-1 text-[11px] text-slate-500">
                 <p>
                   Notas no mês (não canceladas):{' '}
-                  <span className="font-semibold text-slate-700">{formatCurrency(sector.pending_invoices || 0)}</span>
+                  <ValueTrace
+                    className="font-semibold text-slate-700"
+                    displayValue={formatCurrency(sector.pending_invoices || 0)}
+                    meta={valueTrace.sectors.pendingInvoices(sector.name, Number(selectedMonth), Number(selectedYear))}
+                  />
                 </p>
                 <p>
                   Requisições em aberto no mês:{' '}
-                  <span className="font-semibold text-slate-700">{formatCurrency(sector.pending_requisitions || 0)}</span>
+                  <ValueTrace
+                    className="font-semibold text-slate-700"
+                    displayValue={formatCurrency(sector.pending_requisitions || 0)}
+                    meta={valueTrace.sectors.pendingRequisitions(sector.name, Number(selectedMonth), Number(selectedYear))}
+                  />
                 </p>
                 <p>
                   Orçamento da Síntase ({String(selectedMonth).padStart(2, '0')}/{selectedYear}):{' '}
-                  <span className="font-semibold text-slate-700">{formatCurrency(getSectorBudget(sector))}</span>
+                  <ValueTrace
+                    className="font-semibold text-slate-700"
+                    displayValue={formatCurrency(getSectorBudget(sector))}
+                    meta={valueTrace.sectors.budgetMonth(
+                      sector.name,
+                      Number(selectedMonth),
+                      Number(selectedYear),
+                      Number(sector.occupancy_percent ?? 100)
+                    )}
+                  />
                 </p>
               </div>
             )}
@@ -669,7 +692,13 @@ export const Invoices: React.FC = () => {
                   Orçamento ultrapassado
                 </p>
                 <p className="text-xs text-red-700">
-                  Excedido em {formatCurrency((sector.pending_amount || 0) - getSectorBudget(sector))}
+                  Excedido em{' '}
+                  <ValueTrace
+                    className="font-semibold text-red-700"
+                    displayValue={formatCurrency((sector.pending_amount || 0) - getSectorBudget(sector))}
+                    source={`Excedente — ${sector.name}`}
+                    calculation="Compromissos do mês − orçamento Síntase do setor."
+                  />
                 </p>
               </div>
             )}
@@ -748,8 +777,7 @@ export const Invoices: React.FC = () => {
                       <ValueTrace
                         className="text-sm font-bold text-slate-900"
                         displayValue={formatCurrency(invoice.amount)}
-                        source={`Nota #${invoice.invoice_number}`}
-                        calculation="Campo amount informado no lançamento da nota"
+                        meta={valueTrace.invoices.amount(String(invoice.invoice_number), invoice.provider_name)}
                       />
                     ) : (
                       <span className="text-sm font-semibold text-slate-400">Valor oculto</span>

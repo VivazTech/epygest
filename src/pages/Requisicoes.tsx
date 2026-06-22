@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Plus, Archive, XCircle } from 'lucide-react';
 import { cn, formatCurrency } from '../lib/utils';
 import { ValueTrace } from '../components/ValueTrace';
+import { valueTrace } from '../lib/valueTraceMeta';
 import { useSearch } from '../context/SearchContext';
 import { matchesSearch } from '../lib/search';
 
@@ -160,8 +161,7 @@ export const RequisicoesPage: React.FC = () => {
                   <ValueTrace
                     className="text-sm font-bold text-slate-900"
                     displayValue={formatCurrency(r.amount)}
-                    source={`Requisição interna #${r.id}`}
-                    calculation="Campo amount informado no lançamento da requisição"
+                    meta={valueTrace.requisitions.amount(r.id)}
                   />
                 </td>
                 <td className="px-6 py-4">

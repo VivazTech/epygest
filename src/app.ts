@@ -32,6 +32,8 @@ import {
   type FolhaConfig,
 } from "./lib/folhaApuracao.js";
 
+import { parseInvoicePdfText } from "./lib/parseInvoicePdf.js";
+
 // Importa direto o parser para evitar o modo debug do index.js (que tenta abrir ./test/data/*)
 const loadPdfParse = async () => {
   const mod = await import("pdf-parse/lib/pdf-parse.js");
@@ -1045,6 +1047,7 @@ export function createApp() {
           pending_requisitions,
           pending_amount: pending_invoices + pending_requisitions,
           budget_month: budgetBySectorId.get(Number(sector.id)) || 0,
+          occupancy_percent: occupancyPercent,
           budget_month_ref: {
             month: selectedMonth,
             year: selectedYear,
@@ -1204,63 +1207,62 @@ export function createApp() {
 
       let parseWarning = "";
       let parseErrorDetail = "";
-      let invoice_number = "";
-      let provider_name = "";
-      let issue_dateRaw = "";
-      let due_dateRaw = "";
-      let amountRaw = "";
 
       try {
         const pdfParse = await loadPdfParse();
         const parsed = await pdfParse(fileBuffer);
         const text = (parsed.text || "").replace(/\u00A0/g, " ");
-        const compactText = text.replace(/[ \t]+/g, " ");
+        const extracted = parseInvoicePdfText(text);
 
-        const pick = (...patterns: RegExp[]) => {
-          for (const p of patterns) {
-            const m = text.match(p) || compactText.match(p);
-            if (m?.[1]) return m[1].trim();
-          }
-          return "";
-        };
+        const hasData = Boolean(
+          extracted.invoice_number ||
+          extracted.provider_name ||
+          extracted.amount ||
+          extracted.issue_date
+        );
+        if (!hasData) {
+          parseWarning = "PDF salvo, mas não foi possível extrair os campos automaticamente. Preencha manualmente.";
+        }
 
-        provider_name = pick(
-          /(?:Raz[aã]o\s*Social|Fornecedor)\s*[:\-]\s*([^\n\r]+)/i,
-          /Emitente\s*[:\-]\s*([^\n\r]+)/i,
-          /Prestador\s*[:\-]\s*([^\n\r]+)/i
-        );
-        invoice_number = pick(
-          /(?:N[úu]mero\s*da\s*NF-e|N[úu]mero\s*da\s*Nota|N[úu]mero\s*NFS-e|NF[-\s]?e?|NFS[-\s]?e?)\s*[:#\-]?\s*([A-Z0-9.\-\/]+)/i,
-          /(?:N[úu]mero)\s*[:#\-]?\s*([A-Z0-9.\-\/]{3,})/i
-        );
-        issue_dateRaw = pick(
-          /(?:Data\s*de\s*Emiss[aã]o|Emiss[aã]o|Data\s*Emiss[aã]o)\s*[:\-]?\s*(\d{2}[\/.-]\d{2}[\/.-]\d{2,4})/i
-        );
-        due_dateRaw = pick(
-          /(?:Data\s*de\s*Vencimento|Vencimento|Data\s*Vencimento)\s*[:\-]?\s*(\d{2}[\/.-]\d{2}[\/.-]\d{2,4})/i
-        );
-        amountRaw = pick(
-          /(?:Valor\s*Total|Valor\s*da\s*Nota|Valor\s*L[ií]quido|Valor\s*a\s*Pagar|Total)\s*[:\-]?\s*R?\$?\s*([\d.,]+)/i,
-          /R\$\s*([\d.]+,\d{2})/i
-        );
+        res.json({
+          success: true,
+          warning: parseWarning || undefined,
+          parse_error: parseErrorDetail || undefined,
+          extracted: {
+            invoice_number: extracted.invoice_number,
+            provider_name: extracted.provider_name,
+            client_name: extracted.client_name,
+            issue_date: extracted.issue_date,
+            due_date: extracted.due_date,
+            amount: extracted.amount,
+            pix_key: extracted.pix_key,
+            payment_method: extracted.payment_method,
+            description: extracted.description,
+          },
+          file_path: storagePath,
+        });
       } catch (parseError: any) {
         parseWarning = "PDF salvo, mas não foi possível extrair os campos automaticamente. Preencha manualmente.";
         parseErrorDetail = parseError?.message || "Falha desconhecida na leitura do PDF";
-      }
 
-      res.json({
-        success: true,
-        warning: parseWarning || undefined,
-        parse_error: parseErrorDetail || undefined,
-        extracted: {
-          invoice_number,
-          provider_name,
-          issue_date: toIsoDate(issue_dateRaw),
-          due_date: toIsoDate(due_dateRaw),
-          amount: toAmount(amountRaw),
-        },
-        file_path: storagePath,
-      });
+        res.json({
+          success: true,
+          warning: parseWarning,
+          parse_error: parseErrorDetail,
+          extracted: {
+            invoice_number: "",
+            provider_name: "",
+            client_name: "",
+            issue_date: "",
+            due_date: "",
+            amount: "",
+            pix_key: "",
+            payment_method: "",
+            description: "",
+          },
+          file_path: storagePath,
+        });
+      }
     } catch (error: any) {
       console.error("Erro ao processar PDF de nota:", error);
       res.status(500).json({

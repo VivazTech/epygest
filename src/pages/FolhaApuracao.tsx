@@ -5,6 +5,8 @@ import {
   Download, Edit2, X, Users, Building2, History, FileSpreadsheet,
 } from 'lucide-react';
 import { formatCurrency, formatApiError, fetchJson } from '../lib/utils';
+import { ValueTrace } from '../components/ValueTrace';
+import { valueTrace } from '../lib/valueTraceMeta';
 import { MESES_LABEL, CATEGORIAS_RUBRICA } from '../lib/folhaApuracao';
 import { downloadCsv } from '../lib/folhaExport';
 import { useSearch } from '../context/SearchContext';
@@ -369,9 +371,6 @@ export const FolhaApuracaoPage: React.FC = () => {
     { label: 'Comissão', value: apuracao.total_comissao },
     { label: 'Produtividade', value: apuracao.total_produtividade },
     { label: 'Total Salário', value: apuracao.total_salario },
-    { label: 'Provisão 13º', value: apuracao.provisao_13 },
-    { label: 'Provisão Férias', value: apuracao.provisao_ferias },
-    { label: '1/3 Férias', value: apuracao.provisao_um_terco_ferias },
     { label: 'FGTS', value: apuracao.fgts },
     { label: 'FGTS Prov. Férias', value: apuracao.fgts_provisao_ferias },
     { label: 'FGTS Prov. 13º', value: apuracao.fgts_provisao_13 },
@@ -382,6 +381,14 @@ export const FolhaApuracaoPage: React.FC = () => {
     { label: 'Trabalhando', value: apuracao.qtd_trabalhando, currency: false },
     { label: 'Funcionários', value: apuracao.qtd_funcionarios, currency: false },
   ] : [];
+
+  // Provisões destacadas na seção lateral (13º, Férias, 1/3 de Férias).
+  const provisoes = apuracao ? [
+    { label: '13º (Décimo Terceiro)', value: apuracao.provisao_13, sub: `+ FGTS ${formatCurrency(apuracao.fgts_provisao_13 || 0)} · INSS ${formatCurrency(apuracao.inss_13 || 0)}` },
+    { label: 'Férias', value: apuracao.provisao_ferias, sub: `+ FGTS/INSS prov. férias` },
+    { label: 'Um Terço de Férias', value: apuracao.provisao_um_terco_ferias, sub: null },
+  ] : [];
+  const totalProvisoes = provisoes.reduce((s, p) => s + (Number(p.value) || 0), 0);
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
@@ -447,7 +454,12 @@ export const FolhaApuracaoPage: React.FC = () => {
           <div><span className="text-slate-500">Lançamentos</span><p className="font-bold">{processResumo.lancamentos_processados}</p></div>
           <div><span className="text-slate-500">Rubricas</span><p className="font-bold">{processResumo.rubricas_processadas}</p></div>
           <div><span className="text-slate-500">Não mapeadas</span><p className="font-bold">{processResumo.rubricas_nao_mapeadas}</p></div>
-          <div><span className="text-slate-500">Total custo</span><p className="font-bold">{formatCurrency(processResumo.total_custo)}</p></div>
+          <div><span className="text-slate-500">Total custo</span><p className="font-bold">
+            <ValueTrace
+              displayValue={formatCurrency(processResumo.total_custo)}
+              meta={valueTrace.folhaApuracao.totalCusto(month, Number(year))}
+            />
+          </p></div>
         </div>
       )}
 
@@ -513,15 +525,64 @@ export const FolhaApuracaoPage: React.FC = () => {
           )}
 
           {apuracao && (
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-              {cards.map((c) => (
-                <div key={c.label} className={`rounded-2xl border p-3 shadow-sm ${c.highlight ? 'bg-emerald-50 border-emerald-200' : 'bg-white border-slate-100'}`}>
-                  <p className="text-[10px] font-bold text-slate-400 uppercase">{c.label}</p>
-                  <p className={`text-lg font-extrabold mt-1 ${c.highlight ? 'text-emerald-800' : 'text-slate-900'}`}>
-                    {c.currency === false ? c.value : formatCurrency(c.value || 0)}
+            <div className="grid grid-cols-1 xl:grid-cols-[1fr_320px] gap-4 items-start">
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                {cards.map((c) => (
+                  <div key={c.label} className={`rounded-2xl border p-3 shadow-sm ${c.highlight ? 'bg-emerald-50 border-emerald-200' : 'bg-white border-slate-100'}`}>
+                    <p className="text-[10px] font-bold text-slate-400 uppercase">{c.label}</p>
+                    <p className={`text-lg font-extrabold mt-1 ${c.highlight ? 'text-emerald-800' : 'text-slate-900'}`}>
+                      {c.currency === false ? (
+                        <ValueTrace
+                          className={`text-lg font-extrabold ${c.highlight ? 'text-emerald-800' : 'text-slate-900'}`}
+                          displayValue={c.value}
+                          meta={valueTrace.folhaApuracao.card(c.label, month, Number(year))}
+                        />
+                      ) : (
+                        <ValueTrace
+                          className={`text-lg font-extrabold ${c.highlight ? 'text-emerald-800' : 'text-slate-900'}`}
+                          displayValue={formatCurrency(c.value || 0)}
+                          meta={valueTrace.folhaApuracao.card(c.label, month, Number(year))}
+                        />
+                      )}
+                    </p>
+                  </div>
+                ))}
+              </div>
+
+              {/* Seção lateral — Provisões */}
+              <aside className="bg-white rounded-2xl border border-emerald-200 shadow-sm overflow-hidden xl:sticky xl:top-4">
+                <div className="px-4 py-3 bg-emerald-50 border-b border-emerald-100">
+                  <p className="text-sm font-bold text-emerald-800 flex items-center gap-1.5">
+                    <Calculator className="w-4 h-4" /> Provisões
                   </p>
+                  <p className="text-[11px] text-emerald-700/80">13º, férias e 1/3 calculados sobre o salário do mês.</p>
                 </div>
-              ))}
+                <div className="divide-y divide-slate-100">
+                  {provisoes.map((p) => (
+                    <div key={p.label} className="px-4 py-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-sm font-semibold text-slate-700">{p.label}</span>
+                        <ValueTrace
+                          className="text-base font-extrabold text-slate-900 tabular-nums"
+                          displayValue={formatCurrency(p.value || 0)}
+                          meta={valueTrace.folhaApuracao.card(p.label, month, Number(year))}
+                        />
+                      </div>
+                      {p.sub && <p className="text-[10px] text-slate-400 mt-0.5">{p.sub}</p>}
+                    </div>
+                  ))}
+                  <div className="px-4 py-3 bg-slate-50 flex items-center justify-between gap-2">
+                    <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Total Provisões</span>
+                    <ValueTrace
+                      className="text-base font-extrabold text-emerald-800 tabular-nums"
+                      displayValue={formatCurrency(totalProvisoes)}
+                      source={`Total provisões — ${String(month).padStart(2, '0')}/${year}`}
+                      calculation="Soma de provisão 13º + férias + 1/3 de férias (folha_apuracoes_mensais)."
+                      tables="folha_apuracoes_mensais"
+                    />
+                  </div>
+                </div>
+              </aside>
             </div>
           )}
 

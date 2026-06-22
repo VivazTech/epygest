@@ -7,6 +7,7 @@ import {
 import { Calendar, Filter, ChevronDown, Download, ArrowUpRight } from 'lucide-react';
 import { formatCurrency } from '../lib/utils';
 import { ValueTrace } from '../components/ValueTrace';
+import { valueTrace } from '../lib/valueTraceMeta';
 import { useSearch } from '../context/SearchContext';
 import { matchesSearch } from '../lib/search';
 
@@ -202,8 +203,7 @@ export const Dashboard: React.FC = () => {
           <ValueTrace
             className="text-xl font-bold text-slate-800"
             displayValue={formatCurrency(indicators.pontoEquilibrio)}
-            source="Indicador pontoEquilibrio da API"
-            calculation="Valor calculado e retornado em /api/dashboard/indicators"
+            meta={valueTrace.dashboard.indicator('pontoEquilibrio', 'Ponto de Equilíbrio')}
           />
           <div className="w-full bg-slate-100 h-1.5 rounded-full mt-3 overflow-hidden">
             <div className="bg-emerald-500 h-full w-[75%]"></div>
@@ -216,8 +216,7 @@ export const Dashboard: React.FC = () => {
           <ValueTrace
             className="text-xl font-bold text-slate-800"
             displayValue={formatCurrency(indicators.ncg)}
-            source="Indicador ncg da API"
-            calculation="Valor calculado e retornado em /api/dashboard/indicators"
+            meta={valueTrace.dashboard.indicator('ncg', 'NCG')}
           />
           <p className="text-[10px] text-orange-600 mt-3 font-bold flex items-center gap-1">
             <ArrowUpRight className="w-3 h-3" /> +12% vs ideal
@@ -229,8 +228,7 @@ export const Dashboard: React.FC = () => {
           <ValueTrace
             className="text-xl font-bold text-slate-800"
             displayValue={formatCurrency(indicators.caixaMinimo)}
-            source="Indicador caixaMinimo da API"
-            calculation="Valor calculado e retornado em /api/dashboard/indicators"
+            meta={valueTrace.dashboard.indicator('caixaMinimo', 'Caixa Mínimo')}
           />
           <p className="text-[10px] text-emerald-600 mt-3 font-bold flex items-center gap-1">
             Status: Seguro
@@ -242,8 +240,7 @@ export const Dashboard: React.FC = () => {
           <ValueTrace
             className="text-xl font-bold text-slate-800"
             displayValue={`${indicators.investimentos}%`}
-            source="Indicador investimentos da API"
-            calculation="Percentual de investimentos sobre faturamento bruto"
+            meta={valueTrace.dashboard.indicator('investimentos', 'Investimentos')}
           />
           <p className="text-[10px] text-slate-500 mt-3 font-medium">Do faturamento bruto</p>
         </div>

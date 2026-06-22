@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { RefreshCcw, ChevronDown, ChevronRight } from 'lucide-react';
 import { formatCurrency } from '../lib/utils';
+import { ValueTrace } from '../components/ValueTrace';
+import { valueTrace } from '../lib/valueTraceMeta';
 import { useSearch } from '../context/SearchContext';
 import { matchesSearch } from '../lib/search';
 
@@ -173,6 +175,9 @@ export const PrevRealPage: React.FC = () => {
     setExpandedCrds(new Set());
   }, [rowsByCrd, crdFilter, query]);
 
+  const traceYear = data?.year ?? Number(year);
+  const occPct = data?.occupancy_percent ?? 100;
+
   const toggleCrd = (crdName: string) => {
     setExpandedCrds((prev) => {
       const next = new Set(prev);
@@ -284,7 +289,12 @@ export const PrevRealPage: React.FC = () => {
                   <span className="text-sm font-bold text-slate-900">Setor {crdGroup.crdName}</span>
                   <span className="text-xs text-slate-500">({crdGroup.rows.length} linha(s))</span>
                   <span className="ml-auto text-xs font-bold text-slate-700">
-                    Dif. total: {formatCurrency(crdGroup.total_diferenca)}
+                    Dif. total:{' '}
+                    <ValueTrace
+                      className="text-xs font-bold text-slate-700"
+                      displayValue={formatCurrency(crdGroup.total_diferenca)}
+                      meta={valueTrace.prevReal.totalDiferenca(`Diferença total — setor ${crdGroup.crdName}`)}
+                    />
                   </span>
                 </button>
 
@@ -345,17 +355,51 @@ export const PrevRealPage: React.FC = () => {
                                       className="px-2 py-1 rounded hover:bg-emerald-50 transition-colors"
                                       title="Clique para editar previsto"
                                     >
-                                      {formatCurrency(m.previsto || 0)}
+                                      <ValueTrace
+                                        className="text-xs text-slate-700"
+                                        displayValue={formatCurrency(m.previsto || 0)}
+                                        meta={valueTrace.prevReal.previsto(row.grupo, row.detalhado, idx + 1, traceYear, occPct)}
+                                      />
                                     </button>
                                   )}
                                 </td>
-                                <td className="px-3 py-2 text-xs text-right text-slate-700">{formatCurrency(m.realizado || 0)}</td>
-                                <td className={`px-3 py-2 text-xs text-right font-semibold ${(m.diferenca || 0) < 0 ? 'text-red-600' : 'text-emerald-700'}`}>{formatCurrency(m.diferenca || 0)}</td>
+                                <td className="px-3 py-2 text-xs text-right text-slate-700">
+                                  <ValueTrace
+                                    className="text-xs text-slate-700"
+                                    displayValue={formatCurrency(m.realizado || 0)}
+                                    meta={valueTrace.prevReal.realizado(row.grupo, row.detalhado, idx + 1, traceYear)}
+                                  />
+                                </td>
+                                <td className={`px-3 py-2 text-xs text-right font-semibold ${(m.diferenca || 0) < 0 ? 'text-red-600' : 'text-emerald-700'}`}>
+                                  <ValueTrace
+                                    className={`text-xs font-semibold ${(m.diferenca || 0) < 0 ? 'text-red-600' : 'text-emerald-700'}`}
+                                    displayValue={formatCurrency(m.diferenca || 0)}
+                                    meta={valueTrace.prevReal.diferenca(row.grupo, row.detalhado, idx + 1)}
+                                  />
+                                </td>
                               </React.Fragment>
                             ))}
-                            <td className="px-4 py-3 text-xs text-right font-bold text-slate-800">{formatCurrency(row.total_previsto || 0)}</td>
-                            <td className="px-4 py-3 text-xs text-right font-bold text-slate-800">{formatCurrency(row.total_realizado || 0)}</td>
-                            <td className={`px-4 py-3 text-xs text-right font-extrabold ${(row.total_diferenca || 0) < 0 ? 'text-red-700' : 'text-emerald-700'}`}>{formatCurrency(row.total_diferenca || 0)}</td>
+                            <td className="px-4 py-3 text-xs text-right font-bold text-slate-800">
+                              <ValueTrace
+                                className="text-xs font-bold text-slate-800"
+                                displayValue={formatCurrency(row.total_previsto || 0)}
+                                meta={valueTrace.prevReal.totalPrevisto(`Total previsto — ${row.detalhado}`)}
+                              />
+                            </td>
+                            <td className="px-4 py-3 text-xs text-right font-bold text-slate-800">
+                              <ValueTrace
+                                className="text-xs font-bold text-slate-800"
+                                displayValue={formatCurrency(row.total_realizado || 0)}
+                                meta={valueTrace.prevReal.totalRealizado(`Total realizado — ${row.detalhado}`)}
+                              />
+                            </td>
+                            <td className={`px-4 py-3 text-xs text-right font-extrabold ${(row.total_diferenca || 0) < 0 ? 'text-red-700' : 'text-emerald-700'}`}>
+                              <ValueTrace
+                                className={`text-xs font-extrabold ${(row.total_diferenca || 0) < 0 ? 'text-red-700' : 'text-emerald-700'}`}
+                                displayValue={formatCurrency(row.total_diferenca || 0)}
+                                meta={valueTrace.prevReal.totalDiferenca(`Total diferença — ${row.detalhado}`)}
+                              />
+                            </td>
                           </tr>
                         ))}
                         <tr className="bg-slate-100 border-t border-slate-300">
@@ -364,14 +408,50 @@ export const PrevRealPage: React.FC = () => {
                           </td>
                           {crdGroup.months.map((m, idx) => (
                             <React.Fragment key={`subtotal-${crdGroup.crdName}-${idx}`}>
-                              <td className="px-3 py-2 text-xs text-right font-bold text-slate-800 border-l border-slate-200">{formatCurrency(m.previsto || 0)}</td>
-                              <td className="px-3 py-2 text-xs text-right font-bold text-slate-800">{formatCurrency(m.realizado || 0)}</td>
-                              <td className={`px-3 py-2 text-xs text-right font-extrabold ${(m.diferenca || 0) < 0 ? 'text-red-700' : 'text-emerald-700'}`}>{formatCurrency(m.diferenca || 0)}</td>
+                              <td className="px-3 py-2 text-xs text-right font-bold text-slate-800 border-l border-slate-200">
+                                <ValueTrace
+                                  className="text-xs font-bold text-slate-800"
+                                  displayValue={formatCurrency(m.previsto || 0)}
+                                  meta={valueTrace.prevReal.totalPrevisto(`Previsto setor ${crdGroup.crdName} — M${idx + 1}`)}
+                                />
+                              </td>
+                              <td className="px-3 py-2 text-xs text-right font-bold text-slate-800">
+                                <ValueTrace
+                                  className="text-xs font-bold text-slate-800"
+                                  displayValue={formatCurrency(m.realizado || 0)}
+                                  meta={valueTrace.prevReal.totalRealizado(`Realizado setor ${crdGroup.crdName} — M${idx + 1}`)}
+                                />
+                              </td>
+                              <td className={`px-3 py-2 text-xs text-right font-extrabold ${(m.diferenca || 0) < 0 ? 'text-red-700' : 'text-emerald-700'}`}>
+                                <ValueTrace
+                                  className={`text-xs font-extrabold ${(m.diferenca || 0) < 0 ? 'text-red-700' : 'text-emerald-700'}`}
+                                  displayValue={formatCurrency(m.diferenca || 0)}
+                                  meta={valueTrace.prevReal.totalDiferenca(`Diferença setor ${crdGroup.crdName} — M${idx + 1}`)}
+                                />
+                              </td>
                             </React.Fragment>
                           ))}
-                          <td className="px-4 py-3 text-xs text-right font-bold text-slate-900">{formatCurrency(crdGroup.total_previsto || 0)}</td>
-                          <td className="px-4 py-3 text-xs text-right font-bold text-slate-900">{formatCurrency(crdGroup.total_realizado || 0)}</td>
-                          <td className={`px-4 py-3 text-xs text-right font-extrabold ${(crdGroup.total_diferenca || 0) < 0 ? 'text-red-700' : 'text-emerald-700'}`}>{formatCurrency(crdGroup.total_diferenca || 0)}</td>
+                          <td className="px-4 py-3 text-xs text-right font-bold text-slate-900">
+                            <ValueTrace
+                              className="text-xs font-bold text-slate-900"
+                              displayValue={formatCurrency(crdGroup.total_previsto || 0)}
+                              meta={valueTrace.prevReal.totalPrevisto(`Total previsto — setor ${crdGroup.crdName}`)}
+                            />
+                          </td>
+                          <td className="px-4 py-3 text-xs text-right font-bold text-slate-900">
+                            <ValueTrace
+                              className="text-xs font-bold text-slate-900"
+                              displayValue={formatCurrency(crdGroup.total_realizado || 0)}
+                              meta={valueTrace.prevReal.totalRealizado(`Total realizado — setor ${crdGroup.crdName}`)}
+                            />
+                          </td>
+                          <td className={`px-4 py-3 text-xs text-right font-extrabold ${(crdGroup.total_diferenca || 0) < 0 ? 'text-red-700' : 'text-emerald-700'}`}>
+                            <ValueTrace
+                              className={`text-xs font-extrabold ${(crdGroup.total_diferenca || 0) < 0 ? 'text-red-700' : 'text-emerald-700'}`}
+                              displayValue={formatCurrency(crdGroup.total_diferenca || 0)}
+                              meta={valueTrace.prevReal.totalDiferenca(`Total diferença — setor ${crdGroup.crdName}`)}
+                            />
+                          </td>
                         </tr>
                       </tbody>
                     </table>
@@ -401,14 +481,50 @@ export const PrevRealPage: React.FC = () => {
               <td className="px-4 py-3 text-xs text-emerald-800 font-bold">Consolidado</td>
               {(visibleTotals.months || Array.from({ length: 12 }, () => ({ previsto: 0, realizado: 0, diferenca: 0 }))).map((m, idx) => (
                 <React.Fragment key={`tot-${idx}`}>
-                  <td className="px-3 py-2 text-xs text-right text-emerald-800 border-l border-emerald-100">{formatCurrency(m.previsto || 0)}</td>
-                  <td className="px-3 py-2 text-xs text-right text-emerald-800">{formatCurrency(m.realizado || 0)}</td>
-                  <td className={`px-3 py-2 text-xs text-right font-bold ${(m.diferenca || 0) < 0 ? 'text-red-700' : 'text-emerald-800'}`}>{formatCurrency(m.diferenca || 0)}</td>
+                  <td className="px-3 py-2 text-xs text-right text-emerald-800 border-l border-emerald-100">
+                    <ValueTrace
+                      className="text-xs text-emerald-800"
+                      displayValue={formatCurrency(m.previsto || 0)}
+                      meta={valueTrace.prevReal.totalPrevisto(`Total geral previsto — M${idx + 1}/${traceYear}`)}
+                    />
+                  </td>
+                  <td className="px-3 py-2 text-xs text-right text-emerald-800">
+                    <ValueTrace
+                      className="text-xs text-emerald-800"
+                      displayValue={formatCurrency(m.realizado || 0)}
+                      meta={valueTrace.prevReal.totalRealizado(`Total geral realizado — M${idx + 1}/${traceYear}`)}
+                    />
+                  </td>
+                  <td className={`px-3 py-2 text-xs text-right font-bold ${(m.diferenca || 0) < 0 ? 'text-red-700' : 'text-emerald-800'}`}>
+                    <ValueTrace
+                      className={`text-xs font-bold ${(m.diferenca || 0) < 0 ? 'text-red-700' : 'text-emerald-800'}`}
+                      displayValue={formatCurrency(m.diferenca || 0)}
+                      meta={valueTrace.prevReal.totalDiferenca(`Total geral diferença — M${idx + 1}/${traceYear}`)}
+                    />
+                  </td>
                 </React.Fragment>
               ))}
-              <td className="px-4 py-3 text-xs text-right font-bold text-emerald-900">{formatCurrency(visibleTotals.previsto || 0)}</td>
-              <td className="px-4 py-3 text-xs text-right font-bold text-emerald-900">{formatCurrency(visibleTotals.realizado || 0)}</td>
-              <td className={`px-4 py-3 text-xs text-right font-extrabold ${(visibleTotals.diferenca || 0) < 0 ? 'text-red-700' : 'text-emerald-900'}`}>{formatCurrency(visibleTotals.diferenca || 0)}</td>
+              <td className="px-4 py-3 text-xs text-right font-bold text-emerald-900">
+                <ValueTrace
+                  className="text-xs font-bold text-emerald-900"
+                  displayValue={formatCurrency(visibleTotals.previsto || 0)}
+                  meta={valueTrace.prevReal.totalPrevisto(`Total anual previsto — ${traceYear}`)}
+                />
+              </td>
+              <td className="px-4 py-3 text-xs text-right font-bold text-emerald-900">
+                <ValueTrace
+                  className="text-xs font-bold text-emerald-900"
+                  displayValue={formatCurrency(visibleTotals.realizado || 0)}
+                  meta={valueTrace.prevReal.totalRealizado(`Total anual realizado — ${traceYear}`)}
+                />
+              </td>
+              <td className={`px-4 py-3 text-xs text-right font-extrabold ${(visibleTotals.diferenca || 0) < 0 ? 'text-red-700' : 'text-emerald-900'}`}>
+                <ValueTrace
+                  className={`text-xs font-extrabold ${(visibleTotals.diferenca || 0) < 0 ? 'text-red-700' : 'text-emerald-900'}`}
+                  displayValue={formatCurrency(visibleTotals.diferenca || 0)}
+                  meta={valueTrace.prevReal.totalDiferenca(`Total anual diferença — ${traceYear}`)}
+                />
+              </td>
             </tr>
           </tbody>
         </table>
