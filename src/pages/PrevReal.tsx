@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { RefreshCcw, ChevronDown, ChevronRight } from 'lucide-react';
-import { formatCurrency } from '../lib/utils';
+import { RefreshCcw, ChevronDown, ChevronRight, Filter } from 'lucide-react';
+import { cn, formatCurrency } from '../lib/utils';
 import { ValueTrace } from '../components/ValueTrace';
 import { valueTrace } from '../lib/valueTraceMeta';
 import { useSearch } from '../context/SearchContext';
@@ -35,12 +35,66 @@ type PrevRealApiResponse = {
 
 const monthHeaders = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
 
+type PrevRealRow = PrevRealApiResponse['rows'][number];
+type GroupByField = 'sector' | 'grupo' | 'detalhado';
+
+const GROUP_BY_LABELS: Record<GroupByField, string> = {
+  sector: 'Setor (cadastro)',
+  grupo: 'Código CRD (coluna Grupo)',
+  detalhado: 'Nome CRD (coluna Detalhado)',
+};
+
+const GROUP_HEADER_LABELS: Record<GroupByField, string> = {
+  sector: 'Setor',
+  grupo: 'Grupo CRD',
+  detalhado: 'CRD',
+};
+
+const getGroupKey = (row: PrevRealRow, groupBy: GroupByField) => {
+  if (groupBy === 'grupo') return String(row.grupo || '').trim() || '—';
+  if (groupBy === 'detalhado') return String(row.detalhado || '').trim() || '—';
+  return String(row.crd || '').trim() || 'Sem setor';
+};
+
+const getCrdKey = (row: PrevRealRow) =>
+  `${String(row.grupo || '').trim()}|${String(row.detalhado || '').trim()}`;
+
+const getCrdLabel = (row: PrevRealRow) => {
+  const code = String(row.grupo || '').trim();
+  const name = String(row.detalhado || '').trim();
+  if (code && name) return `${code} — ${name}`;
+  return name || code || '—';
+};
+
+const VIEW_CONFIG_KEY = 'prevReal:viewConfig:v1';
+
 export const PrevRealPage: React.FC = () => {
   const { query } = useSearch();
   const currentYear = new Date().getFullYear();
   const [year, setYear] = useState(String(currentYear));
+  const [groupBy, setGroupBy] = useState<GroupByField>(() => {
+    try {
+      const saved = localStorage.getItem(VIEW_CONFIG_KEY);
+      if (saved) return (JSON.parse(saved).groupBy as GroupByField) || 'sector';
+    } catch { /* ignore */ }
+    return 'sector';
+  });
+  const [selectedGroups, setSelectedGroups] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem(VIEW_CONFIG_KEY);
+      if (saved) return Array.isArray(JSON.parse(saved).selectedGroups) ? JSON.parse(saved).selectedGroups : [];
+    } catch { /* ignore */ }
+    return [];
+  });
+  const [selectedCrds, setSelectedCrds] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem(VIEW_CONFIG_KEY);
+      if (saved) return Array.isArray(JSON.parse(saved).selectedCrds) ? JSON.parse(saved).selectedCrds : [];
+    } catch { /* ignore */ }
+    return [];
+  });
+  const [showViewFilters, setShowViewFilters] = useState(false);
   const [crdFilter, setCrdFilter] = useState('');
-  const [crdOptions, setCrdOptions] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<PrevRealApiResponse | null>(null);
   const [expandedCrds, setExpandedCrds] = useState<Set<string>>(new Set());
@@ -55,7 +109,6 @@ export const PrevRealPage: React.FC = () => {
     try {
       const params = new URLSearchParams();
       params.set('year', year);
-      if (crdFilter.trim()) params.set('crd', crdFilter.trim());
       const res = await fetch(`/api/prev-real?${params.toString()}`);
       const json = await res.json();
       if (!res.ok) {
@@ -95,20 +148,27 @@ export const PrevRealPage: React.FC = () => {
     };
 
     loadUserScope();
-
-    fetch('/api/crds')
-      .then((res) => res.json())
-      .then((rows) => {
-        const options = Array.from(new Set(
-          (Array.isArray(rows) ? rows : [])
-            .map((row: any) => String(row.sector_name || '').trim())
-            .filter((value: string) => Boolean(value))
-        )).sort((a, b) => a.localeCompare(b));
-        setCrdOptions(options);
-      });
     loadData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    localStorage.setItem(
+      VIEW_CONFIG_KEY,
+      JSON.stringify({ groupBy, selectedGroups, selectedCrds })
+    );
+  }, [groupBy, selectedGroups, selectedCrds]);
+
+  const canConfigureView =
+    userRole === 'admin' || userRole === 'finance' || userRole === 'controle';
+
+  const toggleSelection = (value: string, selected: string[], setter: (next: string[]) => void) => {
+    setter(
+      selected.includes(value)
+        ? selected.filter((item) => item !== value)
+        : [...selected, value]
+    );
+  };
 
   const visibleRows = useMemo(() => {
     const allRows = data?.rows || [];
@@ -120,11 +180,58 @@ export const PrevRealPage: React.FC = () => {
     return scoped.filter((row) => matchesSearch(query, row.crd, row.grupo, row.detalhado));
   }, [data, userRole, allowedSectorNames, query]);
 
+  const managerSectorOptions = useMemo(() => {
+    const keys = new Set(
+      (data?.rows || [])
+        .filter((row) => allowedSectorNames.includes(String(row.crd || '').trim()))
+        .map((row) => String(row.crd || '').trim())
+        .filter(Boolean)
+    );
+    return Array.from(keys).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  }, [data, allowedSectorNames]);
+
+  const groupOptions = useMemo(() => {
+    const keys = new Set(visibleRows.map((row) => getGroupKey(row, groupBy)));
+    return Array.from(keys).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  }, [visibleRows, groupBy]);
+
+  const crdOptionsDetailed = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const row of visibleRows) {
+      const key = getCrdKey(row);
+      if (!map.has(key)) map.set(key, getCrdLabel(row));
+    }
+    return Array.from(map.entries())
+      .map(([key, label]) => ({ key, label }))
+      .sort((a, b) => a.label.localeCompare(b.label, 'pt-BR'));
+  }, [visibleRows]);
+
+  const filteredRows = useMemo(() => {
+    let rows = visibleRows;
+    if (canConfigureView && selectedGroups.length > 0) {
+      const groupSet = new Set(selectedGroups);
+      rows = rows.filter((row) => groupSet.has(getGroupKey(row, groupBy)));
+    }
+    if (canConfigureView && selectedCrds.length > 0) {
+      const crdSet = new Set(selectedCrds);
+      rows = rows.filter((row) => crdSet.has(getCrdKey(row)));
+    }
+    if (!canConfigureView && crdFilter.trim()) {
+      const term = crdFilter.trim().toLowerCase();
+      rows = rows.filter(
+        (row) =>
+          getGroupKey(row, 'sector').toLowerCase() === term ||
+          getGroupKey(row, 'sector').toLowerCase().includes(term)
+      );
+    }
+    return rows;
+  }, [visibleRows, canConfigureView, selectedGroups, selectedCrds, groupBy, crdFilter]);
+
   const visibleTotals = useMemo(() => {
     const months = Array.from({ length: 12 }, (_, idx) => ({
-      previsto: visibleRows.reduce((sum, row) => sum + (row.months[idx]?.previsto || 0), 0),
-      realizado: visibleRows.reduce((sum, row) => sum + (row.months[idx]?.realizado || 0), 0),
-      diferenca: visibleRows.reduce((sum, row) => sum + (row.months[idx]?.diferenca || 0), 0),
+      previsto: filteredRows.reduce((sum, row) => sum + (row.months[idx]?.previsto || 0), 0),
+      realizado: filteredRows.reduce((sum, row) => sum + (row.months[idx]?.realizado || 0), 0),
+      diferenca: filteredRows.reduce((sum, row) => sum + (row.months[idx]?.diferenca || 0), 0),
     }));
     return {
       months,
@@ -132,22 +239,23 @@ export const PrevRealPage: React.FC = () => {
       realizado: months.reduce((sum, m) => sum + m.realizado, 0),
       diferenca: months.reduce((sum, m) => sum + m.diferenca, 0),
     };
-  }, [visibleRows]);
+  }, [filteredRows]);
 
-  const rowsByCrd = useMemo(() => {
-    const grouped = new Map<string, PrevRealApiResponse['rows']>();
-    for (const row of visibleRows) {
-      if (!grouped.has(row.crd)) grouped.set(row.crd, []);
-      grouped.get(row.crd)!.push(row);
+  const rowsByGroup = useMemo(() => {
+    const grouped = new Map<string, PrevRealRow[]>();
+    for (const row of filteredRows) {
+      const key = getGroupKey(row, groupBy);
+      if (!grouped.has(key)) grouped.set(key, []);
+      grouped.get(key)!.push(row);
     }
-    return Array.from(grouped.entries()).map(([crdName, rows]) => {
+    return Array.from(grouped.entries()).map(([groupName, rows]) => {
       const months = Array.from({ length: 12 }, (_, idx) => ({
         previsto: rows.reduce((sum, row) => sum + (row.months[idx]?.previsto || 0), 0),
         realizado: rows.reduce((sum, row) => sum + (row.months[idx]?.realizado || 0), 0),
         diferenca: rows.reduce((sum, row) => sum + (row.months[idx]?.diferenca || 0), 0),
       }));
       return {
-        crdName,
+        groupName,
         rows,
         months,
         total_previsto: months.reduce((sum, m) => sum + m.previsto, 0),
@@ -155,34 +263,38 @@ export const PrevRealPage: React.FC = () => {
         total_diferenca: months.reduce((sum, m) => sum + m.diferenca, 0),
       };
     });
-  }, [visibleRows]);
+  }, [filteredRows, groupBy]);
 
   useEffect(() => {
-    if (!rowsByCrd.length) {
+    if (!rowsByGroup.length) {
       setExpandedCrds(new Set());
       return;
     }
-    if (crdFilter.trim()) {
-      const filteredName = crdFilter.trim().toLowerCase();
-      const match = rowsByCrd.find((item) => item.crdName.toLowerCase() === filteredName);
-      if (match) setExpandedCrds(new Set([match.crdName]));
+    if (query.trim()) {
+      setExpandedCrds(new Set(rowsByGroup.map((item) => item.groupName)));
       return;
     }
-    if (query.trim()) {
-      setExpandedCrds(new Set(rowsByCrd.map((item) => item.crdName)));
+    if (canConfigureView && (selectedGroups.length > 0 || selectedCrds.length > 0)) {
+      setExpandedCrds(new Set(rowsByGroup.map((item) => item.groupName)));
+      return;
+    }
+    if (!canConfigureView && crdFilter.trim()) {
+      const filteredName = crdFilter.trim().toLowerCase();
+      const match = rowsByGroup.find((item) => item.groupName.toLowerCase() === filteredName);
+      if (match) setExpandedCrds(new Set([match.groupName]));
       return;
     }
     setExpandedCrds(new Set());
-  }, [rowsByCrd, crdFilter, query]);
+  }, [rowsByGroup, crdFilter, query, canConfigureView, selectedGroups, selectedCrds]);
 
   const traceYear = data?.year ?? Number(year);
   const occPct = data?.occupancy_percent ?? 100;
 
-  const toggleCrd = (crdName: string) => {
+  const toggleGroup = (groupName: string) => {
     setExpandedCrds((prev) => {
       const next = new Set(prev);
-      if (next.has(crdName)) next.delete(crdName);
-      else next.add(crdName);
+      if (next.has(groupName)) next.delete(groupName);
+      else next.add(groupName);
       return next;
     });
   };
@@ -231,54 +343,182 @@ export const PrevRealPage: React.FC = () => {
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
       <div className="flex flex-col gap-2">
-        <h2 className="text-2xl font-bold text-slate-900">Prev x Real</h2>
+        <h2 className="text-2xl font-bold text-slate-900">Prev x Real Diario</h2>
         <p className="text-sm text-slate-500">
           Visão por CRD com colunas mensais de Previsto, Realizado e Diferença, agrupadas por setor.
         </p>
       </div>
 
-      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 flex flex-wrap items-center gap-3">
-        {userRole !== 'manager' && (
-          <select
-            value={crdFilter}
-            onChange={(e) => setCrdFilter(e.target.value)}
-            className="w-full md:w-80 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 space-y-4">
+        <div className="flex flex-wrap items-center gap-3">
+          {userRole === 'manager' && (
+            <select
+              value={crdFilter}
+              onChange={(e) => setCrdFilter(e.target.value)}
+              className="w-full md:w-80 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+            >
+              <option value="">Todos os setores</option>
+              {managerSectorOptions.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
+          )}
+          {canConfigureView && (
+            <button
+              type="button"
+              onClick={() => setShowViewFilters((prev) => !prev)}
+              className={cn(
+                'inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-xl border transition-colors',
+                showViewFilters
+                  ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                  : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+              )}
+            >
+              <Filter className="w-4 h-4" />
+              Definir Setor / CRD
+            </button>
+          )}
+          <input
+            type="number"
+            min={2000}
+            max={2100}
+            value={year}
+            onChange={(e) => setYear(e.target.value)}
+            className="w-28 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+          />
+          <button
+            onClick={loadData}
+            disabled={loading}
+            className="inline-flex items-center gap-2 px-4 py-2 bg-[#004D40] text-white text-sm font-bold rounded-xl hover:bg-[#003d33] disabled:opacity-60"
           >
-            <option value="">Todos os setores</option>
-            {crdOptions.map((option) => (
-              <option key={option} value={option}>
-                {option}
-              </option>
-            ))}
-          </select>
+            <RefreshCcw className="w-4 h-4" />
+            {loading ? 'Atualizando...' : 'Atualizar'}
+          </button>
+          <span className="text-xs text-slate-500">Ocupação aplicada: {Number(data?.occupancy_percent ?? 100).toFixed(2)}%</span>
+        </div>
+
+        {canConfigureView && showViewFilters && (
+          <div className="border-t border-slate-100 pt-4 space-y-4">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">
+                Agrupar visualmente por
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {(Object.keys(GROUP_BY_LABELS) as GroupByField[]).map((field) => (
+                  <button
+                    key={field}
+                    type="button"
+                    onClick={() => {
+                      setGroupBy(field);
+                      setSelectedGroups([]);
+                    }}
+                    className={cn(
+                      'px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors',
+                      groupBy === field
+                        ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                        : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                    )}
+                  >
+                    {GROUP_BY_LABELS[field]}
+                  </button>
+                ))}
+              </div>
+              <p className="mt-2 text-[11px] text-slate-400">
+                Escolha qual coluna representa o nível de <b>Setor</b> no accordion. As linhas internas continuam com Grupo (código) e Detalhado (nome do CRD).
+              </p>
+            </div>
+
+            <div>
+              <div className="flex items-center justify-between gap-2 mb-2">
+                <p className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                  Filtrar {GROUP_HEADER_LABELS[groupBy]}s
+                </p>
+                {selectedGroups.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setSelectedGroups([])}
+                    className="text-xs font-semibold text-slate-500 hover:text-slate-700"
+                  >
+                    Limpar
+                  </button>
+                )}
+              </div>
+              <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto">
+                {groupOptions.map((option) => {
+                  const active = selectedGroups.length === 0 || selectedGroups.includes(option);
+                  return (
+                    <button
+                      key={option}
+                      type="button"
+                      onClick={() => toggleSelection(option, selectedGroups, setSelectedGroups)}
+                      className={cn(
+                        'px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors',
+                        active
+                          ? 'bg-blue-50 text-blue-800 border-blue-200'
+                          : 'bg-white text-slate-400 border-slate-200 line-through'
+                      )}
+                    >
+                      {option}
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="mt-1 text-[11px] text-slate-400">
+                Nenhum selecionado = mostra todos. Clique para incluir ou excluir da visualização.
+              </p>
+            </div>
+
+            <div>
+              <div className="flex items-center justify-between gap-2 mb-2">
+                <p className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                  Filtrar CRDs (código + nome)
+                </p>
+                {selectedCrds.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setSelectedCrds([])}
+                    className="text-xs font-semibold text-slate-500 hover:text-slate-700"
+                  >
+                    Limpar
+                  </button>
+                )}
+              </div>
+              <div className="flex flex-wrap gap-2 max-h-40 overflow-y-auto">
+                {crdOptionsDetailed.map(({ key, label }) => {
+                  const active = selectedCrds.length === 0 || selectedCrds.includes(key);
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => toggleSelection(key, selectedCrds, setSelectedCrds)}
+                      className={cn(
+                        'px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors text-left',
+                        active
+                          ? 'bg-violet-50 text-violet-800 border-violet-200'
+                          : 'bg-white text-slate-400 border-slate-200 line-through'
+                      )}
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
         )}
-        <input
-          type="number"
-          min={2000}
-          max={2100}
-          value={year}
-          onChange={(e) => setYear(e.target.value)}
-          className="w-28 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
-        />
-        <button
-          onClick={loadData}
-          disabled={loading}
-          className="inline-flex items-center gap-2 px-4 py-2 bg-[#004D40] text-white text-sm font-bold rounded-xl hover:bg-[#003d33] disabled:opacity-60"
-        >
-          <RefreshCcw className="w-4 h-4" />
-          {loading ? 'Atualizando...' : 'Atualizar'}
-        </button>
-        <span className="text-xs text-slate-500">Ocupação aplicada: {Number(data?.occupancy_percent ?? 100).toFixed(2)}%</span>
       </div>
 
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
         <div className="divide-y divide-slate-100">
-          {rowsByCrd.map((crdGroup) => {
-            const isOpen = expandedCrds.has(crdGroup.crdName);
+          {rowsByGroup.map((group) => {
+            const isOpen = expandedCrds.has(group.groupName);
+            const groupLabel = GROUP_HEADER_LABELS[groupBy];
             return (
-              <div key={crdGroup.crdName}>
+              <div key={group.groupName}>
                 <button
-                  onClick={() => toggleCrd(crdGroup.crdName)}
+                  onClick={() => toggleGroup(group.groupName)}
                   className="w-full flex items-center gap-3 px-5 py-4 hover:bg-slate-50 transition-colors text-left"
                 >
                   {isOpen ? (
@@ -286,14 +526,14 @@ export const PrevRealPage: React.FC = () => {
                   ) : (
                     <ChevronRight className="w-4 h-4 text-slate-500 shrink-0" />
                   )}
-                  <span className="text-sm font-bold text-slate-900">Setor {crdGroup.crdName}</span>
-                  <span className="text-xs text-slate-500">({crdGroup.rows.length} linha(s))</span>
+                  <span className="text-sm font-bold text-slate-900">{groupLabel} {group.groupName}</span>
+                  <span className="text-xs text-slate-500">({group.rows.length} linha(s))</span>
                   <span className="ml-auto text-xs font-bold text-slate-700">
                     Dif. total:{' '}
                     <ValueTrace
                       className="text-xs font-bold text-slate-700"
-                      displayValue={formatCurrency(crdGroup.total_diferenca)}
-                      meta={valueTrace.prevReal.totalDiferenca(`Diferença total — setor ${crdGroup.crdName}`)}
+                      displayValue={formatCurrency(group.total_diferenca)}
+                      meta={valueTrace.prevReal.totalDiferenca(`Diferença total — ${groupLabel} ${group.groupName}`)}
                     />
                   </span>
                 </button>
@@ -306,7 +546,7 @@ export const PrevRealPage: React.FC = () => {
                           <th rowSpan={2} className="th-sticky-corner px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-widest min-w-[120px]">Grupo</th>
                           <th rowSpan={2} className="th-sticky-corner-2 px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-widest min-w-[260px]">Detalhado</th>
                           {monthHeaders.map((month) => (
-                            <th key={`${crdGroup.crdName}-${month}`} colSpan={3} className="th-sticky-top px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center border-l border-slate-200">
+                            <th key={`${group.groupName}-${month}`} colSpan={3} className="th-sticky-top px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center border-l border-slate-200">
                               {month}
                             </th>
                           ))}
@@ -316,7 +556,7 @@ export const PrevRealPage: React.FC = () => {
                         </tr>
                         <tr className="bg-slate-100/70">
                           {monthHeaders.map((month) => (
-                            <React.Fragment key={`${crdGroup.crdName}-${month}-sub`}>
+                            <React.Fragment key={`${group.groupName}-${month}-sub`}>
                               <th className="th-sticky-top-sub px-3 py-2 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-right border-l border-slate-200">Prev.</th>
                               <th className="th-sticky-top-sub px-3 py-2 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-right">Real.</th>
                               <th className="th-sticky-top-sub px-3 py-2 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-right">Dif.</th>
@@ -325,7 +565,7 @@ export const PrevRealPage: React.FC = () => {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
-                        {crdGroup.rows.map((row, rowIndex) => (
+                        {group.rows.map((row, rowIndex) => (
                           <tr
                             key={row.id}
                             className={rowIndex % 2 === 0 ? "bg-white/70 hover:bg-white transition-colors" : "bg-slate-50/70 hover:bg-slate-100/70 transition-colors"}
@@ -404,29 +644,29 @@ export const PrevRealPage: React.FC = () => {
                         ))}
                         <tr className="bg-slate-100 border-t border-slate-300">
                           <td className="sticky left-0 z-20 bg-slate-100 px-4 py-3 text-xs font-bold text-slate-700 min-w-[120px]" colSpan={2}>
-                            Total Setor {crdGroup.crdName}
+                            Total {groupLabel} {group.groupName}
                           </td>
-                          {crdGroup.months.map((m, idx) => (
-                            <React.Fragment key={`subtotal-${crdGroup.crdName}-${idx}`}>
+                          {group.months.map((m, idx) => (
+                            <React.Fragment key={`subtotal-${group.groupName}-${idx}`}>
                               <td className="px-3 py-2 text-xs text-right font-bold text-slate-800 border-l border-slate-200">
                                 <ValueTrace
                                   className="text-xs font-bold text-slate-800"
                                   displayValue={formatCurrency(m.previsto || 0)}
-                                  meta={valueTrace.prevReal.totalPrevisto(`Previsto setor ${crdGroup.crdName} — M${idx + 1}`)}
+                                  meta={valueTrace.prevReal.totalPrevisto(`Previsto ${groupLabel} ${group.groupName} — M${idx + 1}`)}
                                 />
                               </td>
                               <td className="px-3 py-2 text-xs text-right font-bold text-slate-800">
                                 <ValueTrace
                                   className="text-xs font-bold text-slate-800"
                                   displayValue={formatCurrency(m.realizado || 0)}
-                                  meta={valueTrace.prevReal.totalRealizado(`Realizado setor ${crdGroup.crdName} — M${idx + 1}`)}
+                                  meta={valueTrace.prevReal.totalRealizado(`Realizado ${groupLabel} ${group.groupName} — M${idx + 1}`)}
                                 />
                               </td>
                               <td className={`px-3 py-2 text-xs text-right font-extrabold ${(m.diferenca || 0) < 0 ? 'text-red-700' : 'text-emerald-700'}`}>
                                 <ValueTrace
                                   className={`text-xs font-extrabold ${(m.diferenca || 0) < 0 ? 'text-red-700' : 'text-emerald-700'}`}
                                   displayValue={formatCurrency(m.diferenca || 0)}
-                                  meta={valueTrace.prevReal.totalDiferenca(`Diferença setor ${crdGroup.crdName} — M${idx + 1}`)}
+                                  meta={valueTrace.prevReal.totalDiferenca(`Diferença ${groupLabel} ${group.groupName} — M${idx + 1}`)}
                                 />
                               </td>
                             </React.Fragment>
@@ -434,22 +674,22 @@ export const PrevRealPage: React.FC = () => {
                           <td className="px-4 py-3 text-xs text-right font-bold text-slate-900">
                             <ValueTrace
                               className="text-xs font-bold text-slate-900"
-                              displayValue={formatCurrency(crdGroup.total_previsto || 0)}
-                              meta={valueTrace.prevReal.totalPrevisto(`Total previsto — setor ${crdGroup.crdName}`)}
+                              displayValue={formatCurrency(group.total_previsto || 0)}
+                              meta={valueTrace.prevReal.totalPrevisto(`Total previsto — ${groupLabel} ${group.groupName}`)}
                             />
                           </td>
                           <td className="px-4 py-3 text-xs text-right font-bold text-slate-900">
                             <ValueTrace
                               className="text-xs font-bold text-slate-900"
-                              displayValue={formatCurrency(crdGroup.total_realizado || 0)}
-                              meta={valueTrace.prevReal.totalRealizado(`Total realizado — setor ${crdGroup.crdName}`)}
+                              displayValue={formatCurrency(group.total_realizado || 0)}
+                              meta={valueTrace.prevReal.totalRealizado(`Total realizado — ${groupLabel} ${group.groupName}`)}
                             />
                           </td>
-                          <td className={`px-4 py-3 text-xs text-right font-extrabold ${(crdGroup.total_diferenca || 0) < 0 ? 'text-red-700' : 'text-emerald-700'}`}>
+                          <td className={`px-4 py-3 text-xs text-right font-extrabold ${(group.total_diferenca || 0) < 0 ? 'text-red-700' : 'text-emerald-700'}`}>
                             <ValueTrace
-                              className={`text-xs font-extrabold ${(crdGroup.total_diferenca || 0) < 0 ? 'text-red-700' : 'text-emerald-700'}`}
-                              displayValue={formatCurrency(crdGroup.total_diferenca || 0)}
-                              meta={valueTrace.prevReal.totalDiferenca(`Total diferença — setor ${crdGroup.crdName}`)}
+                              className={`text-xs font-extrabold ${(group.total_diferenca || 0) < 0 ? 'text-red-700' : 'text-emerald-700'}`}
+                              displayValue={formatCurrency(group.total_diferenca || 0)}
+                              meta={valueTrace.prevReal.totalDiferenca(`Total diferença — ${groupLabel} ${group.groupName}`)}
                             />
                           </td>
                         </tr>

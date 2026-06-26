@@ -10,6 +10,8 @@ export const RequisicoesPage: React.FC = () => {
   const { query } = useSearch();
   const [requisitions, setRequisitions] = useState<any[]>([]);
   const [crds, setCrds] = useState<any[]>([]);
+  const [userRole, setUserRole] = useState<string>('viewer');
+  const [allowedSectorIds, setAllowedSectorIds] = useState<string[]>([]);
   const [form, setForm] = useState({
     crd_id: '',
     date: '',
@@ -23,8 +25,49 @@ export const RequisicoesPage: React.FC = () => {
   };
 
   useEffect(() => {
+    const loadUserScope = async () => {
+      try {
+        const res = await fetch('/api/auth/me');
+        if (!res.ok) return;
+        const user = await res.json();
+        setUserRole(String(user?.role || 'viewer'));
+        const ids = Array.from(
+          new Set(
+            (Array.isArray(user?.sector_ids) ? user.sector_ids : [user?.sector_id])
+              .map((id: unknown) => String(id ?? '').trim())
+              .filter((id: string) => id !== '')
+          )
+        );
+        setAllowedSectorIds(ids);
+      } catch {
+        // mantém escopo vazio
+      }
+    };
+
+    loadUserScope();
     loadData();
   }, []);
+
+  const hasGlobalSectorView =
+    userRole === 'admin' || userRole === 'finance' || userRole === 'controle';
+
+  const visibleCrds = useMemo(() => {
+    const active = crds.filter((c) => c.active !== false);
+    if (hasGlobalSectorView && allowedSectorIds.length === 0) return active;
+    if (allowedSectorIds.length === 0) return [];
+    return active.filter((c) => allowedSectorIds.includes(String(c.sector_id)));
+  }, [crds, allowedSectorIds, hasGlobalSectorView]);
+
+  const matchesUserSector = (sectorId?: number | string | null) => {
+    if (hasGlobalSectorView && allowedSectorIds.length === 0) return true;
+    if (allowedSectorIds.length === 0) return false;
+    return allowedSectorIds.includes(String(sectorId ?? ''));
+  };
+
+  const scopedRequisitions = useMemo(
+    () => requisitions.filter((r) => matchesUserSector(r.sector_id)),
+    [requisitions, allowedSectorIds, hasGlobalSectorView]
+  );
 
   const createRequisition = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -65,7 +108,7 @@ export const RequisicoesPage: React.FC = () => {
 
   const filteredRequisitions = useMemo(
     () =>
-      requisitions.filter((r) =>
+      scopedRequisitions.filter((r) =>
         matchesSearch(
           query,
           r.crd_code,
@@ -77,7 +120,7 @@ export const RequisicoesPage: React.FC = () => {
           r.status
         )
       ),
-    [requisitions, query]
+    [scopedRequisitions, query]
   );
 
   return (
@@ -97,10 +140,15 @@ export const RequisicoesPage: React.FC = () => {
           className="px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm"
         >
           <option value="">CRD</option>
-          {crds.filter((c) => c.active !== false).map((c) => (
+          {visibleCrds.map((c) => (
             <option key={c.id} value={c.id}>{c.code} - {c.name}{c.sector_name ? ` (${c.sector_name})` : ''}</option>
           ))}
         </select>
+        {visibleCrds.length === 0 && (
+          <p className="md:col-span-5 text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-xl px-3 py-2">
+            Nenhum CRD disponível para os setores vinculados ao seu usuário.
+          </p>
+        )}
 
         <input
           required

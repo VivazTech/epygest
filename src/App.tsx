@@ -23,6 +23,8 @@ import { SearchProvider, useSearch } from './context/SearchContext';
 import { SearchBar } from './components/SearchBar';
 import { getSearchPlaceholder } from './lib/search';
 
+const PLANILHAS_ROLES = ['admin', 'finance', 'controle'] as const;
+
 export default function App() {
   const isSupabaseTestRoute = window.location.pathname === '/teste-supabase';
   const [user, setUser] = useState<any | null>(null);
@@ -60,6 +62,14 @@ export default function App() {
       cancelled = true;
     };
   }, []);
+
+  const canAccessPlanilhas = PLANILHAS_ROLES.includes(user?.role);
+
+  useEffect(() => {
+    if (user && activeTab.startsWith('planilha-') && !canAccessPlanilhas) {
+      setActiveTab('dashboard');
+    }
+  }, [user, activeTab, canAccessPlanilhas]);
 
   const handleLogout = async () => {
     try {
@@ -119,6 +129,7 @@ export default function App() {
 
   const renderContent = () => {
     if (activeTab.startsWith('planilha-')) {
+      if (!canAccessPlanilhas) return <Dashboard />;
       const indice = Number(activeTab.slice('planilha-'.length));
       return (
         <PlanilhasPage
@@ -306,6 +317,8 @@ function AppShell({
                 ? `Planilhas / ${PLANILHAS.find((p) => `planilha-${p.indice}` === activeTab)?.nome ?? ''}`
                 : activeTab.startsWith('folha-')
                 ? `Folha de Pagamento / ${MESES_FOLHA[Number(activeTab.slice('folha-'.length))] ?? ''}`
+                : activeTab === 'prev-real'
+                ? 'Prev x Real Diario'
                 : activeTab.replace('-', ' ')}
             </span>
           </div>

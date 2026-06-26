@@ -50,7 +50,7 @@ const menuItems = [
   { id: 'importacao', label: 'Importação', icon: PlusCircle, roles: ['admin', 'finance', 'controle'] },
   { id: 'cadastros', label: 'Cadastros', icon: Database, roles: ['admin', 'finance', 'controle'] },
   { id: 'sintase', label: 'Síntase', icon: Rows4, roles: ['admin', 'finance', 'controle', 'manager'] },
-  { id: 'prev-real', label: 'Prev x Real', icon: BarChart3, roles: ['admin', 'finance', 'controle', 'manager'] },
+  { id: 'prev-real', label: 'Prev x Real Diario', icon: BarChart3, roles: ['admin', 'finance', 'controle', 'manager'] },
   { id: 'usuarios', label: 'Usuários', icon: Users, roles: ['admin'] },
   { id: 'configuracoes', label: 'Configurações', icon: Settings, roles: ['admin'] },
 ];
@@ -65,7 +65,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 }) => {
   const constructionGroupIds = ['dashboard', 'analise', 'planejamento'];
   const adminGroupIds = ['usuarios', 'configuracoes'];
-  const planilhasRoles = ['admin', 'finance', 'controle', 'manager'];
+  const planilhasRoles = ['admin', 'finance', 'controle'];
   const filteredMenu = menuItems.filter(item => item.roles.includes(user?.role));
   const constructionMenu = filteredMenu.filter((item) => constructionGroupIds.includes(item.id));
   const primaryMenu = filteredMenu.filter(

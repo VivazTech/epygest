@@ -40,6 +40,12 @@ const IMPORT_SOURCES = [
     icon: FileText,
   },
   {
+    key: 'provisao_ferias',
+    title: 'Provisão Férias',
+    description: 'Resultado final da provisão de férias do mês (PDF).',
+    icon: FileText,
+  },
+  {
     key: 'rds',
     title: 'Relatório Diário de Situação',
     description: 'RDS — situação diária de diárias e receitas.',
@@ -160,6 +166,17 @@ type RelCrdSummary = {
   total_lanc_liquido: number;
 };
 
+type ProvisaoFeriasTotals = {
+  salario: number;
+  media_vantagens: number;
+  terco_ferias: number;
+  valor_devido: number;
+  valor_mes: number;
+  inss: number;
+  fgts: number;
+  pis: number;
+};
+
 export const ImportacaoPage: React.FC = () => {
   const { query } = useSearch();
   const [historyRows, setHistoryRows] = useState<ImportHistoryRow[]>([]);
@@ -275,6 +292,40 @@ export const ImportacaoPage: React.FC = () => {
   const [relCrdError, setRelCrdError] = useState('');
   const [relCrdAccounts, setRelCrdAccounts] = useState<RelCrdAccount[]>([]);
   const [relCrdSummary, setRelCrdSummary] = useState<RelCrdSummary | null>(null);
+
+  // Estado da pré-visualização da Provisão de Férias (somente exibição — destino ainda não definido).
+  const [provisaoFeriasLoading, setProvisaoFeriasLoading] = useState(false);
+  const [provisaoFeriasFileName, setProvisaoFeriasFileName] = useState('');
+  const [provisaoFeriasError, setProvisaoFeriasError] = useState('');
+  const [provisaoFeriasTotals, setProvisaoFeriasTotals] = useState<ProvisaoFeriasTotals | null>(null);
+  const [provisaoFeriasPeriod, setProvisaoFeriasPeriod] = useState<{ month?: number; year?: number } | null>(null);
+
+  const uploadProvisaoFerias = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setProvisaoFeriasLoading(true);
+    setProvisaoFeriasError('');
+    setProvisaoFeriasFileName(file.name);
+    try {
+      const formData = new FormData();
+      formData.append('provisao_ferias_pdf', file);
+      const res = await fetch('/api/import/provisao-ferias/preview', { method: 'POST', body: formData });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        setProvisaoFeriasError(formatApiError(data, 'Falha ao processar a Provisão de Férias.'));
+        setProvisaoFeriasTotals(null);
+        setProvisaoFeriasPeriod(null);
+        return;
+      }
+      setProvisaoFeriasTotals(data.totals || null);
+      setProvisaoFeriasPeriod(data.period || null);
+    } catch (err: any) {
+      setProvisaoFeriasError(err?.message || 'Erro inesperado ao importar o arquivo.');
+    } finally {
+      setProvisaoFeriasLoading(false);
+      event.target.value = '';
+    }
+  };
 
   const loadImportHistory = async () => {
     setHistoryLoading(true);
@@ -573,7 +624,7 @@ export const ImportacaoPage: React.FC = () => {
                   <div className="w-11 h-11 rounded-xl bg-[#004D40]/5 text-[#004D40] flex items-center justify-center">
                     <Icon className="w-5 h-5" />
                   </div>
-                  {source.key === 'consumo_interno' || source.key === 'extrato_mensal' || source.key === 'rel_crd' ? (
+                  {source.key === 'consumo_interno' || source.key === 'extrato_mensal' || source.key === 'rel_crd' || source.key === 'provisao_ferias' ? (
                     <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-full px-2 py-0.5">
                       Extração ativa
                     </span>
@@ -620,6 +671,18 @@ export const ImportacaoPage: React.FC = () => {
                       accept=".xls,.xlsx,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                       onChange={uploadRelCrd}
                       disabled={relCrdLoading}
+                      className="hidden"
+                    />
+                  </label>
+                ) : source.key === 'provisao_ferias' ? (
+                  <label className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl border border-[#004D40] bg-white text-sm font-bold text-[#004D40] cursor-pointer hover:bg-emerald-50 transition-colors">
+                    {provisaoFeriasLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+                    {provisaoFeriasLoading ? 'Processando...' : 'Enviar arquivo (PDF)'}
+                    <input
+                      type="file"
+                      accept=".pdf,application/pdf"
+                      onChange={uploadProvisaoFerias}
+                      disabled={provisaoFeriasLoading}
                       className="hidden"
                     />
                   </label>
@@ -942,6 +1005,62 @@ export const ImportacaoPage: React.FC = () => {
                   ))}
                 </tbody>
               </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Pré-visualização da Provisão de Férias — apenas o resultado final do relatório (sem detalhe por funcionário). */}
+      {(provisaoFeriasFileName || provisaoFeriasError) && (
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+          <div className="px-4 py-3 border-b border-slate-100 flex flex-wrap gap-3 items-center justify-between">
+            <div className="flex items-center gap-2">
+              <FileText className="w-4 h-4 text-[#004D40]" />
+              <p className="text-sm font-bold text-slate-800">
+                Provisão Férias — resultado final
+                {provisaoFeriasPeriod?.month && provisaoFeriasPeriod?.year
+                  ? ` (${periodoLabel({ month: provisaoFeriasPeriod.month, year: provisaoFeriasPeriod.year })})`
+                  : ''}
+              </p>
+            </div>
+          </div>
+
+          {provisaoFeriasFileName && !provisaoFeriasError && (
+            <div className="px-4 py-2 text-xs text-emerald-700 bg-emerald-50/60 border-b border-emerald-100 flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4" />
+              Arquivo processado: {provisaoFeriasFileName}
+            </div>
+          )}
+          {provisaoFeriasError && (
+            <div className="px-4 py-2 text-xs text-red-700 bg-red-50 border-b border-red-100 flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4" />
+              {provisaoFeriasError}
+            </div>
+          )}
+
+          {provisaoFeriasTotals && (
+            <div className="p-4">
+              <p className="text-xs text-slate-500 mb-3">
+                Apenas o resultado final do relatório foi extraído. O destino de lançamento ainda não foi definido — os
+                valores ficam disponíveis aqui para decisão posterior.
+              </p>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                {[
+                  ['Salário', provisaoFeriasTotals.salario],
+                  ['Média e vantagens', provisaoFeriasTotals.media_vantagens],
+                  ['1/3 férias', provisaoFeriasTotals.terco_ferias],
+                  ['Valor devido', provisaoFeriasTotals.valor_devido],
+                  ['Valor mês', provisaoFeriasTotals.valor_mes],
+                  ['INSS', provisaoFeriasTotals.inss],
+                  ['FGTS', provisaoFeriasTotals.fgts],
+                  ['PIS', provisaoFeriasTotals.pis],
+                ].map(([label, value]) => (
+                  <div key={label as string} className="rounded-xl border border-slate-100 bg-slate-50/60 p-3">
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">{label}</p>
+                    <p className="text-sm font-bold text-slate-900 mt-1 tabular-nums">{formatCurrency(value as number)}</p>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
         </div>

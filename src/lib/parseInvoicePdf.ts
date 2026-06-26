@@ -49,6 +49,60 @@ const lastDayOfMonthIso = (month: number, year: number): string => {
   return `${yyyy}-${mm}-${dd}`;
 };
 
+const cleanPixKey = (raw: string): string =>
+  String(raw || "")
+    .trim()
+    .replace(/^["'([{]+/, "")
+    .replace(/[.,;)\]}"']+$/, "");
+
+/** Extrai chave Pix de texto livre (descrição, observações, etc.). */
+export const extractPixKeyFromText = (text: string): string => {
+  const source = normalizeText(text).replace(/[ \t]+/g, " ");
+  if (!source) return "";
+  if (!/pix/i.test(source)) return "";
+
+  const tryPatterns: RegExp[] = [
+    // Chave Pix / PIX e-mail: valor@dominio
+    /(?:chave\s*)?pix\s*(?:e-?mail|email|chave)?\s*[:\-–]?\s*([a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,})/i,
+    /(?:chave\s*)?pix\s*[:\-–]\s*([a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,})/i,
+    // PIX seguido de e-mail (ex.: "PIX pix@empresa.com.br")
+    /\bpix\s+([a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,})/i,
+    // E-mail após menção a pix em até ~100 caracteres
+    /\b(?:pix|chave\s*pix)\b[^@\n]{0,100}?([a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,})/i,
+    // Chave aleatória (EVP)
+    /(?:chave\s*)?pix\s*[:\-–]?\s*([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i,
+    // CPF/CNPJ após PIX
+    /(?:chave\s*)?pix\s*(?:cpf|cnpj)?\s*[:\-–]?\s*([\d./-]{11,18})/i,
+    // Telefone após PIX
+    /(?:chave\s*)?pix\s*(?:telefone|celular|fone)?\s*[:\-–]?\s*(\+?55?\s*\(?\d{2}\)?\s*9?\d{4}[-.\s]?\d{4})/i,
+    // Pagamento via PIX: valor genérico
+    /(?:pagamento|pgto\.?|via)\s+(?:por\s+)?pix[^:]*[:\-–]\s*(\S+)/i,
+    // PIX: qualquer token até vírgula/ponto-e-vírgula (último recurso)
+    /(?:chave\s*)?pix\s*[:\-–]?\s*([^\s,;|]{3,})/i,
+  ];
+
+  for (const pattern of tryPatterns) {
+    const match = source.match(pattern);
+    const candidate = cleanPixKey(match?.[1] || "");
+    if (!candidate) continue;
+    if (/^pix$/i.test(candidate)) continue;
+    if (/@/.test(candidate) || /^[\d./+-]+$/.test(candidate) || /^[0-9a-f-]{36}$/i.test(candidate)) {
+      return candidate;
+    }
+    if (candidate.length >= 8) return candidate;
+  }
+
+  return "";
+};
+
+const resolvePixFromSources = (...sources: string[]): { pix_key: string; payment_method: string } => {
+  for (const source of sources) {
+    const pix_key = extractPixKeyFromText(source);
+    if (pix_key) return { pix_key, payment_method: "pix" };
+  }
+  return { pix_key: "", payment_method: "" };
+};
+
 const sectionValueAfterLabel = (lines: string[], sectionStart: RegExp, label: RegExp): string => {
   const start = lines.findIndex((l) => sectionStart.test(l));
   if (start < 0) return "";
@@ -65,19 +119,62 @@ const sectionValueAfterLabel = (lines: string[], sectionStart: RegExp, label: Re
   return "";
 };
 
-const extractInvoiceNumberFromChave = (chave: string): string => {
-  const digits = String(chave || "").replace(/\D/g, "");
-  if (digits.length < 30) return "";
-
-  // Padrão NFS-e Nacional: bloco 00000006526 (número com zeros à esquerda)
-  const padded = digits.match(/0{6}(\d+?)(?=0)/);
-  if (padded?.[1]) return String(parseInt(padded[1], 10));
-
-  if (digits.length >= 35) {
-    const numeroPadded = digits.slice(22, 35);
-    const n = parseInt(numeroPadded, 10);
-    if (Number.isFinite(n) && n > 0 && n < 1_000_000_000) return String(n);
+const extractInvoiceNumberFromText = (lines: string[], joined: string): string => {
+  const numeroLabels = [
+    /^N[úu]mero\s*(?:da\s*)?NFS-?e$/i,
+    /^N[úu]mero\s*da\s*Nota$/i,
+    /^N[úu]mero$/i,
+    /^N[ºo°]\s*(?:da\s*)?NFS-?e$/i,
+  ];
+  for (const label of numeroLabels) {
+    const idx = lines.findIndex((l) => label.test(l));
+    if (idx < 0) continue;
+    for (let j = idx + 1; j <= idx + 3 && j < lines.length; j++) {
+      const candidate = lines[j].trim();
+      if (/^\d{1,15}$/.test(candidate)) return candidate;
+    }
   }
+
+  const inlinePatterns = [
+    /N[úu]mero\s*(?:da\s*)?NFS-?e\s*[:\-]?\s*(\d+)/i,
+    /NFS-?e\s*(?:n[ºo°]\.?)?\s*[:\-]?\s*(\d+)/i,
+    /N[úu]mero\s*(?:da\s*)?Nota\s*[:\-]?\s*(\d+)/i,
+  ];
+  for (const pattern of inlinePatterns) {
+    const match = joined.match(pattern);
+    if (match?.[1]) return match[1];
+  }
+
+  return "";
+};
+
+/** Extrai o número da nota da chave preservando zeros à esquerda. */
+export const extractInvoiceNumberFromChave = (chave: string): string => {
+  const digits = String(chave || "").replace(/\D/g, "");
+  if (digits.length < 35) return "";
+
+  const pickField = (start: number, length: number): string => {
+    const field = digits.slice(start, start + length);
+    if (/^\d+$/.test(field) && !/^0+$/.test(field)) return field;
+    return "";
+  };
+
+  // NFS-e Nacional — 50 dígitos: número nas posições 24–36 (13 dígitos, base 1)
+  if (digits.length >= 50) {
+    const numero = pickField(23, 13);
+    if (numero) return numero;
+  }
+
+  // NF-e — 44 dígitos: número nas posições 26–34 (9 dígitos, base 1)
+  if (digits.length >= 44 && digits.length < 50) {
+    const numero = pickField(25, 9);
+    if (numero) return numero;
+  }
+
+  // Layout alternativo usado em alguns emissores municipais (13 dígitos)
+  const alt = pickField(22, 13);
+  if (alt) return alt;
+
   return "";
 };
 
@@ -150,26 +247,27 @@ export function parseNfseFozGestaoIss(text: string): Partial<InvoicePdfExtracted
   const amount = extractValorTotalNota(joined);
 
   const chaveMatch = joined.match(/Chave de Acesso da NFS-e Nacional:\s*(\d{40,})/i);
-  let invoice_number = chaveMatch ? extractInvoiceNumberFromChave(chaveMatch[1]) : "";
-  if (!invoice_number) {
-    invoice_number = joined.match(/N[úu]mero\s*(?:da\s*)?NFS-?e\s*[:\-]?\s*(\d+)/i)?.[1] || "";
+  let invoice_number = extractInvoiceNumberFromText(lines, joined);
+  if (!invoice_number && chaveMatch) {
+    invoice_number = extractInvoiceNumberFromChave(chaveMatch[1]);
   }
 
   let pix_key = "";
   const pixMatch = joined.match(/PIX\s*(?:EMAIL|CHAVE|E-?MAIL)?\s*:?\s*(\S+@\S+)/i);
-  if (pixMatch?.[1]) pix_key = pixMatch[1].trim();
+  if (pixMatch?.[1]) pix_key = cleanPixKey(pixMatch[1]);
 
   let description = "";
   const descIdx = lines.findIndex((l) => /^DESCRI[ÇC][AÃ]O DOS SERVI[ÇC]OS$/i.test(l));
   if (descIdx >= 0) {
+    const descParts: string[] = [];
     for (let i = descIdx + 1; i < lines.length; i++) {
       const line = lines[i];
       if (/^(reten|valores|pis|cofins|outras inform)/i.test(line)) break;
-      if (line.length > 5 && !/^\d+ - /.test(line)) {
-        description = line;
-        break;
+      if (line.length > 3 && !/^\d+ - /.test(line)) {
+        descParts.push(line);
       }
     }
+    description = descParts.join(" ");
   }
   if (!description) {
     const servLine = lines.find((l) => /^\d{3,4}\s*-\s*.+CNAE:/i.test(l));
@@ -177,6 +275,11 @@ export function parseNfseFozGestaoIss(text: string): Partial<InvoicePdfExtracted
   }
   const servicoExtra = lines.find((l) => /^Servi[çc]o de /i.test(l));
   if (servicoExtra) description = description ? `${description} — ${servicoExtra}` : servicoExtra;
+
+  if (!pix_key) {
+    const fromPix = resolvePixFromSources(description, joined);
+    pix_key = fromPix.pix_key;
+  }
 
   return {
     invoice_number,
@@ -194,6 +297,7 @@ export function parseNfseFozGestaoIss(text: string): Partial<InvoicePdfExtracted
 /** Parser genérico (outros layouts de NF). */
 export function parseInvoicePdfGeneric(text: string): Partial<InvoicePdfExtracted> {
   const compact = normalizeText(text).replace(/[ \t]+/g, " ");
+  const lines = linesOf(text);
 
   const pick = (...patterns: RegExp[]) => {
     for (const p of patterns) {
@@ -209,9 +313,10 @@ export function parseInvoicePdfGeneric(text: string): Partial<InvoicePdfExtracte
     /Emitente\s*[:\-]\s*([^\n\r]+)/i
   );
 
-  const invoice_number = pick(
-    /Chave de Acesso[^:]*:\s*(\d{40,})/i,
-    /(?:N[úu]mero\s*da\s*NF-e|N[úu]mero\s*da\s*Nota|N[úu]mero\s*NFS-e)\s*[:#\-]?\s*([A-Z0-9.\-\/]+)/i
+  const invoice_numberRaw = pick(
+    /N[úu]mero\s*(?:da\s*)?NFS-?e\s*[:\-]?\s*(\d+)/i,
+    /(?:N[úu]mero\s*da\s*NF-e|N[úu]mero\s*da\s*Nota|N[úu]mero\s*NFS-e)\s*[:#\-]?\s*(\d+)/i,
+    /Chave de Acesso[^:]*:\s*(\d{40,})/i
   );
 
   const issue_dateRaw = pick(
@@ -228,12 +333,22 @@ export function parseInvoicePdfGeneric(text: string): Partial<InvoicePdfExtracte
     /(?:Valor\s*Total|Valor\s*da\s*Nota|Valor\s*L[ií]quido)\s*[:\-]?\s*R?\$?\s*([\d.,]+)/i
   );
 
-  const pix_key = pick(/PIX\s*(?:EMAIL|CHAVE)?\s*:?\s*(\S+@\S+)/i);
+  const pix_keyRaw = pick(/PIX\s*(?:EMAIL|CHAVE)?\s*:?\s*(\S+@\S+)/i);
+  const pix_key = cleanPixKey(pix_keyRaw);
 
-  let numero = invoice_number;
+  let numero = invoice_numberRaw || extractInvoiceNumberFromText(lines, text);
   if (/^\d{40,}$/.test(numero)) {
     numero = extractInvoiceNumberFromChave(numero);
   }
+
+  const description = pick(
+    /DESCRI[ÇC][AÃ]O\s*(?:DOS\s*SERVI[ÇC]OS)?\s*[:\-]?\s*([^\n]+)/i,
+    /(?:Discrimina[çc][aã]o|Servi[çc]o\s*Prestado)\s*[:\-]?\s*([^\n]+)/i
+  );
+
+  const pixResolved = pix_key
+    ? { pix_key, payment_method: "pix" as const }
+    : resolvePixFromSources(description, text);
 
   return {
     invoice_number: numero,
@@ -241,16 +356,26 @@ export function parseInvoicePdfGeneric(text: string): Partial<InvoicePdfExtracte
     issue_date: parseBrDateToIso(issue_dateRaw),
     due_date: parseBrDateToIso(due_dateRaw),
     amount: parseBrMoney(amountRaw),
-    pix_key,
-    payment_method: pix_key ? "pix" : "",
+    pix_key: pixResolved.pix_key,
+    payment_method: pixResolved.payment_method,
     client_name: "",
-    description: "",
+    description,
   };
 }
 
 export function parseInvoicePdfText(text: string): InvoicePdfExtracted {
   const nfse = parseNfseFozGestaoIss(text);
   const generic = parseInvoicePdfGeneric(text);
+
+  const description = nfse.description || generic.description || "";
+  let pix_key = nfse.pix_key || generic.pix_key || "";
+  let payment_method = nfse.payment_method || generic.payment_method || "";
+
+  if (!pix_key) {
+    const fromText = resolvePixFromSources(description, text);
+    pix_key = fromText.pix_key;
+    if (pix_key) payment_method = "pix";
+  }
 
   const merged: InvoicePdfExtracted = {
     invoice_number: nfse.invoice_number || generic.invoice_number || "",
@@ -259,9 +384,9 @@ export function parseInvoicePdfText(text: string): InvoicePdfExtracted {
     issue_date: nfse.issue_date || generic.issue_date || "",
     due_date: nfse.due_date || generic.due_date || "",
     amount: nfse.amount || generic.amount || "",
-    pix_key: nfse.pix_key || generic.pix_key || "",
-    payment_method: nfse.payment_method || generic.payment_method || "",
-    description: nfse.description || generic.description || "",
+    pix_key,
+    payment_method,
+    description,
   };
 
   return merged;

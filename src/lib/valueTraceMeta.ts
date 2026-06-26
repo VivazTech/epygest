@@ -31,6 +31,17 @@ export const valueTrace = {
       tables: 'crds, crd_monthly_values, sintase_occupancy',
       calculation: `Por CRD ativo do setor: valor do mês em crd_monthly_values (se existir) senão crds.previsto_mes, multiplicado pela ocupação. ${occ(occupancyPct)}`,
     }),
+    annualPendingAmount: (sectorName: string, year: number): ValueTraceMeta => ({
+      source: `Compromissos anuais — setor ${sectorName} — ${year}`,
+      tables: 'invoices, requisitions',
+      calculation:
+        'Soma de notas (due_date no ano, não canceladas) e requisições abertas (date no ano) no setor (API GET /api/sectors).',
+    }),
+    annualBudget: (sectorName: string, year: number, occupancyPct: number): ValueTraceMeta => ({
+      source: `Orçamento anual Síntase — setor ${sectorName} — ${year}`,
+      tables: 'crds, crd_monthly_values, sintase_occupancy',
+      calculation: `Soma dos 12 meses por CRD ativo (crd_monthly_values ou previsto_mes), com ocupação. ${occ(occupancyPct)}`,
+    }),
   },
 
   invoices: {

@@ -33,6 +33,12 @@ import {
 } from "./lib/folhaApuracao.js";
 
 import { parseInvoicePdfText } from "./lib/parseInvoicePdf.js";
+import {
+  STORAGE_BUCKET,
+  STORAGE_PREFIXES,
+  normalizeStorageObjectPath,
+  type StorageDocumentField,
+} from "./lib/storagePath.js";
 
 // Importa direto o parser para evitar o modo debug do index.js (que tenta abrir ./test/data/*)
 const loadPdfParse = async () => {
@@ -369,9 +375,20 @@ export function createApp() {
 
   // ---------- Storage de documentos (bucket privado + signed URLs) ----------
   // O bucket "invoice-files" deve estar configurado como PRIVADO no Supabase.
-  const STORAGE_BUCKET = "invoice-files";
-  const STORAGE_PREFIXES = ["invoices", "receipts", "boletos"];
   const SIGNED_URL_TTL = 60 * 60; // 1 hora
+
+  const createSignedDocumentUrl = async (rawPath: string) => {
+    const objectPath = normalizeStorageObjectPath(rawPath);
+    if (!objectPath) return { error: "Caminho inválido" as const };
+    const { data, error } = await supabase.storage
+      .from(STORAGE_BUCKET)
+      .createSignedUrl(objectPath, SIGNED_URL_TTL);
+    if (error || !data?.signedUrl) {
+      console.error("Erro ao gerar signed URL:", error, { objectPath, rawPath });
+      return { error: "Arquivo não encontrado" as const };
+    }
+    return { url: data.signedUrl };
+  };
 
   // Faz upload com nome aleatório (sem usar o nome enviado pelo cliente) e retorna o object path.
   const uploadDocument = async (
@@ -529,7 +546,7 @@ export function createApp() {
   const planilhasDir = path.resolve(process.cwd(), "Extracao_Planilhas");
   const planilhaFilePattern = /^aba_\d{3}_[A-Za-z0-9_]+\.json$/;
 
-  app.get("/api/planilhas", (_req, res) => {
+  app.get("/api/planilhas", requireRole("admin", "finance", "controle"), (_req, res) => {
     try {
       const files = fs
         .readdirSync(planilhasDir)
@@ -542,7 +559,7 @@ export function createApp() {
     }
   });
 
-  app.get("/api/planilhas/:arquivo", (req, res) => {
+  app.get("/api/planilhas/:arquivo", requireRole("admin", "finance", "controle"), (req, res) => {
     const { arquivo } = req.params;
     if (!planilhaFilePattern.test(arquivo)) {
       return res.status(400).json({ error: "Arquivo inválido" });
@@ -979,10 +996,12 @@ export function createApp() {
       crdIdToSectorCodeKey.set(id, `${sectorId}|${code}`);
     }
     const monthlyValueBySectorCodeKey = new Map<string, number>();
+    let monthlyValues: any[] = [];
+    const allowedCrdIds = new Set(crdIds);
 
     if (crdIds.length) {
-      const allowedCrdIds = new Set(crdIds);
-      const { rows: monthlyValues, error: monthlyError } = await fetchMonthlyValuesByYear(selectedYear);
+      const { rows, error: monthlyError } = await fetchMonthlyValuesByYear(selectedYear);
+      monthlyValues = rows ?? [];
 
       if (monthlyError) {
         const isMissingTable =
@@ -991,7 +1010,7 @@ export function createApp() {
         if (!isMissingTable) return res.status(500).json({ error: monthlyError.message });
       }
 
-      for (const row of monthlyValues ?? []) {
+      for (const row of monthlyValues) {
         if (Number((row as any).month) !== selectedMonth) continue;
         const crdId = Number((row as any).crd_id);
         if (!allowedCrdIds.has(crdId)) continue;
@@ -1002,7 +1021,16 @@ export function createApp() {
       }
     }
 
+    const valuesByCrdMonth = new Map<string, number>();
+    for (const row of monthlyValues) {
+      const crdId = Number((row as any).crd_id);
+      const month = Number((row as any).month);
+      if (!allowedCrdIds.has(crdId) || month < 1 || month > 12) continue;
+      valuesByCrdMonth.set(`${crdId}|${month}`, sanitizeMonthBudget((row as any).value));
+    }
+
     const budgetBySectorId = new Map<number, number>();
+    const annualBudgetBySectorId = new Map<number, number>();
     for (const crd of crdData ?? []) {
       const crdId = Number((crd as any).id);
       const sectorId = Number((crd as any).sector_id);
@@ -1013,6 +1041,51 @@ export function createApp() {
       const baseValue = monthlyValue ?? defaultValue;
       const effectiveValue = baseValue * occupancyFactor;
       budgetBySectorId.set(sectorId, (budgetBySectorId.get(sectorId) || 0) + effectiveValue);
+
+      let annualCrdSum = 0;
+      for (let m = 1; m <= 12; m++) {
+        annualCrdSum += valuesByCrdMonth.get(`${crdId}|${m}`) ?? defaultValue;
+      }
+      annualBudgetBySectorId.set(
+        sectorId,
+        (annualBudgetBySectorId.get(sectorId) || 0) + annualCrdSum * occupancyFactor
+      );
+    }
+
+    const yearDateFrom = `${selectedYear}-01-01`;
+    const yearDateTo = `${selectedYear}-12-31`;
+    const [{ data: yearInvoices }, { data: yearReqs }] = await Promise.all([
+      supabase
+        .from("invoices")
+        .select("sector_id, amount")
+        .gte("due_date", yearDateFrom)
+        .lte("due_date", yearDateTo)
+        .or("flow_stage.is.null,flow_stage.neq.cancelled"),
+      supabase
+        .from("requisitions")
+        .select("sector_id, amount")
+        .eq("status", "open")
+        .gte("date", yearDateFrom)
+        .lte("date", yearDateTo),
+    ]);
+
+    const annualInvoicesBySector = new Map<number, number>();
+    for (const inv of yearInvoices ?? []) {
+      const sectorId = Number((inv as any).sector_id);
+      if (!Number.isFinite(sectorId)) continue;
+      annualInvoicesBySector.set(
+        sectorId,
+        (annualInvoicesBySector.get(sectorId) || 0) + Number((inv as any).amount)
+      );
+    }
+    const annualReqsBySector = new Map<number, number>();
+    for (const req of yearReqs ?? []) {
+      const sectorId = Number((req as any).sector_id);
+      if (!Number.isFinite(sectorId)) continue;
+      annualReqsBySector.set(
+        sectorId,
+        (annualReqsBySector.get(sectorId) || 0) + Number((req as any).amount)
+      );
     }
 
     const enriched = await Promise.all(
@@ -1040,13 +1113,20 @@ export function createApp() {
         const pending_requisitions = (pendingReqs ?? []).reduce(
           (s: number, r: any) => s + Number(r.amount), 0
         );
+        const sectorId = Number(sector.id);
+        const annual_invoices = annualInvoicesBySector.get(sectorId) || 0;
+        const annual_requisitions = annualReqsBySector.get(sectorId) || 0;
 
         return {
           ...sector,
           pending_invoices,
           pending_requisitions,
           pending_amount: pending_invoices + pending_requisitions,
-          budget_month: budgetBySectorId.get(Number(sector.id)) || 0,
+          budget_month: budgetBySectorId.get(sectorId) || 0,
+          annual_invoices,
+          annual_requisitions,
+          annual_pending_amount: annual_invoices + annual_requisitions,
+          annual_budget: annualBudgetBySectorId.get(sectorId) || 0,
           occupancy_percent: occupancyPercent,
           budget_month_ref: {
             month: selectedMonth,
@@ -1095,6 +1175,22 @@ export function createApp() {
       return res.status(400).json({ error: "CRD inválido para a requisição" });
     }
 
+    const { data: userRow } = await supabase.from("users").select("*").eq("id", req.user!.id).single();
+    if (userRow) {
+      const session = await buildUserSession(userRow);
+      const allowedSectorIds = session.sector_ids ?? [];
+      const isGlobal = ["admin", "finance", "controle"].includes(String(userRow.role || ""));
+
+      if (!isGlobal || allowedSectorIds.length > 0) {
+        if (allowedSectorIds.length === 0) {
+          return res.status(403).json({ error: "Seu usuário não possui setor vinculado para lançar requisições." });
+        }
+        if (!allowedSectorIds.includes(Number(crd.sector_id))) {
+          return res.status(403).json({ error: "CRD fora dos setores permitidos para seu usuário." });
+        }
+      }
+    }
+
     const { data, error } = await supabase
       .from("requisitions")
       .insert({
@@ -1127,18 +1223,30 @@ export function createApp() {
   // INVOICES
   // ====================================================
   app.get("/api/invoices", async (req, res) => {
-    const { month, year } = req.query as { month?: string; year?: string };
+    const { month, year, from, to } = req.query as {
+      month?: string;
+      year?: string;
+      from?: string;
+      to?: string;
+    };
     const now = new Date();
-    const selectedMonth = Number(month) || now.getMonth() + 1;
-    const selectedYear = Number(year) || now.getFullYear();
-    const { dateFrom, dateTo } = getMonthDateRange(selectedYear, selectedMonth);
 
-    const { data, error } = await supabase
+    let query = supabase
       .from("invoices")
       .select("*, sectors(name), users(name)")
-      .gte("due_date", dateFrom)
-      .lte("due_date", dateTo)
       .order("due_date", { ascending: true });
+
+    if (from || to) {
+      if (from) query = query.gte("due_date", from);
+      if (to) query = query.lte("due_date", to);
+    } else {
+      const selectedMonth = Number(month) || now.getMonth() + 1;
+      const selectedYear = Number(year) || now.getFullYear();
+      const { dateFrom, dateTo } = getMonthDateRange(selectedYear, selectedMonth);
+      query = query.gte("due_date", dateFrom).lte("due_date", dateTo);
+    }
+
+    const { data, error } = await query;
 
     if (error) { console.error(error); return res.status(500).json({ error: "Erro interno ao processar a solicitação." }); }
 
@@ -1161,7 +1269,7 @@ export function createApp() {
 
     let query = supabase
       .from("invoices")
-      .select("*, sectors(name)")
+      .select("*, sectors(name), users(name)")
       .neq("flow_stage", "cancelled")
       .order("due_date", { ascending: true });
 
@@ -1172,9 +1280,13 @@ export function createApp() {
     const { data, error } = await query;
     if (error) { console.error(error); return res.status(500).json({ error: "Erro interno ao processar a solicitação." }); }
 
-    const rows = (data ?? []).map((i: any) => ({ ...i, sector_name: i.sectors?.name ?? null }));
+    const rows = (data ?? []).map((i: any) => ({
+      ...i,
+      sector_name: i.sectors?.name ?? null,
+      user_name: i.users?.name ?? null,
+    }));
     const header = [
-      "id","invoice_number","provider_name","sector_name","amount",
+      "id","invoice_number","provider_name","sector_name","user_name","amount",
       "issue_date","due_date","payment_method","pix_key","flow_stage",
       "status","file_path","boleto_file_path","natureza","payment_receipt_path","created_at",
     ];
@@ -1319,35 +1431,62 @@ export function createApp() {
 
   // Gera uma URL assinada (curta) para abrir um documento do bucket privado.
   app.get("/api/storage/signed-url", async (req, res) => {
-    const objectPath = String(req.query?.path || "");
-    const prefix = objectPath.split("/")[0];
-    // Só assina caminhos dentro dos prefixos conhecidos (evita acesso arbitrário ao bucket).
-    if (!STORAGE_PREFIXES.includes(prefix) || objectPath.includes("..")) {
-      return res.status(400).json({ error: "Caminho inválido" });
+    const rawPath = String(req.query?.path || "");
+    const result = await createSignedDocumentUrl(rawPath);
+    if (!("url" in result)) {
+      const status = result.error === "Caminho inválido" ? 400 : 404;
+      return res.status(status).json({ error: result.error });
     }
-    const { data, error } = await supabase.storage
-      .from(STORAGE_BUCKET)
-      .createSignedUrl(objectPath, SIGNED_URL_TTL);
-    if (error || !data?.signedUrl) {
-      console.error("Erro ao gerar signed URL:", error);
-      return res.status(404).json({ error: "Arquivo não encontrado" });
+    res.json({ url: result.url });
+  });
+
+  // URL assinada a partir do registro da nota (path gravado no Supabase).
+  app.get("/api/invoices/:id/document-url", async (req, res) => {
+    const field = String(req.query?.field || "file_path") as StorageDocumentField;
+    const allowed: StorageDocumentField[] = ["file_path", "boleto_file_path", "payment_receipt_path"];
+    if (!allowed.includes(field)) {
+      return res.status(400).json({ error: "Campo inválido" });
     }
-    res.json({ url: data.signedUrl });
+
+    const { data, error } = await supabase
+      .from("invoices")
+      .select(field)
+      .eq("id", Number(req.params.id))
+      .maybeSingle();
+
+    if (error) {
+      console.error(error);
+      return res.status(500).json({ error: "Erro ao buscar documento da nota." });
+    }
+    if (!data) return res.status(404).json({ error: "Nota não encontrada" });
+
+    const rawPath = String((data as Record<string, unknown>)[field] || "");
+    if (!rawPath) return res.status(404).json({ error: "Documento não anexado" });
+
+    const result = await createSignedDocumentUrl(rawPath);
+    if (!("url" in result)) {
+      const status = result.error === "Caminho inválido" ? 400 : 404;
+      return res.status(status).json({ error: result.error });
+    }
+    res.json({ url: result.url });
   });
 
   // Criar nota fiscal
   app.post("/api/invoices", async (req, res) => {
     const {
       invoice_number, provider_name, amount, issue_date, due_date,
-      sector_id, user_id, file_path, boleto_file_path, natureza,
+      sector_id, file_path, boleto_file_path, natureza,
       crd, payment_method, pix_key,
     } = req.body;
+
+    const launchedByUserId = req.user?.id ?? null;
 
     const { data, error } = await supabase
       .from("invoices")
       .insert({
         invoice_number, provider_name, amount, issue_date, due_date,
-        sector_id, user_id,
+        sector_id,
+        user_id: launchedByUserId,
         file_path: file_path || null,
         boleto_file_path: boleto_file_path || null,
         natureza: natureza || "O",
@@ -1364,11 +1503,11 @@ export function createApp() {
     res.json({ id: data.id });
   });
 
-  // Ações de fluxo (aprovar / pagar / cancelar)
+  // Ações de fluxo (aprovar / reprovar / desaprovar / pagar / cancelar)
   app.patch("/api/invoices/:id/flow", async (req, res) => {
     const { id } = req.params;
     const { action, actorSector, payment_receipt_path, cancel_reason } = req.body as {
-      action?: "approve_control" | "mark_paid" | "cancel_request";
+      action?: "approve_control" | "reject_control" | "disapprove_control" | "mark_paid" | "cancel_request";
       actorSector?: string;
       payment_receipt_path?: string;
       cancel_reason?: string;
@@ -1389,6 +1528,31 @@ export function createApp() {
         flow_stage: "control_approved",
         approved_at: new Date().toISOString(),
         approved_by_sector: actorSector || "CONTROLE",
+      }).eq("id", id);
+      if (error) { console.error(error); return res.status(500).json({ error: "Erro interno ao processar a solicitação." }); }
+      return res.json({ success: true });
+    }
+
+    if (action === "reject_control") {
+      if ((invoice.flow_stage || "control_pending") !== "control_pending")
+        return res.status(400).json({ error: "Só é possível reprovar notas aguardando o Controle" });
+      const { error } = await supabase.from("invoices").update({
+        flow_stage: "cancelled",
+        cancelled_at: new Date().toISOString(),
+        cancelled_by_sector: actorSector || "CONTROLE",
+        cancel_reason: cancel_reason || "Reprovada pelo Controle",
+      }).eq("id", id);
+      if (error) { console.error(error); return res.status(500).json({ error: "Erro interno ao processar a solicitação." }); }
+      return res.json({ success: true });
+    }
+
+    if (action === "disapprove_control") {
+      if ((invoice.flow_stage || "control_pending") !== "control_approved")
+        return res.status(400).json({ error: "Só é possível desaprovar notas já aprovadas pelo Controle" });
+      const { error } = await supabase.from("invoices").update({
+        flow_stage: "control_pending",
+        approved_at: null,
+        approved_by_sector: null,
       }).eq("id", id);
       if (error) { console.error(error); return res.status(500).json({ error: "Erro interno ao processar a solicitação." }); }
       return res.json({ success: true });
@@ -2115,6 +2279,90 @@ export function createApp() {
       res.status(500).json({
         success: false,
         error: "Falha ao processar o Rel. CRD.",
+        detail: error?.message ? String(error.message).slice(0, 300) : undefined,
+      });
+    } finally {
+      if (req.file?.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+    }
+  });
+
+  // ====================================================
+  // IMPORTAÇÃO: PROVISÃO DE FÉRIAS (PDF do Desbravador)
+  // Extrai apenas o total geral do relatório (não o detalhe por funcionário).
+  // Ainda não envia para nenhum destino — só exibe no resumo de importação.
+  // ====================================================
+  const parsePtBrNumber = (s: string): number => {
+    const n = Number(String(s ?? "").trim().replace(/\./g, "").replace(",", "."));
+    return Number.isFinite(n) ? n : 0;
+  };
+
+  const parseProvisaoFeriasPdfText = (text: string) => {
+    const periodMatch = /M[ÊE]S:\s*(\d{1,2})\/(\d{4})/i.exec(text);
+    const month = periodMatch ? Number(periodMatch[1]) : undefined;
+    const year = periodMatch ? Number(periodMatch[2]) : undefined;
+
+    // O texto extraído do PDF segue a ordem das colunas da tabela, não a ordem
+    // visual: "valor mês, INSS, FGTS, PIS" aparecem ANTES de "Total Geral :", e
+    // "valor devido, 1/3 férias, média/vantagens, salário" vêm DEPOIS — sem
+    // espaçamento confiável entre eles, então extraímos os valores monetários
+    // pela vizinhança de "Total Geral" em vez de tentar casar grupos colados.
+    const totalIdx = text.search(/Total\s+Geral/i);
+    if (totalIdx < 0) return { month, year, totals: null as null };
+
+    const moneyRe = /\d{1,3}(?:\.\d{3})*,\d{2}/g;
+    const before = text.slice(Math.max(0, totalIdx - 80), totalIdx).match(moneyRe) || [];
+    const after = text.slice(totalIdx, totalIdx + 150).match(moneyRe) || [];
+    const [valorMesS, inssS, fgtsS, pisS] = before.slice(-4);
+    const [valorDevidoS, tercoFeriasS, mediaVantagensS, salarioS] = after.slice(0, 4);
+    if (!salarioS || !valorDevidoS) return { month, year, totals: null as null };
+
+    return {
+      month,
+      year,
+      totals: {
+        salario: parsePtBrNumber(salarioS),
+        media_vantagens: parsePtBrNumber(mediaVantagensS),
+        terco_ferias: parsePtBrNumber(tercoFeriasS),
+        valor_devido: parsePtBrNumber(valorDevidoS),
+        valor_mes: parsePtBrNumber(valorMesS),
+        inss: parsePtBrNumber(inssS),
+        fgts: parsePtBrNumber(fgtsS),
+        pis: parsePtBrNumber(pisS),
+      },
+    };
+  };
+
+  app.post("/api/import/provisao-ferias/preview", upload.single("provisao_ferias_pdf"), async (req, res) => {
+    if (!req.file) return res.status(400).json({ error: "Arquivo não enviado" });
+    if (req.file.mimetype !== "application/pdf" && !/\.pdf$/i.test(req.file.originalname || "")) {
+      if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+      return res.status(400).json({ error: "Envie o relatório em PDF." });
+    }
+    try {
+      const fileBuffer = fs.readFileSync(req.file.path);
+      const pdfParse = await loadPdfParse();
+      const parsed = await pdfParse(fileBuffer);
+      const result = parseProvisaoFeriasPdfText(parsed.text || "");
+
+      if (!result.totals) {
+        return res.status(422).json({
+          success: false,
+          error:
+            "O arquivo foi lido, mas o 'Total Geral' não foi encontrado. Confira se este é o relatório 'Provisão de Férias' do Desbravador — o layout parece diferente do esperado.",
+        });
+      }
+
+      res.json({
+        success: true,
+        report_name: req.file.originalname || "provisao-ferias.pdf",
+        period: { month: result.month, year: result.year },
+        totals: result.totals,
+      });
+    } catch (error: any) {
+      console.error("Erro ao processar Provisão de Férias:", error);
+      res.status(500).json({
+        success: false,
+        error: "Falha ao processar o relatório de Provisão de Férias.",
         detail: error?.message ? String(error.message).slice(0, 300) : undefined,
       });
     } finally {
