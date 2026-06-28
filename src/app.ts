@@ -2371,6 +2371,84 @@ export function createApp() {
   });
 
   // ====================================================
+  // IMPORTAÇÃO: PROVISÃO DE 13º SALÁRIO (PDF do Desbravador)
+  // Extrai apenas o total geral do relatório (não o detalhe por funcionário).
+  // Ainda não envia para nenhum destino — só exibe no resumo de importação.
+  // ====================================================
+  const parseProvisao13PdfText = (text: string) => {
+    const periodMatch = /M[ÊE]S:\s*(\d{1,2})\/(\d{4})/i.exec(text);
+    const month = periodMatch ? Number(periodMatch[1]) : undefined;
+    const year = periodMatch ? Number(periodMatch[2]) : undefined;
+
+    // Assim como na Provisão de Férias, o texto extraído do PDF segue a ordem
+    // das colunas e não a ordem visual. Neste relatório: INSS, FGTS, PIS, Valor
+    // do Mês vêm ANTES de "Total Geral :"; Média/Vantagens, Adiantamento, Valor
+    // devido, Salário 13º vêm DEPOIS.
+    const totalIdx = text.search(/Total\s+Geral/i);
+    if (totalIdx < 0) return { month, year, totals: null as null };
+
+    const moneyRe = /-?\d{1,3}(?:\.\d{3})*,\d{2}/g;
+    const before = text.slice(Math.max(0, totalIdx - 100), totalIdx).match(moneyRe) || [];
+    const after = text.slice(totalIdx, totalIdx + 200).match(moneyRe) || [];
+    const [inssS, fgtsS, pisS, valorMesS] = before.slice(-4);
+    const [mediaVantagensS, adiantamentoS, valorDevidoS, salario13S] = after.slice(0, 4);
+    if (!salario13S || !valorDevidoS) return { month, year, totals: null as null };
+
+    return {
+      month,
+      year,
+      totals: {
+        salario_13: parsePtBrNumber(salario13S),
+        media_vantagens: parsePtBrNumber(mediaVantagensS),
+        adiantamento_13: parsePtBrNumber(adiantamentoS),
+        valor_devido: parsePtBrNumber(valorDevidoS),
+        valor_mes: parsePtBrNumber(valorMesS),
+        inss: parsePtBrNumber(inssS),
+        fgts: parsePtBrNumber(fgtsS),
+        pis: parsePtBrNumber(pisS),
+      },
+    };
+  };
+
+  app.post("/api/import/provisao-13/preview", upload.single("provisao_13_pdf"), async (req, res) => {
+    if (!req.file) return res.status(400).json({ error: "Arquivo não enviado" });
+    if (req.file.mimetype !== "application/pdf" && !/\.pdf$/i.test(req.file.originalname || "")) {
+      if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+      return res.status(400).json({ error: "Envie o relatório em PDF." });
+    }
+    try {
+      const fileBuffer = fs.readFileSync(req.file.path);
+      const pdfParse = await loadPdfParse();
+      const parsed = await pdfParse(fileBuffer);
+      const result = parseProvisao13PdfText(parsed.text || "");
+
+      if (!result.totals) {
+        return res.status(422).json({
+          success: false,
+          error:
+            "O arquivo foi lido, mas o 'Total Geral' não foi encontrado. Confira se este é o relatório 'Provisão de 13º Salário' do Desbravador — o layout parece diferente do esperado.",
+        });
+      }
+
+      res.json({
+        success: true,
+        report_name: req.file.originalname || "provisao-13.pdf",
+        period: { month: result.month, year: result.year },
+        totals: result.totals,
+      });
+    } catch (error: any) {
+      console.error("Erro ao processar Provisão de 13º Salário:", error);
+      res.status(500).json({
+        success: false,
+        error: "Falha ao processar o relatório de Provisão de 13º Salário.",
+        detail: error?.message ? String(error.message).slice(0, 300) : undefined,
+      });
+    } finally {
+      if (req.file?.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+    }
+  });
+
+  // ====================================================
   // IMPORTAÇÃO: EXTRATO MENSAL (folha de pagamento, .xls BIFF do Desbravador)
   // Estes .xls quebram o leitor do SheetJS (formato de número inválido + substream
   // que ele não emite), então fazemos um walker BIFF8 próprio resolvendo o SST.

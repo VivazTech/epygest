@@ -46,6 +46,12 @@ const IMPORT_SOURCES = [
     icon: FileText,
   },
   {
+    key: 'provisao_13',
+    title: 'Provisões 13º',
+    description: 'Resultado final da provisão de 13º salário do mês (PDF).',
+    icon: FileText,
+  },
+  {
     key: 'rds',
     title: 'Relatório Diário de Situação',
     description: 'RDS — situação diária de diárias e receitas.',
@@ -170,6 +176,17 @@ type ProvisaoFeriasTotals = {
   salario: number;
   media_vantagens: number;
   terco_ferias: number;
+  valor_devido: number;
+  valor_mes: number;
+  inss: number;
+  fgts: number;
+  pis: number;
+};
+
+type Provisao13Totals = {
+  salario_13: number;
+  media_vantagens: number;
+  adiantamento_13: number;
   valor_devido: number;
   valor_mes: number;
   inss: number;
@@ -323,6 +340,40 @@ export const ImportacaoPage: React.FC = () => {
       setProvisaoFeriasError(err?.message || 'Erro inesperado ao importar o arquivo.');
     } finally {
       setProvisaoFeriasLoading(false);
+      event.target.value = '';
+    }
+  };
+
+  // Estado da pré-visualização da Provisão de 13º (somente exibição — destino ainda não definido).
+  const [provisao13Loading, setProvisao13Loading] = useState(false);
+  const [provisao13FileName, setProvisao13FileName] = useState('');
+  const [provisao13Error, setProvisao13Error] = useState('');
+  const [provisao13Totals, setProvisao13Totals] = useState<Provisao13Totals | null>(null);
+  const [provisao13Period, setProvisao13Period] = useState<{ month?: number; year?: number } | null>(null);
+
+  const uploadProvisao13 = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setProvisao13Loading(true);
+    setProvisao13Error('');
+    setProvisao13FileName(file.name);
+    try {
+      const formData = new FormData();
+      formData.append('provisao_13_pdf', file);
+      const res = await fetch('/api/import/provisao-13/preview', { method: 'POST', body: formData });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        setProvisao13Error(formatApiError(data, 'Falha ao processar a Provisão de 13º.'));
+        setProvisao13Totals(null);
+        setProvisao13Period(null);
+        return;
+      }
+      setProvisao13Totals(data.totals || null);
+      setProvisao13Period(data.period || null);
+    } catch (err: any) {
+      setProvisao13Error(err?.message || 'Erro inesperado ao importar o arquivo.');
+    } finally {
+      setProvisao13Loading(false);
       event.target.value = '';
     }
   };
@@ -624,7 +675,7 @@ export const ImportacaoPage: React.FC = () => {
                   <div className="w-11 h-11 rounded-xl bg-[#004D40]/5 text-[#004D40] flex items-center justify-center">
                     <Icon className="w-5 h-5" />
                   </div>
-                  {source.key === 'consumo_interno' || source.key === 'extrato_mensal' || source.key === 'rel_crd' || source.key === 'provisao_ferias' ? (
+                  {source.key === 'consumo_interno' || source.key === 'extrato_mensal' || source.key === 'rel_crd' || source.key === 'provisao_ferias' || source.key === 'provisao_13' ? (
                     <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-full px-2 py-0.5">
                       Extração ativa
                     </span>
@@ -683,6 +734,18 @@ export const ImportacaoPage: React.FC = () => {
                       accept=".pdf,application/pdf"
                       onChange={uploadProvisaoFerias}
                       disabled={provisaoFeriasLoading}
+                      className="hidden"
+                    />
+                  </label>
+                ) : source.key === 'provisao_13' ? (
+                  <label className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl border border-[#004D40] bg-white text-sm font-bold text-[#004D40] cursor-pointer hover:bg-emerald-50 transition-colors">
+                    {provisao13Loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+                    {provisao13Loading ? 'Processando...' : 'Enviar arquivo (PDF)'}
+                    <input
+                      type="file"
+                      accept=".pdf,application/pdf"
+                      onChange={uploadProvisao13}
+                      disabled={provisao13Loading}
                       className="hidden"
                     />
                   </label>
@@ -1054,6 +1117,62 @@ export const ImportacaoPage: React.FC = () => {
                   ['INSS', provisaoFeriasTotals.inss],
                   ['FGTS', provisaoFeriasTotals.fgts],
                   ['PIS', provisaoFeriasTotals.pis],
+                ].map(([label, value]) => (
+                  <div key={label as string} className="rounded-xl border border-slate-100 bg-slate-50/60 p-3">
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">{label}</p>
+                    <p className="text-sm font-bold text-slate-900 mt-1 tabular-nums">{formatCurrency(value as number)}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Pré-visualização da Provisão de 13º — apenas o resultado final do relatório (sem detalhe por funcionário). */}
+      {(provisao13FileName || provisao13Error) && (
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+          <div className="px-4 py-3 border-b border-slate-100 flex flex-wrap gap-3 items-center justify-between">
+            <div className="flex items-center gap-2">
+              <FileText className="w-4 h-4 text-[#004D40]" />
+              <p className="text-sm font-bold text-slate-800">
+                Provisões 13º — resultado final
+                {provisao13Period?.month && provisao13Period?.year
+                  ? ` (${periodoLabel({ month: provisao13Period.month, year: provisao13Period.year })})`
+                  : ''}
+              </p>
+            </div>
+          </div>
+
+          {provisao13FileName && !provisao13Error && (
+            <div className="px-4 py-2 text-xs text-emerald-700 bg-emerald-50/60 border-b border-emerald-100 flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4" />
+              Arquivo processado: {provisao13FileName}
+            </div>
+          )}
+          {provisao13Error && (
+            <div className="px-4 py-2 text-xs text-red-700 bg-red-50 border-b border-red-100 flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4" />
+              {provisao13Error}
+            </div>
+          )}
+
+          {provisao13Totals && (
+            <div className="p-4">
+              <p className="text-xs text-slate-500 mb-3">
+                Apenas o resultado final do relatório foi extraído. O destino de lançamento ainda não foi definido — os
+                valores ficam disponíveis aqui para decisão posterior.
+              </p>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                {[
+                  ['Salário 13º', provisao13Totals.salario_13],
+                  ['Média e vantagens', provisao13Totals.media_vantagens],
+                  ['Adiantamento 13º', provisao13Totals.adiantamento_13],
+                  ['Valor devido', provisao13Totals.valor_devido],
+                  ['Valor mês', provisao13Totals.valor_mes],
+                  ['INSS', provisao13Totals.inss],
+                  ['FGTS', provisao13Totals.fgts],
+                  ['PIS', provisao13Totals.pis],
                 ].map(([label, value]) => (
                   <div key={label as string} className="rounded-xl border border-slate-100 bg-slate-50/60 p-3">
                     <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">{label}</p>
