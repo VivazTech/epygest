@@ -1063,15 +1063,16 @@ export const Invoices: React.FC = () => {
 
       {showModal && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-white w-full max-w-lg rounded-3xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
-            <div className="p-6 border-b border-slate-100 flex justify-between items-center">
+          <div className="bg-white w-full max-w-lg max-h-[calc(100dvh-2rem)] rounded-3xl shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="p-6 border-b border-slate-100 flex justify-between items-center shrink-0">
               <h3 className="text-xl font-bold text-slate-900">Lançar Nota Fiscal</h3>
               <button onClick={closeInvoiceModal} className="text-slate-400 hover:text-slate-600 transition-colors">
                 <Plus className="w-6 h-6 rotate-45" />
               </button>
             </div>
             
-            <form onSubmit={handleSubmit} className="p-6 space-y-4">
+            <form onSubmit={handleSubmit} className="flex flex-col min-h-0 flex-1">
+              <div className="p-6 space-y-4 overflow-y-auto flex-1 min-h-0">
               <div className="space-y-1.5">
                 <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">PDF da Nota Fiscal</label>
                 <label className="flex items-center justify-center gap-2 w-full px-4 py-3 bg-slate-50 border border-dashed border-slate-300 rounded-xl text-sm text-slate-600 cursor-pointer hover:bg-slate-100 transition-colors">
@@ -1133,6 +1134,19 @@ export const Invoices: React.FC = () => {
                     )}
                   </>
                 )}
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Setor Responsável</label>
+                <select 
+                  required
+                  value={formData.sector_id}
+                  onChange={e => setFormData({...formData, sector_id: e.target.value, crd: ''})}
+                  className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+                >
+                  <option value="">Selecione um setor</option>
+                  {sectors.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                </select>
               </div>
 
               <div className="grid grid-cols-2 gap-4">
@@ -1244,21 +1258,9 @@ export const Invoices: React.FC = () => {
                   />
                 </div>
               </div>
-
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Setor Responsável</label>
-                <select 
-                  required
-                  value={formData.sector_id}
-                  onChange={e => setFormData({...formData, sector_id: e.target.value, crd: ''})}
-                  className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
-                >
-                  <option value="">Selecione um setor</option>
-                  {sectors.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                </select>
               </div>
 
-              <div className="pt-4 flex gap-3">
+              <div className="p-6 pt-4 border-t border-slate-100 flex gap-3 shrink-0 bg-white">
                 <button 
                   type="button"
                   onClick={closeInvoiceModal}
