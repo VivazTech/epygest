@@ -342,12 +342,18 @@ export const ImportacaoPage: React.FC = () => {
     }
   };
 
-  // Estado da pré-visualização do Rel. CRD (somente exibição por enquanto).
+  // Estado da pré-visualização do Rel. CRD.
   const [relCrdLoading, setRelCrdLoading] = useState(false);
   const [relCrdFileName, setRelCrdFileName] = useState('');
   const [relCrdError, setRelCrdError] = useState('');
   const [relCrdAccounts, setRelCrdAccounts] = useState<RelCrdAccount[]>([]);
   const [relCrdSummary, setRelCrdSummary] = useState<RelCrdSummary | null>(null);
+  const [relCrdSelected, setRelCrdSelected] = useState<Set<string>>(new Set());
+  const now = new Date();
+  const [relCrdImportMonth, setRelCrdImportMonth] = useState(String(now.getMonth() + 1));
+  const [relCrdImportYear, setRelCrdImportYear] = useState(String(now.getFullYear()));
+  const [relCrdCommitting, setRelCrdCommitting] = useState(false);
+  const [relCrdCommitResult, setRelCrdCommitResult] = useState<{ imported: number; not_found: string[] } | null>(null);
 
   // Estado da pré-visualização da Provisão de Férias (somente exibição — destino ainda não definido).
   const [provisaoFeriasLoading, setProvisaoFeriasLoading] = useState(false);
@@ -613,13 +619,46 @@ export const ImportacaoPage: React.FC = () => {
         setRelCrdSummary(null);
         return;
       }
-      setRelCrdAccounts(Array.isArray(data.accounts) ? data.accounts : []);
+      const accounts = Array.isArray(data.accounts) ? data.accounts : [];
+      setRelCrdAccounts(accounts);
       setRelCrdSummary(data.summary || null);
+      setRelCrdSelected(new Set());
+      setRelCrdCommitResult(null);
     } catch (err: any) {
       setRelCrdError(err?.message || 'Erro inesperado ao importar o arquivo.');
     } finally {
       setRelCrdLoading(false);
       if (event?.target) event.target.value = '';
+    }
+  };
+
+  const commitRelCrd = async (codigos?: string[]) => {
+    const targetRows = codigos
+      ? relCrdAccounts.filter((a) => codigos.includes(a.codigo))
+      : relCrdAccounts.filter((a) => relCrdSelected.has(a.codigo));
+    if (!targetRows.length) return;
+    setRelCrdCommitting(true);
+    setRelCrdCommitResult(null);
+    try {
+      const res = await fetch('/api/import/rel-crd/commit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          rows: targetRows.map((a) => ({ codigo: a.codigo, lanc_liquido: a.lanc_liquido })),
+          month: Number(relCrdImportMonth),
+          year: Number(relCrdImportYear),
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        alert(data?.error || 'Falha ao importar os dados do Rel. CRD.');
+        return;
+      }
+      setRelCrdCommitResult({ imported: data.imported, not_found: data.not_found ?? [] });
+    } catch (err: any) {
+      alert(err?.message || 'Erro inesperado ao importar.');
+    } finally {
+      setRelCrdCommitting(false);
     }
   };
 
@@ -1151,7 +1190,7 @@ export const ImportacaoPage: React.FC = () => {
         </div>
       )}
 
-      {/* Pré-visualização do Rel. CRD (somente leitura por enquanto) */}
+      {/* Pré-visualização do Rel. CRD — com seleção e importação por conta */}
       {(relCrdFileName || relCrdError) && (
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
           <div className="px-4 py-3 border-b border-slate-100 flex flex-wrap gap-3 items-center justify-between">
@@ -1183,45 +1222,151 @@ export const ImportacaoPage: React.FC = () => {
             </div>
           )}
 
-          {relCrdAccounts.length > 0 && (
-            <div className="overflow-auto max-h-[520px]">
-              <table className="w-full text-left border-collapse min-w-[1150px]">
-                <thead className="sticky top-0">
-                  <tr className="bg-slate-50 border-b border-slate-200">
-                    {['Cód.', 'Conta', 'Lançamentos', 'Cancelam.', 'Saldo lanç.', 'Baixas', 'Estorno', 'Baixas líq.', 'Lanç. líquido'].map((h) => (
-                      <th
-                        key={h}
-                        className={`px-3 py-2 text-[10px] font-bold text-slate-500 uppercase tracking-widest ${
-                          !['Cód.', 'Conta'].includes(h) ? 'text-right' : ''
-                        }`}
-                      >
-                        {h}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {filteredRelCrdAccounts.map((acc, idx) => (
-                    <tr key={idx} className={`hover:bg-slate-50/70 ${acc.nivel === 1 ? 'bg-slate-100 font-bold' : acc.nivel === 2 ? 'bg-slate-50/60' : ''}`}>
-                      <td className="px-3 py-2 text-xs text-slate-500 tabular-nums">{acc.codigo}</td>
-                      <td
-                        className={`px-3 py-2 text-xs whitespace-nowrap ${acc.nivel === 1 ? 'text-slate-900 font-bold' : acc.nivel === 2 ? 'text-slate-800 font-semibold' : 'text-slate-700'}`}
-                        style={{ paddingLeft: `${0.75 + (acc.nivel - 1) * 1.25}rem` }}
-                      >
-                        {acc.nome}
-                      </td>
-                      <td className="px-3 py-2 text-xs text-right tabular-nums text-slate-700">{formatCurrency(acc.lancamentos)}</td>
-                      <td className="px-3 py-2 text-xs text-right tabular-nums text-slate-500">{formatCurrency(acc.cancelamentos)}</td>
-                      <td className="px-3 py-2 text-xs text-right tabular-nums text-slate-700">{formatCurrency(acc.saldo_lanc)}</td>
-                      <td className="px-3 py-2 text-xs text-right tabular-nums text-slate-700">{formatCurrency(acc.baixas)}</td>
-                      <td className="px-3 py-2 text-xs text-right tabular-nums text-slate-500">{formatCurrency(acc.estorno)}</td>
-                      <td className="px-3 py-2 text-xs text-right tabular-nums text-slate-700">{formatCurrency(acc.baixas_liquido)}</td>
-                      <td className={`px-3 py-2 text-xs text-right tabular-nums font-semibold ${acc.lanc_liquido < 0 ? 'text-red-600' : 'text-slate-900'}`}>{formatCurrency(acc.lanc_liquido)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+          {relCrdCommitResult && (
+            <div className="px-4 py-2 text-xs bg-emerald-50 border-b border-emerald-100 flex flex-wrap gap-x-4 items-center">
+              <span className="text-emerald-700 font-semibold flex items-center gap-1">
+                <CheckCircle2 className="w-4 h-4" />
+                {relCrdCommitResult.imported} conta(s) importada(s) com sucesso.
+              </span>
+              {relCrdCommitResult.not_found.length > 0 && (
+                <span className="text-amber-700">
+                  Não encontrados: {relCrdCommitResult.not_found.join(', ')}
+                </span>
+              )}
             </div>
+          )}
+
+          {relCrdAccounts.length > 0 && (
+            <>
+              {/* Barra de ações: seletor de mês/ano + botões de importação */}
+              <div className="px-4 py-3 border-b border-slate-100 bg-slate-50/50 flex flex-wrap gap-3 items-center justify-between">
+                <div className="flex items-center gap-2 text-xs text-slate-600">
+                  <span className="font-semibold">Importar realizado em:</span>
+                  <select
+                    value={relCrdImportMonth}
+                    onChange={(e) => setRelCrdImportMonth(e.target.value)}
+                    className="border border-slate-200 rounded-lg px-2 py-1 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-[#004D40]/30"
+                  >
+                    {['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'].map((m, i) => (
+                      <option key={i+1} value={String(i+1)}>{m}</option>
+                    ))}
+                  </select>
+                  <select
+                    value={relCrdImportYear}
+                    onChange={(e) => setRelCrdImportYear(e.target.value)}
+                    className="border border-slate-200 rounded-lg px-2 py-1 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-[#004D40]/30"
+                  >
+                    {Array.from({ length: 6 }, (_, i) => now.getFullYear() - 2 + i).map((y) => (
+                      <option key={y} value={String(y)}>{y}</option>
+                    ))}
+                  </select>
+                  {relCrdSelected.size > 0 && (
+                    <span className="ml-1 text-[#004D40] font-semibold">{relCrdSelected.size} selecionada(s)</span>
+                  )}
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => commitRelCrd(relCrdAccounts.map((a) => a.codigo))}
+                    disabled={relCrdCommitting}
+                    className="px-3 py-1.5 rounded-lg text-xs font-bold bg-[#004D40] text-white hover:bg-[#003d33] disabled:opacity-50 transition-colors flex items-center gap-1"
+                  >
+                    {relCrdCommitting ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
+                    Importar tudo
+                  </button>
+                  <button
+                    onClick={() => commitRelCrd()}
+                    disabled={relCrdCommitting || relCrdSelected.size === 0}
+                    className="px-3 py-1.5 rounded-lg text-xs font-bold border border-[#004D40] text-[#004D40] bg-white hover:bg-emerald-50 disabled:opacity-40 transition-colors flex items-center gap-1"
+                  >
+                    {relCrdCommitting ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
+                    Importar selecionados
+                  </button>
+                </div>
+              </div>
+
+              <div className="overflow-auto max-h-[520px]">
+                <table className="w-full text-left border-collapse min-w-[1200px]">
+                  <thead className="sticky top-0 z-10">
+                    <tr className="bg-slate-50 border-b border-slate-200">
+                      <th className="px-3 py-2 w-8">
+                        <input
+                          type="checkbox"
+                          className="rounded border-slate-300 accent-[#004D40]"
+                          checked={filteredRelCrdAccounts.length > 0 && filteredRelCrdAccounts.every((a) => relCrdSelected.has(a.codigo))}
+                          onChange={(e) => {
+                            setRelCrdSelected((prev) => {
+                              const next = new Set(prev);
+                              if (e.target.checked) filteredRelCrdAccounts.forEach((a) => next.add(a.codigo));
+                              else filteredRelCrdAccounts.forEach((a) => next.delete(a.codigo));
+                              return next;
+                            });
+                          }}
+                        />
+                      </th>
+                      {['Cód.', 'Conta', 'Lançamentos', 'Cancelam.', 'Saldo lanç.', 'Baixas', 'Estorno', 'Baixas líq.', 'Lanç. líquido'].map((h) => (
+                        <th
+                          key={h}
+                          className={`px-3 py-2 text-[10px] font-bold text-slate-500 uppercase tracking-widest ${
+                            !['Cód.', 'Conta'].includes(h) ? 'text-right' : ''
+                          }`}
+                        >
+                          {h}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {filteredRelCrdAccounts.map((acc, idx) => {
+                      const isSelected = relCrdSelected.has(acc.codigo);
+                      return (
+                        <tr
+                          key={idx}
+                          className={`cursor-pointer ${isSelected ? 'bg-emerald-50/60' : acc.nivel === 1 ? 'bg-slate-100 font-bold' : acc.nivel === 2 ? 'bg-slate-50/60' : ''} hover:bg-emerald-50/40`}
+                          onClick={() => {
+                            setRelCrdSelected((prev) => {
+                              const next = new Set(prev);
+                              if (next.has(acc.codigo)) next.delete(acc.codigo);
+                              else next.add(acc.codigo);
+                              return next;
+                            });
+                          }}
+                        >
+                          <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
+                            <input
+                              type="checkbox"
+                              className="rounded border-slate-300 accent-[#004D40]"
+                              checked={isSelected}
+                              onChange={() => {
+                                setRelCrdSelected((prev) => {
+                                  const next = new Set(prev);
+                                  if (next.has(acc.codigo)) next.delete(acc.codigo);
+                                  else next.add(acc.codigo);
+                                  return next;
+                                });
+                              }}
+                            />
+                          </td>
+                          <td className="px-3 py-2 text-xs text-slate-500 tabular-nums">{acc.codigo}</td>
+                          <td
+                            className={`px-3 py-2 text-xs whitespace-nowrap ${acc.nivel === 1 ? 'text-slate-900 font-bold' : acc.nivel === 2 ? 'text-slate-800 font-semibold' : 'text-slate-700'}`}
+                            style={{ paddingLeft: `${0.75 + (acc.nivel - 1) * 1.25}rem` }}
+                          >
+                            {acc.nome}
+                          </td>
+                          <td className="px-3 py-2 text-xs text-right tabular-nums text-slate-700">{formatCurrency(acc.lancamentos)}</td>
+                          <td className="px-3 py-2 text-xs text-right tabular-nums text-slate-500">{formatCurrency(acc.cancelamentos)}</td>
+                          <td className="px-3 py-2 text-xs text-right tabular-nums text-slate-700">{formatCurrency(acc.saldo_lanc)}</td>
+                          <td className="px-3 py-2 text-xs text-right tabular-nums text-slate-700">{formatCurrency(acc.baixas)}</td>
+                          <td className="px-3 py-2 text-xs text-right tabular-nums text-slate-500">{formatCurrency(acc.estorno)}</td>
+                          <td className="px-3 py-2 text-xs text-right tabular-nums text-slate-700">{formatCurrency(acc.baixas_liquido)}</td>
+                          <td className={`px-3 py-2 text-xs text-right tabular-nums font-semibold ${acc.lanc_liquido < 0 ? 'text-red-600' : 'text-slate-900'}`}>{formatCurrency(acc.lanc_liquido)}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </>
           )}
         </div>
       )}

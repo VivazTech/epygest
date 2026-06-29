@@ -58,6 +58,7 @@ export const Invoices: React.FC = () => {
   const [uploadingBoleto, setUploadingBoleto] = useState(false);
   const [semBoleto, setSemBoleto] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
+  const [exportingReport, setExportingReport] = useState<'csv' | 'pdf' | null>(null);
   const [reportFilters, setReportFilters] = useState({
     from: '',
     to: '',
@@ -405,33 +406,40 @@ export const Invoices: React.FC = () => {
     return { label: 'Aguardando Controle', icon: Clock, classes: 'bg-orange-100 text-orange-700' };
   };
 
-  const downloadInvoiceReport = async () => {
+  const downloadInvoiceReport = async (format: 'csv' | 'pdf') => {
     const params = new URLSearchParams();
+    params.set('format', format);
     if (reportFilters.from) params.set('from', reportFilters.from);
     if (reportFilters.to) params.set('to', reportFilters.to);
     if (reportFilters.payment_method) params.set('payment_method', reportFilters.payment_method);
 
-    const response = await fetch(`/api/invoices/report?${params.toString()}`);
-    if (!response.ok) {
-      let message = 'Não foi possível gerar o relatório.';
-      try {
-        const data = await response.json();
-        message = data?.detail || data?.error || message;
-      } catch {
-        // resposta não era JSON; mantém a mensagem genérica
+    setExportingReport(format);
+    try {
+      const response = await fetch(`/api/invoices/report?${params.toString()}`);
+      if (!response.ok) {
+        let message = 'Não foi possível gerar o relatório.';
+        try {
+          const data = await response.json();
+          message = data?.detail || data?.error || message;
+        } catch {
+          // resposta não era JSON; mantém a mensagem genérica
+        }
+        alert(message);
+        return;
       }
-      alert(message);
-      return;
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `relatorio-notas-${new Date().toISOString().slice(0, 10)}.${format}`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+      setShowReportModal(false);
+    } finally {
+      setExportingReport(null);
     }
-    const blob = await response.blob();
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `relatorio-notas-${new Date().toISOString().slice(0, 10)}.csv`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    window.URL.revokeObjectURL(url);
   };
 
   const isRequester = actingSector === 'requester';
@@ -1390,23 +1398,30 @@ export const Invoices: React.FC = () => {
                 </select>
               </div>
 
-              <div className="pt-2 flex gap-3">
+              <div className="pt-2 flex flex-col sm:flex-row gap-3">
                 <button
                   type="button"
                   onClick={() => setReportFilters({ from: '', to: '', payment_method: '' })}
-                  className="flex-1 px-4 py-3 bg-slate-100 text-slate-600 font-bold rounded-xl hover:bg-slate-200 transition-colors"
+                  disabled={!!exportingReport}
+                  className="flex-1 px-4 py-3 bg-slate-100 text-slate-600 font-bold rounded-xl hover:bg-slate-200 transition-colors disabled:opacity-60"
                 >
                   Limpar filtros
                 </button>
                 <button
                   type="button"
-                  onClick={async () => {
-                    await downloadInvoiceReport();
-                    setShowReportModal(false);
-                  }}
-                  className="flex-1 px-4 py-3 bg-[#004D40] text-white font-bold rounded-xl hover:bg-[#003d33] shadow-lg shadow-emerald-900/10 transition-colors"
+                  onClick={() => downloadInvoiceReport('csv')}
+                  disabled={!!exportingReport}
+                  className="flex-1 px-4 py-3 bg-white border border-slate-200 text-slate-700 font-bold rounded-xl hover:bg-slate-50 transition-colors disabled:opacity-60"
                 >
-                  Exportar CSV
+                  {exportingReport === 'csv' ? 'Exportando CSV...' : 'Exportar CSV'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => downloadInvoiceReport('pdf')}
+                  disabled={!!exportingReport}
+                  className="flex-1 px-4 py-3 bg-[#004D40] text-white font-bold rounded-xl hover:bg-[#003d33] shadow-lg shadow-emerald-900/10 transition-colors disabled:opacity-60"
+                >
+                  {exportingReport === 'pdf' ? 'Exportando PDF...' : 'Exportar PDF'}
                 </button>
               </div>
             </div>

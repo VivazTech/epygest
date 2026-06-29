@@ -7,6 +7,7 @@ import cookieParser from "cookie-parser";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 import xlsx from "xlsx";
+import PDFDocument from "pdfkit";
 import { supabase } from "./lib/supabase.js";
 import {
   SESSION_COOKIE,
@@ -1275,28 +1276,42 @@ export function createApp() {
     );
   });
 
-  // Relatório CSV
-  app.get("/api/invoices/report", async (req, res) => {
-    const { from, to, payment_method } = req.query as {
-      from?: string; to?: string; payment_method?: string;
+  // Relatório CSV / PDF
+  const invoiceFlowStageLabel = (stage: string) => {
+    const map: Record<string, string> = {
+      control_pending: "Aguardando Controle",
+      control_approved: "Aprovado Controle",
+      paid: "Pago",
+      cancelled: "Cancelado",
     };
+    return map[stage] || stage;
+  };
 
+  const formatReportCurrency = (value: unknown) => {
+    const amount = Number(value);
+    if (!Number.isFinite(amount)) return "";
+    return amount.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+  };
+
+  const fetchInvoiceReportRows = async (filters: {
+    from?: string;
+    to?: string;
+    payment_method?: string;
+  }) => {
     let query = supabase
       .from("invoices")
       .select("*, sectors(name), users(name)")
       .neq("flow_stage", "cancelled")
       .order("due_date", { ascending: true });
 
-    if (from) query = query.gte("due_date", from);
-    if (to) query = query.lte("due_date", to);
-    if (payment_method) query = query.eq("payment_method", payment_method);
+    if (filters.from) query = query.gte("due_date", filters.from);
+    if (filters.to) query = query.lte("due_date", filters.to);
+    if (filters.payment_method) query = query.eq("payment_method", filters.payment_method);
 
     const { data, error } = await query;
-    if (error) { console.error(error); return res.status(500).json({ error: "Erro interno ao processar a solicitação." }); }
+    if (error) throw error;
 
-    // Gera links assinados (temporários) para os arquivos anexados, já que o
-    // storage é privado e o caminho salvo no banco não abre direto no navegador.
-    const rows = await Promise.all(
+    return Promise.all(
       (data ?? []).map(async (i: any) => {
         const [fileUrl, boletoUrl, receiptUrl] = await Promise.all([
           i.file_path ? createSignedDocumentUrl(i.file_path) : Promise.resolve(null),
@@ -1313,16 +1328,139 @@ export function createApp() {
         };
       })
     );
-    const header = [
-      "id","invoice_number","provider_name","sector_name","user_name","amount",
-      "issue_date","due_date","payment_method","pix_key","flow_stage",
-      "status","natureza","file_url","boleto_file_url","payment_receipt_url","created_at",
-    ];
+  };
 
-    const csv = [header.join(","), ...rows.map((r: any) => header.map((k) => escapeCsv(r[k])).join(","))].join("\n");
-    res.setHeader("Content-Type", "text/csv; charset=utf-8");
-    res.setHeader("Content-Disposition", `attachment; filename="relatorio-notas-${Date.now()}.csv"`);
-    res.send("\uFEFF" + csv);
+  const invoiceReportCsvHeader = [
+    "id", "invoice_number", "provider_name", "sector_name", "user_name", "amount",
+    "issue_date", "due_date", "payment_method", "pix_key", "flow_stage",
+    "status", "natureza", "file_url", "boleto_file_url", "payment_receipt_url", "created_at",
+  ];
+
+  const buildInvoiceReportCsv = (rows: any[]) =>
+    [
+      invoiceReportCsvHeader.join(","),
+      ...rows.map((r: any) => invoiceReportCsvHeader.map((k) => escapeCsv(r[k])).join(",")),
+    ].join("\n");
+
+  const buildInvoiceReportPdf = (
+    rows: any[],
+    filters: { from?: string; to?: string; payment_method?: string }
+  ) =>
+    new Promise<Buffer>((resolve, reject) => {
+      const doc = new PDFDocument({ margin: 36, size: "A4", layout: "landscape" });
+      const chunks: Buffer[] = [];
+      doc.on("data", (chunk) => chunks.push(chunk as Buffer));
+      doc.on("end", () => resolve(Buffer.concat(chunks)));
+      doc.on("error", reject);
+
+      const pageWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+      const columns = [
+        { label: "Nota", width: 52 },
+        { label: "Fornecedor", width: 118 },
+        { label: "Setor", width: 72 },
+        { label: "Valor", width: 68 },
+        { label: "Venc.", width: 52 },
+        { label: "Pagamento", width: 58 },
+        { label: "Pix", width: 88 },
+        { label: "Status", width: 78 },
+      ];
+      const startX = doc.page.margins.left;
+      let y = doc.page.margins.top;
+
+      const drawTableHeader = () => {
+        let x = startX;
+        doc.save();
+        doc.rect(startX, y - 2, pageWidth, 16).fill("#004D40");
+        doc.restore();
+        doc.font("Helvetica-Bold").fontSize(8).fillColor("#ffffff");
+        for (const col of columns) {
+          doc.text(col.label, x + 2, y, { width: col.width - 4, lineBreak: false });
+          x += col.width + 4;
+        }
+        y += 16;
+      };
+
+      const ensureSpace = (height = 14) => {
+        if (y + height <= doc.page.height - doc.page.margins.bottom) return;
+        doc.addPage({ size: "A4", layout: "landscape", margin: 36 });
+        y = doc.page.margins.top;
+        drawTableHeader();
+      };
+
+      doc.font("Helvetica-Bold").fontSize(14).fillColor("#004D40")
+        .text("Relatório de Notas para Pagamento", startX, y, { width: pageWidth, align: "center" });
+      y = doc.y + 8;
+
+      doc.font("Helvetica").fontSize(9).fillColor("#444444");
+      const filterParts: string[] = [];
+      if (filters.from || filters.to) {
+        filterParts.push(`Vencimento: ${filters.from || "..."} até ${filters.to || "..."}`);
+      }
+      if (filters.payment_method) filterParts.push(`Pagamento: ${filters.payment_method}`);
+      doc.text(filterParts.length ? filterParts.join("  •  ") : "Todas as notas não canceladas", startX, y);
+      y = doc.y + 2;
+      doc.text(`Gerado em ${new Date().toLocaleString("pt-BR")}  •  ${rows.length} nota(s)`, startX, y);
+      y = doc.y + 10;
+
+      drawTableHeader();
+
+      for (const row of rows) {
+        ensureSpace();
+        let x = startX;
+        doc.font("Helvetica").fontSize(8).fillColor("#222222");
+        const cells = [
+          String(row.invoice_number || ""),
+          String(row.provider_name || ""),
+          String(row.sector_name || ""),
+          formatReportCurrency(row.amount),
+          String(row.due_date || ""),
+          String(row.payment_method || ""),
+          String(row.pix_key || ""),
+          invoiceFlowStageLabel(String(row.flow_stage || row.status || "")),
+        ];
+        for (let i = 0; i < columns.length; i++) {
+          doc.text(cells[i], x + 2, y, { width: columns[i].width - 4, lineBreak: false, ellipsis: true });
+          x += columns[i].width + 4;
+        }
+        y += 14;
+      }
+
+      ensureSpace(24);
+      const total = rows.reduce((sum, row) => sum + (Number(row.amount) || 0), 0);
+      doc.font("Helvetica-Bold").fontSize(10).fillColor("#004D40")
+        .text(`Total: ${formatReportCurrency(total)}`, startX, y + 4, { width: pageWidth, align: "right" });
+
+      doc.end();
+    });
+
+  app.get("/api/invoices/report", async (req, res) => {
+    const { from, to, payment_method, format } = req.query as {
+      from?: string;
+      to?: string;
+      payment_method?: string;
+      format?: string;
+    };
+    const exportFormat = String(format || "csv").toLowerCase();
+
+    try {
+      const rows = await fetchInvoiceReportRows({ from, to, payment_method });
+      const stamp = new Date().toISOString().slice(0, 10);
+
+      if (exportFormat === "pdf") {
+        const pdf = await buildInvoiceReportPdf(rows, { from, to, payment_method });
+        res.setHeader("Content-Type", "application/pdf");
+        res.setHeader("Content-Disposition", `attachment; filename="relatorio-notas-${stamp}.pdf"`);
+        return res.send(pdf);
+      }
+
+      const csv = buildInvoiceReportCsv(rows);
+      res.setHeader("Content-Type", "text/csv; charset=utf-8");
+      res.setHeader("Content-Disposition", `attachment; filename="relatorio-notas-${stamp}.csv"`);
+      res.send("\uFEFF" + csv);
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: "Erro interno ao processar a solicitação." });
+    }
   });
 
   // Upload PDF e extração
@@ -2312,6 +2450,56 @@ export function createApp() {
     } finally {
       if (req.file?.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
     }
+  });
+
+  // ====================================================
+  // IMPORTAÇÃO: REL. CRD — COMMIT (grava lanc_liquido em crd_monthly_values por conta)
+  // ====================================================
+  app.post("/api/import/rel-crd/commit", async (req, res) => {
+    const { rows, month, year } = req.body as {
+      rows: { codigo: string; lanc_liquido: number }[];
+      month: number;
+      year: number;
+    };
+    if (!Array.isArray(rows) || !rows.length)
+      return res.status(400).json({ error: "Nenhuma linha enviada." });
+    if (!month || !year || month < 1 || month > 12 || year < 2000)
+      return res.status(400).json({ error: "Mês/ano inválido." });
+
+    // Busca todos os CRDs ativos para fazer o match por código
+    const { data: crds, error: crdErr } = await supabase.from("crds").select("id, code");
+    if (crdErr) return res.status(500).json({ error: crdErr.message });
+
+    const codeToId = new Map<string, number>();
+    for (const c of crds ?? []) {
+      if (c.code) codeToId.set(String(c.code).trim().toLowerCase(), Number(c.id));
+    }
+
+    const upserts: { crd_id: number; year: number; month: number; value: number }[] = [];
+    const notFound: string[] = [];
+    for (const row of rows) {
+      const crdId = codeToId.get(String(row.codigo ?? "").trim().toLowerCase());
+      if (!crdId) { notFound.push(row.codigo); continue; }
+      upserts.push({ crd_id: crdId, year: Number(year), month: Number(month), value: Number(row.lanc_liquido) });
+    }
+
+    if (!upserts.length) {
+      return res.status(422).json({
+        error: `Nenhum código encontrado no cadastro de CRDs. Verifique se os códigos do relatório existem no sistema.`,
+        not_found: notFound,
+      });
+    }
+
+    const { error: upsertErr } = await supabase
+      .from("crd_monthly_values")
+      .upsert(upserts, { onConflict: "crd_id,year,month" });
+    if (upsertErr) return res.status(500).json({ error: upsertErr.message });
+
+    res.json({
+      success: true,
+      imported: upserts.length,
+      not_found: notFound,
+    });
   });
 
   // ====================================================
