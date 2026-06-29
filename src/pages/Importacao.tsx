@@ -183,7 +183,46 @@ type ProvisaoFeriasTotals = {
   pis: number;
 };
 
+type ProvisaoFeriasRow = {
+  codigo: string;
+  nome: string;
+  vencto_ferias: string;
+  fer_ven: number;
+  fer_pro: number;
+  faltas: number;
+  salario: number;
+  media_vantagens: number;
+  terco_ferias: number;
+  valor_devido: number;
+  valor_mes: number;
+  inss: number;
+  fgts: number;
+  pis: number;
+};
+
+type RdsItem = { label: string; values: number[] };
+type RdsSection = { key: string; title: string; columns: string[]; items: RdsItem[]; total: number[] | null };
+type RdsWeekRow = { dia: string; data: string; quantidade: number; percentual: number };
+
+type RequisicaoGrupo = { codigo: number; nome: string; valor: number };
+type RequisicaoSetor = { codigo: number; nome: string; grupos: RequisicaoGrupo[]; total: number | null };
+
 type Provisao13Totals = {
+  salario_13: number;
+  media_vantagens: number;
+  adiantamento_13: number;
+  valor_devido: number;
+  valor_mes: number;
+  inss: number;
+  fgts: number;
+  pis: number;
+};
+
+type Provisao13Row = {
+  codigo: string;
+  nome: string;
+  data_admissao: string;
+  avos: string;
   salario_13: number;
   media_vantagens: number;
   adiantamento_13: number;
@@ -316,6 +355,7 @@ export const ImportacaoPage: React.FC = () => {
   const [provisaoFeriasError, setProvisaoFeriasError] = useState('');
   const [provisaoFeriasTotals, setProvisaoFeriasTotals] = useState<ProvisaoFeriasTotals | null>(null);
   const [provisaoFeriasPeriod, setProvisaoFeriasPeriod] = useState<{ month?: number; year?: number } | null>(null);
+  const [provisaoFeriasRows, setProvisaoFeriasRows] = useState<ProvisaoFeriasRow[]>([]);
 
   const uploadProvisaoFerias = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -332,9 +372,11 @@ export const ImportacaoPage: React.FC = () => {
         setProvisaoFeriasError(formatApiError(data, 'Falha ao processar a Provisão de Férias.'));
         setProvisaoFeriasTotals(null);
         setProvisaoFeriasPeriod(null);
+        setProvisaoFeriasRows([]);
         return;
       }
       setProvisaoFeriasTotals(data.totals || null);
+      setProvisaoFeriasRows(Array.isArray(data.rows) ? data.rows : []);
       setProvisaoFeriasPeriod(data.period || null);
     } catch (err: any) {
       setProvisaoFeriasError(err?.message || 'Erro inesperado ao importar o arquivo.');
@@ -350,6 +392,7 @@ export const ImportacaoPage: React.FC = () => {
   const [provisao13Error, setProvisao13Error] = useState('');
   const [provisao13Totals, setProvisao13Totals] = useState<Provisao13Totals | null>(null);
   const [provisao13Period, setProvisao13Period] = useState<{ month?: number; year?: number } | null>(null);
+  const [provisao13Rows, setProvisao13Rows] = useState<Provisao13Row[]>([]);
 
   const uploadProvisao13 = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -366,14 +409,90 @@ export const ImportacaoPage: React.FC = () => {
         setProvisao13Error(formatApiError(data, 'Falha ao processar a Provisão de 13º.'));
         setProvisao13Totals(null);
         setProvisao13Period(null);
+        setProvisao13Rows([]);
         return;
       }
       setProvisao13Totals(data.totals || null);
       setProvisao13Period(data.period || null);
+      setProvisao13Rows(Array.isArray(data.rows) ? data.rows : []);
     } catch (err: any) {
       setProvisao13Error(err?.message || 'Erro inesperado ao importar o arquivo.');
     } finally {
       setProvisao13Loading(false);
+      event.target.value = '';
+    }
+  };
+
+  // Estado da pré-visualização do RDS (somente exibição — destino ainda não definido).
+  const [rdsLoading, setRdsLoading] = useState(false);
+  const [rdsFileName, setRdsFileName] = useState('');
+  const [rdsError, setRdsError] = useState('');
+  const [rdsDate, setRdsDate] = useState('');
+  const [rdsSections, setRdsSections] = useState<RdsSection[]>([]);
+  const [rdsPrevisaoSemana, setRdsPrevisaoSemana] = useState<RdsWeekRow[]>([]);
+
+  const uploadRds = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setRdsLoading(true);
+    setRdsError('');
+    setRdsFileName(file.name);
+    try {
+      const formData = new FormData();
+      formData.append('rds_file', file);
+      const res = await fetch('/api/import/rds/preview', { method: 'POST', body: formData });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        setRdsError(formatApiError(data, 'Falha ao processar o RDS.'));
+        setRdsDate('');
+        setRdsSections([]);
+        setRdsPrevisaoSemana([]);
+        return;
+      }
+      setRdsDate(data.date || '');
+      setRdsSections(Array.isArray(data.sections) ? data.sections : []);
+      setRdsPrevisaoSemana(Array.isArray(data.previsao_semana) ? data.previsao_semana : []);
+    } catch (err: any) {
+      setRdsError(err?.message || 'Erro inesperado ao importar o arquivo.');
+    } finally {
+      setRdsLoading(false);
+      event.target.value = '';
+    }
+  };
+
+  // Estado da pré-visualização das Requisições Sintética (somente exibição — destino ainda não definido).
+  const [requisicoesLoading, setRequisicoesLoading] = useState(false);
+  const [requisicoesFileName, setRequisicoesFileName] = useState('');
+  const [requisicoesError, setRequisicoesError] = useState('');
+  const [requisicoesPeriodo, setRequisicoesPeriodo] = useState<{ de: string | null; ate: string | null } | null>(null);
+  const [requisicoesSetores, setRequisicoesSetores] = useState<RequisicaoSetor[]>([]);
+  const [requisicoesTotalGeral, setRequisicoesTotalGeral] = useState<number | null>(null);
+
+  const uploadRequisicoesSintetica = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setRequisicoesLoading(true);
+    setRequisicoesError('');
+    setRequisicoesFileName(file.name);
+    try {
+      const formData = new FormData();
+      formData.append('requisicoes_file', file);
+      const res = await fetch('/api/import/requisicoes-sintetica/preview', { method: 'POST', body: formData });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        setRequisicoesError(formatApiError(data, 'Falha ao processar as Requisições Sintética.'));
+        setRequisicoesPeriodo(null);
+        setRequisicoesSetores([]);
+        setRequisicoesTotalGeral(null);
+        return;
+      }
+      setRequisicoesPeriodo(data.periodo || null);
+      setRequisicoesSetores(Array.isArray(data.setores) ? data.setores : []);
+      setRequisicoesTotalGeral(typeof data.total_geral === 'number' ? data.total_geral : null);
+    } catch (err: any) {
+      setRequisicoesError(err?.message || 'Erro inesperado ao importar o arquivo.');
+    } finally {
+      setRequisicoesLoading(false);
       event.target.value = '';
     }
   };
@@ -465,6 +584,16 @@ export const ImportacaoPage: React.FC = () => {
         matchesSearch(query, acc.codigo, acc.nome, acc.lancamentos, acc.lanc_liquido)
       ),
     [relCrdAccounts, query]
+  );
+  const filteredProvisao13Rows = useMemo(
+    () =>
+      provisao13Rows.filter((r) => matchesSearch(query, r.codigo, r.nome, r.valor_devido, r.salario_13)),
+    [provisao13Rows, query]
+  );
+  const filteredProvisaoFeriasRows = useMemo(
+    () =>
+      provisaoFeriasRows.filter((r) => matchesSearch(query, r.codigo, r.nome, r.valor_devido, r.salario)),
+    [provisaoFeriasRows, query]
   );
 
   const uploadRelCrd = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -675,7 +804,7 @@ export const ImportacaoPage: React.FC = () => {
                   <div className="w-11 h-11 rounded-xl bg-[#004D40]/5 text-[#004D40] flex items-center justify-center">
                     <Icon className="w-5 h-5" />
                   </div>
-                  {source.key === 'consumo_interno' || source.key === 'extrato_mensal' || source.key === 'rel_crd' || source.key === 'provisao_ferias' || source.key === 'provisao_13' ? (
+                  {source.key === 'consumo_interno' || source.key === 'extrato_mensal' || source.key === 'rel_crd' || source.key === 'provisao_ferias' || source.key === 'provisao_13' || source.key === 'rds' || source.key === 'requisicoes_sintetica' ? (
                     <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-full px-2 py-0.5">
                       Extração ativa
                     </span>
@@ -746,6 +875,30 @@ export const ImportacaoPage: React.FC = () => {
                       accept=".pdf,application/pdf"
                       onChange={uploadProvisao13}
                       disabled={provisao13Loading}
+                      className="hidden"
+                    />
+                  </label>
+                ) : source.key === 'rds' ? (
+                  <label className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl border border-[#004D40] bg-white text-sm font-bold text-[#004D40] cursor-pointer hover:bg-emerald-50 transition-colors">
+                    {rdsLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+                    {rdsLoading ? 'Processando...' : 'Enviar arquivo (.xls)'}
+                    <input
+                      type="file"
+                      accept=".xls,.xlsx,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                      onChange={uploadRds}
+                      disabled={rdsLoading}
+                      className="hidden"
+                    />
+                  </label>
+                ) : source.key === 'requisicoes_sintetica' ? (
+                  <label className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl border border-[#004D40] bg-white text-sm font-bold text-[#004D40] cursor-pointer hover:bg-emerald-50 transition-colors">
+                    {requisicoesLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+                    {requisicoesLoading ? 'Processando...' : 'Enviar arquivo (.xls)'}
+                    <input
+                      type="file"
+                      accept=".xls,.xlsx,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                      onChange={uploadRequisicoesSintetica}
+                      disabled={requisicoesLoading}
                       className="hidden"
                     />
                   </label>
@@ -1073,19 +1226,24 @@ export const ImportacaoPage: React.FC = () => {
         </div>
       )}
 
-      {/* Pré-visualização da Provisão de Férias — apenas o resultado final do relatório (sem detalhe por funcionário). */}
+      {/* Pré-visualização da Provisão de Férias — todas as linhas por funcionário + totais. */}
       {(provisaoFeriasFileName || provisaoFeriasError) && (
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
           <div className="px-4 py-3 border-b border-slate-100 flex flex-wrap gap-3 items-center justify-between">
             <div className="flex items-center gap-2">
               <FileText className="w-4 h-4 text-[#004D40]" />
               <p className="text-sm font-bold text-slate-800">
-                Provisão Férias — resultado final
+                Provisão Férias — detalhe por funcionário
                 {provisaoFeriasPeriod?.month && provisaoFeriasPeriod?.year
                   ? ` (${periodoLabel({ month: provisaoFeriasPeriod.month, year: provisaoFeriasPeriod.year })})`
                   : ''}
               </p>
             </div>
+            {provisaoFeriasRows.length > 0 && (
+              <span className="text-xs text-slate-600">
+                Funcionários: <span className="font-bold">{provisaoFeriasRows.length}</span>
+              </span>
+            )}
           </div>
 
           {provisaoFeriasFileName && !provisaoFeriasError && (
@@ -1102,10 +1260,10 @@ export const ImportacaoPage: React.FC = () => {
           )}
 
           {provisaoFeriasTotals && (
-            <div className="p-4">
+            <div className="p-4 border-b border-slate-100">
               <p className="text-xs text-slate-500 mb-3">
-                Apenas o resultado final do relatório foi extraído. O destino de lançamento ainda não foi definido — os
-                valores ficam disponíveis aqui para decisão posterior.
+                Relatório completo extraído (todas as linhas e colunas). O destino de lançamento ainda não foi
+                definido — os valores ficam disponíveis aqui para decisão posterior.
               </p>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 {[
@@ -1126,22 +1284,83 @@ export const ImportacaoPage: React.FC = () => {
               </div>
             </div>
           )}
+
+          {provisaoFeriasRows.length > 0 && (
+            <div className="overflow-auto max-h-[520px]">
+              <table className="w-full text-left border-collapse min-w-[1450px]">
+                <thead className="sticky top-0">
+                  <tr className="bg-slate-50 border-b border-slate-200">
+                    {[
+                      'Cód.',
+                      'Nome',
+                      'Vencto. férias',
+                      'Fér ven',
+                      'Fér pro',
+                      'Faltas',
+                      'Salário',
+                      'Média e vantagens',
+                      '1/3 férias',
+                      'Valor devido',
+                      'Valor mês',
+                      'INSS',
+                      'FGTS',
+                      'PIS',
+                    ].map((h) => (
+                      <th
+                        key={h}
+                        className={`px-3 py-2 text-[10px] font-bold text-slate-500 uppercase tracking-widest ${
+                          !['Cód.', 'Nome', 'Vencto. férias'].includes(h) ? 'text-right' : ''
+                        }`}
+                      >
+                        {h}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {filteredProvisaoFeriasRows.map((r, idx) => (
+                    <tr key={`${r.codigo}-${idx}`} className="hover:bg-slate-50/70">
+                      <td className="px-3 py-2 text-xs text-slate-500 tabular-nums">{r.codigo}</td>
+                      <td className="px-3 py-2 text-xs whitespace-nowrap text-slate-800">{r.nome}</td>
+                      <td className="px-3 py-2 text-xs text-slate-600 tabular-nums">{r.vencto_ferias}</td>
+                      <td className="px-3 py-2 text-xs text-right tabular-nums text-slate-600">{r.fer_ven}</td>
+                      <td className="px-3 py-2 text-xs text-right tabular-nums text-slate-600">{r.fer_pro}</td>
+                      <td className="px-3 py-2 text-xs text-right tabular-nums text-slate-600">{r.faltas}</td>
+                      <td className="px-3 py-2 text-xs text-right tabular-nums text-slate-700">{formatCurrency(r.salario)}</td>
+                      <td className="px-3 py-2 text-xs text-right tabular-nums text-slate-700">{formatCurrency(r.media_vantagens)}</td>
+                      <td className="px-3 py-2 text-xs text-right tabular-nums text-slate-700">{formatCurrency(r.terco_ferias)}</td>
+                      <td className="px-3 py-2 text-xs text-right tabular-nums font-semibold text-slate-900">{formatCurrency(r.valor_devido)}</td>
+                      <td className="px-3 py-2 text-xs text-right tabular-nums text-slate-700">{formatCurrency(r.valor_mes)}</td>
+                      <td className="px-3 py-2 text-xs text-right tabular-nums text-slate-500">{formatCurrency(r.inss)}</td>
+                      <td className="px-3 py-2 text-xs text-right tabular-nums text-slate-500">{formatCurrency(r.fgts)}</td>
+                      <td className="px-3 py-2 text-xs text-right tabular-nums text-slate-500">{formatCurrency(r.pis)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
 
-      {/* Pré-visualização da Provisão de 13º — apenas o resultado final do relatório (sem detalhe por funcionário). */}
+      {/* Pré-visualização da Provisão de 13º — todas as linhas por funcionário + totais. */}
       {(provisao13FileName || provisao13Error) && (
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
           <div className="px-4 py-3 border-b border-slate-100 flex flex-wrap gap-3 items-center justify-between">
             <div className="flex items-center gap-2">
               <FileText className="w-4 h-4 text-[#004D40]" />
               <p className="text-sm font-bold text-slate-800">
-                Provisões 13º — resultado final
+                Provisões 13º — detalhe por funcionário
                 {provisao13Period?.month && provisao13Period?.year
                   ? ` (${periodoLabel({ month: provisao13Period.month, year: provisao13Period.year })})`
                   : ''}
               </p>
             </div>
+            {provisao13Rows.length > 0 && (
+              <span className="text-xs text-slate-600">
+                Funcionários: <span className="font-bold">{provisao13Rows.length}</span>
+              </span>
+            )}
           </div>
 
           {provisao13FileName && !provisao13Error && (
@@ -1158,10 +1377,10 @@ export const ImportacaoPage: React.FC = () => {
           )}
 
           {provisao13Totals && (
-            <div className="p-4">
+            <div className="p-4 border-b border-slate-100">
               <p className="text-xs text-slate-500 mb-3">
-                Apenas o resultado final do relatório foi extraído. O destino de lançamento ainda não foi definido — os
-                valores ficam disponíveis aqui para decisão posterior.
+                Relatório completo extraído (todas as linhas e colunas). O destino de lançamento ainda não foi
+                definido — os valores ficam disponíveis aqui para decisão posterior.
               </p>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 {[
@@ -1180,6 +1399,246 @@ export const ImportacaoPage: React.FC = () => {
                   </div>
                 ))}
               </div>
+            </div>
+          )}
+
+          {provisao13Rows.length > 0 && (
+            <div className="overflow-auto max-h-[520px]">
+              <table className="w-full text-left border-collapse min-w-[1300px]">
+                <thead className="sticky top-0">
+                  <tr className="bg-slate-50 border-b border-slate-200">
+                    {[
+                      'Cód.',
+                      'Nome',
+                      'Data admissão',
+                      'Avos',
+                      'Salário 13º',
+                      'Média e vantagens',
+                      'Adiantamento 13º',
+                      'Valor devido',
+                      'Valor mês',
+                      'INSS',
+                      'FGTS',
+                      'PIS',
+                    ].map((h) => (
+                      <th
+                        key={h}
+                        className={`px-3 py-2 text-[10px] font-bold text-slate-500 uppercase tracking-widest ${
+                          !['Cód.', 'Nome', 'Data admissão', 'Avos'].includes(h) ? 'text-right' : ''
+                        }`}
+                      >
+                        {h}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {filteredProvisao13Rows.map((r, idx) => (
+                    <tr key={`${r.codigo}-${idx}`} className="hover:bg-slate-50/70">
+                      <td className="px-3 py-2 text-xs text-slate-500 tabular-nums">{r.codigo}</td>
+                      <td className="px-3 py-2 text-xs whitespace-nowrap text-slate-800">{r.nome}</td>
+                      <td className="px-3 py-2 text-xs text-slate-600 tabular-nums">{r.data_admissao}</td>
+                      <td className="px-3 py-2 text-xs text-slate-600 tabular-nums">{r.avos}</td>
+                      <td className="px-3 py-2 text-xs text-right tabular-nums text-slate-700">{formatCurrency(r.salario_13)}</td>
+                      <td className="px-3 py-2 text-xs text-right tabular-nums text-slate-700">{formatCurrency(r.media_vantagens)}</td>
+                      <td className="px-3 py-2 text-xs text-right tabular-nums text-slate-700">{formatCurrency(r.adiantamento_13)}</td>
+                      <td className="px-3 py-2 text-xs text-right tabular-nums font-semibold text-slate-900">{formatCurrency(r.valor_devido)}</td>
+                      <td className="px-3 py-2 text-xs text-right tabular-nums text-slate-700">{formatCurrency(r.valor_mes)}</td>
+                      <td className="px-3 py-2 text-xs text-right tabular-nums text-slate-500">{formatCurrency(r.inss)}</td>
+                      <td className="px-3 py-2 text-xs text-right tabular-nums text-slate-500">{formatCurrency(r.fgts)}</td>
+                      <td className="px-3 py-2 text-xs text-right tabular-nums text-slate-500">{formatCurrency(r.pis)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Pré-visualização do RDS — todas as seções e itens do relatório. */}
+      {(rdsFileName || rdsError) && (
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+          <div className="px-4 py-3 border-b border-slate-100 flex flex-wrap gap-3 items-center justify-between">
+            <div className="flex items-center gap-2">
+              <ClipboardList className="w-4 h-4 text-[#004D40]" />
+              <p className="text-sm font-bold text-slate-800">
+                Relatório Diário de Situação — detalhe completo
+                {rdsDate ? ` (${rdsDate})` : ''}
+              </p>
+            </div>
+          </div>
+
+          {rdsFileName && !rdsError && (
+            <div className="px-4 py-2 text-xs text-emerald-700 bg-emerald-50/60 border-b border-emerald-100 flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4" />
+              Arquivo processado: {rdsFileName}
+            </div>
+          )}
+          {rdsError && (
+            <div className="px-4 py-2 text-xs text-red-700 bg-red-50 border-b border-red-100 flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4" />
+              {rdsError}
+            </div>
+          )}
+
+          {rdsSections.length > 0 && (
+            <div className="p-4 space-y-6">
+              <p className="text-xs text-slate-500">
+                Relatório completo extraído (todas as seções e linhas). O destino de lançamento ainda não foi
+                definido — os valores ficam disponíveis aqui para decisão posterior.
+              </p>
+              {rdsSections.map((section) => (
+                <div key={section.key} className="space-y-2">
+                  <p className="text-xs font-bold text-slate-700 uppercase tracking-wider">{section.title}</p>
+                  <div className="overflow-auto max-h-[360px] rounded-xl border border-slate-100">
+                    <table className="w-full text-left border-collapse min-w-[600px]">
+                      <thead className="sticky top-0">
+                        <tr className="bg-slate-50 border-b border-slate-200">
+                          {section.columns.map((h, hi) => (
+                            <th
+                              key={h}
+                              className={`px-3 py-2 text-[10px] font-bold text-slate-500 uppercase tracking-widest ${hi > 0 ? 'text-right' : ''}`}
+                            >
+                              {h}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {section.items.map((item, idx) => (
+                          <tr key={`${item.label}-${idx}`} className="hover:bg-slate-50/70">
+                            <td className="px-3 py-2 text-xs whitespace-nowrap text-slate-800">{item.label}</td>
+                            {item.values.map((v, vi) => (
+                              <td key={vi} className="px-3 py-2 text-xs text-right tabular-nums text-slate-700">
+                                {section.columns[vi + 1]?.includes('%') ? `${v.toFixed(2)}%` : formatCurrency(v)}
+                              </td>
+                            ))}
+                          </tr>
+                        ))}
+                        {section.total && (
+                          <tr className="bg-slate-50 font-bold">
+                            <td className="px-3 py-2 text-xs text-slate-900">Total</td>
+                            {section.total.map((v, vi) => (
+                              <td key={vi} className="px-3 py-2 text-xs text-right tabular-nums text-slate-900">
+                                {section.columns[vi + 1]?.includes('%') ? `${v.toFixed(2)}%` : formatCurrency(v)}
+                              </td>
+                            ))}
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ))}
+
+              {rdsPrevisaoSemana.length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-xs font-bold text-slate-700 uppercase tracking-wider">Previsão de ocupação da semana</p>
+                  <div className="overflow-auto rounded-xl border border-slate-100">
+                    <table className="w-full text-left border-collapse min-w-[500px]">
+                      <thead>
+                        <tr className="bg-slate-50 border-b border-slate-200">
+                          {['Dia', 'Data', 'Quantidade', 'Percentual'].map((h, hi) => (
+                            <th
+                              key={h}
+                              className={`px-3 py-2 text-[10px] font-bold text-slate-500 uppercase tracking-widest ${hi > 0 ? 'text-right' : ''}`}
+                            >
+                              {h}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {rdsPrevisaoSemana.map((w, idx) => (
+                          <tr key={idx} className="hover:bg-slate-50/70">
+                            <td className="px-3 py-2 text-xs text-slate-800">{w.dia}</td>
+                            <td className="px-3 py-2 text-xs text-right tabular-nums text-slate-600">{w.data}</td>
+                            <td className="px-3 py-2 text-xs text-right tabular-nums text-slate-700">{w.quantidade}</td>
+                            <td className="px-3 py-2 text-xs text-right tabular-nums text-slate-700">{w.percentual.toFixed(2)}%</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Pré-visualização das Requisições Sintética — todos os setores e grupos de itens. */}
+      {(requisicoesFileName || requisicoesError) && (
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+          <div className="px-4 py-3 border-b border-slate-100 flex flex-wrap gap-3 items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Layers className="w-4 h-4 text-[#004D40]" />
+              <p className="text-sm font-bold text-slate-800">
+                Requisições Sintética por Grupo de Itens — detalhe completo
+                {requisicoesPeriodo?.de && requisicoesPeriodo?.ate
+                  ? ` (${formatDate(requisicoesPeriodo.de)} a ${formatDate(requisicoesPeriodo.ate)})`
+                  : ''}
+              </p>
+            </div>
+            {requisicoesSetores.length > 0 && (
+              <div className="text-xs text-slate-600 flex flex-wrap gap-x-4 gap-y-1">
+                <span>Setores: <span className="font-bold">{requisicoesSetores.length}</span></span>
+                <span>Grupos: <span className="font-bold">{requisicoesSetores.reduce((s, st) => s + st.grupos.length, 0)}</span></span>
+                {requisicoesTotalGeral !== null && (
+                  <span>Total geral: <span className="font-bold">{formatCurrency(requisicoesTotalGeral)}</span></span>
+                )}
+              </div>
+            )}
+          </div>
+
+          {requisicoesFileName && !requisicoesError && (
+            <div className="px-4 py-2 text-xs text-emerald-700 bg-emerald-50/60 border-b border-emerald-100 flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4" />
+              Arquivo processado: {requisicoesFileName}
+            </div>
+          )}
+          {requisicoesError && (
+            <div className="px-4 py-2 text-xs text-red-700 bg-red-50 border-b border-red-100 flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4" />
+              {requisicoesError}
+            </div>
+          )}
+
+          {requisicoesSetores.length > 0 && (
+            <div className="p-4 space-y-3 max-h-[640px] overflow-auto">
+              <p className="text-xs text-slate-500">
+                Relatório completo extraído (todos os setores, grupos de itens e valores). O destino de lançamento
+                ainda não foi definido — os valores ficam disponíveis aqui para decisão posterior.
+              </p>
+              {requisicoesSetores
+                .filter((st) => matchesSearch(query, st.nome, String(st.codigo), st.total ?? 0) || st.grupos.some((g) => matchesSearch(query, g.nome, String(g.codigo), g.valor)))
+                .map((setor) => (
+                  <details key={`${setor.codigo}-${setor.nome}`} className="rounded-xl border border-slate-100 overflow-hidden">
+                    <summary className="px-3 py-2 bg-slate-50 text-xs font-bold text-slate-800 cursor-pointer flex items-center justify-between">
+                      <span>{setor.codigo} — {setor.nome}</span>
+                      <span className="text-slate-600 tabular-nums">{formatCurrency(setor.total ?? 0)}</span>
+                    </summary>
+                    <table className="w-full text-left border-collapse">
+                      <thead>
+                        <tr className="bg-white border-b border-slate-100">
+                          <th className="px-3 py-1.5 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Cód.</th>
+                          <th className="px-3 py-1.5 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Grupo de itens</th>
+                          <th className="px-3 py-1.5 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-right">Valor</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-50">
+                        {setor.grupos.map((g, gi) => (
+                          <tr key={gi} className="hover:bg-slate-50/70">
+                            <td className="px-3 py-1.5 text-xs text-slate-500 tabular-nums">{g.codigo}</td>
+                            <td className="px-3 py-1.5 text-xs text-slate-700">{g.nome}</td>
+                            <td className="px-3 py-1.5 text-xs text-right tabular-nums text-slate-700">{formatCurrency(g.valor)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </details>
+                ))}
             </div>
           )}
         </div>

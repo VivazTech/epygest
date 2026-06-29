@@ -46,6 +46,14 @@ const loadPdfParse = async () => {
   return (mod as any).default ?? (mod as any);
 };
 
+// pdfjs (vendorizado dentro do pdf-parse) dá acesso à posição (x,y) de cada
+// trecho de texto do PDF — usado para reconstruir colunas de tabelas com
+// precisão, em vez de tentar adivinhar limites em texto corrido sem separador.
+const loadPdfJs = async () => {
+  const mod = await import("pdf-parse/lib/pdf.js/v1.10.100/build/pdf.js");
+  return (mod as any).default ?? (mod as any);
+};
+
 // ---------- helpers ----------
 const toIsoDate = (value: string) => {
   if (!value) return "";
@@ -359,6 +367,11 @@ const getMonthDateRange = (year: number, month: number) => {
     dateTo: `${safeYear}-${monthText}-${String(lastDay).padStart(2, "0")}`,
   };
 };
+
+const applyProvisionDateRange = (query: any, dateFrom: string, dateTo: string) =>
+  query
+    .gte("created_at", `${dateFrom}T00:00:00`)
+    .lte("created_at", `${dateTo}T23:59:59.999`);
 
 // Diretório de upload: /tmp no Vercel (serverless), local no dev
 const uploadDir = process.env.VERCEL
@@ -1234,16 +1247,17 @@ export function createApp() {
     let query = supabase
       .from("invoices")
       .select("*, sectors(name), users(name)")
-      .order("due_date", { ascending: true });
+      .order("created_at", { ascending: false });
 
     if (from || to) {
-      if (from) query = query.gte("due_date", from);
-      if (to) query = query.lte("due_date", to);
+      const dateFrom = from || to!;
+      const dateTo = to || from!;
+      query = applyProvisionDateRange(query, dateFrom, dateTo);
     } else {
       const selectedMonth = Number(month) || now.getMonth() + 1;
       const selectedYear = Number(year) || now.getFullYear();
       const { dateFrom, dateTo } = getMonthDateRange(selectedYear, selectedMonth);
-      query = query.gte("due_date", dateFrom).lte("due_date", dateTo);
+      query = applyProvisionDateRange(query, dateFrom, dateTo);
     }
 
     const { data, error } = await query;
@@ -1280,15 +1294,29 @@ export function createApp() {
     const { data, error } = await query;
     if (error) { console.error(error); return res.status(500).json({ error: "Erro interno ao processar a solicitação." }); }
 
-    const rows = (data ?? []).map((i: any) => ({
-      ...i,
-      sector_name: i.sectors?.name ?? null,
-      user_name: i.users?.name ?? null,
-    }));
+    // Gera links assinados (temporários) para os arquivos anexados, já que o
+    // storage é privado e o caminho salvo no banco não abre direto no navegador.
+    const rows = await Promise.all(
+      (data ?? []).map(async (i: any) => {
+        const [fileUrl, boletoUrl, receiptUrl] = await Promise.all([
+          i.file_path ? createSignedDocumentUrl(i.file_path) : Promise.resolve(null),
+          i.boleto_file_path ? createSignedDocumentUrl(i.boleto_file_path) : Promise.resolve(null),
+          i.payment_receipt_path ? createSignedDocumentUrl(i.payment_receipt_path) : Promise.resolve(null),
+        ]);
+        return {
+          ...i,
+          sector_name: i.sectors?.name ?? null,
+          user_name: i.users?.name ?? null,
+          file_url: fileUrl && "url" in fileUrl ? fileUrl.url : "",
+          boleto_file_url: boletoUrl && "url" in boletoUrl ? boletoUrl.url : "",
+          payment_receipt_url: receiptUrl && "url" in receiptUrl ? receiptUrl.url : "",
+        };
+      })
+    );
     const header = [
       "id","invoice_number","provider_name","sector_name","user_name","amount",
       "issue_date","due_date","payment_method","pix_key","flow_stage",
-      "status","file_path","boleto_file_path","natureza","payment_receipt_path","created_at",
+      "status","natureza","file_url","boleto_file_url","payment_receipt_url","created_at",
     ];
 
     const csv = [header.join(","), ...rows.map((r: any) => header.map((k) => escapeCsv(r[k])).join(","))].join("\n");
@@ -2288,7 +2316,7 @@ export function createApp() {
 
   // ====================================================
   // IMPORTAÇÃO: PROVISÃO DE FÉRIAS (PDF do Desbravador)
-  // Extrai apenas o total geral do relatório (não o detalhe por funcionário).
+  // Extrai todas as linhas (uma por funcionário) e os totais do relatório.
   // Ainda não envia para nenhum destino — só exibe no resumo de importação.
   // ====================================================
   const parsePtBrNumber = (s: string): number => {
@@ -2296,40 +2324,92 @@ export function createApp() {
     return Number.isFinite(n) ? n : 0;
   };
 
-  const parseProvisaoFeriasPdfText = (text: string) => {
-    const periodMatch = /M[ÊE]S:\s*(\d{1,2})\/(\d{4})/i.exec(text);
+  // Lê o PDF usando as coordenadas (x,y) de cada trecho de texto (via pdfjs)
+  // em vez do texto corrido do pdf-parse. O texto corrido cola números
+  // adjacentes sem separador (ex.: código do funcionário colado ao valor
+  // seguinte), o que é ambíguo de desfazer só com regex — duas colunas podem
+  // formar números diferentes mas igualmente válidos a partir do mesmo texto.
+  // Com a posição de cada item já sabemos onde cada coluna começa, então não
+  // há ambiguidade: agrupamos por linha (mesmo y), ordenamos por x, e quando
+  // o pdfjs funde duas colunas próximas em um único item (ex.: "Valor do Mês"
+  // colado ao "INSS" com espaços), separamos por "2+ espaços".
+  const extractPdfRowsByPosition = async (fileBuffer: Buffer): Promise<string[][]> => {
+    const PDFJS = await loadPdfJs();
+    const doc = await PDFJS.getDocument({ data: fileBuffer }).promise;
+    const rows: string[][] = [];
+    for (let p = 1; p <= doc.numPages; p++) {
+      const page = await doc.getPage(p);
+      const content = await page.getTextContent();
+      const byY = new Map<number, { x: number; str: string }[]>();
+      for (const item of content.items as any[]) {
+        const y = Math.round(item.transform[5]);
+        if (!byY.has(y)) byY.set(y, []);
+        byY.get(y)!.push({ x: item.transform[4], str: item.str });
+      }
+      for (const items of byY.values()) {
+        items.sort((a, b) => a.x - b.x);
+        const tokens: string[] = [];
+        for (const it of items) {
+          for (const part of it.str.split(/\s{2,}/)) {
+            const t = part.trim();
+            if (t !== "") tokens.push(t);
+          }
+        }
+        if (tokens.length) rows.push(tokens);
+      }
+    }
+    return rows;
+  };
+
+  const parseProvisaoFeriasPdf = async (fileBuffer: Buffer, headerText: string) => {
+    const periodMatch = /M[ÊE]S:\s*(\d{1,2})\/(\d{4})/i.exec(headerText);
     const month = periodMatch ? Number(periodMatch[1]) : undefined;
     const year = periodMatch ? Number(periodMatch[2]) : undefined;
 
-    // O texto extraído do PDF segue a ordem das colunas da tabela, não a ordem
-    // visual: "valor mês, INSS, FGTS, PIS" aparecem ANTES de "Total Geral :", e
-    // "valor devido, 1/3 férias, média/vantagens, salário" vêm DEPOIS — sem
-    // espaçamento confiável entre eles, então extraímos os valores monetários
-    // pela vizinhança de "Total Geral" em vez de tentar casar grupos colados.
-    const totalIdx = text.search(/Total\s+Geral/i);
-    if (totalIdx < 0) return { month, year, totals: null as null };
+    const tableRows = await extractPdfRowsByPosition(fileBuffer);
+    // Linha de funcionário: 14 colunas e o 1º token é o código (só dígitos).
+    // Ordem visual: Código, Nome, Vencto.férias, FérVen, FérPro, Faltas,
+    // Salário, Média e vantagens, 1/3 férias, Valor devido, Valor do mês,
+    // INSS, FGTS, PIS.
+    const rows = tableRows
+      .filter((tokens) => tokens.length === 14 && /^\d{1,5}$/.test(tokens[0]))
+      .map((tokens) => {
+        const [codigo, nome, vencto, ferVen, ferPro, faltas, salario, media, terco, valorDevido, valorMes, inss, fgts, pis] =
+          tokens;
+        return {
+          codigo,
+          nome,
+          vencto_ferias: vencto,
+          fer_ven: Number(ferVen) || 0,
+          fer_pro: parsePtBrNumber(ferPro),
+          faltas: Number(faltas) || 0,
+          salario: parsePtBrNumber(salario),
+          media_vantagens: parsePtBrNumber(media),
+          terco_ferias: parsePtBrNumber(terco),
+          valor_devido: parsePtBrNumber(valorDevido),
+          valor_mes: parsePtBrNumber(valorMes),
+          inss: parsePtBrNumber(inss),
+          fgts: parsePtBrNumber(fgts),
+          pis: parsePtBrNumber(pis),
+        };
+      });
 
-    const moneyRe = /\d{1,3}(?:\.\d{3})*,\d{2}/g;
-    const before = text.slice(Math.max(0, totalIdx - 80), totalIdx).match(moneyRe) || [];
-    const after = text.slice(totalIdx, totalIdx + 150).match(moneyRe) || [];
-    const [valorMesS, inssS, fgtsS, pisS] = before.slice(-4);
-    const [valorDevidoS, tercoFeriasS, mediaVantagensS, salarioS] = after.slice(0, 4);
-    if (!salarioS || !valorDevidoS) return { month, year, totals: null as null };
-
-    return {
-      month,
-      year,
-      totals: {
-        salario: parsePtBrNumber(salarioS),
-        media_vantagens: parsePtBrNumber(mediaVantagensS),
-        terco_ferias: parsePtBrNumber(tercoFeriasS),
-        valor_devido: parsePtBrNumber(valorDevidoS),
-        valor_mes: parsePtBrNumber(valorMesS),
-        inss: parsePtBrNumber(inssS),
-        fgts: parsePtBrNumber(fgtsS),
-        pis: parsePtBrNumber(pisS),
+    const totals = rows.reduce(
+      (acc, r) => {
+        acc.salario += r.salario;
+        acc.media_vantagens += r.media_vantagens;
+        acc.terco_ferias += r.terco_ferias;
+        acc.valor_devido += r.valor_devido;
+        acc.valor_mes += r.valor_mes;
+        acc.inss += r.inss;
+        acc.fgts += r.fgts;
+        acc.pis += r.pis;
+        return acc;
       },
-    };
+      { salario: 0, media_vantagens: 0, terco_ferias: 0, valor_devido: 0, valor_mes: 0, inss: 0, fgts: 0, pis: 0 }
+    );
+
+    return { month, year, rows, totals: rows.length ? totals : null };
   };
 
   app.post("/api/import/provisao-ferias/preview", upload.single("provisao_ferias_pdf"), async (req, res) => {
@@ -2342,13 +2422,13 @@ export function createApp() {
       const fileBuffer = fs.readFileSync(req.file.path);
       const pdfParse = await loadPdfParse();
       const parsed = await pdfParse(fileBuffer);
-      const result = parseProvisaoFeriasPdfText(parsed.text || "");
+      const result = await parseProvisaoFeriasPdf(fileBuffer, parsed.text || "");
 
-      if (!result.totals) {
+      if (!result.totals || !result.rows.length) {
         return res.status(422).json({
           success: false,
           error:
-            "O arquivo foi lido, mas o 'Total Geral' não foi encontrado. Confira se este é o relatório 'Provisão de Férias' do Desbravador — o layout parece diferente do esperado.",
+            "O arquivo foi lido, mas nenhum funcionário foi reconhecido. Confira se este é o relatório 'Provisão de Férias' do Desbravador — o layout parece diferente do esperado.",
         });
       }
 
@@ -2357,6 +2437,7 @@ export function createApp() {
         report_name: req.file.originalname || "provisao-ferias.pdf",
         period: { month: result.month, year: result.year },
         totals: result.totals,
+        rows: result.rows,
       });
     } catch (error: any) {
       console.error("Erro ao processar Provisão de Férias:", error);
@@ -2372,42 +2453,99 @@ export function createApp() {
 
   // ====================================================
   // IMPORTAÇÃO: PROVISÃO DE 13º SALÁRIO (PDF do Desbravador)
-  // Extrai apenas o total geral do relatório (não o detalhe por funcionário).
+  // Extrai todas as linhas (uma por funcionário) e os totais do relatório.
   // Ainda não envia para nenhum destino — só exibe no resumo de importação.
   // ====================================================
+  // Linhas de cabeçalho/rodapé que não fazem parte da tabela de funcionários.
+  const PROVISAO_NOISE_LINE_RE = [
+    /^Horas:$/i,
+    /^Emissao:$/i,
+    /^Pagina:$/i,
+    /^CNPJ:$/i,
+    /^Empresa:$/i,
+    /^\d{2}:\d{2}:\d{2}$/,
+    /^\d{1,2}\/\d{1,2}$/,
+    /^\d{2}\/\d{2}\/\d{4}$/,
+    /^PROVIS[ÃA]O DE/i,
+    /^\d+\s*-\s*VIVAZ/i,
+    /^\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}$/,
+    /^Sistema licenciado/i,
+    /^\s*$/,
+    /^Encargos.*Nome do empregado/i,
+    /^PIS.*M[êe]s$/i,
+    /^C[óo]digo Nome do empregado/i,
+    /^Total\s+Geral/i,
+  ];
+
+  // Junta as linhas "úteis" do relatório (sem cabeçalho/rodapé/paginação) em uma
+  // única string, pois o pdf-parse extrai o texto na ordem das colunas da
+  // tabela (não a ordem visual) e cada registro de funcionário fica espalhado
+  // por 2-3 linhas dependendo da quebra de página/nome.
+  const joinProvisaoTableLines = (text: string, totalIdx: number): string => {
+    const lines = (totalIdx >= 0 ? text.slice(0, totalIdx) : text).split("\n");
+    return lines.filter((l) => !PROVISAO_NOISE_LINE_RE.some((re) => re.test(l.trim()))).join("");
+  };
+
+  const moneyToken = "(-?\\d{1,3}(?:\\.\\d{3})*,\\d{2})";
+
   const parseProvisao13PdfText = (text: string) => {
     const periodMatch = /M[ÊE]S:\s*(\d{1,2})\/(\d{4})/i.exec(text);
     const month = periodMatch ? Number(periodMatch[1]) : undefined;
     const year = periodMatch ? Number(periodMatch[2]) : undefined;
 
-    // Assim como na Provisão de Férias, o texto extraído do PDF segue a ordem
-    // das colunas e não a ordem visual. Neste relatório: INSS, FGTS, PIS, Valor
-    // do Mês vêm ANTES de "Total Geral :"; Média/Vantagens, Adiantamento, Valor
-    // devido, Salário 13º vêm DEPOIS.
     const totalIdx = text.search(/Total\s+Geral/i);
-    if (totalIdx < 0) return { month, year, totals: null as null };
+    if (totalIdx < 0) return { month, year, rows: [] as any[], totals: null as null };
 
+    const joined = joinProvisaoTableLines(text, totalIdx);
+    // Cada registro: INSS, FGTS, Valor do Mês, Código, PIS, Nome, Data admissão,
+    // Média e vantagens, Salário 13º, Avos (NN/12), Adiantamento 13º, Valor devido.
+    const recordRe = new RegExp(
+      moneyToken + moneyToken + moneyToken + "(\\d{1,4})" + moneyToken +
+        "([^\\d]+?)(\\d{2}/\\d{2}/\\d{4})" + moneyToken + moneyToken + "(\\d{2}/12)" + moneyToken + moneyToken,
+      "g"
+    );
+
+    const rows: any[] = [];
+    let m: RegExpExecArray | null;
+    while ((m = recordRe.exec(joined))) {
+      rows.push({
+        codigo: m[4],
+        nome: m[6].trim(),
+        data_admissao: m[7],
+        avos: m[10],
+        salario_13: parsePtBrNumber(m[9]),
+        media_vantagens: parsePtBrNumber(m[8]),
+        adiantamento_13: parsePtBrNumber(m[11]),
+        valor_devido: parsePtBrNumber(m[12]),
+        valor_mes: parsePtBrNumber(m[3]),
+        inss: parsePtBrNumber(m[1]),
+        fgts: parsePtBrNumber(m[2]),
+        pis: parsePtBrNumber(m[5]),
+      });
+    }
+
+    // Totais a partir do "Total Geral" do relatório (mesma ordem de colunas
+    // jumbled do pdf-parse: INSS/FGTS/PIS/ValorMês antes do marcador, e
+    // Média/Adiantamento/ValorDevido/Salário13 depois).
     const moneyRe = /-?\d{1,3}(?:\.\d{3})*,\d{2}/g;
     const before = text.slice(Math.max(0, totalIdx - 100), totalIdx).match(moneyRe) || [];
     const after = text.slice(totalIdx, totalIdx + 200).match(moneyRe) || [];
     const [inssS, fgtsS, pisS, valorMesS] = before.slice(-4);
     const [mediaVantagensS, adiantamentoS, valorDevidoS, salario13S] = after.slice(0, 4);
-    if (!salario13S || !valorDevidoS) return { month, year, totals: null as null };
+    const totals = salario13S && valorDevidoS
+      ? {
+          salario_13: parsePtBrNumber(salario13S),
+          media_vantagens: parsePtBrNumber(mediaVantagensS),
+          adiantamento_13: parsePtBrNumber(adiantamentoS),
+          valor_devido: parsePtBrNumber(valorDevidoS),
+          valor_mes: parsePtBrNumber(valorMesS),
+          inss: parsePtBrNumber(inssS),
+          fgts: parsePtBrNumber(fgtsS),
+          pis: parsePtBrNumber(pisS),
+        }
+      : null;
 
-    return {
-      month,
-      year,
-      totals: {
-        salario_13: parsePtBrNumber(salario13S),
-        media_vantagens: parsePtBrNumber(mediaVantagensS),
-        adiantamento_13: parsePtBrNumber(adiantamentoS),
-        valor_devido: parsePtBrNumber(valorDevidoS),
-        valor_mes: parsePtBrNumber(valorMesS),
-        inss: parsePtBrNumber(inssS),
-        fgts: parsePtBrNumber(fgtsS),
-        pis: parsePtBrNumber(pisS),
-      },
-    };
+    return { month, year, rows, totals };
   };
 
   app.post("/api/import/provisao-13/preview", upload.single("provisao_13_pdf"), async (req, res) => {
@@ -2422,11 +2560,11 @@ export function createApp() {
       const parsed = await pdfParse(fileBuffer);
       const result = parseProvisao13PdfText(parsed.text || "");
 
-      if (!result.totals) {
+      if (!result.totals || !result.rows.length) {
         return res.status(422).json({
           success: false,
           error:
-            "O arquivo foi lido, mas o 'Total Geral' não foi encontrado. Confira se este é o relatório 'Provisão de 13º Salário' do Desbravador — o layout parece diferente do esperado.",
+            "O arquivo foi lido, mas nenhum funcionário foi reconhecido. Confira se este é o relatório 'Provisão de 13º Salário' do Desbravador — o layout parece diferente do esperado.",
         });
       }
 
@@ -2435,12 +2573,307 @@ export function createApp() {
         report_name: req.file.originalname || "provisao-13.pdf",
         period: { month: result.month, year: result.year },
         totals: result.totals,
+        rows: result.rows,
       });
     } catch (error: any) {
       console.error("Erro ao processar Provisão de 13º Salário:", error);
       res.status(500).json({
         success: false,
         error: "Falha ao processar o relatório de Provisão de 13º Salário.",
+        detail: error?.message ? String(error.message).slice(0, 300) : undefined,
+      });
+    } finally {
+      if (req.file?.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+    }
+  });
+
+  // ====================================================
+  // IMPORTAÇÃO: RELATÓRIO DIÁRIO DE SITUAÇÃO — RDS (.xls do Desbravador)
+  // Layout em 2 blocos de colunas lado a lado (Hospedagem/Eventos/Estatísticas
+  // à esquerda; Alim.&Bebidas/Diversos/Fechamentos/Recebimentos/Adiantamentos/
+  // Resumo/Previsão da semana à direita), cada bloco lido como um fluxo
+  // independente de seções (o título de uma seção nem sempre fica na mesma
+  // coluna — ex.: "Estatísticas" aparece deslocado por causa de células
+  // mescladas no Excel original). Extrai tudo; ainda não envia para nenhum
+  // destino — só exibe no resumo de importação.
+  // ====================================================
+  const RDS_LEFT_RANGE = [0, 1, 2, 3, 4, 5, 6, 7, 8];
+  const RDS_RIGHT_RANGE = [9, 10, 11, 12, 13, 14, 15, 16, 17];
+  const RDS_LEFT_SECTIONS = ["Hospedagem", "Eventos", "Estatísticas"];
+  const RDS_RIGHT_SECTIONS = [
+    "Alim. & Bebidas",
+    "Diversos",
+    "Fechamentos",
+    "Recebimentos",
+    "Adiantamentos",
+    "Resumo",
+    "Previsão de ocupação da semana",
+  ];
+  const RDS_HEADER_TOKENS = new Set(["Diário", "Acumulado", "%", "Pagamento", "Operação", "Valores", "Indicador"]);
+
+  const parseRdsFlexibleNumber = (v: any): number => {
+    if (typeof v === "number") return v;
+    const s = String(v ?? "").trim();
+    if (!s || s === "-") return 0;
+    const n = Number(s.replace(/\./g, "").replace(",", "."));
+    return Number.isFinite(n) ? n : 0;
+  };
+  const rdsIsNumericLike = (v: any): boolean => {
+    if (typeof v === "number") return true;
+    const s = String(v ?? "").trim();
+    return s === "-" || /^-?[\d.,]+$/.test(s);
+  };
+
+  type RdsItem = { label: string; values: number[] };
+  type RdsSection = { items: RdsItem[]; total: number[] | null };
+
+  const scanRdsBlock = (
+    rows: any[][],
+    colRange: number[],
+    knownSections: string[],
+    skipRows: Set<number>
+  ): { sections: Record<string, RdsSection>; order: string[] } => {
+    const sections: Record<string, RdsSection> = {};
+    const order: string[] = [];
+    let currentSection: string | null = null;
+
+    for (let i = 0; i < rows.length; i++) {
+      if (skipRows.has(i)) continue;
+      const row = rows[i] || [];
+      const cells = colRange.map((c) => row[c]).filter((c) => c !== "" && c !== undefined && c !== null);
+      if (!cells.length) continue;
+
+      const sectionMatch = cells.find((c) => typeof c === "string" && knownSections.includes(c.trim()));
+      if (sectionMatch) {
+        currentSection = String(sectionMatch).trim();
+        if (!sections[currentSection]) {
+          sections[currentSection] = { items: [], total: null };
+          order.push(currentSection);
+        }
+        continue;
+      }
+      if (!currentSection) continue;
+
+      let label: string | null = null;
+      const values: any[] = [];
+      let skipRow = false;
+      for (const c of cells) {
+        if (label === null) {
+          if (typeof c === "string" && RDS_HEADER_TOKENS.has(c.trim())) {
+            skipRow = true;
+            break;
+          }
+          if (!rdsIsNumericLike(c)) {
+            label = String(c).trim();
+            continue;
+          }
+          continue;
+        }
+        values.push(c);
+      }
+      if (skipRow || label === null || !values.length) continue;
+
+      if (label === "Total") {
+        sections[currentSection].total = values.map(parseRdsFlexibleNumber);
+      } else {
+        sections[currentSection].items.push({ label, values: values.map(parseRdsFlexibleNumber) });
+      }
+    }
+    return { sections, order };
+  };
+
+  const RDS_SECTION_META: Record<string, { key: string; title: string; columns: string[] }> = {
+    "Hospedagem": { key: "hospedagem", title: "Hospedagem", columns: ["Item", "Diário (R$)", "Diário %", "Acumulado (R$)", "Acumulado %"] },
+    "Eventos": { key: "eventos", title: "Eventos", columns: ["Item", "Diário (R$)", "Diário %", "Acumulado (R$)", "Acumulado %"] },
+    "Estatísticas": { key: "estatisticas", title: "Estatísticas", columns: ["Indicador", "Diário", "Diário %", "Acumulado", "Acumulado %"] },
+    "Alim. & Bebidas": { key: "alimentos_bebidas", title: "Alimentos & Bebidas", columns: ["Item", "Diário (R$)", "Diário %", "Acumulado (R$)", "Acumulado %"] },
+    "Diversos": { key: "diversos", title: "Diversos", columns: ["Item", "Diário (R$)", "Diário %", "Acumulado (R$)", "Acumulado %"] },
+    "Fechamentos": { key: "fechamentos", title: "Fechamentos (Pagamento)", columns: ["Forma", "Diário (R$)", "Acumulado (R$)"] },
+    "Recebimentos": { key: "recebimentos", title: "Recebimentos (Pagamento)", columns: ["Forma", "Diário (R$)", "Acumulado (R$)"] },
+    "Adiantamentos": { key: "adiantamentos", title: "Adiantamentos (Operação)", columns: ["Operação", "Diário (R$)", "Acumulado (R$)"] },
+    "Resumo": { key: "resumo", title: "Resumo de Valores", columns: ["Indicador", "Diário (R$)", "Acumulado (R$)"] },
+  };
+
+  const parseRdsFile = (filePath: string) => {
+    const workbook = xlsx.readFile(filePath);
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    const rows = xlsx.utils.sheet_to_json(sheet, { header: 1, defval: "", raw: true }) as any[][];
+
+    const dateRow = rows.find((r) => r.some((c) => typeof c === "string" && /^Data:\s*\d{2}\/\d{2}\/\d{4}$/.test(c.trim())));
+    const dateCell = dateRow?.find((c) => typeof c === "string" && /^Data:/.test(c.trim()));
+    const dateMatch = dateCell ? /(\d{2})\/(\d{2})\/(\d{4})/.exec(dateCell) : null;
+    const date = dateMatch ? `${dateMatch[1]}/${dateMatch[2]}/${dateMatch[3]}` : null;
+    const month = dateMatch ? Number(dateMatch[2]) : undefined;
+    const year = dateMatch ? Number(dateMatch[3]) : undefined;
+
+    // A mini-tabela semanal não tem rótulo nas linhas de dia/data, então é
+    // extraída à parte (não cabe no scanner genérico linha a linha).
+    let weekRowIdx = -1;
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i] || [];
+      if (RDS_RIGHT_RANGE.some((c) => String(row[c] ?? "").trim() === "Previsão de ocupação da semana")) {
+        weekRowIdx = i;
+        break;
+      }
+    }
+    const skipRows = new Set<number>();
+    let previsaoSemana: { dia: string; data: string; quantidade: number; percentual: number }[] = [];
+    if (weekRowIdx >= 0) {
+      const diasRow = rows[weekRowIdx + 1] || [];
+      const datasRow = rows[weekRowIdx + 2] || [];
+      const qtdRow = rows[weekRowIdx + 3] || [];
+      const pctRow = rows[weekRowIdx + 4] || [];
+      const dias = RDS_RIGHT_RANGE.map((c) => diasRow[c]).filter((v) => v !== "" && v != null);
+      const datas = RDS_RIGHT_RANGE.map((c) => datasRow[c]).filter((v) => v !== "" && v != null);
+      const qtdValues = RDS_RIGHT_RANGE.map((c) => qtdRow[c]).filter((v) => v !== "" && v != null).slice(1).map(parseRdsFlexibleNumber);
+      const pctValues = RDS_RIGHT_RANGE.map((c) => pctRow[c]).filter((v) => v !== "" && v != null).slice(1).map(parseRdsFlexibleNumber);
+      previsaoSemana = (dias as string[]).map((dia, idx) => ({
+        dia,
+        data: String(datas[idx] ?? ""),
+        quantidade: qtdValues[idx] ?? 0,
+        percentual: pctValues[idx] ?? 0,
+      }));
+      for (let r = weekRowIdx; r <= weekRowIdx + 4; r++) skipRows.add(r);
+    }
+
+    const left = scanRdsBlock(rows, RDS_LEFT_RANGE, RDS_LEFT_SECTIONS, skipRows);
+    const right = scanRdsBlock(rows, RDS_RIGHT_RANGE, RDS_RIGHT_SECTIONS, skipRows);
+
+    const sections = [...left.order, ...right.order].map((name) => {
+      const meta = RDS_SECTION_META[name] ?? { key: name, title: name, columns: [] };
+      const data = left.sections[name] ?? right.sections[name];
+      return { ...meta, items: data.items, total: data.total };
+    });
+
+    return { date, month, year, sections, previsao_semana: previsaoSemana };
+  };
+
+  app.post("/api/import/rds/preview", upload.single("rds_file"), async (req, res) => {
+    if (!req.file) return res.status(400).json({ error: "Arquivo não enviado" });
+    if (!/\.(xls|xlsx)$/i.test(req.file.originalname || "")) {
+      if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+      return res.status(400).json({ error: "Envie o relatório em Excel (.xls ou .xlsx)." });
+    }
+    try {
+      const result = parseRdsFile(req.file.path);
+      if (!result.sections.length) {
+        return res.status(422).json({
+          success: false,
+          error:
+            "O arquivo foi lido, mas nenhuma seção foi reconhecida. Confira se este é o Relatório Diário de Situação (RDS) do Desbravador — o layout parece diferente do esperado.",
+        });
+      }
+      res.json({
+        success: true,
+        report_name: req.file.originalname || "rds.xls",
+        date: result.date,
+        period: { month: result.month, year: result.year },
+        sections: result.sections,
+        previsao_semana: result.previsao_semana,
+      });
+    } catch (error: any) {
+      console.error("Erro ao processar RDS:", error);
+      res.status(500).json({
+        success: false,
+        error: "Falha ao processar o Relatório Diário de Situação.",
+        detail: error?.message ? String(error.message).slice(0, 300) : undefined,
+      });
+    } finally {
+      if (req.file?.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+    }
+  });
+
+  // ====================================================
+  // IMPORTAÇÃO: REQUISIÇÕES SINTÉTICA POR GRUPO DE ITENS (.xls do Desbravador)
+  // Hierarquia Setor > Grupo de itens > valor requisitado no período.
+  // Cada setor é uma linha com só código+nome (sem valor); os grupos abaixo
+  // têm código+nome+valor; e fecha com uma linha "Total Setor :". O arquivo
+  // repete o cabeçalho (título + filtros) a cada página impressa, então essas
+  // linhas são ignoradas. Ainda não envia para nenhum destino — só exibe no
+  // resumo de importação.
+  // ====================================================
+  const excelDateToIso = (serial: any): string | null => {
+    if (typeof serial !== "number" || !Number.isFinite(serial)) return null;
+    const d = new Date(Math.round((serial - 25569) * 86400 * 1000));
+    if (Number.isNaN(d.getTime())) return null;
+    return d.toISOString().slice(0, 10);
+  };
+
+  type RequisicaoGrupo = { codigo: number; nome: string; valor: number };
+  type RequisicaoSetor = { codigo: number; nome: string; grupos: RequisicaoGrupo[]; total: number | null };
+
+  const parseRequisicoesSinteticaFile = (filePath: string) => {
+    const workbook = xlsx.readFile(filePath);
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    const rows = xlsx.utils.sheet_to_json(sheet, { header: 1, defval: "", raw: true }) as any[][];
+
+    const filtroRow = rows.find((r) => String(r[0] ?? "").trim().startsWith("Filtros"));
+    const periodo = filtroRow
+      ? { de: excelDateToIso(filtroRow[2]), ate: excelDateToIso(filtroRow[4]) }
+      : { de: null, ate: null };
+
+    const setores: RequisicaoSetor[] = [];
+    let currentSetor: RequisicaoSetor | null = null;
+    let totalGeral: number | null = null;
+
+    for (const row of rows) {
+      const c0 = row[0];
+      const c1 = String(row[1] ?? "").trim();
+      const c8 = String(row[8] ?? "").trim();
+      const c11 = row[11];
+
+      if (typeof c0 === "string" && (c0.startsWith("VIVAZ") || c0.startsWith("Filtros"))) continue;
+      if (c8 === "Total Setor :") {
+        if (currentSetor) currentSetor.total = Number(c11) || 0;
+        continue;
+      }
+      if (c8 === "Total Geral :") {
+        totalGeral = Number(c11) || 0;
+        continue;
+      }
+      // Linha de setor: código numérico + nome, sem valor na coluna do grupo.
+      if (typeof c0 === "number" && c1 && (c11 === "" || c11 == null)) {
+        currentSetor = { codigo: c0, nome: c1, grupos: [], total: null };
+        setores.push(currentSetor);
+        continue;
+      }
+      // Linha de grupo: código numérico + nome + valor, dentro do setor atual.
+      if (typeof c0 === "number" && c1 && typeof c11 === "number" && currentSetor) {
+        currentSetor.grupos.push({ codigo: c0, nome: c1, valor: c11 });
+        continue;
+      }
+    }
+
+    return { periodo, setores, totalGeral };
+  };
+
+  app.post("/api/import/requisicoes-sintetica/preview", upload.single("requisicoes_file"), async (req, res) => {
+    if (!req.file) return res.status(400).json({ error: "Arquivo não enviado" });
+    if (!/\.(xls|xlsx)$/i.test(req.file.originalname || "")) {
+      if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+      return res.status(400).json({ error: "Envie o relatório em Excel (.xls ou .xlsx)." });
+    }
+    try {
+      const result = parseRequisicoesSinteticaFile(req.file.path);
+      if (!result.setores.length) {
+        return res.status(422).json({
+          success: false,
+          error:
+            "O arquivo foi lido, mas nenhum setor foi reconhecido. Confira se este é o relatório 'Requisições Sintética por Grupo de Itens' do Desbravador — o layout parece diferente do esperado.",
+        });
+      }
+      res.json({
+        success: true,
+        report_name: req.file.originalname || "requisicoes-sintetica.xls",
+        periodo: result.periodo,
+        setores: result.setores,
+        total_geral: result.totalGeral,
+      });
+    } catch (error: any) {
+      console.error("Erro ao processar Requisições Sintética:", error);
+      res.status(500).json({
+        success: false,
+        error: "Falha ao processar o relatório de Requisições Sintética por Grupo de Itens.",
         detail: error?.message ? String(error.message).slice(0, 300) : undefined,
       });
     } finally {

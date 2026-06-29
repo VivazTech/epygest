@@ -413,7 +413,14 @@ export const Invoices: React.FC = () => {
 
     const response = await fetch(`/api/invoices/report?${params.toString()}`);
     if (!response.ok) {
-      alert('Não foi possível gerar o relatório.');
+      let message = 'Não foi possível gerar o relatório.';
+      try {
+        const data = await response.json();
+        message = data?.detail || data?.error || message;
+      } catch {
+        // resposta não era JSON; mantém a mensagem genérica
+      }
+      alert(message);
       return;
     }
     const blob = await response.blob();
@@ -431,6 +438,7 @@ export const Invoices: React.FC = () => {
   const requesterSector = sectors.find((s) => String(s.id) === requesterSectorId);
   const isManager = userRole === 'manager';
   const hasGlobalSectorView = userRole === 'admin' || userRole === 'finance' || userRole === 'controle';
+  const canSeeAnnualTotal = userRole === 'admin' || userRole === 'finance';
   const toggleSectorSelection = (sectorId: string) => {
     setSelectedSectorIds((prev) =>
       prev.includes(sectorId)
@@ -637,7 +645,7 @@ export const Invoices: React.FC = () => {
         </div>
 
         <div className="flex flex-wrap items-center gap-3 border-t border-slate-100 pt-4">
-          <span className="text-xs font-bold uppercase tracking-wider text-slate-500">Vencimento</span>
+          <span className="text-xs font-bold uppercase tracking-wider text-slate-500">Provisão</span>
           <label className="flex items-center gap-2 text-xs text-slate-600">
             <span className="font-medium">De</span>
             <input
@@ -671,8 +679,8 @@ export const Invoices: React.FC = () => {
           )}
           <span className="text-xs text-slate-400">
             {customDateFrom || customDateTo
-              ? 'Lista e indicadores filtram por vencimento no período informado.'
-              : 'Sem datas personalizadas, a lista usa a competência selecionada acima.'}
+              ? 'Lista e indicadores filtram pela data de provisão (lançamento) no período informado.'
+              : 'Sem datas personalizadas, a lista usa a competência pela data de provisão (lançamento).'}
           </span>
         </div>
       </div>
@@ -713,6 +721,7 @@ export const Invoices: React.FC = () => {
         </div>
       )}
 
+      {canSeeAnnualTotal && (
       <div className="bg-[#004D40] rounded-2xl border border-emerald-900/20 shadow-lg p-5 text-white">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
@@ -747,6 +756,7 @@ export const Invoices: React.FC = () => {
           </div>
         </div>
       </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {filteredBudgetSectors.map(sector => (
