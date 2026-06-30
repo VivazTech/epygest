@@ -1,5 +1,15 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { RefreshCcw, ChevronDown, ChevronRight, Filter } from 'lucide-react';
+import { RefreshCcw, ChevronDown, ChevronRight, Filter, List } from 'lucide-react';
+
+type UsoConsumoSubgrupo = {
+  id: number;
+  tipo: string;
+  grupo: string;
+  codigo: string;
+  nome: string;
+};
+
+const USO_CONSUMO_CRD_NAME = 'USO E CONSUMO (SEM CRD)';
 import { cn, formatCurrency } from '../lib/utils';
 import { ValueTrace } from '../components/ValueTrace';
 import { valueTrace } from '../lib/valueTraceMeta';
@@ -102,6 +112,8 @@ export const PrevRealPage: React.FC = () => {
   const [editingCell, setEditingCell] = useState<{ rowId: number; monthIndex: number } | null>(null);
   const [editingValue, setEditingValue] = useState('');
   const [userRole, setUserRole] = useState<string>('viewer');
+  const [usoConsumoSubgrupos, setUsoConsumoSubgrupos] = useState<UsoConsumoSubgrupo[]>([]);
+  const [expandedSubgrupos, setExpandedSubgrupos] = useState<Set<number>>(new Set());
   const [allowedSectorNames, setAllowedSectorNames] = useState<string[]>([]);
 
   const loadData = async () => {
@@ -149,6 +161,10 @@ export const PrevRealPage: React.FC = () => {
 
     loadUserScope();
     loadData();
+    fetch('/api/uso-consumo-subgrupos')
+      .then((r) => r.json())
+      .then((d) => setUsoConsumoSubgrupos(Array.isArray(d) ? d : []))
+      .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -565,13 +581,35 @@ export const PrevRealPage: React.FC = () => {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
-                        {group.rows.map((row, rowIndex) => (
+                        {group.rows.map((row, rowIndex) => {
+                          const isUsoConsumo = row.detalhado.trim().toUpperCase() === USO_CONSUMO_CRD_NAME;
+                          const subgruposOpen = expandedSubgrupos.has(row.id);
+                          const rowBg = rowIndex % 2 === 0;
+                          return (
+                          <React.Fragment key={row.id}>
                           <tr
-                            key={row.id}
-                            className={rowIndex % 2 === 0 ? "bg-white/70 hover:bg-white transition-colors" : "bg-slate-50/70 hover:bg-slate-100/70 transition-colors"}
+                            className={rowBg ? "bg-white/70 hover:bg-white transition-colors" : "bg-slate-50/70 hover:bg-slate-100/70 transition-colors"}
                           >
-                            <td className={`sticky left-0 z-20 px-4 py-3 text-xs text-slate-700 min-w-[120px] ${rowIndex % 2 === 0 ? 'bg-white' : 'bg-slate-50'}`}>{row.grupo}</td>
-                            <td className={`sticky left-[120px] z-20 px-4 py-3 text-sm text-slate-700 min-w-[260px] ${rowIndex % 2 === 0 ? 'bg-white' : 'bg-slate-50'}`}>{row.detalhado}</td>
+                            <td className={`sticky left-0 z-20 px-4 py-3 text-xs text-slate-700 min-w-[120px] ${rowBg ? 'bg-white' : 'bg-slate-50'}`}>{row.grupo}</td>
+                            <td className={`sticky left-[120px] z-20 px-4 py-3 text-sm min-w-[260px] ${rowBg ? 'bg-white' : 'bg-slate-50'} ${isUsoConsumo ? 'text-slate-900 font-semibold' : 'text-slate-700'}`}>
+                              <span className="flex items-center gap-2">
+                                {row.detalhado}
+                                {isUsoConsumo && usoConsumoSubgrupos.length > 0 && (
+                                  <button
+                                    onClick={() => setExpandedSubgrupos((prev) => {
+                                      const next = new Set(prev);
+                                      if (next.has(row.id)) next.delete(row.id); else next.add(row.id);
+                                      return next;
+                                    })}
+                                    className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-100 hover:bg-blue-100 transition-colors shrink-0"
+                                    title="Ver subgrupos"
+                                  >
+                                    <List className="w-3 h-3" />
+                                    {subgruposOpen ? 'Ocultar' : `${usoConsumoSubgrupos.length} subgrupos`}
+                                  </button>
+                                )}
+                              </span>
+                            </td>
                             {row.months.map((m, idx) => (
                               <React.Fragment key={`${row.id}-${idx}`}>
                                 <td className="px-3 py-2 text-xs text-right text-slate-700 border-l border-slate-200">
@@ -641,7 +679,41 @@ export const PrevRealPage: React.FC = () => {
                               />
                             </td>
                           </tr>
-                        ))}
+                          {/* Subgrupos de USO E CONSUMO (SEM CRD) */}
+                          {isUsoConsumo && subgruposOpen && usoConsumoSubgrupos.length > 0 && (
+                            <tr>
+                              <td colSpan={3 + 12 * 3} className="p-0 bg-blue-50/40 border-t border-blue-100">
+                                <div className="px-6 py-3">
+                                  <p className="text-[10px] font-bold uppercase tracking-widest text-blue-700 mb-2">
+                                    Subgrupos — {USO_CONSUMO_CRD_NAME}
+                                  </p>
+                                  <table className="w-full text-left border-collapse text-xs">
+                                    <thead>
+                                      <tr className="border-b border-blue-100">
+                                        <th className="px-2 py-1 text-[10px] font-bold text-slate-500 uppercase tracking-widest w-8">Tipo</th>
+                                        <th className="px-2 py-1 text-[10px] font-bold text-slate-500 uppercase tracking-widest w-36">Grupo</th>
+                                        <th className="px-2 py-1 text-[10px] font-bold text-slate-500 uppercase tracking-widest w-36">Código</th>
+                                        <th className="px-2 py-1 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Nome</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-blue-50">
+                                      {usoConsumoSubgrupos.map((sg) => (
+                                        <tr key={sg.id} className="hover:bg-blue-50/60">
+                                          <td className="px-2 py-1 text-slate-500">{sg.tipo}</td>
+                                          <td className="px-2 py-1 text-slate-600">{sg.grupo}</td>
+                                          <td className="px-2 py-1 text-slate-600">{sg.codigo}</td>
+                                          <td className="px-2 py-1 text-slate-800 font-medium">{sg.nome}</td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                          </React.Fragment>
+                          );
+                        })}
                         <tr className="bg-slate-100 border-t border-slate-300">
                           <td className="sticky left-0 z-20 bg-slate-100 px-4 py-3 text-xs font-bold text-slate-700 min-w-[120px]" colSpan={2}>
                             Total {groupLabel} {group.groupName}

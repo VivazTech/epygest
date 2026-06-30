@@ -4950,6 +4950,16 @@ export function createApp() {
     res.json({ success: true, year: Number(year), occupancy_percent: occupancyPercent });
   });
 
+  // Lista os subgrupos de USO E CONSUMO (SEM CRD) cadastrados.
+  app.get("/api/uso-consumo-subgrupos", async (_req, res) => {
+    const { data, error } = await supabase
+      .from("uso_consumo_subgrupos")
+      .select("id, tipo, grupo, codigo, nome")
+      .order("id", { ascending: true });
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data ?? []);
+  });
+
   app.get("/api/prev-real", async (req, res) => {
     const { year, crd } = req.query as { year?: string; crd?: string };
     const selectedYear = Number(year) || new Date().getFullYear();

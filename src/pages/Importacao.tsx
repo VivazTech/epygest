@@ -206,6 +206,46 @@ type RdsWeekRow = { dia: string; data: string; quantidade: number; percentual: n
 
 type RequisicaoGrupo = { codigo: number; nome: string; valor: number };
 type RequisicaoSetor = { codigo: number; nome: string; grupos: RequisicaoGrupo[]; total: number | null };
+type ReqDestino = 'uso_consumo' | 'cmv' | 'investimento' | '';
+
+const REQ_DESTINO_LABELS: Record<string, string> = {
+  uso_consumo: 'Uso e Consumo',
+  cmv: 'CMV',
+  investimento: 'Investimento',
+};
+const REQ_DESTINO_COLORS: Record<string, string> = {
+  uso_consumo: 'bg-blue-100 text-blue-800 border-blue-200',
+  cmv: 'bg-amber-100 text-amber-800 border-amber-200',
+  investimento: 'bg-purple-100 text-purple-800 border-purple-200',
+};
+const REQ_DEFAULT_MAP: Record<number, ReqDestino> = {
+  7: 'cmv', 10: 'cmv', 11: 'cmv', 15: 'cmv', 16: 'cmv', 17: 'cmv',
+  25: 'cmv', 26: 'cmv', 28: 'cmv', 30: 'cmv', 32: 'cmv', 33: 'cmv',
+  34: 'cmv', 35: 'cmv', 36: 'cmv', 37: 'cmv', 38: 'cmv', 39: 'cmv',
+  45: 'cmv',
+  29: 'uso_consumo', 40: 'uso_consumo', 41: 'uso_consumo', 42: 'uso_consumo',
+  43: 'uso_consumo', 44: 'uso_consumo', 46: 'uso_consumo', 47: 'uso_consumo',
+  48: 'uso_consumo', 49: 'uso_consumo', 51: 'uso_consumo', 52: 'uso_consumo',
+  53: 'uso_consumo', 54: 'uso_consumo', 56: 'uso_consumo', 58: 'uso_consumo',
+  80: 'uso_consumo', 81: 'uso_consumo', 84: 'uso_consumo', 86: 'uso_consumo',
+  125: 'uso_consumo',
+  91: 'investimento', 95: 'investimento', 98: 'investimento',
+  101: 'investimento', 104: 'investimento', 111: 'investimento',
+};
+
+const REQ_DESTINO_LS_KEY = 'requisicoes:destino_map';
+
+const loadReqDestinoMap = (): Record<number, ReqDestino> => {
+  try {
+    const raw = localStorage.getItem(REQ_DESTINO_LS_KEY);
+    if (raw) return { ...REQ_DEFAULT_MAP, ...JSON.parse(raw) };
+  } catch { /* ignore */ }
+  return { ...REQ_DEFAULT_MAP };
+};
+
+const saveReqDestinoMap = (map: Record<number, ReqDestino>) => {
+  try { localStorage.setItem(REQ_DESTINO_LS_KEY, JSON.stringify(map)); } catch { /* ignore */ }
+};
 
 type Provisao13Totals = {
   salario_13: number;
@@ -466,13 +506,14 @@ export const ImportacaoPage: React.FC = () => {
     }
   };
 
-  // Estado da pré-visualização das Requisições Sintética (somente exibição — destino ainda não definido).
+  // Estado da pré-visualização das Requisições Sintética.
   const [requisicoesLoading, setRequisicoesLoading] = useState(false);
   const [requisicoesFileName, setRequisicoesFileName] = useState('');
   const [requisicoesError, setRequisicoesError] = useState('');
   const [requisicoesPeriodo, setRequisicoesPeriodo] = useState<{ de: string | null; ate: string | null } | null>(null);
   const [requisicoesSetores, setRequisicoesSetores] = useState<RequisicaoSetor[]>([]);
   const [requisicoesTotalGeral, setRequisicoesTotalGeral] = useState<number | null>(null);
+  const [requisicoesDestinos, setRequisicoesDestinos] = useState<Record<number, ReqDestino>>(() => loadReqDestinoMap());
 
   const uploadRequisicoesSintetica = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -495,12 +536,22 @@ export const ImportacaoPage: React.FC = () => {
       setRequisicoesPeriodo(data.periodo || null);
       setRequisicoesSetores(Array.isArray(data.setores) ? data.setores : []);
       setRequisicoesTotalGeral(typeof data.total_geral === 'number' ? data.total_geral : null);
+      // Recarrega o mapa salvo para refletir edições anteriores
+      setRequisicoesDestinos(loadReqDestinoMap());
     } catch (err: any) {
       setRequisicoesError(err?.message || 'Erro inesperado ao importar o arquivo.');
     } finally {
       setRequisicoesLoading(false);
       event.target.value = '';
     }
+  };
+
+  const setReqDestino = (codigo: number, destino: ReqDestino) => {
+    setRequisicoesDestinos((prev) => {
+      const next = { ...prev, [codigo]: destino };
+      saveReqDestinoMap(next);
+      return next;
+    });
   };
 
   const loadImportHistory = async () => {
@@ -1714,80 +1765,125 @@ export const ImportacaoPage: React.FC = () => {
       )}
 
       {/* Pré-visualização das Requisições Sintética — todos os setores e grupos de itens. */}
-      {(requisicoesFileName || requisicoesError) && (
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-          <div className="px-4 py-3 border-b border-slate-100 flex flex-wrap gap-3 items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Layers className="w-4 h-4 text-[#004D40]" />
-              <p className="text-sm font-bold text-slate-800">
-                Requisições Sintética por Grupo de Itens — detalhe completo
-                {requisicoesPeriodo?.de && requisicoesPeriodo?.ate
-                  ? ` (${formatDate(requisicoesPeriodo.de)} a ${formatDate(requisicoesPeriodo.ate)})`
-                  : ''}
-              </p>
+      {(requisicoesFileName || requisicoesError) && (() => {
+        // Calcula totais por categoria para o painel de resumo
+        const totaisPorCategoria: Record<string, number> = { uso_consumo: 0, cmv: 0, investimento: 0, '': 0 };
+        for (const st of requisicoesSetores) {
+          for (const g of st.grupos) {
+            const dest = requisicoesDestinos[g.codigo] ?? '';
+            totaisPorCategoria[dest] = (totaisPorCategoria[dest] ?? 0) + g.valor;
+          }
+        }
+
+        return (
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+            <div className="px-4 py-3 border-b border-slate-100 flex flex-wrap gap-3 items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Layers className="w-4 h-4 text-[#004D40]" />
+                <p className="text-sm font-bold text-slate-800">
+                  Requisições Sintética por Grupo de Itens — detalhe completo
+                  {requisicoesPeriodo?.de && requisicoesPeriodo?.ate
+                    ? ` (${formatDate(requisicoesPeriodo.de)} a ${formatDate(requisicoesPeriodo.ate)})`
+                    : ''}
+                </p>
+              </div>
+              {requisicoesSetores.length > 0 && (
+                <div className="text-xs text-slate-600 flex flex-wrap gap-x-4 gap-y-1">
+                  <span>Setores: <span className="font-bold">{requisicoesSetores.length}</span></span>
+                  <span>Grupos: <span className="font-bold">{requisicoesSetores.reduce((s, st) => s + st.grupos.length, 0)}</span></span>
+                  {requisicoesTotalGeral !== null && (
+                    <span>Total geral: <span className="font-bold">{formatCurrency(requisicoesTotalGeral)}</span></span>
+                  )}
+                </div>
+              )}
             </div>
-            {requisicoesSetores.length > 0 && (
-              <div className="text-xs text-slate-600 flex flex-wrap gap-x-4 gap-y-1">
-                <span>Setores: <span className="font-bold">{requisicoesSetores.length}</span></span>
-                <span>Grupos: <span className="font-bold">{requisicoesSetores.reduce((s, st) => s + st.grupos.length, 0)}</span></span>
-                {requisicoesTotalGeral !== null && (
-                  <span>Total geral: <span className="font-bold">{formatCurrency(requisicoesTotalGeral)}</span></span>
-                )}
+
+            {requisicoesFileName && !requisicoesError && (
+              <div className="px-4 py-2 text-xs text-emerald-700 bg-emerald-50/60 border-b border-emerald-100 flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4" />
+                Arquivo processado: {requisicoesFileName}
               </div>
             )}
+            {requisicoesError && (
+              <div className="px-4 py-2 text-xs text-red-700 bg-red-50 border-b border-red-100 flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4" />
+                {requisicoesError}
+              </div>
+            )}
+
+            {requisicoesSetores.length > 0 && (
+              <>
+                {/* Painel de totais por categoria */}
+                <div className="px-4 py-3 border-b border-slate-100 bg-slate-50/40 grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  {(['cmv', 'uso_consumo', 'investimento', ''] as ReqDestino[]).map((cat) => (
+                    <div key={cat || 'sem'} className={`rounded-xl border px-3 py-2.5 ${cat ? REQ_DESTINO_COLORS[cat] : 'bg-slate-100 text-slate-600 border-slate-200'}`}>
+                      <p className="text-[10px] font-bold uppercase tracking-widest opacity-70">
+                        {cat ? REQ_DESTINO_LABELS[cat] : 'Não classificado'}
+                      </p>
+                      <p className="text-sm font-bold mt-0.5 tabular-nums">{formatCurrency(totaisPorCategoria[cat] ?? 0)}</p>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="p-4 space-y-3 max-h-[640px] overflow-auto">
+                  {requisicoesSetores
+                    .filter((st) => matchesSearch(query, st.nome, String(st.codigo), st.total ?? 0) || st.grupos.some((g) => matchesSearch(query, g.nome, String(g.codigo), g.valor)))
+                    .map((setor) => (
+                      <details key={`${setor.codigo}-${setor.nome}`} className="rounded-xl border border-slate-100 overflow-hidden">
+                        <summary className="px-3 py-2 bg-slate-50 text-xs font-bold text-slate-800 cursor-pointer flex items-center justify-between">
+                          <span>{setor.codigo} — {setor.nome}</span>
+                          <span className="text-slate-600 tabular-nums">{formatCurrency(setor.total ?? 0)}</span>
+                        </summary>
+                        <table className="w-full text-left border-collapse">
+                          <thead>
+                            <tr className="bg-white border-b border-slate-100">
+                              <th className="px-3 py-1.5 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Cód.</th>
+                              <th className="px-3 py-1.5 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Grupo de itens</th>
+                              <th className="px-3 py-1.5 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-right">Valor</th>
+                              <th className="px-3 py-1.5 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-center">Destino</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-50">
+                            {setor.grupos
+                              .filter((g) => !query || matchesSearch(query, g.nome, String(g.codigo), g.valor))
+                              .map((g, gi) => {
+                                const dest = requisicoesDestinos[g.codigo] ?? '';
+                                return (
+                                  <tr key={gi} className={`${dest ? 'bg-opacity-20' : ''} hover:bg-slate-50/70`}>
+                                    <td className="px-3 py-1.5 text-xs text-slate-500 tabular-nums">{g.codigo}</td>
+                                    <td className="px-3 py-1.5 text-xs text-slate-700">{g.nome}</td>
+                                    <td className="px-3 py-1.5 text-xs text-right tabular-nums text-slate-700">{formatCurrency(g.valor)}</td>
+                                    <td className="px-3 py-1.5 text-center">
+                                      <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden text-[10px] font-bold">
+                                        {(['cmv', 'uso_consumo', 'investimento'] as ReqDestino[]).map((cat) => (
+                                          <button
+                                            key={cat}
+                                            onClick={() => setReqDestino(g.codigo, dest === cat ? '' : cat)}
+                                            className={`px-2 py-1 transition-colors ${dest === cat
+                                              ? cat === 'cmv' ? 'bg-amber-400 text-amber-900'
+                                                : cat === 'uso_consumo' ? 'bg-blue-400 text-blue-900'
+                                                : 'bg-purple-400 text-purple-900'
+                                              : 'bg-white text-slate-400 hover:bg-slate-50'
+                                            }`}
+                                          >
+                                            {cat === 'cmv' ? 'CMV' : cat === 'uso_consumo' ? 'U&C' : 'INV'}
+                                          </button>
+                                        ))}
+                                      </div>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                          </tbody>
+                        </table>
+                      </details>
+                    ))}
+                </div>
+              </>
+            )}
           </div>
-
-          {requisicoesFileName && !requisicoesError && (
-            <div className="px-4 py-2 text-xs text-emerald-700 bg-emerald-50/60 border-b border-emerald-100 flex items-center gap-2">
-              <CheckCircle2 className="w-4 h-4" />
-              Arquivo processado: {requisicoesFileName}
-            </div>
-          )}
-          {requisicoesError && (
-            <div className="px-4 py-2 text-xs text-red-700 bg-red-50 border-b border-red-100 flex items-center gap-2">
-              <AlertTriangle className="w-4 h-4" />
-              {requisicoesError}
-            </div>
-          )}
-
-          {requisicoesSetores.length > 0 && (
-            <div className="p-4 space-y-3 max-h-[640px] overflow-auto">
-              <p className="text-xs text-slate-500">
-                Relatório completo extraído (todos os setores, grupos de itens e valores). O destino de lançamento
-                ainda não foi definido — os valores ficam disponíveis aqui para decisão posterior.
-              </p>
-              {requisicoesSetores
-                .filter((st) => matchesSearch(query, st.nome, String(st.codigo), st.total ?? 0) || st.grupos.some((g) => matchesSearch(query, g.nome, String(g.codigo), g.valor)))
-                .map((setor) => (
-                  <details key={`${setor.codigo}-${setor.nome}`} className="rounded-xl border border-slate-100 overflow-hidden">
-                    <summary className="px-3 py-2 bg-slate-50 text-xs font-bold text-slate-800 cursor-pointer flex items-center justify-between">
-                      <span>{setor.codigo} — {setor.nome}</span>
-                      <span className="text-slate-600 tabular-nums">{formatCurrency(setor.total ?? 0)}</span>
-                    </summary>
-                    <table className="w-full text-left border-collapse">
-                      <thead>
-                        <tr className="bg-white border-b border-slate-100">
-                          <th className="px-3 py-1.5 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Cód.</th>
-                          <th className="px-3 py-1.5 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Grupo de itens</th>
-                          <th className="px-3 py-1.5 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-right">Valor</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-50">
-                        {setor.grupos.map((g, gi) => (
-                          <tr key={gi} className="hover:bg-slate-50/70">
-                            <td className="px-3 py-1.5 text-xs text-slate-500 tabular-nums">{g.codigo}</td>
-                            <td className="px-3 py-1.5 text-xs text-slate-700">{g.nome}</td>
-                            <td className="px-3 py-1.5 text-xs text-right tabular-nums text-slate-700">{formatCurrency(g.valor)}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </details>
-                ))}
-            </div>
-          )}
-        </div>
-      )}
+        );
+      })()}
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 space-y-3">
