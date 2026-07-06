@@ -21,6 +21,7 @@ import { PlanilhasPage } from './pages/Planilhas';
 import { PLANILHAS } from './lib/planilhas';
 import { FolhaPagamentoPage, MESES_FOLHA } from './pages/FolhaPagamento';
 import { FolhaApuracaoPage } from './pages/FolhaApuracao';
+import { ComprasPage } from './pages/Compras';
 import { SearchProvider, useSearch } from './context/SearchContext';
 import { SearchBar } from './components/SearchBar';
 import { getSearchPlaceholder } from './lib/search';
@@ -162,6 +163,7 @@ export default function App() {
       case 'dre': return <DRE />;
       case 'planejamento': return <Planejamento />;
       case 'notas': return <Invoices />;
+      case 'danfe': return <Invoices />;
       case 'requisicoes': return <Requisicoes />;
       case 'lancamentos-manuais': return <LancamentosManuais />;
       case 'comandas': return <Comandas />;
@@ -172,6 +174,7 @@ export default function App() {
       case 'supabase-teste': return <SupabaseTeste />;
       case 'usuarios': return <Usuarios />;
       case 'configuracoes': return <Configuracoes />;
+      case 'compras-ordem': return <ComprasPage />;
       default: return <Dashboard />;
     }
   };
@@ -323,11 +326,12 @@ function AppShell({
                 ? `Folha de Pagamento / ${MESES_FOLHA[Number(activeTab.slice('folha-'.length))] ?? ''}`
                 : activeTab === 'folha-apuracao'
                 ? 'Folha de Pagamento / Apuração de Folha'
-                : ['comandas', 'lancamentos-manuais', 'requisicoes', 'notas'].includes(activeTab)
+                : ['comandas', 'lancamentos-manuais', 'requisicoes', 'notas', 'danfe'].includes(activeTab)
                 ? `Lançamentos / ${
                     activeTab === 'comandas' ? 'Comandas'
                     : activeTab === 'lancamentos-manuais' ? 'Lançamentos Manuais'
                     : activeTab === 'requisicoes' ? 'Requisições'
+                    : activeTab === 'danfe' ? 'DANFE'
                     : 'Controle de Notas'
                   }`
                 : activeTab === 'prev-real'
@@ -362,7 +366,7 @@ function AppShell({
           />
         </div>
 
-        <div className={activeTab === 'notas' || activeTab === 'comandas' || activeTab === 'lancamentos-manuais' || activeTab === 'requisicoes' || activeTab === 'cadastros' || activeTab === 'sintase' || activeTab === 'prev-real' || activeTab === 'dre' || activeTab.startsWith('planilha-') || activeTab.startsWith('folha-') ? 'p-8 pt-4 md:pt-8 w-full max-w-none' : 'p-8 pt-4 md:pt-8 max-w-7xl mx-auto'}>
+        <div className={activeTab === 'notas' || activeTab === 'danfe' || activeTab === 'comandas' || activeTab === 'lancamentos-manuais' || activeTab === 'requisicoes' || activeTab === 'cadastros' || activeTab === 'sintase' || activeTab === 'prev-real' || activeTab === 'dre' || activeTab.startsWith('planilha-') || activeTab.startsWith('folha-') || activeTab === 'compras-ordem' ? 'p-8 pt-4 md:pt-8 w-full max-w-none' : 'p-8 pt-4 md:pt-8 max-w-7xl mx-auto'}>
           {renderContent()}
         </div>
       </main>

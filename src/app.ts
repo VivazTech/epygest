@@ -5374,6 +5374,226 @@ export function createApp() {
     res.json({ success: true, year: Number(year), occupancy_percent: occupancyPercent });
   });
 
+  // ====================================================
+  // COMPRAS: ORDEM DE COMPRA — geração de PDF (pdfkit)
+  // ====================================================
+  app.post("/api/ordem-compra/pdf", async (req, res) => {
+    const b = req.body as Record<string, string>;
+
+    const fmtDate = (iso: string) => {
+      if (!iso) return "___/___/______";
+      const [y, m, d] = iso.split("-");
+      return `${d}/${m}/${y}`;
+    };
+    const fmtCurrency = (v: string) => {
+      const n = parseFloat(String(v ?? "").replace(",", "."));
+      if (!Number.isFinite(n)) return "R$ —";
+      return `R$ ${n.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    };
+
+    const FATURAMENTO_LABEL: Record<string, string> = {
+      nf_recibo: "Emissão de Nota Fiscal + Recibo",
+      recibo: "Emissão de Recibo (sem nota fiscal)",
+    };
+    const PAGAMENTO_LABEL: Record<string, string> = {
+      cartao: "Cartão de Crédito",
+      avista: "À Vista — Efetivo",
+      boleto: "Boleto Bancário — máximo de prazo possível considerando o vencimento",
+      pix: "PIX",
+    };
+
+    try {
+      const doc = new PDFDocument({ margin: 45, size: "A4" });
+      const chunks: Buffer[] = [];
+      doc.on("data", (c: Buffer) => chunks.push(c));
+      doc.on("end", () => {
+        const pdf = Buffer.concat(chunks);
+        res.setHeader("Content-Type", "application/pdf");
+        res.setHeader("Content-Disposition", `attachment; filename="ordem_compra.pdf"`);
+        res.send(pdf);
+      });
+
+      const W = doc.page.width - 90; // largura útil
+      const X = 45;
+      const TEAL = "#004D40";
+      const GRAY = "#64748B";
+      const LINE = "#E2E8F0";
+
+      // ── CABEÇALHO ──────────────────────────────────────────────────────
+      doc.rect(X, 40, W, 50).fill(TEAL);
+      doc.fillColor("white").fontSize(16).font("Helvetica-Bold")
+         .text("ORDEM DE COMPRA", X + 12, 52, { width: W - 12 });
+      doc.fontSize(9).font("Helvetica")
+         .text("VIVAZ CATARATAS RESORT", X + 12, 72, { width: W - 12 });
+
+      // Data — canto direito do header
+      doc.fillColor("white").fontSize(8).font("Helvetica")
+         .text(`Data: ${fmtDate(b.data_execucao)}`, X, 56, { width: W - 12, align: "right" });
+
+      doc.y = 105;
+
+      // ── helper de seção ─────────────────────────────────────────────────
+      const sectionTitle = (title: string) => {
+        doc.moveDown(0.4);
+        doc.rect(X, doc.y, W, 16).fill("#F1F5F9");
+        doc.fillColor(TEAL).fontSize(7.5).font("Helvetica-Bold")
+           .text(title.toUpperCase(), X + 6, doc.y + 4, { width: W - 12 });
+        doc.y += 20;
+      };
+
+      const row = (label: string, value: string, opts?: { bold?: boolean }) => {
+        const yStart = doc.y;
+        doc.fillColor(GRAY).fontSize(7).font("Helvetica")
+           .text(label + ":", X, yStart, { continued: false });
+        doc.fillColor("#0F172A").fontSize(8.5)
+           .font(opts?.bold ? "Helvetica-Bold" : "Helvetica")
+           .text(value || "—", X + 90, yStart, { width: W - 90 });
+        const yEnd = doc.y;
+        doc.y = Math.max(yStart + 16, yEnd + 2);
+      };
+
+      const twoCol = (items: [string, string][]) => {
+        const colW = (W - 12) / items.length;
+        const yStart = doc.y;
+        let xOff = X;
+        for (const [label, value] of items) {
+          doc.fillColor(GRAY).fontSize(7).font("Helvetica").text(label + ":", xOff, yStart);
+          doc.fillColor("#0F172A").fontSize(8.5).font("Helvetica").text(value || "—", xOff, yStart + 11, { width: colW - 6 });
+          xOff += colW + 6;
+        }
+        doc.y = yStart + 28;
+      };
+
+      const checkRow = (label: string, checked: boolean, note?: string) => {
+        const mark = checked ? "☑" : "☐";
+        doc.fillColor(checked ? TEAL : GRAY).fontSize(9).font("Helvetica-Bold")
+           .text(mark, X, doc.y, { continued: true });
+        doc.fillColor(checked ? "#0F172A" : GRAY).font(checked ? "Helvetica-Bold" : "Helvetica")
+           .fontSize(8.5).text(`  ${label}${note ? "  " + note : ""}`, { lineBreak: true });
+        doc.y += 2;
+      };
+
+      const divider = () => {
+        doc.moveTo(X, doc.y).lineTo(X + W, doc.y).strokeColor(LINE).lineWidth(0.5).stroke();
+        doc.y += 6;
+      };
+
+      // ── PRESTADOR ────────────────────────────────────────────────────────
+      sectionTitle("Prestador");
+      twoCol([
+        ["Prestador", b.prestador],
+        ["Telefone", b.telefone],
+      ]);
+      twoCol([
+        ["CNPJ / CPF", b.cnpj_cpf],
+        ["Nome do titular", b.nome_titular],
+      ]);
+
+      // ── SERVIÇO ──────────────────────────────────────────────────────────
+      if (b.servico_executado || b.servico_setor || b.servico_crd) {
+        sectionTitle("Serviço Executado");
+        row("Descrição", b.servico_executado);
+        twoCol([["Setor", b.servico_setor], ["CRD", b.servico_crd]]);
+      }
+
+      // ── MATERIAIS ────────────────────────────────────────────────────────
+      if (b.materiais_descricao || b.materiais_setor || b.materiais_crd) {
+        sectionTitle("Materiais");
+        row("Descrição", b.materiais_descricao);
+        twoCol([["Setor", b.materiais_setor], ["CRD", b.materiais_crd]]);
+      }
+
+      // ── VALOR ───────────────────────────────────────────────────────────
+      sectionTitle("Valor");
+      doc.rect(X, doc.y, W, 22).fill("#F0FDF4");
+      doc.fillColor(TEAL).fontSize(12).font("Helvetica-Bold")
+         .text(`VALOR A SER PAGO: ${fmtCurrency(b.valor)}`, X + 8, doc.y + 5, { width: W - 16 });
+      doc.y += 28;
+
+      // ── FATURAMENTO ─────────────────────────────────────────────────────
+      sectionTitle("Faturamento");
+      checkRow("Emissão de Nota Fiscal + Recibo", b.faturamento === "nf_recibo");
+      checkRow("Emissão de Recibo (sem nota fiscal)", b.faturamento === "recibo");
+
+      // ── PAGAMENTO ───────────────────────────────────────────────────────
+      sectionTitle("Condições de Pagamento");
+      checkRow("Cartão de Crédito", b.pagamento === "cartao");
+      checkRow("À Vista — Efetivo", b.pagamento === "avista");
+      checkRow("Boleto Bancário — máximo de prazo possível considerando o vencimento", b.pagamento === "boleto");
+      checkRow("PIX", b.pagamento === "pix", b.pagamento === "pix" && b.pix_chave ? `  Chave: ${b.pix_chave}` : "");
+      doc.moveDown(0.3);
+      twoCol([
+        ["Banco", b.banco],
+        ["Agência", b.agencia],
+        ["C/C", b.conta_corrente],
+      ]);
+
+      // ── OBS ─────────────────────────────────────────────────────────────
+      if (b.observacao) {
+        sectionTitle("Observações");
+        doc.fillColor("#0F172A").fontSize(8.5).font("Helvetica")
+           .text(b.observacao, X, doc.y, { width: W });
+        doc.y += 8;
+      }
+
+      // ── AVISOS ──────────────────────────────────────────────────────────
+      sectionTitle("Informações Importantes");
+      const avisos = [
+        "Consultar o orçamento mensal para contratação de Serviços.",
+        "Valores acima de R$ 800,00 — Colher assinatura da Diretoria.",
+        "Pagamentos com mínimo de 10 dias úteis após a entrega da nota fiscal no financeiro.",
+        "Pagamentos via Banco: Terças e Quintas — SOMENTE ATÉ AS 10H00.",
+        "Pagamentos à Vista via caixa — Quintas após 14h00. Ordens entregues com mínimo 3 dias antecipado.",
+        "Solicitar aos prestadores inserir a chave PIX no corpo da nota Fiscal.",
+      ];
+      for (const a of avisos) {
+        doc.fillColor(GRAY).fontSize(7.5).font("Helvetica")
+           .text(`• ${a}`, X, doc.y, { width: W });
+        doc.y += 2;
+      }
+
+      // ── ASSINATURAS ─────────────────────────────────────────────────────
+      doc.moveDown(1.2);
+      divider();
+      const sigY = doc.y + 30;
+      const sigW = (W - 20) / 3;
+      const sigs = [
+        b.solicitado_por || "Solicitado por",
+        "Autorizado — Gerência",
+        "Autorizado — Diretoria\nLuiza Mello",
+      ];
+      sigs.forEach((label, i) => {
+        const sx = X + i * (sigW + 10);
+        doc.moveTo(sx, sigY).lineTo(sx + sigW, sigY).strokeColor("#94A3B8").lineWidth(0.8).stroke();
+        doc.fillColor(GRAY).fontSize(7).font("Helvetica")
+           .text(label, sx, sigY + 4, { width: sigW, align: "center" });
+      });
+
+      doc.y = sigY + 36;
+      divider();
+
+      const sig2Y = doc.y + 28;
+      const sigs2 = ["Supervisora ADM — Cristiane Queiroz", "Controller — Elton Roque"];
+      const sig2W = (W - 20) / 2;
+      sigs2.forEach((label, i) => {
+        const sx = X + i * (sig2W + 20);
+        doc.moveTo(sx, sig2Y).lineTo(sx + sig2W, sig2Y).strokeColor("#94A3B8").lineWidth(0.8).stroke();
+        doc.fillColor(GRAY).fontSize(7).font("Helvetica")
+           .text(label, sx, sig2Y + 4, { width: sig2W, align: "center" });
+      });
+
+      // ── RODAPÉ ──────────────────────────────────────────────────────────
+      doc.y = sig2Y + 40;
+      doc.fillColor(GRAY).fontSize(7.5).font("Helvetica")
+         .text(`Foz do Iguaçu, ${fmtDate(b.data_execucao)}`, X, doc.y, { width: W, align: "right" });
+
+      doc.end();
+    } catch (err: any) {
+      console.error("Erro ao gerar PDF da Ordem de Compra:", err);
+      res.status(500).json({ error: "Falha ao gerar o PDF.", detail: err?.message });
+    }
+  });
+
   // Lista os subgrupos de USO E CONSUMO (SEM CRD) cadastrados.
   app.get("/api/uso-consumo-subgrupos", async (_req, res) => {
     const { data, error } = await supabase

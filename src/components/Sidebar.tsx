@@ -1,13 +1,13 @@
 import React from 'react';
-import { 
-  LayoutDashboard, 
-  BarChart3, 
-  FileText, 
-  Target, 
-  FileSpreadsheet, 
-  Settings, 
-  Users, 
-  User, 
+import {
+  LayoutDashboard,
+  BarChart3,
+  FileText,
+  Target,
+  FileSpreadsheet,
+  Settings,
+  Users,
+  User,
   LogOut,
   Receipt,
   PlusCircle,
@@ -24,6 +24,8 @@ import {
   CalendarDays,
   Calculator,
   Layers,
+  ShoppingCart,
+  FileCheck,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { PLANILHAS } from '../lib/planilhas';
@@ -47,6 +49,7 @@ const lancamentosMenuItems = [
   { id: 'lancamentos-manuais', label: 'Lançamentos Manuais', icon: Wallet, roles: ['admin', 'finance', 'controle', 'manager'] },
   { id: 'requisicoes', label: 'Requisições', icon: Archive, roles: ['admin', 'finance', 'controle', 'manager'] },
   { id: 'notas', label: 'Controle de Notas', icon: Receipt, roles: ['admin', 'finance', 'controle', 'manager'] },
+  { id: 'danfe', label: 'DANFE', icon: FileText, roles: ['admin', 'finance', 'controle', 'manager'] },
 ];
 
 const menuItems = [
@@ -85,6 +88,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const showLancamentos = lancamentosMenu.length > 0;
   const folhaRoles = ['admin', 'finance', 'controle'];
   const showFolha = folhaRoles.includes(user?.role);
+  const comprasRoles = ['admin', 'finance', 'controle', 'manager'];
+  const showCompras = comprasRoles.includes(user?.role);
+  const comprasIds = ['compras-ordem'];
+  const [comprasExpanded, setComprasExpanded] = React.useState(comprasIds.includes(activeTab));
   const [constructionExpanded, setConstructionExpanded] = React.useState(
     constructionMenu.some((item) => item.id === activeTab)
   );
@@ -99,6 +106,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   );
 
   React.useEffect(() => {
+    if (comprasIds.includes(activeTab)) setComprasExpanded(true);
     if (constructionMenu.some((item) => item.id === activeTab)) {
       setConstructionExpanded(true);
     }
@@ -214,6 +222,46 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 <span className="font-medium text-xs truncate text-left">{item.label}</span>
               </button>
             ))}
+          </div>
+        )}
+
+        {showCompras && (
+          <div className="space-y-1">
+            <button
+              onClick={() => setComprasExpanded((prev) => !prev)}
+              className={cn(
+                "w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group",
+                comprasIds.includes(activeTab)
+                  ? "text-white bg-white/10"
+                  : "text-white/80 hover:bg-white/5 hover:text-white"
+              )}
+            >
+              <ShoppingCart className="w-5 h-5 min-w-5 min-h-5 shrink-0 transition-transform duration-200 group-hover:scale-110" />
+              <span className={cn("font-medium text-sm flex-1 text-left", collapsed && "hidden")}>
+                Compras
+              </span>
+              <ChevronDown
+                className={cn(
+                  "w-4 h-4 transition-transform duration-200",
+                  comprasExpanded && "rotate-180",
+                  collapsed && "hidden"
+                )}
+              />
+            </button>
+            {!collapsed && comprasExpanded && (
+              <button
+                onClick={() => setActiveTab('compras-ordem')}
+                className={cn(
+                  "w-full flex items-center gap-3 pl-11 pr-4 py-2 rounded-xl transition-all duration-200 group",
+                  activeTab === 'compras-ordem'
+                    ? "bg-emerald-500 text-white shadow-lg shadow-emerald-900/20"
+                    : "text-white/70 hover:bg-white/5 hover:text-white"
+                )}
+              >
+                <FileCheck className="w-4 h-4 min-w-4 min-h-4 shrink-0" />
+                <span className="font-medium text-xs truncate text-left">Ordem de Compra</span>
+              </button>
+            )}
           </div>
         )}
 

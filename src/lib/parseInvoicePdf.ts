@@ -363,7 +363,120 @@ export function parseInvoicePdfGeneric(text: string): Partial<InvoicePdfExtracte
   };
 }
 
+/** Parser para DANFE (NF-e — Documento Auxiliar da Nota Fiscal Eletrônica). */
+export function parseDanfePdfText(text: string): Partial<InvoicePdfExtracted> {
+  const compact = normalizeText(text).replace(/[ \t]+/g, " ");
+  const lines = linesOf(text);
+
+  if (!/\bDANFE\b/i.test(compact) && !/DOCUMENTO AUXILIAR DA NOTA FISCAL/i.test(compact)) {
+    return {};
+  }
+
+  // Número da nota: "Nº: 000.078.214" or from chave
+  let invoice_number = "";
+  const numMatch = compact.match(/N[ºo°]\s*[:\-]?\s*([\d.]+)/i);
+  if (numMatch?.[1]) {
+    invoice_number = numMatch[1].replace(/\./g, "");
+  }
+
+  // Remove leading zeros after stripping dots
+  if (/^0+\d/.test(invoice_number)) {
+    invoice_number = String(parseInt(invoice_number, 10));
+  }
+
+  // Provider name: first capitalized name block after DANFE header (before CNPJ/IE lines)
+  let provider_name = "";
+  const danfeLineIdx = lines.findIndex((l) => /^DANFE$/i.test(l));
+  if (danfeLineIdx >= 0) {
+    for (let i = danfeLineIdx + 1; i < Math.min(danfeLineIdx + 15, lines.length); i++) {
+      const l = lines[i];
+      if (/^CNPJ/i.test(l) || /^IE/i.test(l) || /^DOCUMENTO AUXILIAR/i.test(l)) break;
+      if (l.length > 5 && /[A-ZÁÉÍÓÚÂÊÎÔÛÃÕ]{2,}/.test(l) && !/^\d/.test(l)) {
+        provider_name = l;
+        break;
+      }
+    }
+  }
+
+  // CNPJ emitente
+  const cnpjMatch = compact.match(/CNPJ\s+([\d]{2}\.[\d]{3}\.[\d]{3}\/[\d]{4}-[\d]{2})/);
+  const cnpj_emitente = cnpjMatch?.[1] || "";
+
+  // Chave de acesso: 44-digit groups
+  const chaveRaw = compact.match(/CHAVE DE ACESSO\s+([\d\s]{44,58})/i);
+  const chave_acesso = chaveRaw ? chaveRaw[1].replace(/\s/g, "").slice(0, 44) : "";
+
+  // If no invoice_number from Nº field, extract from chave
+  if (!invoice_number && chave_acesso.length === 44) {
+    invoice_number = extractInvoiceNumberFromChave(chave_acesso);
+  }
+
+  // Issue date from "DATA EMISSÃO" label
+  const emissaoIdx = lines.findIndex((l) => /DATA\s*EMISS[AÃ]O/i.test(l));
+  let issue_date = "";
+  if (emissaoIdx >= 0) {
+    for (let i = emissaoIdx; i <= emissaoIdx + 3 && i < lines.length; i++) {
+      const iso = parseBrDateToIso(lines[i]);
+      if (iso) { issue_date = iso; break; }
+    }
+  }
+
+  // Due date from "FATURA / DUPLICATA" block — first vencimento date
+  let due_date = "";
+  const faturaIdx = lines.findIndex((l) => /FATURA\s*[\/|]\s*DUPLICATA/i.test(l));
+  if (faturaIdx >= 0) {
+    for (let i = faturaIdx + 1; i <= faturaIdx + 10 && i < lines.length; i++) {
+      const iso = parseBrDateToIso(lines[i]);
+      if (iso) { due_date = iso; break; }
+    }
+  }
+
+  // Valor total da nota
+  let amount = "";
+  const valorTotalIdx = lines.findIndex((l) => /VALOR\s+TOTAL\s+DA\s+NOTA/i.test(l));
+  if (valorTotalIdx >= 0) {
+    for (let i = valorTotalIdx; i <= valorTotalIdx + 3 && i < lines.length; i++) {
+      const parsed = parseBrMoney(lines[i]);
+      if (parsed) { amount = parsed; break; }
+    }
+  }
+  if (!amount) {
+    const m = compact.match(/VALOR\s+TOTAL\s+DA\s+NOTA\s+([\d.,]+)/i);
+    if (m?.[1]) amount = parseBrMoney(m[1]);
+  }
+
+  return {
+    invoice_number,
+    provider_name,
+    client_name: "VIVAZ CATARATAS",
+    issue_date,
+    due_date,
+    amount,
+    pix_key: "",
+    payment_method: "boleto",
+    description: cnpj_emitente ? `CNPJ: ${cnpj_emitente}${chave_acesso ? ` | Chave: ${chave_acesso}` : ""}` : "",
+  };
+}
+
 export function parseInvoicePdfText(text: string): InvoicePdfExtracted {
+  // Auto-detect DANFE before trying NFS-e parsers
+  const isDanfe = /\bDANFE\b/i.test(text) || /DOCUMENTO AUXILIAR DA NOTA FISCAL ELETR[ÔO]NICA/i.test(text);
+  if (isDanfe) {
+    const danfe = parseDanfePdfText(text);
+    const merged: InvoicePdfExtracted = {
+      invoice_number: danfe.invoice_number || "",
+      provider_name: danfe.provider_name || "",
+      client_name: danfe.client_name || "",
+      issue_date: danfe.issue_date || "",
+      due_date: danfe.due_date || "",
+      amount: danfe.amount || "",
+      pix_key: danfe.pix_key || "",
+      payment_method: danfe.payment_method || "boleto",
+      description: danfe.description || "",
+    };
+    return merged;
+  }
+
   const nfse = parseNfseFozGestaoIss(text);
   const generic = parseInvoicePdfGeneric(text);
 
