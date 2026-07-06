@@ -141,6 +141,61 @@ CREATE TABLE IF NOT EXISTS requisitions (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- Tabela: manual_entries (lançamentos manuais que compõem orçamento)
+CREATE TABLE IF NOT EXISTS manual_entries (
+  id BIGSERIAL PRIMARY KEY,
+  sector_id BIGINT NOT NULL REFERENCES sectors(id),
+  crd_id BIGINT REFERENCES crds(id),
+  user_id BIGINT REFERENCES users(id),
+  description TEXT,
+  amount NUMERIC NOT NULL CHECK (amount >= 0),
+  date DATE NOT NULL,
+  status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'cancelled', 'posted')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_manual_entries_sector_id ON manual_entries (sector_id);
+CREATE INDEX IF NOT EXISTS idx_manual_entries_date ON manual_entries (date);
+CREATE INDEX IF NOT EXISTS idx_manual_entries_status ON manual_entries (status);
+
+-- Tabela: comandas (lançamento manual de consumo)
+CREATE TABLE IF NOT EXISTS comandas (
+  id BIGSERIAL PRIMARY KEY,
+  consumer_name TEXT NOT NULL,
+  consumed_at DATE NOT NULL,
+  location TEXT NOT NULL,
+  user_id BIGINT REFERENCES users(id),
+  status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'cancelled', 'posted')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS comanda_items (
+  id BIGSERIAL PRIMARY KEY,
+  comanda_id BIGINT NOT NULL REFERENCES comandas(id) ON DELETE CASCADE,
+  description TEXT NOT NULL,
+  quantity NUMERIC NOT NULL CHECK (quantity > 0),
+  unit_price NUMERIC NOT NULL CHECK (unit_price >= 0),
+  total_amount NUMERIC NOT NULL CHECK (total_amount >= 0),
+  sort_order INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_comandas_consumed_at ON comandas (consumed_at);
+CREATE INDEX IF NOT EXISTS idx_comandas_status ON comandas (status);
+CREATE INDEX IF NOT EXISTS idx_comanda_items_comanda_id ON comanda_items (comanda_id);
+
+-- Tabela: pdv_locais (locais PDV para comandas)
+CREATE TABLE IF NOT EXISTS pdv_locais (
+  id BIGSERIAL PRIMARY KEY,
+  name TEXT NOT NULL,
+  active BOOLEAN NOT NULL DEFAULT TRUE,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT pdv_locais_name_unique UNIQUE (name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_pdv_locais_active ON pdv_locais (active);
+CREATE INDEX IF NOT EXISTS idx_pdv_locais_sort_order ON pdv_locais (sort_order);
+
 -- ============================================================
 -- SEED: Formas de pagamento
 -- ============================================================

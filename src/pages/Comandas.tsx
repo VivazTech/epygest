@@ -1,0 +1,416 @@
+import React, { useEffect, useMemo, useState } from 'react';
+import { Plus, Trash2, Archive, XCircle } from 'lucide-react';
+import { cn } from '../lib/utils';
+import { useSearch } from '../context/SearchContext';
+import { matchesSearch } from '../lib/search';
+
+type ComandaItemForm = {
+  description: string;
+  quantity: string;
+};
+
+const emptyItem = (): ComandaItemForm => ({
+  description: '',
+  quantity: '',
+});
+
+export const ComandasPage: React.FC = () => {
+  const { query } = useSearch();
+  const [comandas, setComandas] = useState<any[]>([]);
+  const [pdvLocais, setPdvLocais] = useState<Array<{ id: number; name: string }>>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [form, setForm] = useState({
+    consumer_name: '',
+    consumed_at: '',
+    location: '',
+    items: [emptyItem()],
+  });
+
+  const loadData = async () => {
+    try {
+      const [comandasRes, locaisRes] = await Promise.all([
+        fetch('/api/comandas'),
+        fetch('/api/pdv-locais'),
+      ]);
+      const data = await comandasRes.json().catch(() => null);
+      const locais = await locaisRes.json().catch(() => null);
+
+      if (Array.isArray(locais)) {
+        setPdvLocais(locais.map((l: any) => ({ id: Number(l.id), name: String(l.name) })));
+      } else {
+        setPdvLocais([]);
+      }
+
+      if (!comandasRes.ok || !Array.isArray(data)) {
+        const message =
+          (data && typeof data === 'object' && 'error' in data && String((data as any).error)) ||
+          'Não foi possível carregar as comandas.';
+        console.error('Falha ao carregar comandas:', data);
+        setLoadError(message);
+        setComandas([]);
+        return;
+      }
+      setLoadError(null);
+      setComandas(data);
+    } catch (error) {
+      console.error('Falha ao carregar comandas:', error);
+      setComandas([]);
+      setPdvLocais([]);
+    }
+  };
+
+  useEffect(() => {
+    loadData();
+  }, []);
+
+  const addItem = () => {
+    setForm((prev) => ({ ...prev, items: [...prev.items, emptyItem()] }));
+  };
+
+  const removeItem = (index: number) => {
+    setForm((prev) => ({
+      ...prev,
+      items: prev.items.length <= 1 ? prev.items : prev.items.filter((_, i) => i !== index),
+    }));
+  };
+
+  const updateItem = (index: number, patch: Partial<ComandaItemForm>) => {
+    setForm((prev) => ({
+      ...prev,
+      items: prev.items.map((item, i) => (i === index ? { ...item, ...patch } : item)),
+    }));
+  };
+
+  const resetForm = () => {
+    setForm({
+      consumer_name: '',
+      consumed_at: '',
+      location: '',
+      items: [emptyItem()],
+    });
+  };
+
+  const createComanda = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    const consumerName = form.consumer_name.trim();
+    const location = form.location.trim();
+    if (!consumerName || !form.consumed_at || !location) {
+      alert('Preencha todos os campos obrigatórios da comanda.');
+      return;
+    }
+    if (!pdvLocais.some((l) => l.name === location)) {
+      alert('Selecione um local PDV válido cadastrado em Configurações.');
+      return;
+    }
+
+    for (let i = 0; i < form.items.length; i++) {
+      const item = form.items[i];
+      if (!item.description.trim() || !item.quantity) {
+        alert(`Preencha descrição e quantidade do item ${i + 1}.`);
+        return;
+      }
+      const quantity = Number(item.quantity);
+      if (!Number.isFinite(quantity) || quantity <= 0) {
+        alert(`Quantidade inválida no item ${i + 1}.`);
+        return;
+      }
+    }
+
+    setSubmitting(true);
+    try {
+      const res = await fetch('/api/comandas', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          consumer_name: consumerName,
+          consumed_at: form.consumed_at,
+          location,
+          items: form.items.map((item) => ({
+            description: item.description.trim(),
+            quantity: Number(item.quantity),
+          })),
+        }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json();
+        alert(data.error || 'Não foi possível registrar a comanda.');
+        return;
+      }
+
+      resetForm();
+      loadData();
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const updateStatus = async (id: number, status: 'posted' | 'cancelled') => {
+    await fetch(`/api/comandas/${id}/status`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status }),
+    });
+    loadData();
+  };
+
+  const filteredComandas = useMemo(
+    () =>
+      comandas.filter((comanda) =>
+        matchesSearch(
+          query,
+          comanda.consumer_name,
+          comanda.location,
+          comanda.consumed_at,
+          comanda.user_name,
+          comanda.status,
+          comanda.items_count,
+          ...(comanda.items ?? []).flatMap((item: any) => [item.description, item.quantity])
+        )
+      ),
+    [comandas, query]
+  );
+
+  return (
+    <div className="space-y-6 animate-in fade-in duration-500">
+      <div>
+        <h2 className="text-2xl font-bold text-slate-900">Lançamento de Comanda</h2>
+        <p className="text-slate-500 text-sm">
+          Registre manualmente o consumo informando consumidor, data, local e itens consumidos.
+        </p>
+      </div>
+
+      {loadError && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          {loadError}
+          {loadError.includes('Reinicie') ? null : (
+            <span className="block text-xs mt-1 text-amber-700">
+              Se o problema persistir, reinicie o servidor com <code className="font-mono">npm run dev</code>.
+            </span>
+          )}
+        </div>
+      )}
+
+      <form
+        onSubmit={createComanda}
+        className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6 space-y-5"
+      >
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="space-y-1.5">
+            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+              Nome do Consumidor <span className="text-red-500">*</span>
+            </label>
+            <input
+              required
+              value={form.consumer_name}
+              onChange={(e) => setForm((p) => ({ ...p, consumer_name: e.target.value }))}
+              placeholder="Nome completo"
+              className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+              Data do consumo <span className="text-red-500">*</span>
+            </label>
+            <input
+              required
+              type="date"
+              value={form.consumed_at}
+              onChange={(e) => setForm((p) => ({ ...p, consumed_at: e.target.value }))}
+              className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+              Local do consumo <span className="text-red-500">*</span>
+            </label>
+            <select
+              required
+              value={form.location}
+              onChange={(e) => setForm((p) => ({ ...p, location: e.target.value }))}
+              className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+            >
+              <option value="">
+                {pdvLocais.length === 0 ? 'Cadastre locais em Configurações' : 'Selecione o local'}
+              </option>
+              {pdvLocais.map((local) => (
+                <option key={local.id} value={local.name}>
+                  {local.name}
+                </option>
+              ))}
+            </select>
+            {pdvLocais.length === 0 && (
+              <p className="text-[11px] text-amber-700">
+                Nenhum local PDV ativo. Peça ao administrador para cadastrar em Configurações → Locais PDV.
+              </p>
+            )}
+          </div>
+        </div>
+
+        <div className="space-y-3 border-t border-slate-100 pt-5">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-bold text-slate-800">Itens consumidos</h3>
+              <p className="text-xs text-slate-500">Informe descrição e quantidade de cada item.</p>
+            </div>
+            <button
+              type="button"
+              onClick={addItem}
+              className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 text-sm font-bold text-slate-700 hover:bg-slate-50 transition-colors"
+            >
+              <Plus className="w-4 h-4" />
+              Adicionar item
+            </button>
+          </div>
+
+          <div className="space-y-3">
+            {form.items.map((item, index) => (
+              <div
+                key={index}
+                className="grid grid-cols-1 md:grid-cols-[1fr_140px_auto] gap-3 items-end bg-slate-50/70 border border-slate-100 rounded-xl p-4"
+              >
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+                    Item <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    required
+                    value={item.description}
+                    onChange={(e) => updateItem(index, { description: e.target.value })}
+                    placeholder="Descrição do item"
+                    className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+                    Qtd. <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    required
+                    type="number"
+                    min="0.01"
+                    step="0.01"
+                    value={item.quantity}
+                    onChange={(e) => updateItem(index, { quantity: e.target.value })}
+                    className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm"
+                  />
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => removeItem(index)}
+                  disabled={form.items.length <= 1}
+                  className="p-2 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-slate-500"
+                  title="Remover item"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
+            ))}
+          </div>
+
+          <div className="flex justify-end pt-2">
+            <button
+              type="submit"
+              disabled={submitting}
+              className="inline-flex items-center justify-center gap-2 bg-[#004D40] text-white px-5 py-3 rounded-xl shadow-lg shadow-emerald-900/10 hover:bg-[#003d33] transition-colors disabled:opacity-60"
+            >
+              <Plus className="w-4 h-4" />
+              <span className="font-bold text-sm">{submitting ? 'Salvando...' : 'Registrar comanda'}</span>
+            </button>
+          </div>
+        </div>
+      </form>
+
+      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-x-auto">
+        <table className="w-full text-left border-collapse">
+          <thead>
+            <tr className="bg-slate-50/50">
+              <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Consumidor</th>
+              <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Data / Local</th>
+              <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Itens</th>
+              <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Status</th>
+              <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-right">Ações</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-50">
+            {filteredComandas.length === 0 && (
+              <tr>
+                <td colSpan={5} className="px-6 py-10 text-center text-sm text-slate-400">
+                  Nenhuma comanda registrada.
+                </td>
+              </tr>
+            )}
+            {filteredComandas.map((comanda) => (
+              <tr key={comanda.id} className="hover:bg-slate-50/50 transition-colors align-top">
+                <td className="px-6 py-4 text-sm font-medium text-slate-800">
+                  {comanda.consumer_name}
+                  {comanda.user_name ? (
+                    <span className="block text-[10px] font-normal text-slate-400 mt-0.5">
+                      registrado por {comanda.user_name}
+                    </span>
+                  ) : null}
+                </td>
+                <td className="px-6 py-4 text-sm text-slate-600">
+                  <span className="font-medium text-slate-700">{comanda.consumed_at}</span>
+                  <span className="block text-xs text-slate-500 mt-0.5">{comanda.location}</span>
+                </td>
+                <td className="px-6 py-4 text-sm text-slate-600">
+                  <ul className="space-y-1">
+                    {(comanda.items ?? []).map((item: any) => (
+                      <li key={item.id} className="text-xs">
+                        <span className="font-medium text-slate-700">{item.description}</span>
+                        <span className="text-slate-500"> · qtd. {item.quantity}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </td>
+                <td className="px-6 py-4">
+                  <span
+                    className={cn(
+                      'text-[10px] font-bold px-2 py-1 rounded-lg uppercase tracking-wider',
+                      comanda.status === 'open'
+                        ? 'bg-orange-100 text-orange-700'
+                        : comanda.status === 'posted'
+                          ? 'bg-emerald-100 text-emerald-700'
+                          : 'bg-slate-200 text-slate-700'
+                    )}
+                  >
+                    {comanda.status === 'open' ? 'Aberta' : comanda.status === 'posted' ? 'Baixada' : 'Cancelada'}
+                  </span>
+                </td>
+                <td className="px-6 py-4">
+                  <div className="flex justify-end gap-2">
+                    {comanda.status === 'open' && (
+                      <>
+                        <button
+                          onClick={() => updateStatus(comanda.id, 'posted')}
+                          className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"
+                          title="Baixar comanda"
+                        >
+                          <Archive className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => updateStatus(comanda.id, 'cancelled')}
+                          className="p-2 text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+                          title="Cancelar comanda"
+                        >
+                          <XCircle className="w-4 h-4" />
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+};

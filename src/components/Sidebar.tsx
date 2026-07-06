@@ -19,9 +19,11 @@ import {
   PanelLeftOpen,
   ChevronDown,
   Table2,
+  ClipboardList,
   Wallet,
   CalendarDays,
   Calculator,
+  Layers,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { PLANILHAS } from '../lib/planilhas';
@@ -40,13 +42,18 @@ interface SidebarProps {
   onToggleCollapsed: () => void;
 }
 
+const lancamentosMenuItems = [
+  { id: 'comandas', label: 'Comandas', icon: ClipboardList, roles: ['admin', 'finance', 'controle', 'manager'] },
+  { id: 'lancamentos-manuais', label: 'Lançamentos Manuais', icon: Wallet, roles: ['admin', 'finance', 'controle', 'manager'] },
+  { id: 'requisicoes', label: 'Requisições', icon: Archive, roles: ['admin', 'finance', 'controle', 'manager'] },
+  { id: 'notas', label: 'Controle de Notas', icon: Receipt, roles: ['admin', 'finance', 'controle', 'manager'] },
+];
+
 const menuItems = [
   { id: 'dashboard', label: 'Dashboard Geral', icon: LayoutDashboard, roles: ['admin', 'finance', 'controle', 'manager', 'viewer'] },
   { id: 'analise', label: 'Análise Financeira', icon: BarChart3, roles: ['admin', 'finance', 'controle', 'manager'] },
   { id: 'dre', label: 'DRE Gerencial', icon: FileSpreadsheet, roles: ['admin', 'finance', 'controle'] },
   { id: 'planejamento', label: 'Planejamento', icon: Target, roles: ['admin', 'finance', 'controle', 'manager'] },
-  { id: 'notas', label: 'Controle de Notas', icon: Receipt, roles: ['admin', 'finance', 'controle', 'manager'] },
-  { id: 'requisicoes', label: 'Requisições', icon: Archive, roles: ['admin', 'finance', 'controle', 'manager'] },
   { id: 'importacao', label: 'Importação', icon: PlusCircle, roles: ['admin', 'finance', 'controle'] },
   { id: 'cadastros', label: 'Cadastros', icon: Database, roles: ['admin', 'finance', 'controle'] },
   { id: 'sintase', label: 'Síntase', icon: Rows4, roles: ['admin', 'finance', 'controle', 'manager'] },
@@ -64,19 +71,25 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onToggleCollapsed
 }) => {
   const constructionGroupIds = ['dashboard', 'analise', 'planejamento'];
+  const lancamentosGroupIds = lancamentosMenuItems.map((item) => item.id);
   const adminGroupIds = ['usuarios', 'configuracoes'];
   const planilhasRoles = ['admin', 'finance', 'controle'];
   const filteredMenu = menuItems.filter(item => item.roles.includes(user?.role));
+  const lancamentosMenu = lancamentosMenuItems.filter((item) => item.roles.includes(user?.role));
   const constructionMenu = filteredMenu.filter((item) => constructionGroupIds.includes(item.id));
   const primaryMenu = filteredMenu.filter(
     (item) => !constructionGroupIds.includes(item.id) && !adminGroupIds.includes(item.id)
   );
   const adminMenu = filteredMenu.filter((item) => adminGroupIds.includes(item.id));
   const showPlanilhas = planilhasRoles.includes(user?.role);
+  const showLancamentos = lancamentosMenu.length > 0;
   const folhaRoles = ['admin', 'finance', 'controle'];
   const showFolha = folhaRoles.includes(user?.role);
   const [constructionExpanded, setConstructionExpanded] = React.useState(
     constructionMenu.some((item) => item.id === activeTab)
+  );
+  const [lancamentosExpanded, setLancamentosExpanded] = React.useState(
+    lancamentosGroupIds.includes(activeTab)
   );
   const [planilhasExpanded, setPlanilhasExpanded] = React.useState(
     activeTab.startsWith('planilha-')
@@ -89,13 +102,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
     if (constructionMenu.some((item) => item.id === activeTab)) {
       setConstructionExpanded(true);
     }
+    if (lancamentosGroupIds.includes(activeTab)) {
+      setLancamentosExpanded(true);
+    }
     if (activeTab.startsWith('planilha-')) {
       setPlanilhasExpanded(true);
     }
     if (activeTab.startsWith('folha-') || activeTab === 'folha-apuracao') {
       setFolhaExpanded(true);
     }
-  }, [activeTab, constructionMenu]);
+  }, [activeTab, constructionMenu, lancamentosGroupIds]);
 
   return (
     <div className={cn(
@@ -150,6 +166,52 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   activeTab === item.id ? "scale-110" : "group-hover:scale-110"
                 )} />
                 <span className="font-medium text-sm">{item.label}</span>
+              </button>
+            ))}
+          </div>
+        )}
+
+        {showLancamentos && (
+          <div className="space-y-1">
+            <button
+              onClick={() => setLancamentosExpanded((prev) => !prev)}
+              className={cn(
+                "w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group",
+                lancamentosGroupIds.includes(activeTab)
+                  ? "text-white bg-white/10"
+                  : "text-white/80 hover:bg-white/5 hover:text-white"
+              )}
+            >
+              <Layers className="w-5 h-5 min-w-5 min-h-5 shrink-0 transition-transform duration-200 group-hover:scale-110" />
+              <span className={cn("font-medium text-sm flex-1 text-left", collapsed && "hidden")}>
+                Lançamentos
+              </span>
+              <ChevronDown
+                className={cn(
+                  "w-4 h-4 transition-transform duration-200",
+                  lancamentosExpanded && "rotate-180",
+                  collapsed && "hidden"
+                )}
+              />
+            </button>
+
+            {!collapsed && lancamentosExpanded && lancamentosMenu.map((item) => (
+              <button
+                key={item.id}
+                onClick={() => setActiveTab(item.id)}
+                className={cn(
+                  "w-full flex items-center gap-3 pl-11 pr-4 py-2 rounded-xl transition-all duration-200 group",
+                  activeTab === item.id
+                    ? "bg-emerald-500 text-white shadow-lg shadow-emerald-900/20"
+                    : "text-white/70 hover:bg-white/5 hover:text-white"
+                )}
+                title={item.label}
+              >
+                <item.icon className={cn(
+                  "w-4 h-4 min-w-4 min-h-4 shrink-0 transition-transform duration-200",
+                  activeTab === item.id ? "scale-110" : "group-hover:scale-110"
+                )} />
+                <span className="font-medium text-xs truncate text-left">{item.label}</span>
               </button>
             ))}
           </div>

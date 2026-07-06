@@ -12,9 +12,9 @@ export const valueTrace = {
   sectors: {
     pendingAmount: (sectorName: string, month: number, year: number): ValueTraceMeta => ({
       source: `Compromissos do setor ${sectorName} — ${String(month).padStart(2, '0')}/${year}`,
-      tables: 'invoices, requisitions',
+      tables: 'invoices, requisitions, manual_entries',
       calculation:
-        'Soma de invoices.amount com due_date no mês e flow_stage ≠ cancelled, mais requisitions.amount com status=open e date no mês (API GET /api/sectors).',
+        'Soma de invoices.amount com due_date no mês e flow_stage ≠ cancelled, requisitions.amount com status=open e date no mês, e manual_entries.amount com status=open e date no mês (API GET /api/sectors).',
     }),
     pendingInvoices: (sectorName: string, month: number, year: number): ValueTraceMeta => ({
       source: `Notas do setor ${sectorName} — ${String(month).padStart(2, '0')}/${year}`,
@@ -26,6 +26,11 @@ export const valueTrace = {
       tables: 'requisitions',
       calculation: 'Soma de amount com status=open e date no mês de referência.',
     }),
+    pendingManualEntries: (sectorName: string, month: number, year: number): ValueTraceMeta => ({
+      source: `Lançamentos manuais abertos — ${sectorName} — ${String(month).padStart(2, '0')}/${year}`,
+      tables: 'manual_entries',
+      calculation: 'Soma de amount com status=open e date no mês de referência.',
+    }),
     budgetMonth: (sectorName: string, month: number, year: number, occupancyPct: number): ValueTraceMeta => ({
       source: `Orçamento Síntase — setor ${sectorName} — ${String(month).padStart(2, '0')}/${year}`,
       tables: 'crds, crd_monthly_values, sintase_occupancy',
@@ -33,9 +38,9 @@ export const valueTrace = {
     }),
     annualPendingAmount: (sectorName: string, year: number): ValueTraceMeta => ({
       source: `Compromissos anuais — setor ${sectorName} — ${year}`,
-      tables: 'invoices, requisitions',
+      tables: 'invoices, requisitions, manual_entries',
       calculation:
-        'Soma de notas (due_date no ano, não canceladas) e requisições abertas (date no ano) no setor (API GET /api/sectors).',
+        'Soma de notas (due_date no ano, não canceladas), requisições abertas (date no ano) e lançamentos manuais abertos (date no ano) no setor (API GET /api/sectors).',
     }),
     annualBudget: (sectorName: string, year: number, occupancyPct: number): ValueTraceMeta => ({
       source: `Orçamento anual Síntase — setor ${sectorName} — ${year}`,
@@ -62,6 +67,27 @@ export const valueTrace = {
       source: `Requisição interna #${id}`,
       tables: 'requisitions',
       calculation: 'Campo amount informado no cadastro da requisição.',
+    }),
+  },
+
+  manualEntries: {
+    amount: (id: number): ValueTraceMeta => ({
+      source: `Lançamento manual #${id}`,
+      tables: 'manual_entries',
+      calculation: 'Campo amount informado no cadastro do lançamento.',
+    }),
+    openTotal: (): ValueTraceMeta => ({
+      source: 'Lançamentos manuais em aberto (visíveis)',
+      tables: 'manual_entries',
+      calculation: 'Soma de amount com status=open entre os lançamentos listados para o seu perfil.',
+    }),
+  },
+
+  comandas: {
+    itemsCount: (id: number): ValueTraceMeta => ({
+      source: `Comanda #${id}`,
+      tables: 'comanda_items',
+      calculation: 'Quantidade de itens vinculados à comanda.',
     }),
   },
 

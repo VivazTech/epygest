@@ -38,12 +38,14 @@ export function getSearchPlaceholder(activeTab: string): string {
     planejamento: 'Buscar períodos do planejamento...',
     notas: 'Buscar nota, fornecedor, setor ou CRD...',
     requisicoes: 'Buscar requisição, CRD ou descrição...',
+    'lancamentos-manuais': 'Buscar lançamento, setor, CRD ou descrição...',
+    comandas: 'Buscar comanda, consumidor, local ou item...',
     importacao: 'Buscar importação ou dados da prévia...',
     cadastros: 'Buscar cadastro, código ou setor...',
     sintase: 'Buscar CRD, grupo ou detalhado...',
     'prev-real': 'Buscar CRD, grupo ou detalhado...',
     usuarios: 'Buscar nome, e-mail ou setor...',
-    configuracoes: 'Buscar configuração...',
+    configuracoes: 'Buscar configuração ou local PDV...',
   };
 
   return map[activeTab] ?? 'Buscar...';

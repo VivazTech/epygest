@@ -10,6 +10,8 @@ import { PlanningPage as Planejamento } from './pages/Planning';
 import { ImportacaoPage as Importacao } from './pages/Importacao';
 import { CadastrosPage as Cadastros } from './pages/Cadastros';
 import { RequisicoesPage as Requisicoes } from './pages/Requisicoes';
+import { LancamentosManuaisPage as LancamentosManuais } from './pages/LancamentosManuais';
+import { ComandasPage as Comandas } from './pages/Comandas';
 import { SupabaseConnectionTestPage as SupabaseTeste } from './pages/SupabaseConnectionTest';
 import { SintasePage as Sintase } from './pages/Sintase';
 import { PrevRealPage as PrevReal } from './pages/PrevReal';
@@ -161,6 +163,8 @@ export default function App() {
       case 'planejamento': return <Planejamento />;
       case 'notas': return <Invoices />;
       case 'requisicoes': return <Requisicoes />;
+      case 'lancamentos-manuais': return <LancamentosManuais />;
+      case 'comandas': return <Comandas />;
       case 'importacao': return <Importacao />;
       case 'cadastros': return <Cadastros />;
       case 'sintase': return <Sintase />;
@@ -317,6 +321,15 @@ function AppShell({
                 ? `Planilhas / ${PLANILHAS.find((p) => `planilha-${p.indice}` === activeTab)?.nome ?? ''}`
                 : activeTab.startsWith('folha-')
                 ? `Folha de Pagamento / ${MESES_FOLHA[Number(activeTab.slice('folha-'.length))] ?? ''}`
+                : activeTab === 'folha-apuracao'
+                ? 'Folha de Pagamento / Apuração de Folha'
+                : ['comandas', 'lancamentos-manuais', 'requisicoes', 'notas'].includes(activeTab)
+                ? `Lançamentos / ${
+                    activeTab === 'comandas' ? 'Comandas'
+                    : activeTab === 'lancamentos-manuais' ? 'Lançamentos Manuais'
+                    : activeTab === 'requisicoes' ? 'Requisições'
+                    : 'Controle de Notas'
+                  }`
                 : activeTab === 'prev-real'
                 ? 'Prev x Real Diario'
                 : activeTab.replace('-', ' ')}
@@ -349,7 +362,7 @@ function AppShell({
           />
         </div>
 
-        <div className={activeTab === 'notas' || activeTab === 'cadastros' || activeTab === 'sintase' || activeTab === 'prev-real' || activeTab === 'dre' || activeTab.startsWith('planilha-') || activeTab.startsWith('folha-') ? 'p-8 pt-4 md:pt-8 w-full max-w-none' : 'p-8 pt-4 md:pt-8 max-w-7xl mx-auto'}>
+        <div className={activeTab === 'notas' || activeTab === 'comandas' || activeTab === 'lancamentos-manuais' || activeTab === 'requisicoes' || activeTab === 'cadastros' || activeTab === 'sintase' || activeTab === 'prev-real' || activeTab === 'dre' || activeTab.startsWith('planilha-') || activeTab.startsWith('folha-') ? 'p-8 pt-4 md:pt-8 w-full max-w-none' : 'p-8 pt-4 md:pt-8 max-w-7xl mx-auto'}>
           {renderContent()}
         </div>
       </main>

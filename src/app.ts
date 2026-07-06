@@ -1068,7 +1068,7 @@ export function createApp() {
 
     const yearDateFrom = `${selectedYear}-01-01`;
     const yearDateTo = `${selectedYear}-12-31`;
-    const [{ data: yearInvoices }, { data: yearReqs }] = await Promise.all([
+    const [{ data: yearInvoices }, { data: yearReqs }, { data: yearManual }] = await Promise.all([
       supabase
         .from("invoices")
         .select("sector_id, amount")
@@ -1077,6 +1077,12 @@ export function createApp() {
         .or("flow_stage.is.null,flow_stage.neq.cancelled"),
       supabase
         .from("requisitions")
+        .select("sector_id, amount")
+        .eq("status", "open")
+        .gte("date", yearDateFrom)
+        .lte("date", yearDateTo),
+      supabase
+        .from("manual_entries")
         .select("sector_id, amount")
         .eq("status", "open")
         .gte("date", yearDateFrom)
@@ -1101,10 +1107,19 @@ export function createApp() {
         (annualReqsBySector.get(sectorId) || 0) + Number((req as any).amount)
       );
     }
+    const annualManualBySector = new Map<number, number>();
+    for (const entry of yearManual ?? []) {
+      const sectorId = Number((entry as any).sector_id);
+      if (!Number.isFinite(sectorId)) continue;
+      annualManualBySector.set(
+        sectorId,
+        (annualManualBySector.get(sectorId) || 0) + Number((entry as any).amount)
+      );
+    }
 
     const enriched = await Promise.all(
       (sectors ?? []).map(async (sector: any) => {
-        const [{ data: pendingInvoices }, { data: pendingReqs }] = await Promise.all([
+        const [{ data: pendingInvoices }, { data: pendingReqs }, { data: pendingManual }] = await Promise.all([
           supabase
             .from("invoices")
             .select("amount")
@@ -1119,6 +1134,13 @@ export function createApp() {
             .eq("status", "open")
             .gte("date", dateFrom)
             .lte("date", dateTo),
+          supabase
+            .from("manual_entries")
+            .select("amount")
+            .eq("sector_id", sector.id)
+            .eq("status", "open")
+            .gte("date", dateFrom)
+            .lte("date", dateTo),
         ]);
 
         const pending_invoices = (pendingInvoices ?? []).reduce(
@@ -1127,19 +1149,25 @@ export function createApp() {
         const pending_requisitions = (pendingReqs ?? []).reduce(
           (s: number, r: any) => s + Number(r.amount), 0
         );
+        const pending_manual_entries = (pendingManual ?? []).reduce(
+          (s: number, m: any) => s + Number(m.amount), 0
+        );
         const sectorId = Number(sector.id);
         const annual_invoices = annualInvoicesBySector.get(sectorId) || 0;
         const annual_requisitions = annualReqsBySector.get(sectorId) || 0;
+        const annual_manual_entries = annualManualBySector.get(sectorId) || 0;
 
         return {
           ...sector,
           pending_invoices,
           pending_requisitions,
-          pending_amount: pending_invoices + pending_requisitions,
+          pending_manual_entries,
+          pending_amount: pending_invoices + pending_requisitions + pending_manual_entries,
           budget_month: budgetBySectorId.get(sectorId) || 0,
           annual_invoices,
           annual_requisitions,
-          annual_pending_amount: annual_invoices + annual_requisitions,
+          annual_manual_entries,
+          annual_pending_amount: annual_invoices + annual_requisitions + annual_manual_entries,
           annual_budget: annualBudgetBySectorId.get(sectorId) || 0,
           occupancy_percent: occupancyPercent,
           budget_month_ref: {
@@ -1230,6 +1258,402 @@ export function createApp() {
 
     const { error } = await supabase.from("requisitions").update({ status }).eq("id", id);
     if (error) { console.error(error); return res.status(500).json({ error: "Erro interno ao processar a solicitação." }); }
+    res.json({ success: true });
+  });
+
+  // ====================================================
+  // LANÇAMENTOS MANUAIS
+  // ====================================================
+  const assertSectorAccessForUser = async (req: express.Request, sectorId: number) => {
+    const { data: userRow } = await supabase.from("users").select("*").eq("id", req.user!.id).single();
+    if (!userRow) return { ok: true as const };
+
+    const session = await buildUserSession(userRow);
+    const allowedSectorIds = session.sector_ids ?? [];
+    const isGlobal = ["admin", "finance", "controle"].includes(String(userRow.role || ""));
+
+    if (!isGlobal || allowedSectorIds.length > 0) {
+      if (allowedSectorIds.length === 0) {
+        return { ok: false as const, status: 403, error: "Seu usuário não possui setor vinculado para este lançamento." };
+      }
+      if (!allowedSectorIds.includes(Number(sectorId))) {
+        return { ok: false as const, status: 403, error: "Setor fora dos permitidos para seu usuário." };
+      }
+    }
+    return { ok: true as const };
+  };
+
+  app.get("/api/manual-entries", async (_req, res) => {
+    const { data, error } = await supabase
+      .from("manual_entries")
+      .select("*, sectors(name), crds(id, code, name), users(id, name)")
+      .order("date", { ascending: false });
+
+    if (error) {
+      console.error(error);
+      return res.status(500).json({ error: "Erro interno ao processar a solicitação." });
+    }
+
+    res.json(
+      (data ?? []).map((row: any) => ({
+        ...row,
+        sector_name: row.sectors?.name ?? null,
+        crd_code: row.crds?.code ?? null,
+        crd_name: row.crds?.name ?? null,
+        user_name: row.users?.name ?? null,
+        sectors: undefined,
+        crds: undefined,
+        users: undefined,
+      }))
+    );
+  });
+
+  app.post("/api/manual-entries", async (req, res) => {
+    const { sector_id, crd_id, description, amount, date } = req.body;
+    if (!sector_id || amount == null || !date) {
+      return res.status(400).json({ error: "sector_id, amount e date são obrigatórios" });
+    }
+
+    const sectorId = Number(sector_id);
+    if (!Number.isFinite(sectorId)) {
+      return res.status(400).json({ error: "Setor inválido" });
+    }
+
+    const access = await assertSectorAccessForUser(req, sectorId);
+    if (!access.ok) return res.status(access.status).json({ error: access.error });
+
+    let resolvedCrdId: number | null = null;
+    if (crd_id) {
+      const { data: crd, error: crdError } = await supabase
+        .from("crds")
+        .select("id, sector_id")
+        .eq("id", Number(crd_id))
+        .single();
+      if (crdError || !crd) {
+        return res.status(400).json({ error: "CRD inválido para o lançamento" });
+      }
+      if (Number(crd.sector_id) !== sectorId) {
+        return res.status(400).json({ error: "CRD não pertence ao setor informado" });
+      }
+      resolvedCrdId = Number(crd.id);
+    }
+
+    const { data, error } = await supabase
+      .from("manual_entries")
+      .insert({
+        sector_id: sectorId,
+        crd_id: resolvedCrdId,
+        user_id: req.user!.id,
+        description: description || null,
+        amount,
+        date,
+        status: "open",
+      })
+      .select("id")
+      .single();
+
+    if (error) {
+      console.error(error);
+      return res.status(500).json({ error: "Erro interno ao processar a solicitação." });
+    }
+    res.json({ id: data.id });
+  });
+
+  app.patch("/api/manual-entries/:id/status", async (req, res) => {
+    const { id } = req.params;
+    const { status } = req.body;
+    if (!["open", "cancelled", "posted"].includes(status)) {
+      return res.status(400).json({ error: "Status inválido" });
+    }
+
+    const { data: existing, error: fetchError } = await supabase
+      .from("manual_entries")
+      .select("sector_id")
+      .eq("id", id)
+      .single();
+    if (fetchError || !existing) {
+      return res.status(404).json({ error: "Lançamento não encontrado" });
+    }
+
+    const access = await assertSectorAccessForUser(req, Number(existing.sector_id));
+    if (!access.ok) return res.status(access.status).json({ error: access.error });
+
+    const { error } = await supabase.from("manual_entries").update({ status }).eq("id", id);
+    if (error) {
+      console.error(error);
+      return res.status(500).json({ error: "Erro interno ao processar a solicitação." });
+    }
+    res.json({ success: true });
+  });
+
+  // ====================================================
+  // LOCAIS PDV (configurações / comandas)
+  // ====================================================
+  app.get("/api/pdv-locais", async (req, res) => {
+    const includeInactive = String(req.query.all || "") === "1";
+    let query = supabase
+      .from("pdv_locais")
+      .select("*")
+      .order("sort_order", { ascending: true })
+      .order("name", { ascending: true });
+    if (!includeInactive) query = query.eq("active", true);
+
+    const { data, error } = await query;
+    if (error) {
+      console.error(error);
+      return res.status(500).json({ error: "Erro interno ao processar a solicitação." });
+    }
+    res.json(data ?? []);
+  });
+
+  app.post("/api/pdv-locais", requireRole("admin"), async (req, res) => {
+    const name = String(req.body?.name ?? "").trim();
+    if (!name) return res.status(400).json({ error: "Nome do local é obrigatório." });
+
+    const { data: existing } = await supabase
+      .from("pdv_locais")
+      .select("id")
+      .ilike("name", name)
+      .maybeSingle();
+    if (existing) return res.status(400).json({ error: "Já existe um local com este nome." });
+
+    const { data: last } = await supabase
+      .from("pdv_locais")
+      .select("sort_order")
+      .order("sort_order", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const sortOrder = Number((last as any)?.sort_order ?? 0) + 1;
+
+    const { data, error } = await supabase
+      .from("pdv_locais")
+      .insert({ name, active: true, sort_order: sortOrder })
+      .select("id, name, active, sort_order")
+      .single();
+
+    if (error) {
+      console.error(error);
+      return res.status(500).json({ error: "Erro interno ao processar a solicitação." });
+    }
+    res.json(data);
+  });
+
+  app.patch("/api/pdv-locais/:id", requireRole("admin"), async (req, res) => {
+    const { id } = req.params;
+    const patch: Record<string, unknown> = {};
+    if (req.body?.name != null) {
+      const name = String(req.body.name).trim();
+      if (!name) return res.status(400).json({ error: "Nome do local é obrigatório." });
+      patch.name = name;
+    }
+    if (typeof req.body?.active === "boolean") patch.active = req.body.active;
+    if (req.body?.sort_order != null) patch.sort_order = Number(req.body.sort_order);
+
+    if (!Object.keys(patch).length) {
+      return res.status(400).json({ error: "Nenhum campo para atualizar." });
+    }
+
+    const { error } = await supabase.from("pdv_locais").update(patch).eq("id", id);
+    if (error) {
+      console.error(error);
+      return res.status(500).json({ error: "Erro interno ao processar a solicitação." });
+    }
+    res.json({ success: true });
+  });
+
+  app.delete("/api/pdv-locais/:id", requireRole("admin"), async (req, res) => {
+    const { id } = req.params;
+    const { error } = await supabase.from("pdv_locais").delete().eq("id", id);
+    if (error) {
+      console.error(error);
+      return res.status(500).json({ error: "Erro interno ao processar a solicitação." });
+    }
+    res.json({ success: true });
+  });
+
+  // ====================================================
+  // COMANDAS
+  // ====================================================
+  type ComandaItemInput = {
+    description?: string;
+    quantity?: number | string;
+  };
+
+  const normalizeComandaItems = (items: ComandaItemInput[]) => {
+    if (!Array.isArray(items) || items.length === 0) {
+      return { ok: false as const, error: "Informe ao menos um item consumido." };
+    }
+
+    const normalized = items.map((item, index) => {
+      const description = String(item.description ?? "").trim();
+      const quantity = Number(item.quantity);
+      if (!description) {
+        return { error: `Item ${index + 1}: descrição é obrigatória.` };
+      }
+      if (!Number.isFinite(quantity) || quantity <= 0) {
+        return { error: `Item ${index + 1}: quantidade deve ser maior que zero.` };
+      }
+      return {
+        description,
+        quantity,
+        unit_price: 0,
+        total_amount: 0,
+        sort_order: index,
+      };
+    });
+
+    const invalid = normalized.find((row) => "error" in row) as { error: string } | undefined;
+    if (invalid?.error) return { ok: false as const, error: invalid.error };
+
+    return { ok: true as const, items: normalized as Array<{
+      description: string;
+      quantity: number;
+      unit_price: number;
+      total_amount: number;
+      sort_order: number;
+    }> };
+  };
+
+  const mapComandaRows = (rows: any[], items: any[]) => {
+    const itemsByComanda = new Map<number, any[]>();
+    for (const item of items) {
+      const comandaId = Number(item.comanda_id);
+      if (!Number.isFinite(comandaId)) continue;
+      const list = itemsByComanda.get(comandaId) ?? [];
+      list.push({
+        id: item.id,
+        description: item.description,
+        quantity: Number(item.quantity),
+        sort_order: Number(item.sort_order ?? 0),
+      });
+      itemsByComanda.set(comandaId, list);
+    }
+
+    return (rows ?? []).map((row: any) => {
+      const comandaItems = (itemsByComanda.get(Number(row.id)) ?? []).sort(
+        (a, b) => a.sort_order - b.sort_order
+      );
+      return {
+        ...row,
+        user_name: row.users?.name ?? null,
+        items: comandaItems,
+        items_count: comandaItems.length,
+        users: undefined,
+      };
+    });
+  };
+
+  app.get("/api/comandas", async (_req, res) => {
+    const { data: comandas, error } = await supabase
+      .from("comandas")
+      .select("*, users(id, name)")
+      .order("consumed_at", { ascending: false })
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      console.error(error);
+      return res.status(500).json({ error: "Erro interno ao processar a solicitação." });
+    }
+
+    const ids = (comandas ?? []).map((row: any) => Number(row.id)).filter((id) => Number.isFinite(id));
+    if (!ids.length) return res.json([]);
+
+    const { data: items, error: itemsError } = await supabase
+      .from("comanda_items")
+      .select("*")
+      .in("comanda_id", ids)
+      .order("sort_order", { ascending: true });
+
+    if (itemsError) {
+      console.error(itemsError);
+      return res.status(500).json({ error: "Erro interno ao processar a solicitação." });
+    }
+
+    res.json(mapComandaRows(comandas ?? [], items ?? []));
+  });
+
+  app.post("/api/comandas", async (req, res) => {
+    const { consumer_name, consumed_at, location, items } = req.body as {
+      consumer_name?: string;
+      consumed_at?: string;
+      location?: string;
+      items?: ComandaItemInput[];
+    };
+
+    const name = String(consumer_name ?? "").trim();
+    const consumedDate = String(consumed_at ?? "").trim();
+    const consumedLocation = String(location ?? "").trim();
+
+    if (!name) return res.status(400).json({ error: "Nome do consumidor é obrigatório." });
+    if (!consumedDate) return res.status(400).json({ error: "Data do consumo é obrigatória." });
+    if (!consumedLocation) return res.status(400).json({ error: "Local do consumo é obrigatório." });
+
+    const { data: pdvLocal } = await supabase
+      .from("pdv_locais")
+      .select("id, name")
+      .eq("active", true)
+      .ilike("name", consumedLocation)
+      .maybeSingle();
+    if (!pdvLocal) {
+      return res.status(400).json({ error: "Selecione um local PDV válido cadastrado em Configurações." });
+    }
+
+    const parsedItems = normalizeComandaItems(items ?? []);
+    if (!parsedItems.ok) return res.status(400).json({ error: parsedItems.error });
+
+    const { data: comanda, error: comandaError } = await supabase
+      .from("comandas")
+      .insert({
+        consumer_name: name,
+        consumed_at: consumedDate,
+        location: String(pdvLocal.name),
+        user_id: req.user!.id,
+        status: "open",
+      })
+      .select("id")
+      .single();
+
+    if (comandaError || !comanda) {
+      console.error(comandaError);
+      return res.status(500).json({ error: "Erro interno ao processar a solicitação." });
+    }
+
+    const itemRows = parsedItems.items.map((item) => ({
+      comanda_id: comanda.id,
+      ...item,
+    }));
+
+    const { error: itemsError } = await supabase.from("comanda_items").insert(itemRows);
+    if (itemsError) {
+      console.error(itemsError);
+      await supabase.from("comandas").delete().eq("id", comanda.id);
+      return res.status(500).json({ error: "Não foi possível salvar os itens da comanda." });
+    }
+
+    res.json({ id: comanda.id });
+  });
+
+  app.patch("/api/comandas/:id/status", async (req, res) => {
+    const { id } = req.params;
+    const { status } = req.body;
+    if (!["open", "cancelled", "posted"].includes(status)) {
+      return res.status(400).json({ error: "Status inválido" });
+    }
+
+    const { data: existing, error: fetchError } = await supabase
+      .from("comandas")
+      .select("id")
+      .eq("id", id)
+      .single();
+    if (fetchError || !existing) {
+      return res.status(404).json({ error: "Comanda não encontrada" });
+    }
+
+    const { error } = await supabase.from("comandas").update({ status }).eq("id", id);
+    if (error) {
+      console.error(error);
+      return res.status(500).json({ error: "Erro interno ao processar a solicitação." });
+    }
     res.json({ success: true });
   });
 

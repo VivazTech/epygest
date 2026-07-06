@@ -735,7 +735,7 @@ export const Invoices: React.FC = () => {
           <div>
             <p className="text-[10px] font-bold uppercase tracking-widest text-emerald-200/80">Total Anual</p>
             <p className="text-sm text-emerald-100 mt-1">
-              Compromissos do ano {selectedYear} (notas + requisições) vs orçamento Síntase
+              Compromissos do ano {selectedYear} (notas + requisições + lançamentos manuais) vs orçamento Síntase
             </p>
           </div>
           <div className="text-right">
@@ -820,6 +820,14 @@ export const Invoices: React.FC = () => {
                     className="font-semibold text-slate-700"
                     displayValue={formatCurrency(sector.pending_requisitions || 0)}
                     meta={valueTrace.sectors.pendingRequisitions(sector.name, Number(selectedMonth), Number(selectedYear))}
+                  />
+                </p>
+                <p>
+                  Lançamentos manuais em aberto no mês:{' '}
+                  <ValueTrace
+                    className="font-semibold text-slate-700"
+                    displayValue={formatCurrency(sector.pending_manual_entries || 0)}
+                    meta={valueTrace.sectors.pendingManualEntries(sector.name, Number(selectedMonth), Number(selectedYear))}
                   />
                 </p>
                 <p>

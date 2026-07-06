@@ -117,6 +117,51 @@ db.exec(`
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (sector_id) REFERENCES sectors(id)
   );
+
+  CREATE TABLE IF NOT EXISTS manual_entries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    sector_id INTEGER NOT NULL,
+    crd_id INTEGER,
+    user_id INTEGER,
+    description TEXT,
+    amount REAL NOT NULL,
+    date DATE NOT NULL,
+    status TEXT CHECK(status IN ('open', 'cancelled', 'posted')) DEFAULT 'open',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (sector_id) REFERENCES sectors(id),
+    FOREIGN KEY (crd_id) REFERENCES crds(id),
+    FOREIGN KEY (user_id) REFERENCES users(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS comandas (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    consumer_name TEXT NOT NULL,
+    consumed_at DATE NOT NULL,
+    location TEXT NOT NULL,
+    user_id INTEGER,
+    status TEXT CHECK(status IN ('open', 'cancelled', 'posted')) DEFAULT 'open',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS comanda_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    comanda_id INTEGER NOT NULL,
+    description TEXT NOT NULL,
+    quantity REAL NOT NULL,
+    unit_price REAL NOT NULL,
+    total_amount REAL NOT NULL,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    FOREIGN KEY (comanda_id) REFERENCES comandas(id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS pdv_locais (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    active INTEGER NOT NULL DEFAULT 1,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
 `);
 
 // Forward-only migration for existing databases
