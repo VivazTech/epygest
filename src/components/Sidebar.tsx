@@ -53,14 +53,14 @@ const lancamentosMenuItems = [
 ];
 
 const menuItems = [
-  { id: 'dashboard', label: 'Dashboard Geral', icon: LayoutDashboard, roles: ['admin', 'finance', 'controle', 'manager', 'viewer'] },
-  { id: 'analise', label: 'Análise Financeira', icon: BarChart3, roles: ['admin', 'finance', 'controle', 'manager'] },
-  { id: 'dre', label: 'DRE Gerencial', icon: FileSpreadsheet, roles: ['admin', 'finance', 'controle'] },
-  { id: 'planejamento', label: 'Planejamento', icon: Target, roles: ['admin', 'finance', 'controle', 'manager'] },
-  { id: 'importacao', label: 'Importação', icon: PlusCircle, roles: ['admin', 'finance', 'controle'] },
-  { id: 'cadastros', label: 'Cadastros', icon: Database, roles: ['admin', 'finance', 'controle'] },
-  { id: 'sintase', label: 'Síntase', icon: Rows4, roles: ['admin', 'finance', 'controle', 'manager'] },
-  { id: 'prev-real', label: 'Prev x Real Diario', icon: BarChart3, roles: ['admin', 'finance', 'controle', 'manager'] },
+  { id: 'dashboard', label: 'Dashboard Geral', icon: LayoutDashboard, roles: ['admin', 'controle', 'manager', 'viewer'] },
+  { id: 'analise', label: 'Análise Financeira', icon: BarChart3, roles: ['admin', 'controle', 'manager'] },
+  { id: 'dre', label: 'DRE Gerencial', icon: FileSpreadsheet, roles: ['admin', 'controle'] },
+  { id: 'planejamento', label: 'Planejamento', icon: Target, roles: ['admin', 'controle', 'manager'] },
+  { id: 'importacao', label: 'Importação', icon: PlusCircle, roles: ['admin', 'controle'] },
+  { id: 'cadastros', label: 'Cadastros', icon: Database, roles: ['admin', 'controle'] },
+  { id: 'sintase', label: 'Síntase', icon: Rows4, roles: ['admin', 'controle', 'manager'] },
+  { id: 'prev-real', label: 'Prev x Real Diario', icon: BarChart3, roles: ['admin', 'controle', 'manager'] },
   { id: 'usuarios', label: 'Usuários', icon: Users, roles: ['admin'] },
   { id: 'configuracoes', label: 'Configurações', icon: Settings, roles: ['admin'] },
 ];
@@ -76,7 +76,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const constructionGroupIds = ['dashboard', 'analise', 'planejamento'];
   const lancamentosGroupIds = lancamentosMenuItems.map((item) => item.id);
   const adminGroupIds = ['usuarios', 'configuracoes'];
-  const planilhasRoles = ['admin', 'finance', 'controle'];
+  const planilhasRoles = ['admin', 'controle'];
   const filteredMenu = menuItems.filter(item => item.roles.includes(user?.role));
   const lancamentosMenu = lancamentosMenuItems.filter((item) => item.roles.includes(user?.role));
   const constructionMenu = filteredMenu.filter((item) => constructionGroupIds.includes(item.id));
@@ -86,9 +86,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const adminMenu = filteredMenu.filter((item) => adminGroupIds.includes(item.id));
   const showPlanilhas = planilhasRoles.includes(user?.role);
   const showLancamentos = lancamentosMenu.length > 0;
-  const folhaRoles = ['admin', 'finance', 'controle'];
+  const folhaRoles = ['admin', 'controle'];
   const showFolha = folhaRoles.includes(user?.role);
-  const comprasRoles = ['admin', 'finance', 'controle', 'manager'];
+  const comprasRoles = ['admin', 'controle', 'manager'];
   const showCompras = comprasRoles.includes(user?.role);
   const comprasIds = ['compras-ordem'];
   const [comprasExpanded, setComprasExpanded] = React.useState(comprasIds.includes(activeTab));
