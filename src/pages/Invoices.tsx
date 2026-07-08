@@ -16,11 +16,13 @@ import { ValueTrace } from '../components/ValueTrace';
 import { SearchableSelect } from '../components/SearchableSelect';
 import { valueTrace } from '../lib/valueTraceMeta';
 import { useSearch } from '../context/SearchContext';
+import { useToast } from '../context/ToastContext';
 import { matchesSearch } from '../lib/search';
 import { isDirectDocumentUrl, type StorageDocumentField } from '../lib/storagePath';
 
 export const Invoices: React.FC = () => {
   const { query } = useSearch();
+  const { showSuccess } = useToast();
   const now = new Date();
   const initialMonth = (() => {
     const saved = localStorage.getItem('invoices:selectedMonth');
@@ -260,10 +262,14 @@ export const Invoices: React.FC = () => {
       })
     });
     if (response.ok) {
+      showSuccess('Nota fiscal lançada com sucesso.');
       closeInvoiceModal();
       setFormData({ invoice_number: '', provider_name: '', amount: '', issue_date: '', due_date: '', sector_id: '', file_path: '', boleto_file_path: '', natureza: 'O', crd: '', payment_method: '', pix_key: '' });
       fetchInvoices();
       fetchSectors();
+    } else {
+      const data = await response.json().catch(() => ({}));
+      alert(data.error || 'Não foi possível lançar a nota fiscal.');
     }
   };
 
@@ -282,11 +288,23 @@ export const Invoices: React.FC = () => {
         ...prev,
         boleto_file_path: data.file_path || prev.boleto_file_path
       }));
+      showSuccess('Boleto anexado com sucesso.');
     } catch (error: any) {
       alert(error.message || 'Não foi possível enviar o boleto.');
     } finally {
       setUploadingBoleto(false);
     }
+  };
+
+  const flowSuccessMessages: Record<
+    'approve_control' | 'reject_control' | 'disapprove_control' | 'mark_paid' | 'cancel_request',
+    string
+  > = {
+    approve_control: 'Nota aprovada pelo Controle.',
+    reject_control: 'Nota reprovada pelo Controle.',
+    disapprove_control: 'Nota devolvida para análise do setor.',
+    mark_paid: 'Pagamento registrado com sucesso.',
+    cancel_request: 'Solicitação de nota cancelada.',
   };
 
   const runFlowAction = async (
@@ -310,6 +328,7 @@ export const Invoices: React.FC = () => {
       alert(data.error || 'Não foi possível atualizar o fluxo da nota.');
       return false;
     }
+    showSuccess(flowSuccessMessages[action]);
     fetchInvoices();
     fetchSectors();
     return true;
@@ -437,6 +456,7 @@ export const Invoices: React.FC = () => {
       a.remove();
       window.URL.revokeObjectURL(url);
       setShowReportModal(false);
+      showSuccess(`Relatório ${format.toUpperCase()} gerado com sucesso.`);
     } finally {
       setExportingReport(null);
     }

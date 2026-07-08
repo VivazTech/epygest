@@ -24,6 +24,7 @@ import { FolhaPagamentoPage, MESES_FOLHA } from './pages/FolhaPagamento';
 import { FolhaApuracaoPage } from './pages/FolhaApuracao';
 import { ComprasPage } from './pages/Compras';
 import { SearchProvider, useSearch } from './context/SearchContext';
+import { ToastProvider } from './context/ToastContext';
 import { SearchBar } from './components/SearchBar';
 import { getSearchPlaceholder } from './lib/search';
 
@@ -316,17 +317,18 @@ function AppShell({
   }, [activeTab, setQuery]);
 
   return (
-    <div className="min-h-screen bg-[#F8FAFC] font-sans text-slate-900">
-      <Sidebar
-        activeTab={activeTab}
-        setActiveTab={setActiveTab}
-        user={user}
-        onLogout={onLogout}
-        collapsed={sidebarCollapsed}
-        onToggleCollapsed={onToggleCollapsed}
-      />
+    <ToastProvider>
+      <div className="min-h-screen bg-[#F8FAFC] font-sans text-slate-900">
+          <Sidebar
+            activeTab={activeTab}
+            setActiveTab={setActiveTab}
+            user={user}
+            onLogout={onLogout}
+            collapsed={sidebarCollapsed}
+            onToggleCollapsed={onToggleCollapsed}
+          />
 
-      <main className={sidebarCollapsed ? 'pl-20 min-h-screen' : 'pl-64 min-h-screen'}>
+          <main className={sidebarCollapsed ? 'pl-20 min-h-screen' : 'pl-64 min-h-screen'}>
         <header className="h-20 bg-white/80 backdrop-blur-md border-b border-slate-100 flex items-center gap-4 px-8 sticky top-0 z-40">
           <div className="flex items-center gap-2 min-w-0 shrink-0">
             <span className="text-slate-400 text-sm font-medium">EpyGest</span>
@@ -382,6 +384,7 @@ function AppShell({
           {renderContent()}
         </div>
       </main>
-    </div>
+        </div>
+      </ToastProvider>
   );
 }
