@@ -384,16 +384,27 @@ export function parseDanfePdfText(text: string): Partial<InvoicePdfExtracted> {
     invoice_number = String(parseInt(invoice_number, 10));
   }
 
-  // Provider name: first capitalized name block after DANFE header (before CNPJ/IE lines)
+  // Provider name: from "RECEBEMOS DE <name> OS PRODUTOS" sentence (most reliable)
   let provider_name = "";
-  const danfeLineIdx = lines.findIndex((l) => /^DANFE$/i.test(l));
-  if (danfeLineIdx >= 0) {
-    for (let i = danfeLineIdx + 1; i < Math.min(danfeLineIdx + 15, lines.length); i++) {
-      const l = lines[i];
-      if (/^CNPJ/i.test(l) || /^IE/i.test(l) || /^DOCUMENTO AUXILIAR/i.test(l)) break;
-      if (l.length > 5 && /[A-ZÁÉÍÓÚÂÊÎÔÛÃÕ]{2,}/.test(l) && !/^\d/.test(l)) {
-        provider_name = l;
-        break;
+  const recebemosMatch = compact.match(/RECEBEMOS DE ([A-ZÁÉÍÓÚÂÊÎÔÛÃÕA-Z][A-ZÁÉÍÓÚÂÊÎÔÛÃÕA-Za-z\s]+?) OS PRODUTOS/i);
+  if (recebemosMatch?.[1]) {
+    provider_name = recebemosMatch[1].trim();
+  } else {
+    // Fallback: look for emitente name block before the DANFE line
+    const danfeLineIdx = lines.findIndex((l) => /^DANFE$/i.test(l));
+    if (danfeLineIdx > 0) {
+      for (let i = danfeLineIdx - 1; i >= Math.max(0, danfeLineIdx - 10); i--) {
+        const l = lines[i];
+        if (/^(AV|RUA|BAIRRO|CEP|FONE|NF-e|N[ºo°]|SÉRIE|RECEBEMOS)/i.test(l)) continue;
+        if (l.length > 5 && /[A-ZÁÉÍÓÚÂÊÎÔÛÃÕ]{3,}/.test(l) && !/^\d/.test(l)) {
+          // Check if it's a company name fragment (e.g. "LTDA") — join with prior line
+          if (/^(LTDA|ME|EPP|EIRELI|S\.A\.?|SA)$/i.test(l) && i > 0) {
+            provider_name = lines[i - 1].trim() + " " + l;
+          } else {
+            provider_name = l;
+          }
+          break;
+        }
       }
     }
   }

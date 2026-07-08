@@ -9,3 +9,4 @@ coverage/
 finance.db
 uploads/
 .vercel
+.claude/worktrees/

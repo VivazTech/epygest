@@ -1,7 +1,12 @@
 import "dotenv/config";
 import { readFile } from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import react from "@vitejs/plugin-react";
 import { createServer as createViteServer } from "vite";
 import { createApp } from "./src/app.ts";
+
+const projectRoot = path.dirname(fileURLToPath(import.meta.url));
 
 async function startServer() {
   const app = createApp();
@@ -14,7 +19,13 @@ async function startServer() {
 
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      configFile: false,
+      root: projectRoot,
+      plugins: [react()],
+      server: {
+        middlewareMode: true,
+        hmr: process.env.DISABLE_HMR !== "true",
+      },
       appType: "spa",
     });
     app.use(vite.middlewares);
