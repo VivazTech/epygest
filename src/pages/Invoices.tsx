@@ -466,7 +466,8 @@ export const Invoices: React.FC = () => {
   const requesterSector = sectors.find((s) => String(s.id) === requesterSectorId);
   const isManager = userRole === 'manager';
   const hasGlobalSectorView = userRole === 'admin' || userRole === 'finance' || userRole === 'controle';
-  const canSeeAnnualTotal = userRole === 'admin' || userRole === 'finance';
+  const canSeeAnnualTotal = userRole === 'admin';
+  const canSeeBudgetCards = userRole !== 'finance';
   const toggleSectorSelection = (sectorId: string) => {
     setSelectedSectorIds((prev) =>
       prev.includes(sectorId)
@@ -786,7 +787,7 @@ export const Invoices: React.FC = () => {
       </div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      {canSeeBudgetCards && <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {filteredBudgetSectors.map(sector => (
           <div
             key={sector.id}
@@ -915,7 +916,7 @@ export const Invoices: React.FC = () => {
             </div>
           </div>
         ))}
-      </div>
+      </div>}
 
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
         <div className="p-4 border-b border-slate-50 flex flex-col sm:flex-row sm:items-center justify-between gap-4">

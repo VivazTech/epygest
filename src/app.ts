@@ -3506,7 +3506,7 @@ export function createApp() {
       n = (rk | 0) >> 2;
     } else {
       const b = Buffer.alloc(8);
-      b.writeUInt32LE((rk >>> 0) & 0xfffffffc, 4);
+      b.writeUInt32LE((rk & 0xfffffffc) >>> 0, 4);
       n = b.readDoubleLE(0);
     }
     return n * mult;

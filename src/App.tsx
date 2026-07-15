@@ -54,6 +54,7 @@ export default function App() {
         if (!cancelled && data?.id && data?.role) {
           setUser(data);
           localStorage.setItem('user', JSON.stringify(data)); // cache só para a UI
+          if (data.role === 'finance') setActiveTab('notas');
         }
       } catch {
         if (!cancelled) {
@@ -114,6 +115,7 @@ export default function App() {
       }
       setUser(data);
       localStorage.setItem('user', JSON.stringify(data));
+      if (data.role === 'finance') setActiveTab('notas');
       setLoginForm({ email: '', password: '' });
     } finally {
       setLoginLoading(false);
