@@ -695,7 +695,7 @@ export const ImportacaoPage: React.FC = () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          rows: targetRows.map((a) => ({ codigo: a.codigo, lanc_liquido: a.lanc_liquido })),
+          rows: targetRows.map((a) => ({ codigo: a.codigo, saldo_lanc: a.saldo_lanc })),
           month: Number(relCrdImportMonth),
           year: Number(relCrdImportYear),
         }),

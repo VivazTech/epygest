@@ -2877,11 +2877,13 @@ export function createApp() {
   });
 
   // ====================================================
-  // IMPORTAÇÃO: REL. CRD — COMMIT (grava lanc_liquido em crd_monthly_values por conta)
+  // IMPORTAÇÃO: REL. CRD — COMMIT
+  // Grava a coluna "SALDO LANÇ." (saldo_lanc) em crd_realizado por conta,
+  // aparecendo na coluna REAL. do Prev x Real MENSAL do mês importado.
   // ====================================================
   app.post("/api/import/rel-crd/commit", async (req, res) => {
     const { rows, month, year } = req.body as {
-      rows: { codigo: string; lanc_liquido: number }[];
+      rows: { codigo: string; saldo_lanc?: number; lanc_liquido?: number }[];
       month: number;
       year: number;
     };
@@ -2899,12 +2901,13 @@ export function createApp() {
       if (c.code) codeToId.set(String(c.code).trim().toLowerCase(), Number(c.id));
     }
 
-    const upserts: { crd_id: number; year: number; month: number; value: number }[] = [];
+    const upserts: { crd_id: number; year: number; month: number; source: string; value: number }[] = [];
     const notFound: string[] = [];
     for (const row of rows) {
       const crdId = codeToId.get(String(row.codigo ?? "").trim().toLowerCase());
       if (!crdId) { notFound.push(row.codigo); continue; }
-      upserts.push({ crd_id: crdId, year: Number(year), month: Number(month), value: Number(row.lanc_liquido) });
+      const value = Number(row.saldo_lanc ?? row.lanc_liquido ?? 0);
+      upserts.push({ crd_id: crdId, year: Number(year), month: Number(month), source: "rel_crd", value });
     }
 
     if (!upserts.length) {
@@ -2915,8 +2918,8 @@ export function createApp() {
     }
 
     const { error: upsertErr } = await supabase
-      .from("crd_monthly_values")
-      .upsert(upserts, { onConflict: "crd_id,year,month" });
+      .from("crd_realizado")
+      .upsert(upserts, { onConflict: "crd_id,year,month,source" });
     if (upsertErr) return res.status(500).json({ error: upsertErr.message });
 
     res.json({
