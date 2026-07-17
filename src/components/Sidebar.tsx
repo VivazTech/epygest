@@ -29,6 +29,7 @@ import {
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { PLANILHAS } from '../lib/planilhas';
+import logoIcon from '../../logoicon2.svg';
 
 const FOLHA_MESES = [
   'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
@@ -127,12 +128,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
       collapsed ? "w-20" : "w-64"
     )}>
       <div className="p-6 flex items-center gap-3 border-b border-white/10">
-        <div className="w-10 h-10 bg-emerald-400 rounded-lg flex items-center justify-center font-bold text-xl text-[#004D40]">
-          F
+        <div className="w-10 h-10 bg-white rounded-lg flex items-center justify-center">
+          <img src={logoIcon} alt="Vivaz Cataratas" className="h-6 w-auto" />
         </div>
         <div className={cn(collapsed && "hidden")}>
-          <h1 className="font-bold text-lg leading-tight">EpyGest</h1>
-          <p className="text-[10px] opacity-60 uppercase tracking-widest">Gestão Inteligente</p>
+          <h1 className="font-bold text-lg leading-tight">Budget Vivaz</h1>
+          <p className="text-[10px] opacity-60 uppercase tracking-widest">Vivaz Cataratas</p>
         </div>
       </div>
 

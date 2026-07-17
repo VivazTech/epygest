@@ -114,7 +114,7 @@ export const Invoices: React.FC = () => {
         const users = await fetch('/api/users').then((res) => res.json()).catch(() => []);
         const freshUser = (Array.isArray(users) ? users : []).find((u: any) => String(u.id) === String(user.id));
         const normalizedSectorIds = Array.from(
-          new Set(
+          new Set<string>(
             (Array.isArray(freshUser?.sector_ids) ? freshUser.sector_ids : [freshUser?.sector_id ?? user?.sector_id])
               .map((id) => String(id ?? '').trim())
               .filter((id) => id !== '')

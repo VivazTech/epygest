@@ -49,7 +49,7 @@ export const LancamentosManuaisPage: React.FC = () => {
         const user = await res.json();
         setUserRole(String(user?.role || 'viewer'));
         const ids = Array.from(
-          new Set(
+          new Set<string>(
             (Array.isArray(user?.sector_ids) ? user.sector_ids : [user?.sector_id])
               .map((id: unknown) => String(id ?? '').trim())
               .filter((id: string) => id !== '')

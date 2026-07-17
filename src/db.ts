@@ -1,5 +1,6 @@
 // Banco de dados migrado para Supabase. Ver src/lib/supabase.ts
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
+import Database from 'better-sqlite3';
 
 const db = new Database('finance.db');
 

@@ -147,7 +147,7 @@ export const PrevRealPage: React.FC = () => {
           ? freshUser.sector_names
           : (Array.isArray(parsed?.sector_names) ? parsed.sector_names : []);
         const names = Array.from(
-          new Set(
+          new Set<string>(
             sourceNames
               .map((name: any) => String(name || '').trim())
               .filter((name: string) => Boolean(name))
