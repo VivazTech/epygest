@@ -5,6 +5,7 @@ import { ValueTrace } from '../components/ValueTrace';
 import { valueTrace } from '../lib/valueTraceMeta';
 import { useSearch } from '../context/SearchContext';
 import { matchesSearch } from '../lib/search';
+import { isSharedCrdCode } from '../lib/sharedCrds';
 
 export const LancamentosManuaisPage: React.FC = () => {
   const { query } = useSearch();
@@ -16,6 +17,7 @@ export const LancamentosManuaisPage: React.FC = () => {
   const [form, setForm] = useState({
     sector_id: '',
     crd_id: '',
+    issue_date: '',
     date: '',
     amount: '',
     description: '',
@@ -77,7 +79,9 @@ export const LancamentosManuaisPage: React.FC = () => {
   const visibleCrds = useMemo(() => {
     const active = crds.filter((c) => c.active !== false);
     if (!form.sector_id) return [];
-    return active.filter((c) => String(c.sector_id) === form.sector_id);
+    return active.filter(
+      (c) => String(c.sector_id) === form.sector_id || isSharedCrdCode(c.code)
+    );
   }, [crds, form.sector_id]);
 
   const matchesUserSector = (sectorId?: number | string | null) => {
@@ -93,8 +97,8 @@ export const LancamentosManuaisPage: React.FC = () => {
 
   const createEntry = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!form.sector_id || !form.date || !form.amount) {
-      alert('Preencha setor, data e valor.');
+    if (!form.sector_id || !form.issue_date || !form.date || !form.amount) {
+      alert('Preencha setor, data de emissão, data de lançamento e valor.');
       return;
     }
 
@@ -104,6 +108,7 @@ export const LancamentosManuaisPage: React.FC = () => {
       body: JSON.stringify({
         sector_id: parseInt(form.sector_id, 10),
         crd_id: form.crd_id ? parseInt(form.crd_id, 10) : null,
+        issue_date: form.issue_date,
         date: form.date,
         amount: parseFloat(form.amount),
         description: form.description || null,
@@ -116,7 +121,7 @@ export const LancamentosManuaisPage: React.FC = () => {
       return;
     }
 
-    setForm({ sector_id: '', crd_id: '', date: '', amount: '', description: '' });
+    setForm({ sector_id: '', crd_id: '', issue_date: '', date: '', amount: '', description: '' });
     loadData();
   };
 
@@ -139,6 +144,7 @@ export const LancamentosManuaisPage: React.FC = () => {
           entry.crd_name,
           entry.description,
           entry.user_name,
+          entry.issue_date,
           entry.date,
           entry.amount,
           entry.status
@@ -175,7 +181,7 @@ export const LancamentosManuaisPage: React.FC = () => {
           </p>
         </div>
         <p className="text-xs text-slate-400 max-w-md">
-          Baixe ou cancele um lançamento para removê-lo do compromisso orçamentário do setor na competência da data informada.
+          Baixe ou cancele um lançamento para removê-lo do compromisso orçamentário do setor na competência da data de lançamento.
         </p>
       </div>
 
@@ -213,13 +219,27 @@ export const LancamentosManuaisPage: React.FC = () => {
           </p>
         )}
 
-        <input
-          required
-          type="date"
-          value={form.date}
-          onChange={(e) => setForm((p) => ({ ...p, date: e.target.value }))}
-          className="px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm"
-        />
+        <label className="flex flex-col gap-1 min-w-0">
+          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-1">Data de emissão</span>
+          <input
+            required
+            type="date"
+            value={form.issue_date}
+            onChange={(e) => setForm((p) => ({ ...p, issue_date: e.target.value }))}
+            className="px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+          />
+        </label>
+
+        <label className="flex flex-col gap-1 min-w-0">
+          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-1">Data de lançamento</span>
+          <input
+            required
+            type="date"
+            value={form.date}
+            onChange={(e) => setForm((p) => ({ ...p, date: e.target.value }))}
+            className="px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+          />
+        </label>
 
         <input
           required
@@ -229,19 +249,19 @@ export const LancamentosManuaisPage: React.FC = () => {
           placeholder="Valor"
           value={form.amount}
           onChange={(e) => setForm((p) => ({ ...p, amount: e.target.value }))}
-          className="px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+          className="px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm self-end"
         />
 
         <input
           placeholder="Descrição (opcional)"
           value={form.description}
           onChange={(e) => setForm((p) => ({ ...p, description: e.target.value }))}
-          className="px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+          className="px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm self-end"
         />
 
         <button
           type="submit"
-          className="flex items-center justify-center gap-2 bg-[#004D40] text-white px-4 py-2.5 rounded-xl shadow-lg shadow-emerald-900/10 hover:bg-[#003d33] transition-colors"
+          className="flex items-center justify-center gap-2 bg-[#004D40] text-white px-4 py-2.5 rounded-xl shadow-lg shadow-emerald-900/10 hover:bg-[#003d33] transition-colors self-end"
         >
           <Plus className="w-4 h-4" />
           <span className="font-bold text-sm">Lançar</span>
@@ -253,7 +273,8 @@ export const LancamentosManuaisPage: React.FC = () => {
           <thead>
             <tr className="bg-slate-50/50">
               <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Setor / CRD</th>
-              <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Data</th>
+              <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Emissão</th>
+              <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Lançamento</th>
               <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Descrição</th>
               <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Valor</th>
               <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Status</th>
@@ -263,7 +284,7 @@ export const LancamentosManuaisPage: React.FC = () => {
           <tbody className="divide-y divide-slate-50">
             {filteredEntries.length === 0 && (
               <tr>
-                <td colSpan={6} className="px-6 py-10 text-center text-sm text-slate-400">
+                <td colSpan={7} className="px-6 py-10 text-center text-sm text-slate-400">
                   Nenhum lançamento manual encontrado.
                 </td>
               </tr>
@@ -281,6 +302,7 @@ export const LancamentosManuaisPage: React.FC = () => {
                     <span className="block text-[10px] font-normal text-slate-400 mt-0.5">por {entry.user_name}</span>
                   ) : null}
                 </td>
+                <td className="px-6 py-4 text-sm text-slate-600">{entry.issue_date || '—'}</td>
                 <td className="px-6 py-4 text-sm text-slate-600">{entry.date}</td>
                 <td className="px-6 py-4 text-sm text-slate-600">{entry.description || '—'}</td>
                 <td className="px-6 py-4">

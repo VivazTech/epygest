@@ -5,6 +5,7 @@ import { ValueTrace } from '../components/ValueTrace';
 import { valueTrace } from '../lib/valueTraceMeta';
 import { useSearch } from '../context/SearchContext';
 import { matchesSearch } from '../lib/search';
+import { isSharedCrdCode } from '../lib/sharedCrds';
 
 export const RequisicoesPage: React.FC = () => {
   const { query } = useSearch();
@@ -55,7 +56,9 @@ export const RequisicoesPage: React.FC = () => {
     const active = crds.filter((c) => c.active !== false);
     if (hasGlobalSectorView && allowedSectorIds.length === 0) return active;
     if (allowedSectorIds.length === 0) return [];
-    return active.filter((c) => allowedSectorIds.includes(String(c.sector_id)));
+    return active.filter(
+      (c) => allowedSectorIds.includes(String(c.sector_id)) || isSharedCrdCode(c.code)
+    );
   }, [crds, allowedSectorIds, hasGlobalSectorView]);
 
   const matchesUserSector = (sectorId?: number | string | null) => {

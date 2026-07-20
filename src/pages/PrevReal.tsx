@@ -15,6 +15,7 @@ import { ValueTrace } from '../components/ValueTrace';
 import { valueTrace } from '../lib/valueTraceMeta';
 import { useSearch } from '../context/SearchContext';
 import { matchesSearch } from '../lib/search';
+import { isSharedCrdCode } from '../lib/sharedCrds';
 
 type PrevRealMonth = {
   previsto: number;
@@ -191,7 +192,11 @@ export const PrevRealPage: React.FC = () => {
     const scoped =
       userRole !== 'manager'
         ? allRows
-        : allRows.filter((row) => allowedSectorNames.includes(String(row.crd || '').trim()));
+        : allRows.filter(
+            (row) =>
+              allowedSectorNames.includes(String(row.crd || '').trim()) ||
+              isSharedCrdCode(row.grupo)
+          );
     if (!query.trim()) return scoped;
     return scoped.filter((row) => matchesSearch(query, row.crd, row.grupo, row.detalhado));
   }, [data, userRole, allowedSectorNames, query]);
@@ -199,7 +204,11 @@ export const PrevRealPage: React.FC = () => {
   const managerSectorOptions = useMemo(() => {
     const keys = new Set(
       (data?.rows || [])
-        .filter((row) => allowedSectorNames.includes(String(row.crd || '').trim()))
+        .filter(
+          (row) =>
+            allowedSectorNames.includes(String(row.crd || '').trim()) ||
+            isSharedCrdCode(row.grupo)
+        )
         .map((row) => String(row.crd || '').trim())
         .filter(Boolean)
     );

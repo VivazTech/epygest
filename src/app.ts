@@ -34,6 +34,7 @@ import {
 } from "./lib/folhaApuracao.js";
 
 import { parseInvoicePdfText } from "./lib/parseInvoicePdf.js";
+import { isSharedCrdCode } from "./lib/sharedCrds.js";
 import {
   STORAGE_BUCKET,
   STORAGE_PREFIXES,
@@ -1210,7 +1211,7 @@ export function createApp() {
 
     const { data: crd, error: crdError } = await supabase
       .from("crds")
-      .select("id, sector_id")
+      .select("id, sector_id, code")
       .eq("id", Number(crd_id))
       .single();
     if (crdError || !crd) {
@@ -1222,8 +1223,9 @@ export function createApp() {
       const session = await buildUserSession(userRow);
       const allowedSectorIds = session.sector_ids ?? [];
       const isGlobal = ["admin", "finance", "controle"].includes(String(userRow.role || ""));
+      const shared = isSharedCrdCode((crd as any).code);
 
-      if (!isGlobal || allowedSectorIds.length > 0) {
+      if (!shared && (!isGlobal || allowedSectorIds.length > 0)) {
         if (allowedSectorIds.length === 0) {
           return res.status(403).json({ error: "Seu usuário não possui setor vinculado para lançar requisições." });
         }
@@ -1309,9 +1311,9 @@ export function createApp() {
   });
 
   app.post("/api/manual-entries", async (req, res) => {
-    const { sector_id, crd_id, description, amount, date } = req.body;
-    if (!sector_id || amount == null || !date) {
-      return res.status(400).json({ error: "sector_id, amount e date são obrigatórios" });
+    const { sector_id, crd_id, description, amount, date, issue_date } = req.body;
+    if (!sector_id || amount == null || !date || !issue_date) {
+      return res.status(400).json({ error: "sector_id, amount, issue_date e date são obrigatórios" });
     }
 
     const sectorId = Number(sector_id);
@@ -1326,13 +1328,13 @@ export function createApp() {
     if (crd_id) {
       const { data: crd, error: crdError } = await supabase
         .from("crds")
-        .select("id, sector_id")
+        .select("id, sector_id, code")
         .eq("id", Number(crd_id))
         .single();
       if (crdError || !crd) {
         return res.status(400).json({ error: "CRD inválido para o lançamento" });
       }
-      if (Number(crd.sector_id) !== sectorId) {
+      if (Number(crd.sector_id) !== sectorId && !isSharedCrdCode((crd as any).code)) {
         return res.status(400).json({ error: "CRD não pertence ao setor informado" });
       }
       resolvedCrdId = Number(crd.id);
@@ -1346,6 +1348,7 @@ export function createApp() {
         user_id: req.user!.id,
         description: description || null,
         amount,
+        issue_date,
         date,
         status: "open",
       })
@@ -2226,8 +2229,27 @@ export function createApp() {
       .order("active", { ascending: false })
       .order("code");
 
-    if (sector_id && Number.isFinite(Number(sector_id)))
-      query = query.eq("sector_id", Number(sector_id));
+    // Filtro por setor: inclui também CRDs compartilhados (ex.: 326).
+    if (sector_id && Number.isFinite(Number(sector_id))) {
+      const { data, error } = await supabase
+        .from("crds")
+        .select("*, sectors(name)")
+        .order("active", { ascending: false })
+        .order("code");
+      if (error) { console.error(error); return res.status(500).json({ error: "Erro interno ao processar a solicitação." }); }
+
+      const sectorIdNum = Number(sector_id);
+      const filtered = (data ?? []).filter(
+        (r: any) => Number(r.sector_id) === sectorIdNum || isSharedCrdCode(r.code)
+      );
+      return res.json(
+        filtered.map((r: any) => ({
+          ...r,
+          sector_name: r.sectors?.name ?? null,
+          sectors: undefined,
+        }))
+      );
+    }
 
     const { data, error } = await query;
     if (error) { console.error(error); return res.status(500).json({ error: "Erro interno ao processar a solicitação." }); }

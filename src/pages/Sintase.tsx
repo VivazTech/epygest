@@ -5,6 +5,7 @@ import { ValueTrace } from '../components/ValueTrace';
 import { valueTrace } from '../lib/valueTraceMeta';
 import { useSearch } from '../context/SearchContext';
 import { matchesSearch } from '../lib/search';
+import { isSharedCrdCode } from '../lib/sharedCrds';
 
 type SintaseApiResponse = {
   year: number;
@@ -108,7 +109,11 @@ export const SintasePage: React.FC = () => {
     const scoped =
       userRole !== 'manager'
         ? allRows
-        : allRows.filter((row) => allowedSectorNames.includes(String(row.crd || '').trim()));
+        : allRows.filter(
+            (row) =>
+              allowedSectorNames.includes(String(row.crd || '').trim()) ||
+              isSharedCrdCode(row.grupo)
+          );
     if (!query.trim()) return scoped;
     return scoped.filter((row) => matchesSearch(query, row.crd, row.grupo, row.detalhado));
   }, [data, userRole, allowedSectorNames, query]);
