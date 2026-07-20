@@ -151,7 +151,7 @@ CREATE TABLE IF NOT EXISTS manual_entries (
   amount NUMERIC NOT NULL CHECK (amount >= 0),
   issue_date DATE NOT NULL,
   date DATE NOT NULL,
-  status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'cancelled', 'posted')),
+  status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'approved', 'cancelled', 'posted')),
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 

@@ -9,7 +9,8 @@ import {
   FileText,
   Upload,
   BadgeCheck,
-  XCircle
+  XCircle,
+  Trash2
 } from 'lucide-react';
 import { cn, formatCurrency, formatDate } from '../lib/utils';
 import { ValueTrace } from '../components/ValueTrace';
@@ -349,6 +350,27 @@ export const Invoices: React.FC = () => {
     await runFlowAction(id, 'cancel_request', undefined, reason);
   };
 
+  const deleteInvoice = async (invoice: any) => {
+    if (userRole !== 'admin') {
+      alert('Apenas administradores podem excluir notas.');
+      return;
+    }
+    const label = invoice.invoice_number
+      ? `nota ${invoice.invoice_number}`
+      : `nota #${invoice.id}`;
+    if (!window.confirm(`Deseja realmente excluir a ${label}? Esta ação não pode ser desfeita.`)) return;
+
+    const res = await fetch(`/api/invoices/${invoice.id}`, { method: 'DELETE' });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      alert(data.error || 'Não foi possível excluir a nota.');
+      return;
+    }
+    showSuccess('Nota excluída com sucesso.');
+    fetchInvoices();
+    fetchSectors();
+  };
+
   const markAsPaid = (id: number) => {
     setSelectedInvoiceId(id);
     setReceiptFile(null);
@@ -468,6 +490,15 @@ export const Invoices: React.FC = () => {
   const hasGlobalSectorView = userRole === 'admin' || userRole === 'finance' || userRole === 'controle';
   const canSeeAnnualTotal = userRole === 'admin';
   const canSeeBudgetCards = userRole !== 'finance';
+  const canSwitchActingProfile = userRole === 'admin';
+  const canApproveControl = actingSector === 'controle' && (userRole === 'controle' || userRole === 'admin');
+  const canPayFinance = actingSector === 'financeiro' && (userRole === 'finance' || userRole === 'admin');
+  const showImportButton =
+    userRole === 'manager' ||
+    (userRole === 'admin' && actingSector === 'requester');
+  const canCancelAsRequester =
+    actingSector === 'requester' &&
+    (userRole === 'manager' || userRole === 'admin' || userRole === 'viewer');
   const toggleSectorSelection = (sectorId: string) => {
     setSelectedSectorIds((prev) =>
       prev.includes(sectorId)
@@ -612,13 +643,27 @@ export const Invoices: React.FC = () => {
         </div>
         
         <div className="flex items-center gap-3">
-          <button
-            onClick={() => setShowModal(true)}
-            className="flex items-center gap-2 bg-[#004D40] text-white px-4 py-2.5 rounded-xl shadow-lg shadow-emerald-900/10 hover:bg-[#003d33] transition-colors"
-          >
-            <Plus className="w-4 h-4" />
-            <span className="font-bold text-sm">Importar Nota</span>
-          </button>
+          {canSwitchActingProfile && (
+            <select
+              value={actingSector}
+              onChange={(e) => setActingSector(e.target.value as 'requester' | 'controle' | 'financeiro')}
+              className="px-3 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-semibold text-slate-700 shadow-sm"
+              title="Perfil de atuação no fluxo"
+            >
+              <option value="requester">Atuar como Solicitante</option>
+              <option value="controle">Atuar como Controle</option>
+              <option value="financeiro">Atuar como Financeiro</option>
+            </select>
+          )}
+          {showImportButton && (
+            <button
+              onClick={() => setShowModal(true)}
+              className="flex items-center gap-2 bg-[#004D40] text-white px-4 py-2.5 rounded-xl shadow-lg shadow-emerald-900/10 hover:bg-[#003d33] transition-colors"
+            >
+              <Plus className="w-4 h-4" />
+              <span className="font-bold text-sm">Importar Nota</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -1043,7 +1088,7 @@ export const Invoices: React.FC = () => {
                           Ver Nota Fiscal
                         </button>
                       )}
-                      {(actingSector === 'controle' && (invoice.flow_stage || 'control_pending') === 'control_pending') && (
+                      {(canApproveControl && (invoice.flow_stage || 'control_pending') === 'control_pending') && (
                         <>
                           <button 
                             onClick={() => approveByControl(invoice.id)}
@@ -1061,7 +1106,7 @@ export const Invoices: React.FC = () => {
                           </button>
                         </>
                       )}
-                      {(actingSector === 'controle' && (invoice.flow_stage || 'control_pending') === 'control_approved') && (
+                      {(canApproveControl && (invoice.flow_stage || 'control_pending') === 'control_approved') && (
                         <button
                           onClick={() => disapproveByControl(invoice.id)}
                           className="inline-flex items-center px-3 py-1.5 text-xs font-semibold text-amber-700 bg-amber-50 hover:bg-amber-100 rounded-lg transition-colors"
@@ -1070,7 +1115,7 @@ export const Invoices: React.FC = () => {
                           Desaprovar (Controle)
                         </button>
                       )}
-                      {(actingSector === 'financeiro' && (invoice.flow_stage || 'control_pending') === 'control_approved') && (
+                      {(canPayFinance && (invoice.flow_stage || 'control_pending') === 'control_approved') && (
                         <button 
                           onClick={() => markAsPaid(invoice.id)}
                           className="inline-flex items-center px-3 py-1.5 text-xs font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded-lg transition-colors"
@@ -1079,7 +1124,7 @@ export const Invoices: React.FC = () => {
                           Marcar como Pago
                         </button>
                       )}
-                      {(actingSector === 'requester' &&
+                      {(canCancelAsRequester &&
                         (invoice.flow_stage || 'control_pending') !== 'paid' &&
                         (invoice.flow_stage || 'control_pending') !== 'cancelled' &&
                         invoice.status !== 'paid') && (
@@ -1091,11 +1136,22 @@ export const Invoices: React.FC = () => {
                           Cancelar Solicitação
                         </button>
                       )}
+                      {userRole === 'admin' && (
+                        <button
+                          onClick={() => deleteInvoice(invoice)}
+                          className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold text-red-700 bg-red-50 hover:bg-red-100 rounded-lg transition-colors"
+                          title="Excluir nota definitivamente (apenas admin)"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          Excluir
+                        </button>
+                      )}
                       {!(
-                        (actingSector === 'controle' && (invoice.flow_stage || 'control_pending') === 'control_pending') ||
-                        (actingSector === 'controle' && (invoice.flow_stage || 'control_pending') === 'control_approved') ||
-                        (actingSector === 'financeiro' && (invoice.flow_stage || 'control_pending') === 'control_approved') ||
-                        (actingSector === 'requester' && (invoice.flow_stage || 'control_pending') !== 'paid' && (invoice.flow_stage || 'control_pending') !== 'cancelled' && invoice.status !== 'paid')
+                        userRole === 'admin' ||
+                        (canApproveControl && (invoice.flow_stage || 'control_pending') === 'control_pending') ||
+                        (canApproveControl && (invoice.flow_stage || 'control_pending') === 'control_approved') ||
+                        (canPayFinance && (invoice.flow_stage || 'control_pending') === 'control_approved') ||
+                        (canCancelAsRequester && (invoice.flow_stage || 'control_pending') !== 'paid' && (invoice.flow_stage || 'control_pending') !== 'cancelled' && invoice.status !== 'paid')
                       ) && (
                         <span className="text-xs text-slate-400 px-2">Sem ação neste perfil</span>
                       )}

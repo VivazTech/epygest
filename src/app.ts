@@ -902,12 +902,11 @@ export function createApp() {
     const { month, year } = req.query as { month?: string; year?: string };
 
     const now = new Date();
-    const m = month ? month.padStart(2, "0") : String(now.getMonth() + 1).padStart(2, "0");
-    const y = year ?? String(now.getFullYear());
-    const dateFrom = `${y}-${m}-01`;
-    const dateTo = `${y}-${m}-31`;
+    const selectedMonth = Number(month) || now.getMonth() + 1;
+    const selectedYear = Number(year) || now.getFullYear();
+    const { dateFrom, dateTo } = getMonthDateRange(selectedYear, selectedMonth);
 
-    const [{ data: allRevenue }, { data: allExpenses }, { data: monthRevenue }] =
+    const [{ data: allRevenue }, { data: allExpenses }, { data: monthRevenue }, { data: monthExpenses }] =
       await Promise.all([
         supabase.from("financial_records").select("amount").eq("type", "revenue"),
         supabase.from("financial_records").select("amount").eq("type", "expense"),
@@ -917,19 +916,29 @@ export function createApp() {
           .eq("type", "revenue")
           .gte("date", dateFrom)
           .lte("date", dateTo),
+        supabase
+          .from("financial_records")
+          .select("amount")
+          .eq("type", "expense")
+          .gte("date", dateFrom)
+          .lte("date", dateTo),
       ]);
 
     const totalRevenue = (allRevenue ?? []).reduce((s: number, r: any) => s + Number(r.amount), 0);
     const totalExpenses = (allExpenses ?? []).reduce((s: number, r: any) => s + Number(r.amount), 0);
     const monthlyRevenue = (monthRevenue ?? []).reduce((s: number, r: any) => s + Number(r.amount), 0);
+    const monthlyExpenses = (monthExpenses ?? []).reduce((s: number, r: any) => s + Number(r.amount), 0);
+    const monthlyProfit = (monthlyRevenue - monthlyExpenses) * 0.8;
 
     res.json({
+      month: selectedMonth,
+      year: selectedYear,
       receitaMensal: monthlyRevenue,
       receitaAcumulada: totalRevenue,
       faturamentoMensal: monthlyRevenue * 1.1,
       faturamentoAcumulado: totalRevenue * 1.1,
       saldo: totalRevenue - totalExpenses,
-      lucro: (totalRevenue - totalExpenses) * 0.8,
+      lucro: monthlyProfit,
       crescimento: 12.5,
       cac: 450.0,
       ticketMedio: 1250.0,
@@ -1085,7 +1094,7 @@ export function createApp() {
       supabase
         .from("manual_entries")
         .select("sector_id, amount")
-        .eq("status", "open")
+        .in("status", ["open", "approved"])
         .gte("date", yearDateFrom)
         .lte("date", yearDateTo),
     ]);
@@ -1139,7 +1148,7 @@ export function createApp() {
             .from("manual_entries")
             .select("amount")
             .eq("sector_id", sector.id)
-            .eq("status", "open")
+            .in("status", ["open", "approved"])
             .gte("date", dateFrom)
             .lte("date", dateTo),
         ]);
@@ -1365,13 +1374,13 @@ export function createApp() {
   app.patch("/api/manual-entries/:id/status", async (req, res) => {
     const { id } = req.params;
     const { status } = req.body;
-    if (!["open", "cancelled", "posted"].includes(status)) {
+    if (!["open", "approved", "cancelled", "posted"].includes(status)) {
       return res.status(400).json({ error: "Status inválido" });
     }
 
     const { data: existing, error: fetchError } = await supabase
       .from("manual_entries")
-      .select("sector_id")
+      .select("id, sector_id, status")
       .eq("id", id)
       .single();
     if (fetchError || !existing) {
@@ -1381,10 +1390,62 @@ export function createApp() {
     const access = await assertSectorAccessForUser(req, Number(existing.sector_id));
     if (!access.ok) return res.status(access.status).json({ error: access.error });
 
+    const role = String(req.user?.role || "");
+    const isAdmin = role === "admin";
+    const isControle = role === "controle" || isAdmin;
+    const isFinance = role === "finance" || isAdmin;
+    const current = String((existing as any).status || "open");
+
+    // Fluxo: open → approved (Controle) → posted (Financeiro)
+    // Cancelamento permitido em open/approved.
+    if (status === "approved") {
+      if (!isControle) return res.status(403).json({ error: "Apenas Controle (ou admin) pode aprovar." });
+      if (current !== "open") return res.status(400).json({ error: "Só é possível aprovar lançamentos em aberto." });
+    } else if (status === "posted") {
+      if (!isFinance) return res.status(403).json({ error: "Apenas Financeiro (ou admin) pode baixar/pagar." });
+      if (current !== "approved") return res.status(400).json({ error: "O lançamento precisa ser aprovado pelo Controle antes do pagamento." });
+    } else if (status === "cancelled") {
+      if (current === "posted") return res.status(400).json({ error: "Não é possível cancelar um lançamento já baixado." });
+      if (!["open", "approved"].includes(current)) {
+        return res.status(400).json({ error: "Este lançamento já está cancelado." });
+      }
+      // Controle pode reprovar (open→cancelled); solicitante/admin também podem cancelar.
+      if (!(isControle || isAdmin || ["manager"].includes(role))) {
+        // finance não cancela; managers and controle/admin ok
+        if (role === "finance") return res.status(403).json({ error: "Financeiro não cancela lançamentos manuais." });
+      }
+    } else if (status === "open") {
+      // Desaprovar: devolver approved → open (só Controle/admin)
+      if (!isControle) return res.status(403).json({ error: "Apenas Controle (ou admin) pode devolver o lançamento." });
+      if (current !== "approved") return res.status(400).json({ error: "Só é possível devolver lançamentos aprovados." });
+    }
+
     const { error } = await supabase.from("manual_entries").update({ status }).eq("id", id);
     if (error) {
       console.error(error);
       return res.status(500).json({ error: "Erro interno ao processar a solicitação." });
+    }
+    res.json({ success: true });
+  });
+
+  // Exclusão definitiva de lançamento manual (apenas admin)
+  app.delete("/api/manual-entries/:id", requireRole("admin"), async (req, res) => {
+    const { id } = req.params;
+    const { data: existing, error: fetchError } = await supabase
+      .from("manual_entries")
+      .select("id")
+      .eq("id", id)
+      .maybeSingle();
+    if (fetchError) {
+      console.error(fetchError);
+      return res.status(500).json({ error: "Erro interno ao processar a solicitação." });
+    }
+    if (!existing) return res.status(404).json({ error: "Lançamento não encontrado" });
+
+    const { error } = await supabase.from("manual_entries").delete().eq("id", id);
+    if (error) {
+      console.error(error);
+      return res.status(500).json({ error: "Não foi possível excluir o lançamento." });
     }
     res.json({ success: true });
   });
@@ -2106,6 +2167,18 @@ export function createApp() {
       cancel_reason?: string;
     };
 
+    const role = String(req.user?.role || "");
+    const isAdmin = role === "admin";
+    const isControle = role === "controle" || isAdmin;
+    const isFinance = role === "finance" || isAdmin;
+
+    if (["approve_control", "reject_control", "disapprove_control"].includes(String(action)) && !isControle) {
+      return res.status(403).json({ error: "Apenas Controle (ou admin) pode executar esta ação." });
+    }
+    if (action === "mark_paid" && !isFinance) {
+      return res.status(403).json({ error: "Apenas Financeiro (ou admin) pode marcar como pago." });
+    }
+
     const { data: invoice, error: fetchErr } = await supabase
       .from("invoices")
       .select("*")
@@ -2181,6 +2254,28 @@ export function createApp() {
     }
 
     res.status(400).json({ error: "Ação inválida" });
+  });
+
+  // Exclusão definitiva de nota (apenas admin)
+  app.delete("/api/invoices/:id", requireRole("admin"), async (req, res) => {
+    const { id } = req.params;
+    const { data: existing, error: fetchError } = await supabase
+      .from("invoices")
+      .select("id")
+      .eq("id", id)
+      .maybeSingle();
+    if (fetchError) {
+      console.error(fetchError);
+      return res.status(500).json({ error: "Erro interno ao processar a solicitação." });
+    }
+    if (!existing) return res.status(404).json({ error: "Nota não encontrada" });
+
+    const { error } = await supabase.from("invoices").delete().eq("id", id);
+    if (error) {
+      console.error(error);
+      return res.status(500).json({ error: "Não foi possível excluir a nota." });
+    }
+    res.json({ success: true });
   });
 
   // ====================================================

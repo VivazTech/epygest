@@ -11,6 +11,11 @@ import { valueTrace } from '../lib/valueTraceMeta';
 import { useSearch } from '../context/SearchContext';
 import { matchesSearch } from '../lib/search';
 
+const MONTH_LABELS = [
+  'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+  'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro',
+];
+
 const chartData = [
   { name: 'Jan', receita: 180000, despesa: 140000 },
   { name: 'Fev', receita: 210000, despesa: 155000 },
@@ -28,7 +33,12 @@ const pieData = [
 
 export const Dashboard: React.FC = () => {
   const { query } = useSearch();
+  const now = new Date();
+  const [selectedMonth, setSelectedMonth] = useState(String(now.getMonth() + 1));
+  const [selectedYear, setSelectedYear] = useState(String(now.getFullYear()));
+  const [periodOpen, setPeriodOpen] = useState(false);
   const [indicators, setIndicators] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
 
   const filteredChartData = useMemo(
     () => chartData.filter((item) => matchesSearch(query, item.name, item.receita, item.despesa)),
@@ -39,13 +49,46 @@ export const Dashboard: React.FC = () => {
     [query]
   );
 
-  useEffect(() => {
-    fetch('/api/dashboard/indicators')
-      .then(res => res.json())
-      .then(data => setIndicators(data));
+  const periodLabel = useMemo(() => {
+    const monthIdx = Math.max(1, Math.min(12, Number(selectedMonth) || 1)) - 1;
+    return `${MONTH_LABELS[monthIdx]}, ${selectedYear}`;
+  }, [selectedMonth, selectedYear]);
+
+  const yearOptions = useMemo(() => {
+    const current = new Date().getFullYear();
+    return Array.from({ length: 6 }, (_, i) => String(current - 2 + i));
   }, []);
 
-  if (!indicators) return <div className="p-8 text-slate-400">Carregando indicadores...</div>;
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    const params = new URLSearchParams({
+      month: selectedMonth,
+      year: selectedYear,
+    });
+    fetch(`/api/dashboard/indicators?${params.toString()}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (!cancelled) setIndicators(data);
+      })
+      .catch(() => {
+        if (!cancelled) setIndicators(null);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedMonth, selectedYear]);
+
+  if (loading && !indicators) {
+    return <div className="p-8 text-slate-400">Carregando indicadores...</div>;
+  }
+
+  if (!indicators) {
+    return <div className="p-8 text-slate-400">Não foi possível carregar os indicadores.</div>;
+  }
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500">
@@ -56,10 +99,64 @@ export const Dashboard: React.FC = () => {
         </div>
         
         <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2 bg-white border border-slate-200 px-4 py-2 rounded-xl shadow-sm cursor-pointer hover:bg-slate-50 transition-colors">
-            <Calendar className="w-4 h-4 text-slate-400" />
-            <span className="text-sm font-medium text-slate-600">Março, 2024</span>
-            <ChevronDown className="w-4 h-4 text-slate-400" />
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setPeriodOpen((open) => !open)}
+              className="flex items-center gap-2 bg-white border border-slate-200 px-4 py-2 rounded-xl shadow-sm hover:bg-slate-50 transition-colors"
+            >
+              <Calendar className="w-4 h-4 text-slate-400" />
+              <span className="text-sm font-medium text-slate-600">{periodLabel}</span>
+              <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${periodOpen ? 'rotate-180' : ''}`} />
+            </button>
+
+            {periodOpen && (
+              <>
+                <button
+                  type="button"
+                  className="fixed inset-0 z-10 cursor-default"
+                  aria-label="Fechar filtro de período"
+                  onClick={() => setPeriodOpen(false)}
+                />
+                <div className="absolute right-0 top-full mt-2 z-20 w-64 bg-white border border-slate-200 rounded-2xl shadow-lg p-3 space-y-3">
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Mês</label>
+                    <select
+                      value={selectedMonth}
+                      onChange={(e) => setSelectedMonth(e.target.value)}
+                      className="mt-1 w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+                    >
+                      {MONTH_LABELS.map((label, idx) => (
+                        <option key={label} value={String(idx + 1)}>
+                          {label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Ano</label>
+                    <select
+                      value={selectedYear}
+                      onChange={(e) => setSelectedYear(e.target.value)}
+                      className="mt-1 w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+                    >
+                      {yearOptions.map((year) => (
+                        <option key={year} value={year}>
+                          {year}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setPeriodOpen(false)}
+                    className="w-full px-3 py-2 rounded-xl bg-[#004D40] text-white text-sm font-bold hover:bg-[#003d33] transition-colors"
+                  >
+                    Aplicar período
+                  </button>
+                </div>
+              </>
+            )}
           </div>
           <button className="p-2.5 bg-white border border-slate-200 rounded-xl shadow-sm hover:bg-slate-50 transition-colors">
             <Filter className="w-4 h-4 text-slate-500" />
@@ -99,8 +196,8 @@ export const Dashboard: React.FC = () => {
           variation={-2.4} 
           description="vs meta projetada"
           color="orange"
-          traceSource="Receita acumulada e despesas acumuladas"
-          traceCalculation="(Receita - Despesas) * 0.8"
+          traceSource="Receita e despesas do mês selecionado"
+          traceCalculation="(Receita mensal - Despesas mensais) * 0.8"
         />
         <IndicatorCard 
           title="Ticket Médio" 
