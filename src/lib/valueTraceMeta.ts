@@ -272,15 +272,25 @@ export const valueTrace = {
       calculation:
         'Resultado Operacional − Impostos s/ Resultado − Obras e Investimentos (Previsto e Realizado calculados com edições manuais, quando houver). Diferença = Realizado − Previsto.',
     }),
-    av: (label: string, mes: string, serie: string, grupoPai: string | null): ValueTraceMeta => ({
+    av: (label: string, mes: string): ValueTraceMeta => ({
       source: `AV (análise vertical) — ${label} — ${mes}`,
-      calculation: grupoPai
-        ? `Participação da linha dentro do grupo "${grupoPai}" (o grupo é 100%): |valor da linha| ÷ |valor do grupo| × 100, sobre o ${serie} (usa o Realizado quando linha e grupo têm realizado; senão o Previsto). As linhas de um grupo somam 100%. Considera edições manuais.`
-        : 'Linha de grupo principal — é a base (100%) da análise vertical dos seus subitens.',
+      calculation:
+        '|Diferença| ÷ |Previsto| × 100 — quanto do previsto a diferença representa. O Previsto é o 100%: ex. previsto R$ 1.000 e realizado R$ 400 → diferença R$ 600 = 60%. Só aparece quando o mês tem Previsto e Diferença. Considera edições manuais.',
+    }),
+    // AV das linhas de resultado: participação sobre uma base (a base é 100%).
+    avRatio: (label: string, mes: string, base: string): ValueTraceMeta => ({
+      source: `AV (análise vertical) — ${label} — ${mes}`,
+      calculation: `${label} ÷ ${base} × 100 — quanto ${label} representa de ${base} (a base é 100%). Usa o Realizado quando ambos têm realizado no mês; senão o Previsto. Considera edições manuais.`,
     }),
     ah: (label: string, mes: string, mesAnterior: string, serie: string): ValueTraceMeta => ({
       source: `AH (análise horizontal) — ${label} — ${mes}`,
       calculation: `Variação percentual sobre ${mesAnterior}: (valor do mês − valor de ${mesAnterior}) ÷ |valor de ${mesAnterior}| × 100, calculada sobre o ${serie}. Considera edições manuais.`,
+    }),
+    // AH das linhas de resultado: quanto a diferença representa do previsto.
+    ahVariance: (label: string, mes: string): ValueTraceMeta => ({
+      source: `AH (análise horizontal) — ${label} — ${mes}`,
+      calculation:
+        '|Diferença| ÷ |Previsto| × 100 — quanto a diferença representa do previsto (ex.: previsto R$ 1.000, realizado R$ 400 → diferença R$ 600 = 60%). Só aparece quando o mês tem Previsto e Diferença. Considera edições manuais.',
     }),
   },
 
