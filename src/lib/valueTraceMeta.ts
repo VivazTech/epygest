@@ -267,6 +267,14 @@ export const valueTrace = {
       source: `Total 2026 — ${campo} — ${label}`,
       calculation: 'Soma dos 12 meses da linha (considerando edições manuais, quando houver).',
     }),
+    av: (label: string, mes: string, serie: string): ValueTraceMeta => ({
+      source: `AV (análise vertical) — ${label} — ${mes}`,
+      calculation: `|valor da linha| ÷ |Receita Líquida do mês| × 100, calculada sobre o ${serie} (usa o Realizado quando a linha e a Receita Líquida têm realizado no mês; senão o Previsto). Considera edições manuais.`,
+    }),
+    ah: (label: string, mes: string, mesAnterior: string, serie: string): ValueTraceMeta => ({
+      source: `AH (análise horizontal) — ${label} — ${mes}`,
+      calculation: `Variação percentual sobre ${mesAnterior}: (valor do mês − valor de ${mesAnterior}) ÷ |valor de ${mesAnterior}| × 100, calculada sobre o ${serie}. Considera edições manuais.`,
+    }),
   },
 
   cadastros: {

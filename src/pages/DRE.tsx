@@ -50,6 +50,25 @@ const dreSource = dreData.source;
 
 const editKey = (row: number, month: number, field: 'prev' | 'real') => `${row}:${month}:${field}`;
 
+const RESULTADO_FOOTER_IDS = [
+  { id: 'l52-receita-bruta', short: 'Receita Bruta', accent: 'emerald' as const },
+  { id: 'l77-receita-liquida', short: 'Receita Líquida', accent: 'teal' as const },
+  { id: 'l81-resultado-bruto', short: 'Resultado Bruto', accent: 'sky' as const },
+  { id: 'l83-despesas-totais', short: 'Despesas Totais', accent: 'amber' as const },
+  { id: 'l309-resultado-operacional', short: 'Resultado Operacional', accent: 'brand' as const },
+];
+
+const findDreRow = (rows: DRERow[], id: string): DRERow | null => {
+  for (const row of rows) {
+    if (row.id === id) return row;
+    if (row.children?.length) {
+      const found = findDreRow(row.children, id);
+      if (found) return found;
+    }
+  }
+  return null;
+};
+
 const formatWhen = (iso: string) => {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
@@ -70,6 +89,53 @@ export const DREPage: React.FC = () => {
   const [editingCell, setEditingCell] = useState<EditingCell | null>(null);
   const [editingValue, setEditingValue] = useState('');
   const [savingCell, setSavingCell] = useState(false);
+  /** Índices 0–11 dos meses visíveis. Vazio = todos. */
+  const [selectedMonths, setSelectedMonths] = useState<number[]>(() =>
+    Array.from({ length: 12 }, (_, i) => i)
+  );
+  // Análises AV/AH (opcionais, como na versão anterior do DRE); preferência fica salva no navegador.
+  const [showAV, setShowAV] = useState(() => {
+    try { return localStorage.getItem('dre:show_av') === '1'; } catch { return false; }
+  });
+  const [showAH, setShowAH] = useState(() => {
+    try { return localStorage.getItem('dre:show_ah') === '1'; } catch { return false; }
+  });
+
+  const toggleAV = () => {
+    setShowAV((v) => {
+      try { localStorage.setItem('dre:show_av', v ? '0' : '1'); } catch { /* ignore */ }
+      return !v;
+    });
+  };
+  const toggleAH = () => {
+    setShowAH((v) => {
+      try { localStorage.setItem('dre:show_ah', v ? '0' : '1'); } catch { /* ignore */ }
+      return !v;
+    });
+  };
+
+  const visibleMonths = useMemo(() => {
+    const set = new Set(selectedMonths);
+    const months = MESES.map((_, i) => i).filter((i) => set.has(i));
+    return months.length ? months : MESES.map((_, i) => i);
+  }, [selectedMonths]);
+
+  const allMonthsSelected = visibleMonths.length === 12;
+
+  const toggleMonth = (monthIndex: number) => {
+    setSelectedMonths((prev) => {
+      const set = new Set(prev);
+      if (set.has(monthIndex)) {
+        if (set.size <= 1) return prev; // mantém ao menos um mês
+        set.delete(monthIndex);
+      } else {
+        set.add(monthIndex);
+      }
+      return Array.from(set).sort((a, b) => a - b);
+    });
+  };
+
+  const selectAllMonths = () => setSelectedMonths(Array.from({ length: 12 }, (_, i) => i));
 
   const loadEdits = async () => {
     try {
@@ -125,10 +191,10 @@ export const DREPage: React.FC = () => {
     return { prev, real, dif };
   };
 
-  const totalOf = (row: DRERow): MonthCell => {
+  const totalOf = (row: DRERow, monthIndexes: number[] = visibleMonths): MonthCell => {
     let prev: number | null = null;
     let real: number | null = null;
-    for (let m = 0; m < 12; m++) {
+    for (const m of monthIndexes) {
       const v = effective(row, m);
       if (v.prev != null) prev = (prev ?? 0) + v.prev;
       if (v.real != null) real = (real ?? 0) + v.real;
@@ -136,6 +202,54 @@ export const DREPage: React.FC = () => {
     const dif = prev != null && real != null ? real - prev : null;
     return { prev, real, dif };
   };
+
+  // ---- Análises AV/AH (sobre os dados importados + edições) ----
+  const receitaLiquidaRow = useMemo(() => findDreRow(dreRows, 'l77-receita-liquida'), []);
+
+  type Analise = { pct: number | null; serie: 'Realizado' | 'Previsto' | null };
+
+  // AV: |linha| ÷ |Receita Líquida do mês| × 100 (Realizado quando ambos têm; senão Previsto).
+  const avOf = (row: DRERow, monthIndex: number): Analise => {
+    if (!receitaLiquidaRow) return { pct: null, serie: null };
+    const line = effective(row, monthIndex);
+    const base = effective(receitaLiquidaRow, monthIndex);
+    if (line.real != null && base.real != null && base.real !== 0) {
+      return { pct: (Math.abs(line.real) / Math.abs(base.real)) * 100, serie: 'Realizado' };
+    }
+    if (line.prev != null && base.prev != null && base.prev !== 0) {
+      return { pct: (Math.abs(line.prev) / Math.abs(base.prev)) * 100, serie: 'Previsto' };
+    }
+    return { pct: null, serie: null };
+  };
+
+  const avTotalOf = (row: DRERow): Analise => {
+    if (!receitaLiquidaRow) return { pct: null, serie: null };
+    const line = totalOf(row);
+    const base = totalOf(receitaLiquidaRow);
+    if (line.real != null && base.real != null && base.real !== 0) {
+      return { pct: (Math.abs(line.real) / Math.abs(base.real)) * 100, serie: 'Realizado' };
+    }
+    if (line.prev != null && base.prev != null && base.prev !== 0) {
+      return { pct: (Math.abs(line.prev) / Math.abs(base.prev)) * 100, serie: 'Previsto' };
+    }
+    return { pct: null, serie: null };
+  };
+
+  // AH: variação % sobre o mês-calendário anterior (Realizado quando ambos têm; senão Previsto).
+  const ahOf = (row: DRERow, monthIndex: number): Analise => {
+    if (monthIndex === 0) return { pct: null, serie: null };
+    const cur = effective(row, monthIndex);
+    const ant = effective(row, monthIndex - 1);
+    if (cur.real != null && ant.real != null && ant.real !== 0) {
+      return { pct: ((cur.real - ant.real) / Math.abs(ant.real)) * 100, serie: 'Realizado' };
+    }
+    if (cur.prev != null && ant.prev != null && ant.prev !== 0) {
+      return { pct: ((cur.prev - ant.prev) / Math.abs(ant.prev)) * 100, serie: 'Previsto' };
+    }
+    return { pct: null, serie: null };
+  };
+
+  const monthColSpan = 3 + (showAV ? 1 : 0) + (showAH ? 1 : 0);
 
   const startCellEdit = (row: DRERow, monthIndex: number, field: 'prev' | 'real') => {
     const current = effective(row, monthIndex)[field];
@@ -185,6 +299,29 @@ export const DREPage: React.FC = () => {
       setSavingCell(false);
     }
   };
+
+  const resultadosFooter = useMemo(() => {
+    return RESULTADO_FOOTER_IDS.map((meta) => {
+      const row = findDreRow(dreRows, meta.id);
+      if (!row) return null;
+      const total = totalOf(row, visibleMonths);
+      const atingimento =
+        total.prev != null && total.prev !== 0 && total.real != null
+          ? (total.real / total.prev) * 100
+          : null;
+      return { ...meta, row, total, atingimento };
+    }).filter(Boolean) as Array<{
+      id: string;
+      short: string;
+      accent: 'emerald' | 'teal' | 'sky' | 'amber' | 'brand';
+      row: DRERow;
+      total: MonthCell;
+      atingimento: number | null;
+    }>;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [edits, visibleMonths]);
+
+  const resultadoOperacional = resultadosFooter.find((r) => r.id === 'l309-resultado-operacional');
 
   const renderEditableCell = (row: DRERow, monthIndex: number, field: 'prev' | 'real') => {
     const isEditing =
@@ -271,8 +408,10 @@ export const DREPage: React.FC = () => {
             </div>
           </td>
 
-          {MESES.map((_, monthIndex) => {
+          {visibleMonths.map((monthIndex) => {
             const cell = effective(row, monthIndex);
+            const av = showAV ? avOf(row, monthIndex) : null;
+            const ah = showAH ? ahOf(row, monthIndex) : null;
             return (
               <React.Fragment key={`${row.id}-${monthIndex}`}>
                 <td className="min-w-[120px] px-2 py-1.5 text-right">
@@ -281,7 +420,7 @@ export const DREPage: React.FC = () => {
                 <td className="min-w-[120px] px-2 py-1.5 text-right">
                   {renderEditableCell(row, monthIndex, 'real')}
                 </td>
-                <td className="min-w-[120px] px-3 py-1.5 text-right border-r border-slate-200">
+                <td className={cn('min-w-[120px] px-3 py-1.5 text-right', !showAV && !showAH && 'border-r border-slate-200')}>
                   <ValueTrace
                     className={cn(
                       'text-xs tabular-nums font-semibold',
@@ -291,6 +430,32 @@ export const DREPage: React.FC = () => {
                     meta={valueTrace.dre.diferenca(row.label, `${MESES[monthIndex]}/${dreYear}`)}
                   />
                 </td>
+                {showAV && (
+                  <td className={cn('min-w-[70px] px-2 py-1.5 text-right', !showAH && 'border-r border-slate-200')}>
+                    <ValueTrace
+                      className="text-[11px] tabular-nums font-semibold text-slate-500"
+                      displayValue={av?.pct == null ? '—' : `${av.pct.toFixed(1)}%`}
+                      meta={valueTrace.dre.av(row.label, `${MESES[monthIndex]}/${dreYear}`, av?.serie ?? 'Previsto')}
+                    />
+                  </td>
+                )}
+                {showAH && (
+                  <td className="min-w-[70px] px-2 py-1.5 text-right border-r border-slate-200">
+                    <ValueTrace
+                      className={cn(
+                        'text-[11px] tabular-nums font-semibold',
+                        ah?.pct == null ? 'text-slate-400' : ah.pct < 0 ? 'text-red-600' : ah.pct > 0 ? 'text-emerald-600' : 'text-slate-500'
+                      )}
+                      displayValue={ah?.pct == null ? '—' : `${ah.pct > 0 ? '+' : ''}${ah.pct.toFixed(1)}%`}
+                      meta={valueTrace.dre.ah(
+                        row.label,
+                        `${MESES[monthIndex]}/${dreYear}`,
+                        monthIndex > 0 ? `${MESES[monthIndex - 1]}/${dreYear}` : 'mês anterior',
+                        ah?.serie ?? 'Previsto'
+                      )}
+                    />
+                  </td>
+                )}
               </React.Fragment>
             );
           })}
@@ -309,7 +474,7 @@ export const DREPage: React.FC = () => {
               meta={valueTrace.dre.total(row.label, 'Realizado')}
             />
           </td>
-          <td className="min-w-[120px] px-3 py-1.5 text-right border-r border-slate-200 bg-slate-50/60">
+          <td className={cn('min-w-[120px] px-3 py-1.5 text-right bg-slate-50/60', !showAV && !showAH && 'border-r border-slate-200')}>
             <ValueTrace
               className={cn(
                 'text-xs tabular-nums font-semibold',
@@ -319,6 +484,23 @@ export const DREPage: React.FC = () => {
               meta={valueTrace.dre.total(row.label, 'Diferença')}
             />
           </td>
+          {showAV && (() => {
+            const av = avTotalOf(row);
+            return (
+              <td className={cn('min-w-[70px] px-2 py-1.5 text-right bg-slate-50/60', !showAH && 'border-r border-slate-200')}>
+                <ValueTrace
+                  className="text-[11px] tabular-nums font-semibold text-slate-500"
+                  displayValue={av.pct == null ? '—' : `${av.pct.toFixed(1)}%`}
+                  meta={valueTrace.dre.av(row.label, `Total ${dreYear}`, av.serie ?? 'Previsto')}
+                />
+              </td>
+            );
+          })()}
+          {showAH && (
+            <td className="min-w-[70px] px-2 py-1.5 text-right border-r border-slate-200 bg-slate-50/60">
+              <span className="text-[11px] text-slate-300">—</span>
+            </td>
+          )}
         </tr>
         {hasChildren && isExpanded && row.children?.map((child) => renderRow(child))}
       </React.Fragment>
@@ -327,16 +509,89 @@ export const DREPage: React.FC = () => {
 
   return (
     <div className="space-y-5 animate-in fade-in duration-500">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
         <div>
           <h2 className="text-2xl font-bold text-slate-900">DRE Gerencial</h2>
           <p className="text-sm text-slate-500">
             Previsto x Realizado por mês, importado da planilha Prev x Real {dreYear}. Clique em uma célula para editar; passe o mouse para ver a origem do valor.
           </p>
         </div>
-        <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 shadow-sm">
+        <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 shadow-sm shrink-0">
           <Calendar className="w-4 h-4 text-slate-400" />
           <span className="text-sm font-medium text-slate-600">{dreYear}</span>
+        </div>
+      </div>
+
+      <div className="rounded-2xl border border-slate-200 bg-white shadow-sm px-4 py-3 space-y-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+            Filtrar meses
+            {!allMonthsSelected && (
+              <span className="ml-2 normal-case tracking-normal text-slate-500 font-semibold">
+                · {visibleMonths.length} selecionado{visibleMonths.length === 1 ? '' : 's'}
+              </span>
+            )}
+          </p>
+          <div className="flex items-center gap-3">
+            {!allMonthsSelected && (
+              <button
+                type="button"
+                onClick={selectAllMonths}
+                className="text-xs font-bold text-[#004D40] hover:underline"
+              >
+                Mostrar todos
+              </button>
+            )}
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Análises</span>
+              <button
+                type="button"
+                onClick={toggleAV}
+                title="Análise vertical: % de cada linha sobre a Receita Líquida do mês"
+                className={cn(
+                  'px-2.5 py-1 rounded-lg text-xs font-bold transition-colors border',
+                  showAV
+                    ? 'bg-[#004D40] text-white border-[#004D40] shadow-sm'
+                    : 'bg-white text-slate-400 border-slate-200 hover:border-slate-300 hover:text-slate-600'
+                )}
+              >
+                AV
+              </button>
+              <button
+                type="button"
+                onClick={toggleAH}
+                title="Análise horizontal: variação % de cada linha sobre o mês anterior"
+                className={cn(
+                  'px-2.5 py-1 rounded-lg text-xs font-bold transition-colors border',
+                  showAH
+                    ? 'bg-[#004D40] text-white border-[#004D40] shadow-sm'
+                    : 'bg-white text-slate-400 border-slate-200 hover:border-slate-300 hover:text-slate-600'
+                )}
+              >
+                AH
+              </button>
+            </div>
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          {MESES.map((mes, monthIndex) => {
+            const active = visibleMonths.includes(monthIndex);
+            return (
+              <button
+                key={mes}
+                type="button"
+                onClick={() => toggleMonth(monthIndex)}
+                className={cn(
+                  'px-2.5 py-1.5 rounded-lg text-xs font-bold transition-colors border',
+                  active
+                    ? 'bg-[#004D40] text-white border-[#004D40] shadow-sm'
+                    : 'bg-white text-slate-400 border-slate-200 hover:border-slate-300 hover:text-slate-600'
+                )}
+              >
+                {mes.slice(0, 3)}
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -354,21 +609,27 @@ export const DREPage: React.FC = () => {
                 <th rowSpan={2} className="sticky left-0 z-30 min-w-[320px] max-w-[320px] border-r border-slate-200 bg-slate-100 px-4 py-3 text-[11px] font-bold uppercase tracking-wider text-slate-600">
                   Categorias
                 </th>
-                {MESES.map((mes) => (
-                  <th key={mes} colSpan={3} className="border-r border-slate-200 px-3 py-2 text-center text-[11px] font-bold uppercase tracking-wider text-slate-600">
-                    {mes} {dreYear}
+                {visibleMonths.map((monthIndex) => (
+                  <th key={MESES[monthIndex]} colSpan={monthColSpan} className="border-r border-slate-200 px-3 py-2 text-center text-[11px] font-bold uppercase tracking-wider text-slate-600">
+                    {MESES[monthIndex]} {dreYear}
                   </th>
                 ))}
-                <th colSpan={3} className="border-r border-slate-200 px-3 py-2 text-center text-[11px] font-bold uppercase tracking-wider text-slate-700 bg-slate-200/70">
-                  Total {dreYear}
+                <th colSpan={monthColSpan} className="border-r border-slate-200 px-3 py-2 text-center text-[11px] font-bold uppercase tracking-wider text-slate-700 bg-slate-200/70">
+                  {allMonthsSelected ? `Total ${dreYear}` : `Total (${visibleMonths.length} mês${visibleMonths.length === 1 ? '' : 'es'})`}
                 </th>
               </tr>
               <tr className="bg-slate-50 border-b border-slate-200">
-                {[...MESES, 'Total'].map((mes) => (
+                {[...visibleMonths.map((i) => MESES[i]), 'Total'].map((mes) => (
                   <React.Fragment key={`${mes}-sub`}>
                     <th className="min-w-[120px] border-r border-slate-100 px-3 py-2 text-right text-[10px] font-bold uppercase tracking-wide text-slate-500">Previsto</th>
                     <th className="min-w-[120px] border-r border-slate-100 px-3 py-2 text-right text-[10px] font-bold uppercase tracking-wide text-slate-500">Realizado</th>
-                    <th className="min-w-[120px] border-r border-slate-200 px-3 py-2 text-right text-[10px] font-bold uppercase tracking-wide text-slate-500">Diferença</th>
+                    <th className={cn('min-w-[120px] px-3 py-2 text-right text-[10px] font-bold uppercase tracking-wide text-slate-500', showAV || showAH ? 'border-r border-slate-100' : 'border-r border-slate-200')}>Diferença</th>
+                    {showAV && (
+                      <th className={cn('min-w-[70px] px-2 py-2 text-right text-[10px] font-bold uppercase tracking-wide text-slate-500', showAH ? 'border-r border-slate-100' : 'border-r border-slate-200')} title="Análise vertical: % sobre a Receita Líquida do mês">AV</th>
+                    )}
+                    {showAH && (
+                      <th className="min-w-[70px] border-r border-slate-200 px-2 py-2 text-right text-[10px] font-bold uppercase tracking-wide text-slate-500" title="Análise horizontal: variação % sobre o mês anterior">AH</th>
+                    )}
                   </React.Fragment>
                 ))}
               </tr>
@@ -379,6 +640,158 @@ export const DREPage: React.FC = () => {
           </table>
         </div>
       </div>
+
+      {resultadosFooter.length > 0 && (
+        <div className="rounded-2xl border border-slate-200 bg-gradient-to-br from-slate-50 via-white to-emerald-50/40 shadow-sm overflow-hidden">
+          <div className="px-5 py-4 border-b border-slate-100 flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">Resultados {dreYear}</p>
+              <h3 className="text-lg font-bold text-slate-900 mt-0.5">Painel de apuração</h3>
+            </div>
+            {resultadoOperacional && (
+              <div className="text-right">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Resultado operacional (real)</p>
+                <p
+                  className={cn(
+                    'text-2xl font-extrabold tabular-nums mt-0.5',
+                    (resultadoOperacional.total.real ?? 0) < 0 ? 'text-red-600' : 'text-[#004D40]'
+                  )}
+                >
+                  {resultadoOperacional.total.real == null
+                    ? '—'
+                    : formatCurrency(resultadoOperacional.total.real)}
+                </p>
+              </div>
+            )}
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-px bg-slate-100">
+            {resultadosFooter.map((item) => {
+              const real = item.total.real;
+              const prev = item.total.prev;
+              const dif = item.total.dif;
+              const barPct =
+                item.atingimento == null
+                  ? 0
+                  : Math.max(0, Math.min(100, Math.abs(item.atingimento)));
+              const accentBar =
+                item.accent === 'brand'
+                  ? 'bg-[#004D40]'
+                  : item.accent === 'emerald'
+                    ? 'bg-emerald-500'
+                    : item.accent === 'teal'
+                      ? 'bg-teal-500'
+                      : item.accent === 'sky'
+                        ? 'bg-sky-500'
+                        : 'bg-amber-500';
+              const accentSoft =
+                item.accent === 'brand'
+                  ? 'bg-[#004D40]/10'
+                  : item.accent === 'emerald'
+                    ? 'bg-emerald-100'
+                    : item.accent === 'teal'
+                      ? 'bg-teal-100'
+                      : item.accent === 'sky'
+                        ? 'bg-sky-100'
+                        : 'bg-amber-100';
+
+              return (
+                <div key={item.id} className="bg-white p-4 flex flex-col gap-3 min-h-[148px]">
+                  <div className="flex items-start justify-between gap-2">
+                    <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500 leading-tight">
+                      {item.short}
+                    </p>
+                    {dif != null && (
+                      <span
+                        className={cn(
+                          'shrink-0 text-[10px] font-bold tabular-nums px-1.5 py-0.5 rounded-md',
+                          dif < 0 ? 'bg-red-50 text-red-700' : dif > 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'
+                        )}
+                      >
+                        {dif > 0 ? '+' : ''}
+                        {formatCurrency(dif)}
+                      </span>
+                    )}
+                  </div>
+
+                  <div>
+                    <p
+                      className={cn(
+                        'text-xl font-extrabold tabular-nums leading-none',
+                        real != null && real < 0 ? 'text-red-600' : 'text-slate-900'
+                      )}
+                    >
+                      {real == null ? '—' : formatCurrency(real)}
+                    </p>
+                    <p className="text-[11px] text-slate-400 mt-1.5 tabular-nums">
+                      Previsto {prev == null ? '—' : formatCurrency(prev)}
+                    </p>
+                  </div>
+
+                  <div className="mt-auto space-y-1.5">
+                    <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                      <span>Atingimento</span>
+                      <span className="tabular-nums text-slate-600">
+                        {item.atingimento == null ? '—' : `${item.atingimento.toFixed(0)}%`}
+                      </span>
+                    </div>
+                    <div className={cn('h-2 rounded-full overflow-hidden', accentSoft)}>
+                      <div
+                        className={cn('h-full rounded-full transition-all duration-500', accentBar)}
+                        style={{ width: `${barPct}%` }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {resultadoOperacional && (
+            <div className="px-5 py-4 border-t border-slate-100 bg-white/70">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-3">
+                Resultado operacional por mês (realizado)
+              </p>
+              <div
+                className="grid gap-1.5"
+                style={{ gridTemplateColumns: `repeat(${Math.max(visibleMonths.length, 1)}, minmax(0, 1fr))` }}
+              >
+                {visibleMonths.map((monthIndex) => {
+                  const mes = MESES[monthIndex];
+                  const cell = effective(resultadoOperacional.row, monthIndex);
+                  const val = cell.real;
+                  const maxAbs = Math.max(
+                    ...visibleMonths.map((i) => Math.abs(effective(resultadoOperacional.row, i).real ?? 0)),
+                    1
+                  );
+                  const heightPct = val == null ? 0 : Math.max(8, (Math.abs(val) / maxAbs) * 100);
+                  return (
+                    <div key={mes} className="flex flex-col items-center gap-1.5 min-w-0">
+                      <div className="h-16 w-full flex items-end justify-center">
+                        <div
+                          className={cn(
+                            'w-full max-w-[18px] rounded-t-md transition-all',
+                            val == null
+                              ? 'bg-slate-100 h-1'
+                              : val < 0
+                                ? 'bg-red-400/80'
+                                : 'bg-[#004D40]/80'
+                          )}
+                          style={{ height: val == null ? 4 : `${heightPct}%` }}
+                          title={`${mes}: ${val == null ? '—' : formatCurrency(val)}`}
+                        />
+                      </div>
+                      <span className="text-[9px] font-bold uppercase text-slate-400 truncate w-full text-center">
+                        {mes.slice(0, 3)}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 };
