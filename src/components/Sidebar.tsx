@@ -26,6 +26,7 @@ import {
   Layers,
   ShoppingCart,
   FileCheck,
+  TrendingUp,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { PLANILHAS } from '../lib/planilhas';
@@ -49,7 +50,7 @@ const lancamentosMenuItems = [
   { id: 'comandas', label: 'Comandas', icon: ClipboardList, roles: ['admin', 'finance', 'controle', 'manager'] },
   { id: 'lancamentos-manuais', label: 'Lançamentos Manuais', icon: Wallet, roles: ['admin', 'finance', 'controle', 'manager'] },
   { id: 'requisicoes', label: 'Requisições', icon: Archive, roles: ['admin', 'finance', 'controle', 'manager'] },
-  { id: 'notas', label: 'Controle de Notas', icon: Receipt, roles: ['admin', 'finance', 'controle', 'manager'] },
+  { id: 'notas', label: 'Notas de Serviço', icon: Receipt, roles: ['admin', 'finance', 'controle', 'manager'] },
   { id: 'danfe', label: 'DANFE', icon: FileText, roles: ['admin', 'finance', 'controle', 'manager'] },
 ];
 
@@ -99,9 +100,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [lancamentosExpanded, setLancamentosExpanded] = React.useState(
     lancamentosGroupIds.includes(activeTab)
   );
-  const [planilhasExpanded, setPlanilhasExpanded] = React.useState(
-    activeTab.startsWith('planilha-')
-  );
+  const isApuracaoResultadosTab =
+    activeTab.startsWith('planilha-') ||
+    activeTab === 'apuracao-folha' ||
+    activeTab === 'apuracao-receita';
+  const [planilhasExpanded, setPlanilhasExpanded] = React.useState(isApuracaoResultadosTab);
   const [folhaExpanded, setFolhaExpanded] = React.useState(
     activeTab.startsWith('folha-') || activeTab === 'folha-apuracao'
   );
@@ -114,7 +117,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
     if (lancamentosGroupIds.includes(activeTab)) {
       setLancamentosExpanded(true);
     }
-    if (activeTab.startsWith('planilha-')) {
+    if (
+      activeTab.startsWith('planilha-') ||
+      activeTab === 'apuracao-folha' ||
+      activeTab === 'apuracao-receita'
+    ) {
       setPlanilhasExpanded(true);
     }
     if (activeTab.startsWith('folha-') || activeTab === 'folha-apuracao') {
@@ -291,14 +298,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
               onClick={() => setPlanilhasExpanded((prev) => !prev)}
               className={cn(
                 "w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group",
-                activeTab.startsWith('planilha-')
+                isApuracaoResultadosTab
                   ? "text-white bg-white/10"
                   : "text-white/80 hover:bg-white/5 hover:text-white"
               )}
             >
               <FileSpreadsheet className="w-5 h-5 min-w-5 min-h-5 shrink-0 transition-transform duration-200 group-hover:scale-110" />
               <span className={cn("font-medium text-sm flex-1 text-left", collapsed && "hidden")}>
-                Planilhas
+                Apuração de Resultados
               </span>
               <ChevronDown
                 className={cn(
@@ -308,6 +315,41 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 )}
               />
             </button>
+
+            {!collapsed && planilhasExpanded && (
+              <>
+                <button
+                  onClick={() => setActiveTab('apuracao-folha')}
+                  className={cn(
+                    "w-full flex items-center gap-3 pl-11 pr-4 py-2 rounded-xl transition-all duration-200 group",
+                    activeTab === 'apuracao-folha'
+                      ? "bg-emerald-500 text-white shadow-lg shadow-emerald-900/20"
+                      : "text-white/70 hover:bg-white/5 hover:text-white"
+                  )}
+                >
+                  <Calculator className={cn(
+                    "w-4 h-4 min-w-4 min-h-4 shrink-0 transition-transform duration-200",
+                    activeTab === 'apuracao-folha' ? "scale-110" : "group-hover:scale-110"
+                  )} />
+                  <span className="font-medium text-xs truncate text-left">Apuração da Folha</span>
+                </button>
+                <button
+                  onClick={() => setActiveTab('apuracao-receita')}
+                  className={cn(
+                    "w-full flex items-center gap-3 pl-11 pr-4 py-2 rounded-xl transition-all duration-200 group",
+                    activeTab === 'apuracao-receita'
+                      ? "bg-emerald-500 text-white shadow-lg shadow-emerald-900/20"
+                      : "text-white/70 hover:bg-white/5 hover:text-white"
+                  )}
+                >
+                  <TrendingUp className={cn(
+                    "w-4 h-4 min-w-4 min-h-4 shrink-0 transition-transform duration-200",
+                    activeTab === 'apuracao-receita' ? "scale-110" : "group-hover:scale-110"
+                  )} />
+                  <span className="font-medium text-xs truncate text-left">Apuração de Receita</span>
+                </button>
+              </>
+            )}
 
             {!collapsed && planilhasExpanded && PLANILHAS.map((planilha) => {
               const tabId = `planilha-${planilha.indice}`;

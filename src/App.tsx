@@ -22,6 +22,7 @@ import { PlanilhasPage } from './pages/Planilhas';
 import { PLANILHAS } from './lib/planilhas';
 import { FolhaPagamentoPage, MESES_FOLHA } from './pages/FolhaPagamento';
 import { FolhaApuracaoPage } from './pages/FolhaApuracao';
+import { ApuracaoReceitaPage } from './pages/ApuracaoReceita';
 import { ComprasPage } from './pages/Compras';
 import { SearchProvider, useSearch } from './context/SearchContext';
 import { ToastProvider } from './context/ToastContext';
@@ -151,8 +152,13 @@ export default function App() {
       );
     }
 
-    if (activeTab === 'folha-apuracao') {
+    if (activeTab === 'apuracao-folha' || activeTab === 'folha-apuracao') {
       return <FolhaApuracaoPage />;
+    }
+
+    if (activeTab === 'apuracao-receita') {
+      if (!canAccessPlanilhas) return <Dashboard />;
+      return <ApuracaoReceitaPage />;
     }
 
     if (activeTab.startsWith('folha-')) {
@@ -336,19 +342,23 @@ function AppShell({
             <span className="text-slate-400 text-sm font-medium">EpyGest</span>
             <span className="text-slate-300">/</span>
             <span className="text-slate-900 text-sm font-bold capitalize truncate">
-              {activeTab.startsWith('planilha-')
-                ? `Planilhas / ${PLANILHAS.find((p) => `planilha-${p.indice}` === activeTab)?.nome ?? ''}`
-                : activeTab.startsWith('folha-')
-                ? `Folha de Pagamento / ${MESES_FOLHA[Number(activeTab.slice('folha-'.length))] ?? ''}`
+              {activeTab === 'apuracao-folha'
+                ? 'Apuração de Resultados / Apuração da Folha'
+                : activeTab === 'apuracao-receita'
+                ? 'Apuração de Resultados / Apuração de Receita'
+                : activeTab.startsWith('planilha-')
+                ? `Apuração de Resultados / ${PLANILHAS.find((p) => `planilha-${p.indice}` === activeTab)?.nome ?? ''}`
                 : activeTab === 'folha-apuracao'
                 ? 'Folha de Pagamento / Apuração de Folha'
+                : activeTab.startsWith('folha-')
+                ? `Folha de Pagamento / ${MESES_FOLHA[Number(activeTab.slice('folha-'.length))] ?? ''}`
                 : ['comandas', 'lancamentos-manuais', 'requisicoes', 'notas', 'danfe'].includes(activeTab)
                 ? `Lançamentos / ${
                     activeTab === 'comandas' ? 'Comandas'
                     : activeTab === 'lancamentos-manuais' ? 'Lançamentos Manuais'
                     : activeTab === 'requisicoes' ? 'Requisições'
                     : activeTab === 'danfe' ? 'DANFE'
-                    : 'Controle de Notas'
+                    : 'Notas de Serviço'
                   }`
                 : activeTab === 'prev-real'
                 ? 'Prev x Real Diario'

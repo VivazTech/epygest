@@ -951,6 +951,65 @@ export function createApp() {
   });
 
   // ====================================================
+  // APURAÇÃO DE RECEITA
+  // ====================================================
+  app.get("/api/apuracao/receita", requireRole("admin", "finance", "controle"), async (req, res) => {
+    const year = Number((req.query as { year?: string }).year) || new Date().getFullYear();
+    const dateFrom = `${year}-01-01`;
+    const dateTo = `${year}-12-31`;
+    const monthLabels = [
+      "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
+      "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro",
+    ];
+
+    const { data, error } = await supabase
+      .from("financial_records")
+      .select("amount, type, date")
+      .gte("date", dateFrom)
+      .lte("date", dateTo);
+
+    if (error) {
+      console.error(error);
+      return res.status(500).json({ error: "Não foi possível carregar a apuração de receita." });
+    }
+
+    const months = Array.from({ length: 12 }, (_, i) => ({
+      month: i + 1,
+      label: monthLabels[i],
+      receita: 0,
+      despesa: 0,
+      resultado: 0,
+    }));
+
+    for (const row of data ?? []) {
+      const d = String((row as any).date ?? "");
+      const m = Number(d.slice(5, 7));
+      if (m < 1 || m > 12) continue;
+      const amount = Number((row as any).amount) || 0;
+      const type = String((row as any).type ?? "");
+      if (type === "revenue") months[m - 1].receita += amount;
+      else if (type === "expense") months[m - 1].despesa += amount;
+    }
+
+    for (const m of months) {
+      m.resultado = m.receita - m.despesa;
+    }
+
+    res.json({
+      year,
+      months,
+      totals: months.reduce(
+        (acc, m) => ({
+          receita: acc.receita + m.receita,
+          despesa: acc.despesa + m.despesa,
+          resultado: acc.resultado + m.resultado,
+        }),
+        { receita: 0, despesa: 0, resultado: 0 }
+      ),
+    });
+  });
+
+  // ====================================================
   // FINANCIAL RECORDS
   // ====================================================
   app.get("/api/financial/records", async (_req, res) => {
