@@ -23,6 +23,7 @@ import { PLANILHAS, APURACAO_RECEITA_ITENS, BASE_ORCAMENTO_ITENS, isApuracaoRece
 import { FolhaPagamentoPage, MESES_FOLHA } from './pages/FolhaPagamento';
 import { FolhaApuracaoPage } from './pages/FolhaApuracao';
 import { RelatorioCrdPage, RelatorioCrdMesPage, MESES_REL_CRD } from './pages/RelatorioCrd';
+import { RelatorioRequisicoesPage, RelatorioRequisicoesMesPage, MESES_REL_REQ } from './pages/RelatorioRequisicoes';
 import { ComprasPage } from './pages/Compras';
 import { SearchProvider, useSearch } from './context/SearchContext';
 import { ToastProvider } from './context/ToastContext';
@@ -166,6 +167,19 @@ export default function App() {
       const mes = Number(activeTab.slice('rel-crd-'.length));
       if (mes >= 1 && mes <= 12) {
         return <RelatorioCrdMesPage key={mes} month={mes} />;
+      }
+    }
+
+    if (activeTab === 'rel-req') {
+      if (!canAccessPlanilhas) return <Dashboard />;
+      return <RelatorioRequisicoesPage onSelectMonth={(m) => setActiveTab(`rel-req-${m}`)} />;
+    }
+
+    if (activeTab.startsWith('rel-req-')) {
+      if (!canAccessPlanilhas) return <Dashboard />;
+      const mes = Number(activeTab.slice('rel-req-'.length));
+      if (mes >= 1 && mes <= 12) {
+        return <RelatorioRequisicoesMesPage key={mes} month={mes} />;
       }
     }
 
@@ -356,6 +370,10 @@ function AppShell({
                 ? 'Apuração de Resultados / Relatorio de CRD / Resumo'
                 : activeTab.startsWith('rel-crd-')
                 ? `Apuração de Resultados / Relatorio de CRD / ${MESES_REL_CRD[Number(activeTab.slice('rel-crd-'.length))] ?? ''}`
+                : activeTab === 'rel-req'
+                ? 'Apuração de Resultados / Requisições / Resumo'
+                : activeTab.startsWith('rel-req-')
+                ? `Apuração de Resultados / Requisições / ${MESES_REL_REQ[Number(activeTab.slice('rel-req-'.length))] ?? ''}`
                 : activeTab.startsWith('planilha-') && isApuracaoReceitaPlanilha(Number(activeTab.slice('planilha-'.length)))
                 ? `Apuração de Receita / ${APURACAO_RECEITA_ITENS.find((p) => `planilha-${p.indice}` === activeTab)?.nome ?? ''}`
                 : activeTab === 'planilha-2'

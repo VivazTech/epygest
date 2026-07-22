@@ -72,6 +72,7 @@ const IMPORT_HISTORY_LABELS: Record<string, string> = {
   orcamento: 'Orçamento',
   ajustes: 'Ajustes',
   rel_crd: 'Rel. CRD',
+  requisicoes_sintetica: 'Requisições Sintética',
 };
 
 type ImportHistoryRow = {
@@ -564,6 +565,10 @@ export const ImportacaoPage: React.FC = () => {
   const [requisicoesSetores, setRequisicoesSetores] = useState<RequisicaoSetor[]>([]);
   const [requisicoesTotalGeral, setRequisicoesTotalGeral] = useState<number | null>(null);
   const [requisicoesDestinos, setRequisicoesDestinos] = useState<Record<number, ReqDestino>>(() => loadReqDestinoMap());
+  const [reqImportMonth, setReqImportMonth] = useState(String(new Date().getMonth() + 1));
+  const [reqImportYear, setReqImportYear] = useState(String(new Date().getFullYear()));
+  const [reqCommitting, setReqCommitting] = useState(false);
+  const [reqCommitResult, setReqCommitResult] = useState<{ imported: number } | null>(null);
 
   const uploadRequisicoesSintetica = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -588,6 +593,14 @@ export const ImportacaoPage: React.FC = () => {
       setRequisicoesTotalGeral(typeof data.total_geral === 'number' ? data.total_geral : null);
       // Recarrega o mapa salvo para refletir edições anteriores
       setRequisicoesDestinos(loadReqDestinoMap());
+      setReqCommitResult(null);
+      // Sugere a competência a partir do período do relatório.
+      const de = String(data.periodo?.de ?? '');
+      const m = de.match(/^(\d{4})-(\d{2})/);
+      if (m) {
+        setReqImportYear(m[1]);
+        setReqImportMonth(String(Number(m[2])));
+      }
     } catch (err: any) {
       setRequisicoesError(err?.message || 'Erro inesperado ao importar o arquivo.');
     } finally {
@@ -602,6 +615,49 @@ export const ImportacaoPage: React.FC = () => {
       saveReqDestinoMap(next);
       return next;
     });
+  };
+
+  // Envia as requisições do preview para a competência escolhida (Apuração de Resultados › Requisições).
+  const commitRequisicoes = async () => {
+    if (reqCommitting || !requisicoesSetores.length) return;
+    setReqCommitting(true);
+    setReqCommitResult(null);
+    try {
+      const res = await fetch('/api/import/requisicoes-sintetica/commit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          month: Number(reqImportMonth),
+          year: Number(reqImportYear),
+          file_name: requisicoesFileName || undefined,
+          setores: requisicoesSetores.map((st) => ({
+            codigo: st.codigo,
+            nome: st.nome,
+            grupos: st.grupos.map((g) => ({
+              codigo: g.codigo,
+              nome: g.nome,
+              valor: g.valor,
+              destino: requisicoesDestinos[g.codigo] ?? '',
+            })),
+          })),
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        alert(data?.error || 'Falha ao importar as Requisições Sintética.');
+        return;
+      }
+      setReqCommitResult({ imported: data.imported ?? 0 });
+      const mesLabel = ['', 'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'][Number(reqImportMonth)] || reqImportMonth;
+      alert(
+        `${data.imported ?? 0} grupo(s) importado(s) para ${mesLabel}/${reqImportYear}.` +
+          `\n→ Apuração de Resultados › Requisições › ${mesLabel}.`
+      );
+    } catch (err: any) {
+      alert(err?.message || 'Erro inesperado ao importar.');
+    } finally {
+      setReqCommitting(false);
+    }
   };
 
   const loadImportHistory = async () => {
@@ -1949,8 +2005,50 @@ export const ImportacaoPage: React.FC = () => {
               </div>
             )}
 
+            {reqCommitResult && (
+              <div className="px-4 py-2 text-xs bg-emerald-50 border-b border-emerald-100 flex items-center gap-1 text-emerald-700 font-semibold">
+                <CheckCircle2 className="w-4 h-4" />
+                {reqCommitResult.imported} grupo(s) enviado(s) para Apuração de Resultados › Requisições.
+              </div>
+            )}
+
             {requisicoesSetores.length > 0 && (
               <>
+                {/* Barra de ações: seletor de mês/ano + enviar para a Apuração */}
+                <div className="px-4 py-3 border-b border-slate-100 bg-slate-50/50 flex flex-wrap gap-3 items-center justify-between">
+                  <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
+                    <span className="font-semibold">Importar em:</span>
+                    <select
+                      value={reqImportMonth}
+                      onChange={(e) => setReqImportMonth(e.target.value)}
+                      className="border border-slate-200 rounded-lg px-2 py-1 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-[#004D40]/30"
+                    >
+                      {['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'].map((m, i) => (
+                        <option key={i+1} value={String(i+1)}>{m}</option>
+                      ))}
+                    </select>
+                    <select
+                      value={reqImportYear}
+                      onChange={(e) => setReqImportYear(e.target.value)}
+                      className="border border-slate-200 rounded-lg px-2 py-1 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-[#004D40]/30"
+                    >
+                      {Array.from({ length: 6 }, (_, i) => new Date().getFullYear() - 2 + i).map((y) => (
+                        <option key={y} value={String(y)}>{y}</option>
+                      ))}
+                    </select>
+                    <span className="text-slate-400">·</span>
+                    <span>Destino: Apuração de Resultados › Requisições (substitui o mês)</span>
+                  </div>
+                  <button
+                    onClick={() => commitRequisicoes()}
+                    disabled={reqCommitting}
+                    className="px-3 py-1.5 rounded-lg text-xs font-bold bg-[#004D40] text-white hover:bg-[#003d33] disabled:opacity-50 transition-colors flex items-center gap-1"
+                  >
+                    {reqCommitting ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
+                    Importar tudo
+                  </button>
+                </div>
+
                 {/* Painel de totais por categoria */}
                 <div className="px-4 py-3 border-b border-slate-100 bg-slate-50/40 grid grid-cols-2 sm:grid-cols-4 gap-3">
                   {(['cmv', 'uso_consumo', 'investimento', ''] as ReqDestino[]).map((cat) => (

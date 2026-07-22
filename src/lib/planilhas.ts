@@ -55,8 +55,12 @@ export const isBaseOrcamentoTab = (tab: string) =>
 export const isRelCrdTab = (tab: string) =>
   tab === 'rel-crd' || /^rel-crd-\d+$/.test(tab);
 
+export const isRelReqTab = (tab: string) =>
+  tab === 'rel-req' || /^rel-req-\d+$/.test(tab);
+
 export const isApuracaoResultadosTab = (tab: string) =>
   isRelCrdTab(tab) ||
+  isRelReqTab(tab) ||
   (tab.startsWith('planilha-') &&
     !isApuracaoReceitaPlanilha(Number(tab.slice('planilha-'.length))) &&
     !isBaseOrcamentoPlanilha(Number(tab.slice('planilha-'.length))));

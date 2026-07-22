@@ -29,7 +29,7 @@ import {
   TrendingUp,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
-import { PLANILHAS_RESULTADOS, APURACAO_RECEITA_ITENS, BASE_ORCAMENTO_ITENS, isApuracaoReceitaPlanilha, isBaseOrcamentoTab, isRelCrdTab, isApuracaoResultadosTab as checkApuracaoResultadosTab } from '../lib/planilhas';
+import { PLANILHAS_RESULTADOS, APURACAO_RECEITA_ITENS, BASE_ORCAMENTO_ITENS, isApuracaoReceitaPlanilha, isBaseOrcamentoTab, isRelCrdTab, isRelReqTab, isApuracaoResultadosTab as checkApuracaoResultadosTab } from '../lib/planilhas';
 import logoIcon from '../../logoicon2.svg';
 
 const FOLHA_MESES = [
@@ -110,10 +110,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
     activeTab.startsWith('planilha-') && isApuracaoReceitaPlanilha(planilhaIndice);
   const isBaseOrcamentoActive = isBaseOrcamentoTab(activeTab);
   const isRelCrdActive = isRelCrdTab(activeTab);
+  const isRelReqActive = isRelReqTab(activeTab);
   const [planilhasExpanded, setPlanilhasExpanded] = React.useState(isApuracaoResultadosTab);
   const [receitaExpanded, setReceitaExpanded] = React.useState(isApuracaoReceitaTab);
   const [baseOrcamentoExpanded, setBaseOrcamentoExpanded] = React.useState(isBaseOrcamentoActive);
   const [relCrdExpanded, setRelCrdExpanded] = React.useState(isRelCrdActive);
+  const [relReqExpanded, setRelReqExpanded] = React.useState(isRelReqActive);
   const [folhaExpanded, setFolhaExpanded] = React.useState(
     activeTab.startsWith('folha-') || activeTab === 'folha-apuracao'
   );
@@ -138,10 +140,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
     if (isRelCrdActive) {
       setRelCrdExpanded(true);
     }
+    if (isRelReqActive) {
+      setRelReqExpanded(true);
+    }
     if (activeTab.startsWith('folha-') || activeTab === 'folha-apuracao') {
       setFolhaExpanded(true);
     }
-  }, [activeTab, constructionMenu, lancamentosGroupIds, isApuracaoResultadosTab, isApuracaoReceitaTab, isBaseOrcamentoActive, isRelCrdActive]);
+  }, [activeTab, constructionMenu, lancamentosGroupIds, isApuracaoResultadosTab, isApuracaoReceitaTab, isBaseOrcamentoActive, isRelCrdActive, isRelReqActive]);
 
   return (
     <div className={cn(
@@ -444,6 +449,71 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     </button>
                     {REL_CRD_MESES.map((mes, idx) => {
                       const tabId = `rel-crd-${idx + 1}`;
+                      return (
+                        <button
+                          key={tabId}
+                          onClick={() => setActiveTab(tabId)}
+                          className={cn(
+                            "w-full flex items-center gap-3 pl-14 pr-4 py-1.5 rounded-xl transition-all duration-200 group",
+                            activeTab === tabId
+                              ? "bg-emerald-500 text-white shadow-lg shadow-emerald-900/20"
+                              : "text-white/60 hover:bg-white/5 hover:text-white"
+                          )}
+                        >
+                          <CalendarDays className={cn(
+                            "w-3.5 h-3.5 min-w-3.5 min-h-3.5 shrink-0",
+                            activeTab === tabId ? "scale-110" : "group-hover:scale-110"
+                          )} />
+                          <span className="font-medium text-[11px] truncate text-left">
+                            {String(idx + 1).padStart(2, '0')} · {mes}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </>
+                )}
+
+                <button
+                  onClick={() => setRelReqExpanded((prev) => !prev)}
+                  className={cn(
+                    "w-full flex items-center gap-3 pl-11 pr-4 py-2 rounded-xl transition-all duration-200 group",
+                    isRelReqActive
+                      ? "text-white bg-white/10"
+                      : "text-white/70 hover:bg-white/5 hover:text-white"
+                  )}
+                >
+                  <Layers className={cn(
+                    "w-4 h-4 min-w-4 min-h-4 shrink-0 transition-transform duration-200",
+                    isRelReqActive ? "scale-110" : "group-hover:scale-110"
+                  )} />
+                  <span className="font-medium text-xs truncate text-left flex-1">Requisições</span>
+                  <ChevronDown
+                    className={cn(
+                      "w-3.5 h-3.5 transition-transform duration-200",
+                      relReqExpanded && "rotate-180"
+                    )}
+                  />
+                </button>
+
+                {relReqExpanded && (
+                  <>
+                    <button
+                      onClick={() => setActiveTab('rel-req')}
+                      className={cn(
+                        "w-full flex items-center gap-3 pl-14 pr-4 py-2 rounded-xl transition-all duration-200 group",
+                        activeTab === 'rel-req'
+                          ? "bg-emerald-500 text-white shadow-lg shadow-emerald-900/20"
+                          : "text-white/70 hover:bg-white/5 hover:text-white"
+                      )}
+                    >
+                      <Calculator className={cn(
+                        "w-3.5 h-3.5 min-w-3.5 min-h-3.5 shrink-0",
+                        activeTab === 'rel-req' ? "scale-110" : "group-hover:scale-110"
+                      )} />
+                      <span className="font-medium text-xs truncate text-left">Resumo</span>
+                    </button>
+                    {REL_CRD_MESES.map((mes, idx) => {
+                      const tabId = `rel-req-${idx + 1}`;
                       return (
                         <button
                           key={tabId}

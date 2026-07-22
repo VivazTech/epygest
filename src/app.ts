@@ -3879,6 +3879,189 @@ export function createApp() {
     }
   });
 
+  // Grava as Requisições Sintética do mês em requisicoes_rows (substitui a competência).
+  // Alimenta Apuração de Resultados › Requisições (Resumo + meses).
+  app.post("/api/import/requisicoes-sintetica/commit", async (req, res) => {
+    const { setores, month, year, file_name } = req.body as {
+      setores: {
+        codigo: number;
+        nome: string;
+        grupos: { codigo: number; nome: string; valor: number; destino?: string | null }[];
+      }[];
+      month: number;
+      year: number;
+      file_name?: string;
+    };
+    if (!Array.isArray(setores) || !setores.length)
+      return res.status(400).json({ error: "Nenhum setor enviado." });
+    if (!month || !year || month < 1 || month > 12 || year < 2000)
+      return res.status(400).json({ error: "Mês/ano inválido." });
+
+    const DESTINOS_VALIDOS = new Set(["cmv", "uso_consumo", "investimento"]);
+    const rows: Record<string, any>[] = [];
+    for (const setor of setores) {
+      const setorCodigo = Number(setor.codigo);
+      const setorNome = String(setor.nome ?? "").trim();
+      if (!Number.isFinite(setorCodigo) || !setorNome) continue;
+      for (const grupo of setor.grupos ?? []) {
+        const grupoCodigo = Number(grupo.codigo);
+        const grupoNome = String(grupo.nome ?? "").trim();
+        if (!Number.isFinite(grupoCodigo) || !grupoNome) continue;
+        const destino = String(grupo.destino ?? "").trim();
+        rows.push({
+          year: Number(year),
+          month: Number(month),
+          setor_codigo: setorCodigo,
+          setor_nome: setorNome,
+          grupo_codigo: grupoCodigo,
+          grupo_nome: grupoNome,
+          valor: Number(grupo.valor) || 0,
+          destino: DESTINOS_VALIDOS.has(destino) ? destino : null,
+        });
+      }
+    }
+    if (!rows.length)
+      return res.status(422).json({ error: "Nenhum grupo válido para importar." });
+
+    const { error: delErr } = await supabase
+      .from("requisicoes_rows")
+      .delete()
+      .eq("year", Number(year))
+      .eq("month", Number(month));
+    if (delErr) {
+      console.error("requisicoes_rows delete (execute sql/14_requisicoes_rows.sql):", delErr);
+      return res.status(500).json({
+        error: "Tabela requisicoes_rows indisponível. Execute sql/14_requisicoes_rows.sql no Supabase.",
+        detail: delErr.message,
+      });
+    }
+
+    const { error: insertErr } = await supabase.from("requisicoes_rows").insert(rows);
+    if (insertErr) {
+      console.error("requisicoes_rows insert:", insertErr);
+      return res.status(500).json({ error: insertErr.message });
+    }
+
+    const totalGeral = rows.reduce((s, r) => s + Number(r.valor || 0), 0);
+    try {
+      await logImportHistory({
+        source_type: "requisicoes_sintetica",
+        file_name: file_name || `Requisições Sintética ${month}/${year}`,
+        status: "success",
+        year: Number(year),
+        month: Number(month),
+        records_count: rows.length,
+        total_amount: totalGeral,
+        summary: {
+          setores: setores.length,
+          grupos: rows.length,
+          nao_classificados: rows.filter((r) => !r.destino).length,
+        },
+        user: (req as any).user,
+      });
+    } catch (e) {
+      console.error("Falha ao registrar histórico Requisições Sintética:", e);
+    }
+
+    res.json({ success: true, imported: rows.length, total_geral: totalGeral });
+  });
+
+  // ====================================================
+  // REQUISIÇÕES (Apuração de Resultados — consulta por competência)
+  // ====================================================
+  app.get("/api/requisicoes-sintetica/competencias", requireRole("admin", "finance", "controle", "manager"), async (req, res) => {
+    const year = Number((req.query as { year?: string }).year) || new Date().getFullYear();
+    const { data, error } = await supabase
+      .from("requisicoes_rows")
+      .select("month, valor, setor_codigo")
+      .eq("year", year);
+    if (error) {
+      console.error(error);
+      return res.status(500).json({
+        error: "Não foi possível carregar competências. Execute sql/14_requisicoes_rows.sql se ainda não rodou.",
+      });
+    }
+
+    const byMonth = new Map<number, { grupos: number; setores: Set<number>; valor: number }>();
+    for (let m = 1; m <= 12; m++) byMonth.set(m, { grupos: 0, setores: new Set(), valor: 0 });
+    for (const row of data ?? []) {
+      const agg = byMonth.get(Number((row as any).month));
+      if (!agg) continue;
+      agg.grupos += 1;
+      agg.setores.add(Number((row as any).setor_codigo));
+      agg.valor += Number((row as any).valor) || 0;
+    }
+
+    res.json({
+      year,
+      months: Array.from(byMonth.entries()).map(([month, agg]) => ({
+        month,
+        importado: agg.grupos > 0,
+        setores: agg.setores.size,
+        grupos: agg.grupos,
+        valor: agg.valor,
+      })),
+    });
+  });
+
+  app.get("/api/requisicoes-sintetica", requireRole("admin", "finance", "controle", "manager"), async (req, res) => {
+    const year = Number((req.query as { year?: string }).year) || new Date().getFullYear();
+    const month = Number((req.query as { month?: string }).month);
+    if (!month || month < 1 || month > 12) {
+      return res.status(400).json({ error: "Informe month (1-12)." });
+    }
+
+    const { data, error } = await supabase
+      .from("requisicoes_rows")
+      .select("*")
+      .eq("year", year)
+      .eq("month", month)
+      .order("setor_codigo", { ascending: true })
+      .order("grupo_codigo", { ascending: true });
+
+    if (error) {
+      console.error(error);
+      return res.status(500).json({
+        error: "Não foi possível carregar as Requisições. Execute sql/14_requisicoes_rows.sql se ainda não rodou.",
+      });
+    }
+
+    const rows = data ?? [];
+    const setoresMap = new Map<number, { codigo: number; nome: string; total: number; grupos: any[] }>();
+    const porDestino: Record<string, number> = { cmv: 0, uso_consumo: 0, investimento: 0, "": 0 };
+    for (const r of rows as any[]) {
+      const codigo = Number(r.setor_codigo);
+      let setor = setoresMap.get(codigo);
+      if (!setor) {
+        setor = { codigo, nome: String(r.setor_nome ?? ""), total: 0, grupos: [] };
+        setoresMap.set(codigo, setor);
+      }
+      const valor = Number(r.valor) || 0;
+      setor.total += valor;
+      setor.grupos.push({
+        codigo: Number(r.grupo_codigo),
+        nome: String(r.grupo_nome ?? ""),
+        valor,
+        destino: r.destino ?? "",
+      });
+      const destino = String(r.destino ?? "");
+      porDestino[destino in porDestino ? destino : ""] += valor;
+    }
+
+    res.json({
+      year,
+      month,
+      setores: Array.from(setoresMap.values()),
+      summary: {
+        setores: setoresMap.size,
+        grupos: rows.length,
+        total_geral: rows.reduce((s: number, r: any) => s + (Number(r.valor) || 0), 0),
+        por_destino: porDestino,
+        nao_classificados: (rows as any[]).filter((r) => !r.destino).length,
+      },
+    });
+  });
+
   // ====================================================
   // IMPORTAÇÃO: EXTRATO MENSAL (folha de pagamento, .xls BIFF do Desbravador)
   // Estes .xls quebram o leitor do SheetJS (formato de número inválido + substream
