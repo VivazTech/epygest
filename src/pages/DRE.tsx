@@ -56,7 +56,10 @@ const RESULTADO_FOOTER_IDS = [
   { id: 'l81-resultado-bruto', short: 'Resultado Bruto', accent: 'sky' as const },
   { id: 'l83-despesas-totais', short: 'Despesas Totais', accent: 'amber' as const },
   { id: 'l309-resultado-operacional', short: 'Resultado Operacional', accent: 'brand' as const },
+  { id: 'resultado-liquido', short: 'Resultado Líquido', accent: 'brand' as const },
 ];
+
+const LIQUIDO_LABEL = '(=) Resultado Líquido';
 
 const findDreRow = (rows: DRERow[], id: string): DRERow | null => {
   for (const row of rows) {
@@ -203,6 +206,44 @@ export const DREPage: React.FC = () => {
     return { prev, real, dif };
   };
 
+  // Resultado Líquido = Resultado Operacional − Impostos s/ Resultado − Obras e Investimentos
+  const resultadoOperacionalRow = useMemo(() => findDreRow(dreRows, 'l309-resultado-operacional'), []);
+  const impostosResultadoRow = useMemo(() => findDreRow(dreRows, 'l311-impostos-s-resultado'), []);
+  const obrasInvestimentosRow = useMemo(() => findDreRow(dreRows, 'l319-obras-e-investimentos'), []);
+
+  const resultadoLiquidoOf = (monthIndex: number): MonthCell => {
+    if (!resultadoOperacionalRow || !impostosResultadoRow || !obrasInvestimentosRow) {
+      return { prev: null, real: null, dif: null };
+    }
+    const op = effective(resultadoOperacionalRow, monthIndex);
+    const imp = effective(impostosResultadoRow, monthIndex);
+    const obr = effective(obrasInvestimentosRow, monthIndex);
+    const fieldOrNull = (a: number | null, b: number | null, c: number | null) => {
+      if (a == null && b == null && c == null) return null;
+      return (a ?? 0) - (b ?? 0) - (c ?? 0);
+    };
+    const prev = fieldOrNull(op.prev, imp.prev, obr.prev);
+    const real = fieldOrNull(op.real, imp.real, obr.real);
+    const dif = prev != null && real != null ? real - prev : null;
+    return { prev, real, dif };
+  };
+
+  const resultadoLiquidoTotal = (monthIndexes: number[] = visibleMonths): MonthCell => {
+    let prev: number | null = null;
+    let real: number | null = null;
+    for (const m of monthIndexes) {
+      const v = resultadoLiquidoOf(m);
+      if (v.prev != null) prev = (prev ?? 0) + v.prev;
+      if (v.real != null) real = (real ?? 0) + v.real;
+    }
+    const dif = prev != null && real != null ? real - prev : null;
+    return { prev, real, dif };
+  };
+
+  const showResultadoLiquido = Boolean(
+    resultadoOperacionalRow && impostosResultadoRow && obrasInvestimentosRow
+  );
+
   // ---- Análises AV/AH (sobre os dados importados + edições) ----
   const receitaLiquidaRow = useMemo(() => findDreRow(dreRows, 'l77-receita-liquida'), []);
 
@@ -302,9 +343,11 @@ export const DREPage: React.FC = () => {
 
   const resultadosFooter = useMemo(() => {
     return RESULTADO_FOOTER_IDS.map((meta) => {
-      const row = findDreRow(dreRows, meta.id);
-      if (!row) return null;
-      const total = totalOf(row, visibleMonths);
+      const isLiquido = meta.id === 'resultado-liquido';
+      const row = isLiquido ? null : findDreRow(dreRows, meta.id);
+      if (!isLiquido && !row) return null;
+      if (isLiquido && !showResultadoLiquido) return null;
+      const total = isLiquido ? resultadoLiquidoTotal(visibleMonths) : totalOf(row!, visibleMonths);
       const atingimento =
         total.prev != null && total.prev !== 0 && total.real != null
           ? (total.real / total.prev) * 100
@@ -314,14 +357,15 @@ export const DREPage: React.FC = () => {
       id: string;
       short: string;
       accent: 'emerald' | 'teal' | 'sky' | 'amber' | 'brand';
-      row: DRERow;
+      row: DRERow | null;
       total: MonthCell;
       atingimento: number | null;
     }>;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [edits, visibleMonths]);
+  }, [edits, visibleMonths, showResultadoLiquido]);
 
   const resultadoOperacional = resultadosFooter.find((r) => r.id === 'l309-resultado-operacional');
+  const resultadoLiquidoFooter = resultadosFooter.find((r) => r.id === 'resultado-liquido');
 
   const renderEditableCell = (row: DRERow, monthIndex: number, field: 'prev' | 'real') => {
     const isEditing =
@@ -636,6 +680,152 @@ export const DREPage: React.FC = () => {
             </thead>
             <tbody className="divide-y divide-slate-100">
               {filteredDreRows.map((row) => renderRow(row))}
+              {showResultadoLiquido && (() => {
+                const total = resultadoLiquidoTotal();
+                const avFromCell = (cell: MonthCell, monthIndex: number | null): Analise => {
+                  if (!receitaLiquidaRow) return { pct: null, serie: null };
+                  const base =
+                    monthIndex == null
+                      ? totalOf(receitaLiquidaRow)
+                      : effective(receitaLiquidaRow, monthIndex);
+                  if (cell.real != null && base.real != null && base.real !== 0) {
+                    return { pct: (Math.abs(cell.real) / Math.abs(base.real)) * 100, serie: 'Realizado' };
+                  }
+                  if (cell.prev != null && base.prev != null && base.prev !== 0) {
+                    return { pct: (Math.abs(cell.prev) / Math.abs(base.prev)) * 100, serie: 'Previsto' };
+                  }
+                  return { pct: null, serie: null };
+                };
+                const ahFromMonths = (monthIndex: number): Analise => {
+                  if (monthIndex === 0) return { pct: null, serie: null };
+                  const cur = resultadoLiquidoOf(monthIndex);
+                  const ant = resultadoLiquidoOf(monthIndex - 1);
+                  if (cur.real != null && ant.real != null && ant.real !== 0) {
+                    return { pct: ((cur.real - ant.real) / Math.abs(ant.real)) * 100, serie: 'Realizado' };
+                  }
+                  if (cur.prev != null && ant.prev != null && ant.prev !== 0) {
+                    return { pct: ((cur.prev - ant.prev) / Math.abs(ant.prev)) * 100, serie: 'Previsto' };
+                  }
+                  return { pct: null, serie: null };
+                };
+                return (
+                  <tr key="resultado-liquido" className="bg-slate-100/80 font-bold text-slate-800">
+                    <td className="sticky left-0 z-20 bg-slate-100 border-r border-slate-200 min-w-[320px] max-w-[320px] px-4 py-2.5">
+                      <div className="flex items-center gap-2">
+                        <span className="w-5" />
+                        <span className="text-sm">{LIQUIDO_LABEL}</span>
+                      </div>
+                    </td>
+                    {visibleMonths.map((monthIndex) => {
+                      const cell = resultadoLiquidoOf(monthIndex);
+                      const av = showAV ? avFromCell(cell, monthIndex) : null;
+                      const ah = showAH ? ahFromMonths(monthIndex) : null;
+                      const mes = `${MESES[monthIndex]}/${dreYear}`;
+                      return (
+                        <React.Fragment key={`liquido-${monthIndex}`}>
+                          <td className="min-w-[120px] px-3 py-1.5 text-right">
+                            <ValueTrace
+                              className={cn(
+                                'text-xs tabular-nums',
+                                cell.prev != null && cell.prev < 0 ? 'text-red-600' : 'text-slate-600'
+                              )}
+                              displayValue={cell.prev == null ? '—' : formatCurrency(cell.prev)}
+                              meta={valueTrace.dre.liquido('Previsto', mes)}
+                            />
+                          </td>
+                          <td className="min-w-[120px] px-3 py-1.5 text-right">
+                            <ValueTrace
+                              className={cn(
+                                'text-xs tabular-nums font-medium',
+                                cell.real != null && cell.real < 0 ? 'text-red-600' : 'text-slate-800'
+                              )}
+                              displayValue={cell.real == null ? '—' : formatCurrency(cell.real)}
+                              meta={valueTrace.dre.liquido('Realizado', mes)}
+                            />
+                          </td>
+                          <td className={cn('min-w-[120px] px-3 py-1.5 text-right', !showAV && !showAH && 'border-r border-slate-200')}>
+                            <ValueTrace
+                              className={cn(
+                                'text-xs tabular-nums font-semibold',
+                                cell.dif == null ? 'text-slate-400' : cell.dif < 0 ? 'text-red-600' : cell.dif > 0 ? 'text-emerald-600' : 'text-slate-500'
+                              )}
+                              displayValue={cell.dif == null ? '—' : formatCurrency(cell.dif)}
+                              meta={valueTrace.dre.liquido('Diferença', mes)}
+                            />
+                          </td>
+                          {showAV && (
+                            <td className={cn('min-w-[70px] px-2 py-1.5 text-right', !showAH && 'border-r border-slate-200')}>
+                              <ValueTrace
+                                className="text-[11px] tabular-nums font-semibold text-slate-500"
+                                displayValue={av?.pct == null ? '—' : `${av.pct.toFixed(1)}%`}
+                                meta={valueTrace.dre.av(LIQUIDO_LABEL, mes, av?.serie ?? 'Previsto')}
+                              />
+                            </td>
+                          )}
+                          {showAH && (
+                            <td className="min-w-[70px] px-2 py-1.5 text-right border-r border-slate-200">
+                              <ValueTrace
+                                className={cn(
+                                  'text-[11px] tabular-nums font-semibold',
+                                  ah?.pct == null ? 'text-slate-400' : ah.pct < 0 ? 'text-red-600' : ah.pct > 0 ? 'text-emerald-600' : 'text-slate-500'
+                                )}
+                                displayValue={ah?.pct == null ? '—' : `${ah.pct > 0 ? '+' : ''}${ah.pct.toFixed(1)}%`}
+                                meta={valueTrace.dre.ah(
+                                  LIQUIDO_LABEL,
+                                  mes,
+                                  monthIndex > 0 ? `${MESES[monthIndex - 1]}/${dreYear}` : 'mês anterior',
+                                  ah?.serie ?? 'Previsto'
+                                )}
+                              />
+                            </td>
+                          )}
+                        </React.Fragment>
+                      );
+                    })}
+                    <td className="min-w-[120px] px-3 py-1.5 text-right bg-slate-50/60">
+                      <ValueTrace
+                        className={cn('text-xs tabular-nums', total.prev != null && total.prev < 0 ? 'text-red-600' : 'text-slate-600')}
+                        displayValue={total.prev == null ? '—' : formatCurrency(total.prev)}
+                        meta={valueTrace.dre.liquido('Previsto', `Total ${dreYear}`)}
+                      />
+                    </td>
+                    <td className="min-w-[120px] px-3 py-1.5 text-right bg-slate-50/60">
+                      <ValueTrace
+                        className={cn('text-xs tabular-nums font-medium', total.real != null && total.real < 0 ? 'text-red-600' : 'text-slate-800')}
+                        displayValue={total.real == null ? '—' : formatCurrency(total.real)}
+                        meta={valueTrace.dre.liquido('Realizado', `Total ${dreYear}`)}
+                      />
+                    </td>
+                    <td className={cn('min-w-[120px] px-3 py-1.5 text-right bg-slate-50/60', !showAV && !showAH && 'border-r border-slate-200')}>
+                      <ValueTrace
+                        className={cn(
+                          'text-xs tabular-nums font-semibold',
+                          total.dif == null ? 'text-slate-400' : total.dif < 0 ? 'text-red-600' : total.dif > 0 ? 'text-emerald-600' : 'text-slate-500'
+                        )}
+                        displayValue={total.dif == null ? '—' : formatCurrency(total.dif)}
+                        meta={valueTrace.dre.liquido('Diferença', `Total ${dreYear}`)}
+                      />
+                    </td>
+                    {showAV && (() => {
+                      const av = avFromCell(total, null);
+                      return (
+                        <td className={cn('min-w-[70px] px-2 py-1.5 text-right bg-slate-50/60', !showAH && 'border-r border-slate-200')}>
+                          <ValueTrace
+                            className="text-[11px] tabular-nums font-semibold text-slate-500"
+                            displayValue={av.pct == null ? '—' : `${av.pct.toFixed(1)}%`}
+                            meta={valueTrace.dre.av(LIQUIDO_LABEL, `Total ${dreYear}`, av.serie ?? 'Previsto')}
+                          />
+                        </td>
+                      );
+                    })()}
+                    {showAH && (
+                      <td className="min-w-[70px] px-2 py-1.5 text-right border-r border-slate-200 bg-slate-50/60">
+                        <span className="text-[11px] text-slate-300">—</span>
+                      </td>
+                    )}
+                  </tr>
+                );
+              })()}
             </tbody>
           </table>
         </div>
@@ -648,24 +838,28 @@ export const DREPage: React.FC = () => {
               <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">Resultados {dreYear}</p>
               <h3 className="text-lg font-bold text-slate-900 mt-0.5">Painel de apuração</h3>
             </div>
-            {resultadoOperacional && (
+            {(resultadoLiquidoFooter || resultadoOperacional) && (
               <div className="text-right">
-                <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Resultado operacional (real)</p>
+                <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                  {resultadoLiquidoFooter ? 'Resultado líquido (real)' : 'Resultado operacional (real)'}
+                </p>
                 <p
                   className={cn(
                     'text-2xl font-extrabold tabular-nums mt-0.5',
-                    (resultadoOperacional.total.real ?? 0) < 0 ? 'text-red-600' : 'text-[#004D40]'
+                    ((resultadoLiquidoFooter || resultadoOperacional)!.total.real ?? 0) < 0
+                      ? 'text-red-600'
+                      : 'text-[#004D40]'
                   )}
                 >
-                  {resultadoOperacional.total.real == null
+                  {(resultadoLiquidoFooter || resultadoOperacional)!.total.real == null
                     ? '—'
-                    : formatCurrency(resultadoOperacional.total.real)}
+                    : formatCurrency((resultadoLiquidoFooter || resultadoOperacional)!.total.real!)}
                 </p>
               </div>
             )}
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-px bg-slate-100">
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6 gap-px bg-slate-100">
             {resultadosFooter.map((item) => {
               const real = item.total.real;
               const prev = item.total.prev;
@@ -747,7 +941,7 @@ export const DREPage: React.FC = () => {
             })}
           </div>
 
-          {resultadoOperacional && (
+          {resultadoOperacional?.row && (
             <div className="px-5 py-4 border-t border-slate-100 bg-white/70">
               <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-3">
                 Resultado operacional por mês (realizado)
@@ -758,10 +952,10 @@ export const DREPage: React.FC = () => {
               >
                 {visibleMonths.map((monthIndex) => {
                   const mes = MESES[monthIndex];
-                  const cell = effective(resultadoOperacional.row, monthIndex);
+                  const cell = effective(resultadoOperacional.row!, monthIndex);
                   const val = cell.real;
                   const maxAbs = Math.max(
-                    ...visibleMonths.map((i) => Math.abs(effective(resultadoOperacional.row, i).real ?? 0)),
+                    ...visibleMonths.map((i) => Math.abs(effective(resultadoOperacional.row!, i).real ?? 0)),
                     1
                   );
                   const heightPct = val == null ? 0 : Math.max(8, (Math.abs(val) / maxAbs) * 100);
