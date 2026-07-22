@@ -3054,9 +3054,9 @@ export function createApp() {
 
   // ====================================================
   // IMPORTAÇÃO: REL. CRD — COMMIT
-  // Grava a coluna "SALDO LANÇ." (saldo_lanc) em crd_realizado por conta,
-  // aparecendo na coluna REAL. do Prev x Real MENSAL do mês importado.
-  // Também persiste as linhas completas em rel_crd_rows para o Relatorio de CRD.
+  // Por linha: destinos D (Prev x Real Diario) e/ou M (Prev x Real Mensal).
+  // Grava saldo_lanc em crd_realizado com source rel_crd_diario / rel_crd.
+  // Também persiste as linhas em rel_crd_rows para o Relatorio de CRD.
   // ====================================================
   app.post("/api/import/rel-crd/commit", async (req, res) => {
     const { rows, month, year } = req.body as {
@@ -3071,6 +3071,7 @@ export function createApp() {
         baixas?: number;
         estorno?: number;
         baixas_liquido?: number;
+        destinos?: Array<"D" | "M" | string>;
       }[];
       month: number;
       year: number;
@@ -3080,7 +3081,6 @@ export function createApp() {
     if (!month || !year || month < 1 || month > 12 || year < 2000)
       return res.status(400).json({ error: "Mês/ano inválido." });
 
-    // Busca todos os CRDs ativos para fazer o match por código
     const { data: crds, error: crdErr } = await supabase.from("crds").select("id, code");
     if (crdErr) return res.status(500).json({ error: crdErr.message });
 
@@ -3092,20 +3092,42 @@ export function createApp() {
     const upserts: { crd_id: number; year: number; month: number; source: string; value: number }[] = [];
     const reportRows: Record<string, any>[] = [];
     const notFound: string[] = [];
+    let toDiario = 0;
+    let toMensal = 0;
+
     for (const row of rows) {
       const codigo = String(row.codigo ?? "").trim();
       const crdId = codeToId.get(codigo.toLowerCase()) ?? null;
       if (!crdId) notFound.push(codigo);
       const saldo = Number(row.saldo_lanc ?? row.lanc_liquido ?? 0);
+      const destinosRaw = Array.isArray(row.destinos) ? row.destinos : ["D", "M"];
+      const wantD = destinosRaw.some((d) => String(d).toUpperCase() === "D");
+      const wantM = destinosRaw.some((d) => String(d).toUpperCase() === "M");
+      if (!wantD && !wantM) continue;
+
       if (crdId) {
-        upserts.push({
-          crd_id: crdId,
-          year: Number(year),
-          month: Number(month),
-          source: "rel_crd",
-          value: saldo,
-        });
+        if (wantD) {
+          upserts.push({
+            crd_id: crdId,
+            year: Number(year),
+            month: Number(month),
+            source: "rel_crd_diario",
+            value: saldo,
+          });
+          toDiario += 1;
+        }
+        if (wantM) {
+          upserts.push({
+            crd_id: crdId,
+            year: Number(year),
+            month: Number(month),
+            source: "rel_crd",
+            value: saldo,
+          });
+          toMensal += 1;
+        }
       }
+
       reportRows.push({
         year: Number(year),
         month: Number(month),
@@ -3125,12 +3147,11 @@ export function createApp() {
 
     if (!reportRows.length) {
       return res.status(422).json({
-        error: `Nenhuma linha válida para importar.`,
+        error: "Nenhuma linha válida para importar. Selecione D e/ou M em ao menos uma conta.",
         not_found: notFound,
       });
     }
 
-    // Substitui as linhas do mês (reimportação completa das contas enviadas).
     const { error: delErr } = await supabase
       .from("rel_crd_rows")
       .delete()
@@ -3150,6 +3171,27 @@ export function createApp() {
       return res.status(500).json({ error: insertErr.message });
     }
 
+    // Limpa realizado Rel. CRD do mês (diario + mensal) e reinsere conforme destinos.
+    const { data: existingReal } = await supabase
+      .from("crd_realizado")
+      .select("id, source")
+      .eq("year", Number(year))
+      .eq("month", Number(month))
+      .in("source", ["rel_crd", "rel_crd_diario"]);
+    if (existingReal?.length) {
+      const ids = existingReal.map((r: any) => r.id).filter(Boolean);
+      if (ids.length) {
+        await supabase.from("crd_realizado").delete().in("id", ids);
+      } else {
+        await supabase
+          .from("crd_realizado")
+          .delete()
+          .eq("year", Number(year))
+          .eq("month", Number(month))
+          .in("source", ["rel_crd", "rel_crd_diario"]);
+      }
+    }
+
     if (upserts.length) {
       const { error: upsertErr } = await supabase
         .from("crd_realizado")
@@ -3167,7 +3209,8 @@ export function createApp() {
         records_count: reportRows.length,
         total_amount: reportRows.reduce((s, r) => s + Number(r.saldo_lanc || 0), 0),
         summary: {
-          matched: upserts.length,
+          to_diario: toDiario,
+          to_mensal: toMensal,
           not_found: notFound,
         },
         user: (req as any).user,
@@ -3180,6 +3223,8 @@ export function createApp() {
       success: true,
       imported: reportRows.length,
       matched: upserts.length,
+      to_diario: toDiario,
+      to_mensal: toMensal,
       not_found: notFound,
     });
   });
@@ -5946,8 +5991,9 @@ export function createApp() {
   });
 
   app.get("/api/prev-real", async (req, res) => {
-    const { year, crd } = req.query as { year?: string; crd?: string };
+    const { year, crd, mode } = req.query as { year?: string; crd?: string; mode?: string };
     const selectedYear = Number(year) || new Date().getFullYear();
+    const viewMode = String(mode || "mensal").toLowerCase() === "diario" ? "diario" : "mensal";
     const crdFilter = normalizeCrdFilterText(crd || "");
     const dateFrom = `${selectedYear}-01-01`;
     const dateTo = `${selectedYear}-12-31`;
@@ -6054,12 +6100,16 @@ export function createApp() {
       addRealized(crdId, month, (reqRow as any).amount);
     }
 
-    // Realizado importado (ex.: total do Consumo Interno por mês).
+    // Realizado importado (ex.: Consumo Interno, Rel. CRD).
+    // Rel. CRD: source rel_crd = Mensal (M); rel_crd_diario = Diario (D).
     const { data: realizadoImport } = await supabase
       .from("crd_realizado")
-      .select("crd_id, month, value")
+      .select("crd_id, month, value, source")
       .eq("year", selectedYear);
     for (const row of realizadoImport ?? []) {
+      const source = String((row as any).source || "");
+      if (viewMode === "diario" && (source === "rel_crd" || source === "rel_crd_mensal")) continue;
+      if (viewMode === "mensal" && source === "rel_crd_diario") continue;
       addRealized(Number((row as any).crd_id), Number((row as any).month), (row as any).value);
     }
 

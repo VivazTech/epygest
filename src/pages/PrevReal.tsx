@@ -128,6 +128,7 @@ export const PrevRealPage: React.FC<PrevRealPageProps> = ({ mode = 'diario' }) =
     try {
       const params = new URLSearchParams();
       params.set('year', year);
+      params.set('mode', mode);
       const res = await fetch(`/api/prev-real?${params.toString()}`);
       const json = await res.json();
       if (!res.ok) {

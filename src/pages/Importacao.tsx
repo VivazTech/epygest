@@ -173,6 +173,54 @@ type RelCrdSummary = {
   total_lanc_liquido: number;
 };
 
+type RelCrdDestinoFlags = { D: boolean; M: boolean };
+
+const REL_CRD_DESTINO_DEFAULT: RelCrdDestinoFlags = { D: true, M: true };
+const REL_CRD_DESTINO_LS_KEY = 'relCrd:destino_map:v1';
+
+const loadRelCrdDestinoMap = (): Record<string, RelCrdDestinoFlags> => {
+  try {
+    const raw = localStorage.getItem(REL_CRD_DESTINO_LS_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return {};
+    const out: Record<string, RelCrdDestinoFlags> = {};
+    for (const [codigo, value] of Object.entries(parsed as Record<string, any>)) {
+      out[String(codigo)] = {
+        D: Boolean(value?.D),
+        M: Boolean(value?.M),
+      };
+    }
+    return out;
+  } catch {
+    return {};
+  }
+};
+
+const saveRelCrdDestinoMap = (map: Record<string, RelCrdDestinoFlags>) => {
+  try {
+    localStorage.setItem(REL_CRD_DESTINO_LS_KEY, JSON.stringify(map));
+  } catch {
+    /* ignore */
+  }
+};
+
+/** Monta destinos do arquivo atual: reaproveita a última seleção por código; contas novas ficam D+M. */
+const buildRelCrdDestinosForAccounts = (
+  accounts: RelCrdAccount[],
+  saved: Record<string, RelCrdDestinoFlags> = loadRelCrdDestinoMap()
+): Record<string, RelCrdDestinoFlags> => {
+  const destinos: Record<string, RelCrdDestinoFlags> = {};
+  for (const acc of accounts) {
+    const codigo = String(acc.codigo);
+    const prev = saved[codigo];
+    destinos[codigo] = prev
+      ? { D: Boolean(prev.D), M: Boolean(prev.M) }
+      : { ...REL_CRD_DESTINO_DEFAULT };
+  }
+  return destinos;
+};
+
 type ProvisaoFeriasTotals = {
   salario: number;
   media_vantagens: number;
@@ -389,7 +437,8 @@ export const ImportacaoPage: React.FC = () => {
   const [relCrdError, setRelCrdError] = useState('');
   const [relCrdAccounts, setRelCrdAccounts] = useState<RelCrdAccount[]>([]);
   const [relCrdSummary, setRelCrdSummary] = useState<RelCrdSummary | null>(null);
-  const [relCrdSelected, setRelCrdSelected] = useState<Set<string>>(new Set());
+  /** Destino por código: D = Prev x Real Diario, M = Prev x Real Mensal (persiste a última seleção). */
+  const [relCrdDestinos, setRelCrdDestinos] = useState<Record<string, RelCrdDestinoFlags>>({});
   const now = new Date();
   const [relCrdImportMonth, setRelCrdImportMonth] = useState(String(now.getMonth() + 1));
   const [relCrdImportYear, setRelCrdImportYear] = useState(String(now.getFullYear()));
@@ -674,7 +723,7 @@ export const ImportacaoPage: React.FC = () => {
       const accounts = Array.isArray(data.accounts) ? data.accounts : [];
       setRelCrdAccounts(accounts);
       setRelCrdSummary(data.summary || null);
-      setRelCrdSelected(new Set());
+      setRelCrdDestinos(buildRelCrdDestinosForAccounts(accounts));
       setRelCrdCommitResult(null);
     } catch (err: any) {
       setRelCrdError(err?.message || 'Erro inesperado ao importar o arquivo.');
@@ -684,11 +733,32 @@ export const ImportacaoPage: React.FC = () => {
     }
   };
 
-  const commitRelCrd = async (codigos?: string[]) => {
-    const targetRows = codigos
-      ? relCrdAccounts.filter((a) => codigos.includes(a.codigo))
-      : relCrdAccounts.filter((a) => relCrdSelected.has(a.codigo));
-    if (!targetRows.length) return;
+  const toggleRelCrdDestino = (codigo: string, key: 'D' | 'M') => {
+    setRelCrdDestinos((prev) => {
+      const current = prev[codigo] ?? { ...REL_CRD_DESTINO_DEFAULT };
+      const next = { ...prev, [codigo]: { ...current, [key]: !current[key] } };
+      // Mescla com o mapa salvo para não perder códigos de importações anteriores.
+      saveRelCrdDestinoMap({ ...loadRelCrdDestinoMap(), ...next });
+      return next;
+    });
+  };
+
+  const commitRelCrd = async () => {
+    const targetRows = relCrdAccounts
+      .map((a) => {
+        const dest = relCrdDestinos[a.codigo] ?? { D: false, M: false };
+        const destinos: Array<'D' | 'M'> = [];
+        if (dest.D) destinos.push('D');
+        if (dest.M) destinos.push('M');
+        return { ...a, destinos };
+      })
+      .filter((a) => a.destinos.length > 0);
+    if (!targetRows.length) {
+      alert('Selecione ao menos D ou M em alguma linha para importar.');
+      return;
+    }
+    // Garante que a seleção atual vira o padrão da próxima importação.
+    saveRelCrdDestinoMap({ ...loadRelCrdDestinoMap(), ...relCrdDestinos });
     setRelCrdCommitting(true);
     setRelCrdCommitResult(null);
     try {
@@ -707,6 +777,7 @@ export const ImportacaoPage: React.FC = () => {
             estorno: a.estorno,
             baixas_liquido: a.baixas_liquido,
             lanc_liquido: a.lanc_liquido,
+            destinos: a.destinos,
           })),
           month: Number(relCrdImportMonth),
           year: Number(relCrdImportYear),
@@ -721,7 +792,8 @@ export const ImportacaoPage: React.FC = () => {
       const mesLabel = ['', 'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'][Number(relCrdImportMonth)] || relCrdImportMonth;
       alert(
         `${data.imported} conta(s) importada(s) para ${mesLabel}/${relCrdImportYear}.` +
-          `\n→ Prev x Real Mensal (REAL.) e Relatorio de CRD › ${mesLabel}.`
+          `\n→ Prev x Real Diario: ${data.to_diario ?? 0} · Prev x Real Mensal: ${data.to_mensal ?? 0}` +
+          `\n→ Relatorio de CRD › ${mesLabel}.`
       );
     } catch (err: any) {
       alert(err?.message || 'Erro inesperado ao importar.');
@@ -1306,9 +1378,9 @@ export const ImportacaoPage: React.FC = () => {
 
           {relCrdAccounts.length > 0 && (
             <>
-              {/* Barra de ações: seletor de mês/ano + botões de importação */}
+              {/* Barra de ações: seletor de mês/ano + importar */}
               <div className="px-4 py-3 border-b border-slate-100 bg-slate-50/50 flex flex-wrap gap-3 items-center justify-between">
-                <div className="flex items-center gap-2 text-xs text-slate-600">
+                <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
                   <span className="font-semibold">Importar realizado em:</span>
                   <select
                     value={relCrdImportMonth}
@@ -1328,49 +1400,25 @@ export const ImportacaoPage: React.FC = () => {
                       <option key={y} value={String(y)}>{y}</option>
                     ))}
                   </select>
-                  {relCrdSelected.size > 0 && (
-                    <span className="ml-1 text-[#004D40] font-semibold">{relCrdSelected.size} selecionada(s)</span>
-                  )}
+                  <span className="text-slate-400">·</span>
+                  <span title="D = Prev x Real Diario · M = Prev x Real Mensal">
+                    Destino: <b>D</b> Diario · <b>M</b> Mensal (reusa a última seleção)
+                  </span>
                 </div>
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => commitRelCrd(relCrdAccounts.map((a) => a.codigo))}
-                    disabled={relCrdCommitting}
-                    className="px-3 py-1.5 rounded-lg text-xs font-bold bg-[#004D40] text-white hover:bg-[#003d33] disabled:opacity-50 transition-colors flex items-center gap-1"
-                  >
-                    {relCrdCommitting ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
-                    Importar tudo
-                  </button>
-                  <button
-                    onClick={() => commitRelCrd()}
-                    disabled={relCrdCommitting || relCrdSelected.size === 0}
-                    className="px-3 py-1.5 rounded-lg text-xs font-bold border border-[#004D40] text-[#004D40] bg-white hover:bg-emerald-50 disabled:opacity-40 transition-colors flex items-center gap-1"
-                  >
-                    {relCrdCommitting ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
-                    Importar selecionados
-                  </button>
-                </div>
+                <button
+                  onClick={() => commitRelCrd()}
+                  disabled={relCrdCommitting}
+                  className="px-3 py-1.5 rounded-lg text-xs font-bold bg-[#004D40] text-white hover:bg-[#003d33] disabled:opacity-50 transition-colors flex items-center gap-1"
+                >
+                  {relCrdCommitting ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
+                  Importar tudo
+                </button>
               </div>
 
               <div className="overflow-auto max-h-[520px]">
                 <table className="w-full text-left border-collapse min-w-[1200px]">
                   <thead className="sticky top-0 z-10">
                     <tr className="bg-slate-50 border-b border-slate-200">
-                      <th className="px-3 py-2 w-8">
-                        <input
-                          type="checkbox"
-                          className="rounded border-slate-300 accent-[#004D40]"
-                          checked={filteredRelCrdAccounts.length > 0 && filteredRelCrdAccounts.every((a) => relCrdSelected.has(a.codigo))}
-                          onChange={(e) => {
-                            setRelCrdSelected((prev) => {
-                              const next = new Set(prev);
-                              if (e.target.checked) filteredRelCrdAccounts.forEach((a) => next.add(a.codigo));
-                              else filteredRelCrdAccounts.forEach((a) => next.delete(a.codigo));
-                              return next;
-                            });
-                          }}
-                        />
-                      </th>
                       {['Cód.', 'Conta', 'Lançamentos', 'Cancelam.', 'Saldo lanç.', 'Baixas', 'Estorno', 'Baixas líq.', 'Lanç. líquido'].map((h) => (
                         <th
                           key={h}
@@ -1381,39 +1429,19 @@ export const ImportacaoPage: React.FC = () => {
                           {h}
                         </th>
                       ))}
+                      <th className="px-3 py-2 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center">
+                        Destino
+                      </th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {filteredRelCrdAccounts.map((acc, idx) => {
-                      const isSelected = relCrdSelected.has(acc.codigo);
+                      const dest = relCrdDestinos[acc.codigo] ?? { D: true, M: true };
                       return (
                         <tr
                           key={idx}
-                          className={`cursor-pointer ${isSelected ? 'bg-emerald-50/60' : acc.nivel === 1 ? 'bg-slate-100 font-bold' : acc.nivel === 2 ? 'bg-slate-50/60' : ''} hover:bg-emerald-50/40`}
-                          onClick={() => {
-                            setRelCrdSelected((prev) => {
-                              const next = new Set(prev);
-                              if (next.has(acc.codigo)) next.delete(acc.codigo);
-                              else next.add(acc.codigo);
-                              return next;
-                            });
-                          }}
+                          className={`${acc.nivel === 1 ? 'bg-slate-100 font-bold' : acc.nivel === 2 ? 'bg-slate-50/60' : ''} hover:bg-slate-50/40`}
                         >
-                          <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
-                            <input
-                              type="checkbox"
-                              className="rounded border-slate-300 accent-[#004D40]"
-                              checked={isSelected}
-                              onChange={() => {
-                                setRelCrdSelected((prev) => {
-                                  const next = new Set(prev);
-                                  if (next.has(acc.codigo)) next.delete(acc.codigo);
-                                  else next.add(acc.codigo);
-                                  return next;
-                                });
-                              }}
-                            />
-                          </td>
                           <td className="px-3 py-2 text-xs text-slate-500 tabular-nums">{acc.codigo}</td>
                           <td
                             className={`px-3 py-2 text-xs whitespace-nowrap ${acc.nivel === 1 ? 'text-slate-900 font-bold' : acc.nivel === 2 ? 'text-slate-800 font-semibold' : 'text-slate-700'}`}
@@ -1428,6 +1456,34 @@ export const ImportacaoPage: React.FC = () => {
                           <td className="px-3 py-2 text-xs text-right tabular-nums text-slate-500">{formatCurrency(acc.estorno)}</td>
                           <td className="px-3 py-2 text-xs text-right tabular-nums text-slate-700">{formatCurrency(acc.baixas_liquido)}</td>
                           <td className={`px-3 py-2 text-xs text-right tabular-nums font-semibold ${acc.lanc_liquido < 0 ? 'text-red-600' : 'text-slate-900'}`}>{formatCurrency(acc.lanc_liquido)}</td>
+                          <td className="px-3 py-2 text-center">
+                            <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden text-[10px] font-bold">
+                              <button
+                                type="button"
+                                title="Prev x Real Diario"
+                                onClick={() => toggleRelCrdDestino(acc.codigo, 'D')}
+                                className={`px-2.5 py-1 transition-colors ${
+                                  dest.D
+                                    ? 'bg-blue-400 text-blue-900'
+                                    : 'bg-white text-slate-400 hover:bg-slate-50'
+                                }`}
+                              >
+                                D
+                              </button>
+                              <button
+                                type="button"
+                                title="Prev x Real Mensal"
+                                onClick={() => toggleRelCrdDestino(acc.codigo, 'M')}
+                                className={`px-2.5 py-1 transition-colors border-l border-slate-200 ${
+                                  dest.M
+                                    ? 'bg-amber-400 text-amber-900'
+                                    : 'bg-white text-slate-400 hover:bg-slate-50'
+                                }`}
+                              >
+                                M
+                              </button>
+                            </div>
+                          </td>
                         </tr>
                       );
                     })}
