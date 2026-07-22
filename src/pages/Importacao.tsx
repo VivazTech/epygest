@@ -743,6 +743,35 @@ export const ImportacaoPage: React.FC = () => {
     });
   };
 
+  /** Marca/desmarca D ou M em todas as contas visíveis (ou liga ambos). */
+  const setRelCrdDestinoAll = (patch: Partial<RelCrdDestinoFlags>) => {
+    const targets = filteredRelCrdAccounts.length ? filteredRelCrdAccounts : relCrdAccounts;
+    if (!targets.length) return;
+    setRelCrdDestinos((prev) => {
+      const next = { ...prev };
+      for (const acc of targets) {
+        const codigo = String(acc.codigo);
+        const current = next[codigo] ?? { ...REL_CRD_DESTINO_DEFAULT };
+        next[codigo] = {
+          D: patch.D !== undefined ? Boolean(patch.D) : current.D,
+          M: patch.M !== undefined ? Boolean(patch.M) : current.M,
+        };
+      }
+      saveRelCrdDestinoMap({ ...loadRelCrdDestinoMap(), ...next });
+      return next;
+    });
+  };
+
+  const relCrdAllD = useMemo(() => {
+    const list = filteredRelCrdAccounts;
+    return list.length > 0 && list.every((a) => (relCrdDestinos[a.codigo] ?? REL_CRD_DESTINO_DEFAULT).D);
+  }, [filteredRelCrdAccounts, relCrdDestinos]);
+
+  const relCrdAllM = useMemo(() => {
+    const list = filteredRelCrdAccounts;
+    return list.length > 0 && list.every((a) => (relCrdDestinos[a.codigo] ?? REL_CRD_DESTINO_DEFAULT).M);
+  }, [filteredRelCrdAccounts, relCrdDestinos]);
+
   const commitRelCrd = async () => {
     const targetRows = relCrdAccounts
       .map((a) => {
@@ -1419,6 +1448,45 @@ export const ImportacaoPage: React.FC = () => {
                 <table className="w-full text-left border-collapse min-w-[1200px]">
                   <thead className="sticky top-0 z-10">
                     <tr className="bg-slate-50 border-b border-slate-200">
+                      <th className="px-3 py-2 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center">
+                        <div className="flex flex-col items-center gap-1">
+                          <span>Destino</span>
+                          <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden text-[10px] font-bold normal-case tracking-normal">
+                            <button
+                              type="button"
+                              title={relCrdAllD ? 'Desmarcar D em todas' : 'Selecionar D em todas'}
+                              onClick={() => setRelCrdDestinoAll({ D: !relCrdAllD })}
+                              className={`px-2.5 py-1 transition-colors ${
+                                relCrdAllD
+                                  ? 'bg-blue-400 text-blue-900'
+                                  : 'bg-white text-slate-400 hover:bg-slate-50'
+                              }`}
+                            >
+                              D
+                            </button>
+                            <button
+                              type="button"
+                              title={relCrdAllM ? 'Desmarcar M em todas' : 'Selecionar M em todas'}
+                              onClick={() => setRelCrdDestinoAll({ M: !relCrdAllM })}
+                              className={`px-2.5 py-1 transition-colors border-l border-slate-200 ${
+                                relCrdAllM
+                                  ? 'bg-amber-400 text-amber-900'
+                                  : 'bg-white text-slate-400 hover:bg-slate-50'
+                              }`}
+                            >
+                              M
+                            </button>
+                          </div>
+                          <button
+                            type="button"
+                            title="Ligar D e M em todas as linhas"
+                            onClick={() => setRelCrdDestinoAll({ D: true, M: true })}
+                            className="text-[9px] font-bold uppercase tracking-wider text-[#004D40] hover:underline"
+                          >
+                            Selecionar todos
+                          </button>
+                        </div>
+                      </th>
                       {['Cód.', 'Conta', 'Lançamentos', 'Cancelam.', 'Saldo lanç.', 'Baixas', 'Estorno', 'Baixas líq.', 'Lanç. líquido'].map((h) => (
                         <th
                           key={h}
@@ -1429,9 +1497,6 @@ export const ImportacaoPage: React.FC = () => {
                           {h}
                         </th>
                       ))}
-                      <th className="px-3 py-2 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center">
-                        Destino
-                      </th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
@@ -1442,20 +1507,6 @@ export const ImportacaoPage: React.FC = () => {
                           key={idx}
                           className={`${acc.nivel === 1 ? 'bg-slate-100 font-bold' : acc.nivel === 2 ? 'bg-slate-50/60' : ''} hover:bg-slate-50/40`}
                         >
-                          <td className="px-3 py-2 text-xs text-slate-500 tabular-nums">{acc.codigo}</td>
-                          <td
-                            className={`px-3 py-2 text-xs whitespace-nowrap ${acc.nivel === 1 ? 'text-slate-900 font-bold' : acc.nivel === 2 ? 'text-slate-800 font-semibold' : 'text-slate-700'}`}
-                            style={{ paddingLeft: `${0.75 + (acc.nivel - 1) * 1.25}rem` }}
-                          >
-                            {acc.nome}
-                          </td>
-                          <td className="px-3 py-2 text-xs text-right tabular-nums text-slate-700">{formatCurrency(acc.lancamentos)}</td>
-                          <td className="px-3 py-2 text-xs text-right tabular-nums text-slate-500">{formatCurrency(acc.cancelamentos)}</td>
-                          <td className="px-3 py-2 text-xs text-right tabular-nums text-slate-700">{formatCurrency(acc.saldo_lanc)}</td>
-                          <td className="px-3 py-2 text-xs text-right tabular-nums text-slate-700">{formatCurrency(acc.baixas)}</td>
-                          <td className="px-3 py-2 text-xs text-right tabular-nums text-slate-500">{formatCurrency(acc.estorno)}</td>
-                          <td className="px-3 py-2 text-xs text-right tabular-nums text-slate-700">{formatCurrency(acc.baixas_liquido)}</td>
-                          <td className={`px-3 py-2 text-xs text-right tabular-nums font-semibold ${acc.lanc_liquido < 0 ? 'text-red-600' : 'text-slate-900'}`}>{formatCurrency(acc.lanc_liquido)}</td>
                           <td className="px-3 py-2 text-center">
                             <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden text-[10px] font-bold">
                               <button
@@ -1484,6 +1535,20 @@ export const ImportacaoPage: React.FC = () => {
                               </button>
                             </div>
                           </td>
+                          <td className="px-3 py-2 text-xs text-slate-500 tabular-nums">{acc.codigo}</td>
+                          <td
+                            className={`px-3 py-2 text-xs whitespace-nowrap ${acc.nivel === 1 ? 'text-slate-900 font-bold' : acc.nivel === 2 ? 'text-slate-800 font-semibold' : 'text-slate-700'}`}
+                            style={{ paddingLeft: `${0.75 + (acc.nivel - 1) * 1.25}rem` }}
+                          >
+                            {acc.nome}
+                          </td>
+                          <td className="px-3 py-2 text-xs text-right tabular-nums text-slate-700">{formatCurrency(acc.lancamentos)}</td>
+                          <td className="px-3 py-2 text-xs text-right tabular-nums text-slate-500">{formatCurrency(acc.cancelamentos)}</td>
+                          <td className="px-3 py-2 text-xs text-right tabular-nums text-slate-700">{formatCurrency(acc.saldo_lanc)}</td>
+                          <td className="px-3 py-2 text-xs text-right tabular-nums text-slate-700">{formatCurrency(acc.baixas)}</td>
+                          <td className="px-3 py-2 text-xs text-right tabular-nums text-slate-500">{formatCurrency(acc.estorno)}</td>
+                          <td className="px-3 py-2 text-xs text-right tabular-nums text-slate-700">{formatCurrency(acc.baixas_liquido)}</td>
+                          <td className={`px-3 py-2 text-xs text-right tabular-nums font-semibold ${acc.lanc_liquido < 0 ? 'text-red-600' : 'text-slate-900'}`}>{formatCurrency(acc.lanc_liquido)}</td>
                         </tr>
                       );
                     })}
