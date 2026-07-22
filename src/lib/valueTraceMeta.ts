@@ -272,9 +272,11 @@ export const valueTrace = {
       calculation:
         'Resultado Operacional − Impostos s/ Resultado − Obras e Investimentos (Previsto e Realizado calculados com edições manuais, quando houver). Diferença = Realizado − Previsto.',
     }),
-    av: (label: string, mes: string, serie: string): ValueTraceMeta => ({
+    av: (label: string, mes: string, serie: string, grupoPai: string | null): ValueTraceMeta => ({
       source: `AV (análise vertical) — ${label} — ${mes}`,
-      calculation: `|valor da linha| ÷ |Receita Líquida do mês| × 100, calculada sobre o ${serie} (usa o Realizado quando a linha e a Receita Líquida têm realizado no mês; senão o Previsto). Considera edições manuais.`,
+      calculation: grupoPai
+        ? `Participação da linha dentro do grupo "${grupoPai}" (o grupo é 100%): |valor da linha| ÷ |valor do grupo| × 100, sobre o ${serie} (usa o Realizado quando linha e grupo têm realizado; senão o Previsto). As linhas de um grupo somam 100%. Considera edições manuais.`
+        : 'Linha de grupo principal — é a base (100%) da análise vertical dos seus subitens.',
     }),
     ah: (label: string, mes: string, mesAnterior: string, serie: string): ValueTraceMeta => ({
       source: `AH (análise horizontal) — ${label} — ${mes}`,

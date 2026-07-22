@@ -138,6 +138,11 @@ export const DREPage: React.FC = () => {
     });
   };
 
+  /** Duplo clique: fica só o mês clicado. */
+  const soloMonth = (monthIndex: number) => {
+    setSelectedMonths([monthIndex]);
+  };
+
   const selectAllMonths = () => setSelectedMonths(Array.from({ length: 12 }, (_, i) => i));
 
   const loadEdits = async () => {
@@ -245,15 +250,13 @@ export const DREPage: React.FC = () => {
   );
 
   // ---- Análises AV/AH (sobre os dados importados + edições) ----
-  const receitaLiquidaRow = useMemo(() => findDreRow(dreRows, 'l77-receita-liquida'), []);
-
   type Analise = { pct: number | null; serie: 'Realizado' | 'Previsto' | null };
 
   // AV: |linha| ÷ |Receita Líquida do mês| × 100 (Realizado quando ambos têm; senão Previsto).
-  const avOf = (row: DRERow, monthIndex: number): Analise => {
-    if (!receitaLiquidaRow) return { pct: null, serie: null };
-    const line = effective(row, monthIndex);
-    const base = effective(receitaLiquidaRow, monthIndex);
+  // AV hierárquica: o grupo pai é a base (100%) e cada linha do grupo é a sua
+  // participação nesse 100%. Grupos principais mostram 100%; linhas fora de
+  // grupo (sem pai e sem filhos) não têm AV.
+  const avFromCells = (line: MonthCell, base: MonthCell): Analise => {
     if (line.real != null && base.real != null && base.real !== 0) {
       return { pct: (Math.abs(line.real) / Math.abs(base.real)) * 100, serie: 'Realizado' };
     }
@@ -263,17 +266,14 @@ export const DREPage: React.FC = () => {
     return { pct: null, serie: null };
   };
 
-  const avTotalOf = (row: DRERow): Analise => {
-    if (!receitaLiquidaRow) return { pct: null, serie: null };
-    const line = totalOf(row);
-    const base = totalOf(receitaLiquidaRow);
-    if (line.real != null && base.real != null && base.real !== 0) {
-      return { pct: (Math.abs(line.real) / Math.abs(base.real)) * 100, serie: 'Realizado' };
-    }
-    if (line.prev != null && base.prev != null && base.prev !== 0) {
-      return { pct: (Math.abs(line.prev) / Math.abs(base.prev)) * 100, serie: 'Previsto' };
-    }
-    return { pct: null, serie: null };
+  const avOf = (row: DRERow, parent: DRERow | null, monthIndex: number): Analise => {
+    if (!parent) return { pct: row.children?.length ? 100 : null, serie: null };
+    return avFromCells(effective(row, monthIndex), effective(parent, monthIndex));
+  };
+
+  const avTotalOf = (row: DRERow, parent: DRERow | null): Analise => {
+    if (!parent) return { pct: row.children?.length ? 100 : null, serie: null };
+    return avFromCells(totalOf(row), totalOf(parent));
   };
 
   // AH: variação % sobre o mês-calendário anterior (Realizado quando ambos têm; senão Previsto).
@@ -425,7 +425,7 @@ export const DREPage: React.FC = () => {
     );
   };
 
-  const renderRow = (row: DRERow): React.ReactNode => {
+  const renderRow = (row: DRERow, parent: DRERow | null = null): React.ReactNode => {
     const hasChildren = Boolean(row.children?.length);
     const isExpanded = expanded[row.id];
     const total = totalOf(row);
@@ -454,7 +454,7 @@ export const DREPage: React.FC = () => {
 
           {visibleMonths.map((monthIndex) => {
             const cell = effective(row, monthIndex);
-            const av = showAV ? avOf(row, monthIndex) : null;
+            const av = showAV ? avOf(row, parent, monthIndex) : null;
             const ah = showAH ? ahOf(row, monthIndex) : null;
             return (
               <React.Fragment key={`${row.id}-${monthIndex}`}>
@@ -479,7 +479,7 @@ export const DREPage: React.FC = () => {
                     <ValueTrace
                       className="text-[11px] tabular-nums font-semibold text-slate-500"
                       displayValue={av?.pct == null ? '—' : `${av.pct.toFixed(1)}%`}
-                      meta={valueTrace.dre.av(row.label, `${MESES[monthIndex]}/${dreYear}`, av?.serie ?? 'Previsto')}
+                      meta={valueTrace.dre.av(row.label, `${MESES[monthIndex]}/${dreYear}`, av?.serie ?? 'Previsto', parent?.label ?? null)}
                     />
                   </td>
                 )}
@@ -529,13 +529,13 @@ export const DREPage: React.FC = () => {
             />
           </td>
           {showAV && (() => {
-            const av = avTotalOf(row);
+            const av = avTotalOf(row, parent);
             return (
               <td className={cn('min-w-[70px] px-2 py-1.5 text-right bg-slate-50/60', !showAH && 'border-r border-slate-200')}>
                 <ValueTrace
                   className="text-[11px] tabular-nums font-semibold text-slate-500"
                   displayValue={av.pct == null ? '—' : `${av.pct.toFixed(1)}%`}
-                  meta={valueTrace.dre.av(row.label, `Total ${dreYear}`, av.serie ?? 'Previsto')}
+                  meta={valueTrace.dre.av(row.label, `Total ${dreYear}`, av.serie ?? 'Previsto', parent?.label ?? null)}
                 />
               </td>
             );
@@ -546,7 +546,7 @@ export const DREPage: React.FC = () => {
             </td>
           )}
         </tr>
-        {hasChildren && isExpanded && row.children?.map((child) => renderRow(child))}
+        {hasChildren && isExpanded && row.children?.map((child) => renderRow(child, row))}
       </React.Fragment>
     );
   };
@@ -591,7 +591,7 @@ export const DREPage: React.FC = () => {
               <button
                 type="button"
                 onClick={toggleAV}
-                title="Análise vertical: % de cada linha sobre a Receita Líquida do mês"
+                title="Análise vertical: participação de cada linha dentro do seu grupo (o grupo é 100%)"
                 className={cn(
                   'px-2.5 py-1 rounded-lg text-xs font-bold transition-colors border',
                   showAV
@@ -625,6 +625,11 @@ export const DREPage: React.FC = () => {
                 key={mes}
                 type="button"
                 onClick={() => toggleMonth(monthIndex)}
+                onDoubleClick={(e) => {
+                  e.preventDefault();
+                  soloMonth(monthIndex);
+                }}
+                title="Clique para marcar/desmarcar · Clique duas vezes para ver só este mês"
                 className={cn(
                   'px-2.5 py-1.5 rounded-lg text-xs font-bold transition-colors border',
                   active
@@ -669,7 +674,7 @@ export const DREPage: React.FC = () => {
                     <th className="min-w-[120px] border-r border-slate-100 px-3 py-2 text-right text-[10px] font-bold uppercase tracking-wide text-slate-500">Realizado</th>
                     <th className={cn('min-w-[120px] px-3 py-2 text-right text-[10px] font-bold uppercase tracking-wide text-slate-500', showAV || showAH ? 'border-r border-slate-100' : 'border-r border-slate-200')}>Diferença</th>
                     {showAV && (
-                      <th className={cn('min-w-[70px] px-2 py-2 text-right text-[10px] font-bold uppercase tracking-wide text-slate-500', showAH ? 'border-r border-slate-100' : 'border-r border-slate-200')} title="Análise vertical: % sobre a Receita Líquida do mês">AV</th>
+                      <th className={cn('min-w-[70px] px-2 py-2 text-right text-[10px] font-bold uppercase tracking-wide text-slate-500', showAH ? 'border-r border-slate-100' : 'border-r border-slate-200')} title="Análise vertical: participação da linha dentro do seu grupo (o grupo é 100%)">AV</th>
                     )}
                     {showAH && (
                       <th className="min-w-[70px] border-r border-slate-200 px-2 py-2 text-right text-[10px] font-bold uppercase tracking-wide text-slate-500" title="Análise horizontal: variação % sobre o mês anterior">AH</th>
@@ -682,20 +687,6 @@ export const DREPage: React.FC = () => {
               {filteredDreRows.map((row) => renderRow(row))}
               {showResultadoLiquido && (() => {
                 const total = resultadoLiquidoTotal();
-                const avFromCell = (cell: MonthCell, monthIndex: number | null): Analise => {
-                  if (!receitaLiquidaRow) return { pct: null, serie: null };
-                  const base =
-                    monthIndex == null
-                      ? totalOf(receitaLiquidaRow)
-                      : effective(receitaLiquidaRow, monthIndex);
-                  if (cell.real != null && base.real != null && base.real !== 0) {
-                    return { pct: (Math.abs(cell.real) / Math.abs(base.real)) * 100, serie: 'Realizado' };
-                  }
-                  if (cell.prev != null && base.prev != null && base.prev !== 0) {
-                    return { pct: (Math.abs(cell.prev) / Math.abs(base.prev)) * 100, serie: 'Previsto' };
-                  }
-                  return { pct: null, serie: null };
-                };
                 const ahFromMonths = (monthIndex: number): Analise => {
                   if (monthIndex === 0) return { pct: null, serie: null };
                   const cur = resultadoLiquidoOf(monthIndex);
@@ -718,7 +709,6 @@ export const DREPage: React.FC = () => {
                     </td>
                     {visibleMonths.map((monthIndex) => {
                       const cell = resultadoLiquidoOf(monthIndex);
-                      const av = showAV ? avFromCell(cell, monthIndex) : null;
                       const ah = showAH ? ahFromMonths(monthIndex) : null;
                       const mes = `${MESES[monthIndex]}/${dreYear}`;
                       return (
@@ -755,11 +745,7 @@ export const DREPage: React.FC = () => {
                           </td>
                           {showAV && (
                             <td className={cn('min-w-[70px] px-2 py-1.5 text-right', !showAH && 'border-r border-slate-200')}>
-                              <ValueTrace
-                                className="text-[11px] tabular-nums font-semibold text-slate-500"
-                                displayValue={av?.pct == null ? '—' : `${av.pct.toFixed(1)}%`}
-                                meta={valueTrace.dre.av(LIQUIDO_LABEL, mes, av?.serie ?? 'Previsto')}
-                              />
+                              <span className="text-[11px] text-slate-300">—</span>
                             </td>
                           )}
                           {showAH && (
@@ -806,18 +792,11 @@ export const DREPage: React.FC = () => {
                         meta={valueTrace.dre.liquido('Diferença', `Total ${dreYear}`)}
                       />
                     </td>
-                    {showAV && (() => {
-                      const av = avFromCell(total, null);
-                      return (
-                        <td className={cn('min-w-[70px] px-2 py-1.5 text-right bg-slate-50/60', !showAH && 'border-r border-slate-200')}>
-                          <ValueTrace
-                            className="text-[11px] tabular-nums font-semibold text-slate-500"
-                            displayValue={av.pct == null ? '—' : `${av.pct.toFixed(1)}%`}
-                            meta={valueTrace.dre.av(LIQUIDO_LABEL, `Total ${dreYear}`, av.serie ?? 'Previsto')}
-                          />
-                        </td>
-                      );
-                    })()}
+                    {showAV && (
+                      <td className={cn('min-w-[70px] px-2 py-1.5 text-right bg-slate-50/60', !showAH && 'border-r border-slate-200')}>
+                        <span className="text-[11px] text-slate-300">—</span>
+                      </td>
+                    )}
                     {showAH && (
                       <td className="min-w-[70px] px-2 py-1.5 text-right border-r border-slate-200 bg-slate-50/60">
                         <span className="text-[11px] text-slate-300">—</span>
