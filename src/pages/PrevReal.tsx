@@ -79,7 +79,13 @@ const getCrdLabel = (row: PrevRealRow) => {
 
 const VIEW_CONFIG_KEY = 'prevReal:viewConfig:v1';
 
-export const PrevRealPage: React.FC = () => {
+type PrevRealMode = 'mensal' | 'diario';
+
+type PrevRealPageProps = {
+  mode?: PrevRealMode;
+};
+
+export const PrevRealPage: React.FC<PrevRealPageProps> = ({ mode = 'diario' }) => {
   const { query } = useSearch();
   const currentYear = new Date().getFullYear();
   const [year, setYear] = useState(String(currentYear));
@@ -368,9 +374,13 @@ export const PrevRealPage: React.FC = () => {
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
       <div className="flex flex-col gap-2">
-        <h2 className="text-2xl font-bold text-slate-900">Prev x Real Diario</h2>
+        <h2 className="text-2xl font-bold text-slate-900">
+          {mode === 'mensal' ? 'Prev x Real Mensal' : 'Prev x Real Diario'}
+        </h2>
         <p className="text-sm text-slate-500">
-          Visão por CRD com colunas mensais de Previsto, Realizado e Diferença, agrupadas por setor.
+          {mode === 'mensal'
+            ? 'Comparativo mensal por CRD: Previsto, Realizado e Diferença ao longo do ano.'
+            : 'Visão por CRD com Previsto, Realizado e Diferença, agrupadas por setor.'}
         </p>
       </div>
 

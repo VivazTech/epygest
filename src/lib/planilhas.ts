@@ -27,10 +27,37 @@ export const PLANILHAS: PlanilhaMeta[] = [
   { indice: 16, nome: 'Setores', arquivo: 'aba_016_Setores.json' },
   { indice: 17, nome: 'Dados Folha e Extras', arquivo: 'aba_017_Dados_Folha_e_Extras.json' },
   { indice: 18, nome: 'Acomp. Orçamento', arquivo: 'aba_018_Acomp__Or_amento.json' },
-  { indice: 19, nome: 'Real 2024', arquivo: 'aba_019_Real_2024.json' },
-  { indice: 20, nome: 'Cópia Projeção Folha', arquivo: 'aba_020_C_pia_Proje__o_Folha.json' },
-  { indice: 21, nome: 'Cópia de Prev x Real 2025', arquivo: 'aba_021_C_pia_de_Prev_x_Real_2025.json' },
 ];
+
+/** Itens da seção Apuração de Receita (planilhas RDS). */
+export const APURACAO_RECEITA_ITENS: PlanilhaMeta[] = [
+  { indice: 12, nome: 'Relatório de RDS', arquivo: 'aba_012_RDS.json' },
+  { indice: 13, nome: 'Apoio RDS', arquivo: 'aba_013_Apoio_RDS.json' },
+];
+
+/** Itens da seção Base de Orçamento. */
+export const BASE_ORCAMENTO_ITENS: Array<PlanilhaMeta & { tabId: string }> = [
+  { indice: 1, nome: 'Síntase', arquivo: 'aba_001_S_ntese.json', tabId: 'sintase' },
+  { indice: 14, nome: 'Consumo Interno', arquivo: 'aba_014_Consumo_Interno.json', tabId: 'planilha-14' },
+  { indice: 15, nome: 'Contas novas', arquivo: 'aba_015_Contas_novas.json', tabId: 'planilha-15' },
+  { indice: 16, nome: 'Setores', arquivo: 'aba_016_Setores.json', tabId: 'planilha-16' },
+  { indice: 17, nome: 'Dados Folha e Extras', arquivo: 'aba_017_Dados_Folha_e_Extras.json', tabId: 'planilha-17' },
+  { indice: 18, nome: 'Acomp. Orçamento', arquivo: 'aba_018_Acomp__Or_amento.json', tabId: 'planilha-18' },
+];
+
+const APURACAO_RECEITA_INDICES = new Set(APURACAO_RECEITA_ITENS.map((p) => p.indice));
+const BASE_ORCAMENTO_INDICES = new Set(BASE_ORCAMENTO_ITENS.map((p) => p.indice));
+
+/** Planilhas listadas em Apuração de Resultados (exclui receita e base de orçamento). */
+export const PLANILHAS_RESULTADOS = PLANILHAS.filter(
+  (p) => !APURACAO_RECEITA_INDICES.has(p.indice) && !BASE_ORCAMENTO_INDICES.has(p.indice)
+).map((p) => (p.indice === 2 ? { ...p, nome: 'Prev x Real Mensal' } : p));
+
+export const isApuracaoReceitaPlanilha = (indice: number) => APURACAO_RECEITA_INDICES.has(indice);
+export const isBaseOrcamentoPlanilha = (indice: number) => BASE_ORCAMENTO_INDICES.has(indice);
+export const isBaseOrcamentoTab = (tab: string) =>
+  tab === 'sintase' ||
+  (tab.startsWith('planilha-') && isBaseOrcamentoPlanilha(Number(tab.slice('planilha-'.length))));
 
 const normalizeNome = (nome: string) =>
   nome.normalize('NFD').replace(/[̀-ͯ]/g, '').trim().toLowerCase();

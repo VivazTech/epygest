@@ -394,7 +394,7 @@ export const FolhaApuracaoPage: React.FC = () => {
     <div className="space-y-6 animate-in fade-in duration-500">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-bold text-slate-900">Apuração de Folha</h2>
+          <h2 className="text-2xl font-bold text-slate-900">Apuração da Folha</h2>
           <p className="text-slate-500 text-sm">Classificação, cálculo, encargos, relatórios e síntese anual.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -518,7 +518,7 @@ export const FolhaApuracaoPage: React.FC = () => {
               {!dadosImportados && (
                 <div className="bg-amber-50 border border-amber-100 rounded-2xl p-4 text-sm text-amber-900">
                   Nenhum dado importado para {MESES_LABEL[month]}/{year}.
-                  Importe o extrato em <b>Importação › Extrato Mensal</b> e envie para a Folha de Pagamento — os mesmos dados alimentam a apuração.
+                  Importe o extrato em <b>Importação › Extrato Mensal</b> e envie para a Apuração da Folha — os mesmos dados alimentam a apuração.
                 </div>
               )}
             </div>

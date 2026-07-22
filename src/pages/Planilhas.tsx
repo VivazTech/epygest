@@ -31,7 +31,7 @@ import { PrevRealPage } from './PrevReal';
 // As demais continuam como espelho estático do JSON extraído.
 const LIVE_SHEETS: Record<number, React.FC> = {
   1: SintasePage,   // Síntese  -> tela calculada existente
-  2: PrevRealPage,  // Prev x Real 2026 -> tela calculada existente (previsto x realizado)
+  2: () => <PrevRealPage mode="mensal" />,  // Prev x Real Mensal (Apuração de Resultados)
   3: AjustesLive,   // Ajustes -> grade editável conta x mês
   4: OrcamentoLive, // Orçamento 2026
 };

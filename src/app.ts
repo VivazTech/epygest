@@ -3973,7 +3973,7 @@ export function createApp() {
         success: true,
         report_name: req.file.originalname || "extrato-mensal.xls",
         period,
-        destino: { secao: "Folha de Pagamento" },
+        destino: { secao: "Apuração da Folha" },
         summary: {
           funcionarios: employees.length,
           total_proventos: totalProventos,

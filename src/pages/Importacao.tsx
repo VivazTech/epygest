@@ -351,7 +351,7 @@ export const ImportacaoPage: React.FC = () => {
     const mes = Number(extratoMonth);
     const ano = Number(extratoYear);
     if (!mes || mes < 1 || mes > 12 || !ano) {
-      alert('Selecione o mês (e ano) para enviar à Folha de Pagamento.');
+      alert('Selecione o mês (e ano) para enviar à Apuração da Folha.');
       return;
     }
     setExtratoCommitting(true);
@@ -364,14 +364,14 @@ export const ImportacaoPage: React.FC = () => {
       const res = await fetch('/api/folha/import', { method: 'POST', body: formData });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        alert(formatApiError(data, 'Falha ao enviar para a Folha de Pagamento.'));
+        alert(formatApiError(data, 'Falha ao enviar para a Apuração da Folha.'));
         return;
       }
       setExtratoCommitMsg(
         `Enviado: ${data.funcionarios} funcionário(s), ${data.rubricas ?? 0} rubrica(s)` +
           (data.rubricas_cadastradas ? `, ${data.rubricas_cadastradas} nova(s) no cadastro de apuração` : '') +
-          ` → Folha de Pagamento › ${periodoLabel({ month: mes, year: ano })}.` +
-          ` Vá em Folha › Apuração de Folha, selecione o mês e clique em Processar mês.` +
+          ` → Apuração da Folha › ${periodoLabel({ month: mes, year: ano })}.` +
+          ` Vá em Apuração da Folha › Apuração, selecione o mês e clique em Processar mês.` +
           (data.realizado
             ? ` Líquido ${formatCurrency(data.realizado.valor)} lançado no Real de RH › Folha de pagamento.`
             : '')
@@ -1146,7 +1146,7 @@ export const ImportacaoPage: React.FC = () => {
             </div>
           )}
 
-          {/* Envio para a Folha de Pagamento do mês (detectado ou selecionado — obrigatório) */}
+          {/* Envio para a Apuração da Folha do mês (detectado ou selecionado — obrigatório) */}
           {extratoSummary && !extratoError && (
             <div className="px-4 py-3 border-b border-slate-100 bg-slate-50/60 flex flex-wrap items-center justify-between gap-3">
               <div className="text-xs text-slate-600 space-y-1">
@@ -1181,7 +1181,7 @@ export const ImportacaoPage: React.FC = () => {
                   />
                 </div>
                 <p className="text-[11px] text-slate-500">
-                  Destino: <b>Folha de Pagamento</b> › {extratoMonth ? periodoLabel({ month: Number(extratoMonth), year: Number(extratoYear) }) : '—'} (substitui a folha do mês).
+                  Destino: <b>Apuração da Folha</b> › {extratoMonth ? periodoLabel({ month: Number(extratoMonth), year: Number(extratoYear) }) : '—'} (substitui a folha do mês).
                 </p>
                 {extratoCommitMsg && (
                   <p className="text-[11px] font-semibold text-emerald-700 inline-flex items-center gap-1">
@@ -1196,7 +1196,7 @@ export const ImportacaoPage: React.FC = () => {
                 className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-[#004D40] text-white text-sm font-bold hover:bg-[#003d33] disabled:opacity-60 transition-colors"
               >
                 {extratoCommitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowRightCircle className="w-4 h-4" />}
-                {extratoCommitting ? 'Enviando...' : 'Enviar para Folha de Pagamento'}
+                {extratoCommitting ? 'Enviando...' : 'Enviar para Apuração da Folha'}
               </button>
             </div>
           )}

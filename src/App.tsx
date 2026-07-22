@@ -19,10 +19,9 @@ import { PrevRealPage as PrevReal } from './pages/PrevReal';
 import { ConfiguracoesPage as Configuracoes } from './pages/Configuracoes';
 import { UsuariosPage as Usuarios } from './pages/Usuarios';
 import { PlanilhasPage } from './pages/Planilhas';
-import { PLANILHAS } from './lib/planilhas';
+import { PLANILHAS, APURACAO_RECEITA_ITENS, BASE_ORCAMENTO_ITENS, isApuracaoReceitaPlanilha, isBaseOrcamentoTab } from './lib/planilhas';
 import { FolhaPagamentoPage, MESES_FOLHA } from './pages/FolhaPagamento';
 import { FolhaApuracaoPage } from './pages/FolhaApuracao';
-import { ApuracaoReceitaPage } from './pages/ApuracaoReceita';
 import { ComprasPage } from './pages/Compras';
 import { SearchProvider, useSearch } from './context/SearchContext';
 import { ToastProvider } from './context/ToastContext';
@@ -152,13 +151,8 @@ export default function App() {
       );
     }
 
-    if (activeTab === 'apuracao-folha' || activeTab === 'folha-apuracao') {
+    if (activeTab === 'folha-apuracao') {
       return <FolhaApuracaoPage />;
-    }
-
-    if (activeTab === 'apuracao-receita') {
-      if (!canAccessPlanilhas) return <Dashboard />;
-      return <ApuracaoReceitaPage />;
     }
 
     if (activeTab.startsWith('folha-')) {
@@ -181,7 +175,7 @@ export default function App() {
       case 'importacao': return <Importacao />;
       case 'cadastros': return <Cadastros />;
       case 'sintase': return <Sintase />;
-      case 'prev-real': return <PrevReal />;
+      case 'prev-real': return <PrevReal mode="diario" />;
       case 'supabase-teste': return <SupabaseTeste />;
       case 'usuarios': return <Usuarios />;
       case 'configuracoes': return <Configuracoes />;
@@ -342,16 +336,18 @@ function AppShell({
             <span className="text-slate-400 text-sm font-medium">EpyGest</span>
             <span className="text-slate-300">/</span>
             <span className="text-slate-900 text-sm font-bold capitalize truncate">
-              {activeTab === 'apuracao-folha'
-                ? 'Apuração de Resultados / Apuração da Folha'
-                : activeTab === 'apuracao-receita'
-                ? 'Apuração de Resultados / Apuração de Receita'
+              {isBaseOrcamentoTab(activeTab)
+                ? `Base de Orçamento / ${BASE_ORCAMENTO_ITENS.find((p) => p.tabId === activeTab)?.nome ?? ''}`
+                : activeTab.startsWith('planilha-') && isApuracaoReceitaPlanilha(Number(activeTab.slice('planilha-'.length)))
+                ? `Apuração de Receita / ${APURACAO_RECEITA_ITENS.find((p) => `planilha-${p.indice}` === activeTab)?.nome ?? ''}`
+                : activeTab === 'planilha-2'
+                ? 'Apuração de Resultados / Prev x Real Mensal'
                 : activeTab.startsWith('planilha-')
                 ? `Apuração de Resultados / ${PLANILHAS.find((p) => `planilha-${p.indice}` === activeTab)?.nome ?? ''}`
                 : activeTab === 'folha-apuracao'
-                ? 'Folha de Pagamento / Apuração de Folha'
+                ? 'Apuração da Folha / Apuração'
                 : activeTab.startsWith('folha-')
-                ? `Folha de Pagamento / ${MESES_FOLHA[Number(activeTab.slice('folha-'.length))] ?? ''}`
+                ? `Apuração da Folha / ${MESES_FOLHA[Number(activeTab.slice('folha-'.length))] ?? ''}`
                 : ['comandas', 'lancamentos-manuais', 'requisicoes', 'notas', 'danfe'].includes(activeTab)
                 ? `Lançamentos / ${
                     activeTab === 'comandas' ? 'Comandas'

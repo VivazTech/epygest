@@ -262,7 +262,7 @@ export const FolhaPagamentoPage: React.FC<FolhaPagamentoPageProps> = ({ month })
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h2 className="text-2xl font-bold text-slate-900">
-            Folha de Pagamento — {MESES_FOLHA[month]}/{data?.year ?? year}
+            Apuração da Folha — {MESES_FOLHA[month]}/{data?.year ?? year}
           </h2>
           <p className="text-sm text-slate-500">
             Folha do mês por funcionário (proventos, descontos, líquido e bases), importada do Extrato Mensal.
