@@ -5852,6 +5852,72 @@ export function createApp() {
     });
   });
 
+  // ====================================================
+  // DRE GERENCIAL: edições manuais por célula
+  // Sobrepõem os valores importados da planilha Prev x Real (src/data/dre2026.json).
+  // ====================================================
+  app.get("/api/dre/edits", requireRole("admin", "controle"), async (req, res) => {
+    const year = Number((req.query as { year?: string }).year) || new Date().getFullYear();
+    const { data, error } = await supabase
+      .from("dre_cell_edits")
+      .select("row_key, month, field, value, user_name, updated_at")
+      .eq("year", year);
+    if (error) {
+      console.error("dre_cell_edits select (execute sql/15_dre_cell_edits.sql):", error);
+      return res.status(500).json({
+        error: "Não foi possível carregar as edições do DRE. Execute sql/15_dre_cell_edits.sql no Supabase.",
+      });
+    }
+    res.json({ year, edits: data ?? [] });
+  });
+
+  app.patch("/api/dre/cell", requireRole("admin", "controle"), async (req, res) => {
+    const { year, row_key, row_label, month, field, value } = req.body as {
+      year?: number;
+      row_key?: number;
+      row_label?: string;
+      month?: number;
+      field?: string;
+      value?: number | string;
+    };
+    if (!Number.isFinite(Number(year)) || Number(year) < 2000)
+      return res.status(400).json({ error: "year inválido" });
+    if (!Number.isFinite(Number(row_key)))
+      return res.status(400).json({ error: "row_key inválido" });
+    if (!Number.isFinite(Number(month)) || Number(month) < 1 || Number(month) > 12)
+      return res.status(400).json({ error: "month deve estar entre 1 e 12" });
+    if (field !== "prev" && field !== "real")
+      return res.status(400).json({ error: "field deve ser 'prev' ou 'real'" });
+    const numValue = Number(String(value).replace(",", "."));
+    if (!Number.isFinite(numValue))
+      return res.status(400).json({ error: "value inválido" });
+
+    const user = (req as any).user;
+    const record = {
+      year: Number(year),
+      row_key: Number(row_key),
+      row_label: String(row_label ?? "").slice(0, 200) || null,
+      month: Number(month),
+      field,
+      value: numValue,
+      user_name: user?.name ?? null,
+      user_email: user?.email ?? null,
+      updated_at: new Date().toISOString(),
+    };
+    const { data, error } = await supabase
+      .from("dre_cell_edits")
+      .upsert(record, { onConflict: "year,row_key,month,field" })
+      .select("row_key, month, field, value, user_name, updated_at")
+      .single();
+    if (error) {
+      console.error("dre_cell_edits upsert (execute sql/15_dre_cell_edits.sql):", error);
+      return res.status(500).json({
+        error: "Não foi possível salvar. Execute sql/15_dre_cell_edits.sql no Supabase se ainda não rodou.",
+      });
+    }
+    res.json({ success: true, edit: data });
+  });
+
   app.patch("/api/sintase/cell", async (req, res) => {
     const { crd_id, month, year, value, occupancy_percent } = req.body as {
       crd_id?: number;

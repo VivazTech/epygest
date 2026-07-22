@@ -248,6 +248,27 @@ export const valueTrace = {
     },
   },
 
+  dre: {
+    imported: (label: string, planilhaRow: number, campo: string, mes: string, source: string): ValueTraceMeta => ({
+      source: `${campo} — ${label} — ${mes}`,
+      tables: 'src/data/dre2026.json',
+      calculation: `Importado da planilha "${source}" (linha ${planilhaRow} da aba, coluna ${campo} de ${mes}) pelo script scripts/import-dre-prev-real.cjs. Clique na célula para editar.`,
+    }),
+    edited: (label: string, campo: string, mes: string, userName: string, when: string, originalValue: string): ValueTraceMeta => ({
+      source: `${campo} — ${label} — ${mes}`,
+      tables: 'dre_cell_edits',
+      calculation: `Editado manualmente por ${userName} em ${when}. Valor importado da planilha era ${originalValue}. Clique para editar novamente.`,
+    }),
+    diferenca: (label: string, mes: string): ValueTraceMeta => ({
+      source: `Diferença — ${label} — ${mes}`,
+      calculation: 'Realizado − Previsto (negativo = abaixo do previsto, como os valores entre parênteses da planilha).',
+    }),
+    total: (label: string, campo: string): ValueTraceMeta => ({
+      source: `Total 2026 — ${campo} — ${label}`,
+      calculation: 'Soma dos 12 meses da linha (considerando edições manuais, quando houver).',
+    }),
+  },
+
   cadastros: {
     crdField: (code: string, field: string, label: string): ValueTraceMeta => ({
       source: `CRD ${code}`,

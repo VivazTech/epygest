@@ -3,11 +3,13 @@ import { Calendar, ChevronDown, ChevronRight } from 'lucide-react';
 import { cn, formatCurrency } from '../lib/utils';
 import { useSearch } from '../context/SearchContext';
 import { filterTreeByLabel } from '../lib/search';
+import { ValueTrace } from '../components/ValueTrace';
+import { valueTrace } from '../lib/valueTraceMeta';
 import dreData from '../data/dre2026.json';
 
-// Dados gerados a partir da aba "Prev x Real 2026" (linhas 52-330) pelo script
-// scripts/import-dre-prev-real.cjs. Para reimportar, rode:
-//   node scripts/import-dre-prev-real.cjs "caminho/para/Prev x Real 2026.csv"
+// Dados-base gerados da aba "Prev x Real 2026" (linhas 52-330) pelo script
+// scripts/import-dre-prev-real.cjs. Edições manuais por célula ficam em
+// dre_cell_edits (Supabase) e sobrepõem o valor importado.
 
 type MonthCell = {
   prev: number | null;
@@ -26,6 +28,17 @@ interface DRERow {
   children?: DRERow[];
 }
 
+type CellEdit = {
+  row_key: number;
+  month: number;
+  field: 'prev' | 'real';
+  value: number;
+  user_name: string | null;
+  updated_at: string;
+};
+
+type EditingCell = { row: number; month: number; field: 'prev' | 'real' };
+
 const MESES = [
   'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
   'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro',
@@ -33,23 +46,15 @@ const MESES = [
 
 const dreRows = dreData.rows as DRERow[];
 const dreYear = dreData.year;
+const dreSource = dreData.source;
 
-// Total do ano: soma dos meses preenchidos; Diferença = Realizado - Previsto
-// (mesma convenção da planilha, onde valores entre parênteses são negativos).
-const totalOf = (values: MonthCell[]): MonthCell => {
-  let prev: number | null = null;
-  let real: number | null = null;
-  for (const v of values) {
-    if (v.prev != null) prev = (prev ?? 0) + v.prev;
-    if (v.real != null) real = (real ?? 0) + v.real;
-  }
-  const dif = prev != null && real != null ? real - prev : null;
-  return { prev, real, dif };
+const editKey = (row: number, month: number, field: 'prev' | 'real') => `${row}:${month}:${field}`;
+
+const formatWhen = (iso: string) => {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString('pt-BR') + ' ' + d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 };
-
-const Money: React.FC<{ value: number | null; className?: string }> = ({ value, className }) => (
-  <span className={className}>{value == null ? '—' : formatCurrency(value)}</span>
-);
 
 export const DREPage: React.FC = () => {
   const { query } = useSearch();
@@ -60,6 +65,32 @@ export const DREPage: React.FC = () => {
     }
     return initial;
   });
+  const [edits, setEdits] = useState<Record<string, CellEdit>>({});
+  const [editsError, setEditsError] = useState('');
+  const [editingCell, setEditingCell] = useState<EditingCell | null>(null);
+  const [editingValue, setEditingValue] = useState('');
+  const [savingCell, setSavingCell] = useState(false);
+
+  const loadEdits = async () => {
+    try {
+      const res = await fetch(`/api/dre/edits?year=${dreYear}`);
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error || 'Falha ao carregar edições.');
+      const map: Record<string, CellEdit> = {};
+      for (const e of (json.edits ?? []) as CellEdit[]) {
+        map[editKey(e.row_key, e.month, e.field)] = e;
+      }
+      setEdits(map);
+      setEditsError('');
+    } catch (err: any) {
+      setEditsError(err?.message || 'Falha ao carregar edições manuais do DRE.');
+    }
+  };
+
+  useEffect(() => {
+    loadEdits();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const filteredDreRows = useMemo(() => filterTreeByLabel(dreRows, query), [query]);
 
@@ -80,30 +111,143 @@ export const DREPage: React.FC = () => {
     setExpanded((prev) => ({ ...prev, [id]: !prev[id] }));
   };
 
-  const renderCells = (cell: MonthCell, key: string, lastOfGroup: boolean) => (
-    <React.Fragment key={key}>
-      <td className={cn('min-w-[120px] px-3 py-2.5 text-right text-xs tabular-nums', cell.prev != null && cell.prev < 0 ? 'text-red-600' : 'text-slate-600')}>
-        <Money value={cell.prev} />
-      </td>
-      <td className={cn('min-w-[120px] px-3 py-2.5 text-right text-xs tabular-nums font-medium', cell.real != null && cell.real < 0 ? 'text-red-600' : 'text-slate-800')}>
-        <Money value={cell.real} />
-      </td>
-      <td
-        className={cn(
-          'min-w-[120px] px-3 py-2.5 text-right text-xs tabular-nums font-semibold',
-          lastOfGroup ? 'border-r border-slate-200' : 'border-r border-slate-100',
-          cell.dif == null ? 'text-slate-400' : cell.dif < 0 ? 'text-red-600' : cell.dif > 0 ? 'text-emerald-600' : 'text-slate-500'
-        )}
+  // Valor efetivo da célula: edição manual (se houver) senão o importado.
+  const effective = (row: DRERow, monthIndex: number): MonthCell => {
+    const base = row.values[monthIndex];
+    const prevEdit = edits[editKey(row.row, monthIndex + 1, 'prev')];
+    const realEdit = edits[editKey(row.row, monthIndex + 1, 'real')];
+    const prev = prevEdit ? prevEdit.value : base.prev;
+    const real = realEdit ? realEdit.value : base.real;
+    // Se alguma célula foi editada, a diferença é recalculada; senão vale a da planilha.
+    const dif = prevEdit || realEdit
+      ? (prev != null && real != null ? real - prev : null)
+      : base.dif;
+    return { prev, real, dif };
+  };
+
+  const totalOf = (row: DRERow): MonthCell => {
+    let prev: number | null = null;
+    let real: number | null = null;
+    for (let m = 0; m < 12; m++) {
+      const v = effective(row, m);
+      if (v.prev != null) prev = (prev ?? 0) + v.prev;
+      if (v.real != null) real = (real ?? 0) + v.real;
+    }
+    const dif = prev != null && real != null ? real - prev : null;
+    return { prev, real, dif };
+  };
+
+  const startCellEdit = (row: DRERow, monthIndex: number, field: 'prev' | 'real') => {
+    const current = effective(row, monthIndex)[field];
+    setEditingCell({ row: row.row, month: monthIndex + 1, field });
+    setEditingValue(current == null ? '' : String(current));
+  };
+
+  const saveCellEdit = async (row: DRERow) => {
+    if (savingCell || !editingCell) return;
+    const raw = editingValue.trim();
+    if (!raw) {
+      setEditingCell(null);
+      return;
+    }
+    const parsed = Number(raw.replace(/\./g, '').replace(',', '.'));
+    const parsedSimple = Number(raw.replace(',', '.'));
+    const value = Number.isFinite(parsedSimple) ? parsedSimple : parsed;
+    if (!Number.isFinite(value)) {
+      alert('Digite um valor numérico válido.');
+      return;
+    }
+    setSavingCell(true);
+    try {
+      const res = await fetch('/api/dre/cell', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          year: dreYear,
+          row_key: editingCell.row,
+          row_label: row.label,
+          month: editingCell.month,
+          field: editingCell.field,
+          value,
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        alert(json.error || 'Erro ao salvar a célula.');
+        return;
+      }
+      const saved = json.edit as CellEdit;
+      setEdits((prev) => ({ ...prev, [editKey(saved.row_key, saved.month, saved.field)]: saved }));
+      setEditingCell(null);
+    } catch (err: any) {
+      alert(err?.message || 'Erro inesperado ao salvar.');
+    } finally {
+      setSavingCell(false);
+    }
+  };
+
+  const renderEditableCell = (row: DRERow, monthIndex: number, field: 'prev' | 'real') => {
+    const isEditing =
+      editingCell?.row === row.row && editingCell.month === monthIndex + 1 && editingCell.field === field;
+    if (isEditing) {
+      return (
+        <input
+          autoFocus
+          type="text"
+          inputMode="decimal"
+          value={editingValue}
+          onChange={(e) => setEditingValue(e.target.value)}
+          onBlur={() => saveCellEdit(row)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') saveCellEdit(row);
+            if (e.key === 'Escape') setEditingCell(null);
+          }}
+          disabled={savingCell}
+          className="w-24 px-2 py-1 text-right text-xs bg-white border border-emerald-300 rounded-md"
+        />
+      );
+    }
+
+    const cell = effective(row, monthIndex);
+    const value = cell[field];
+    const campo = field === 'prev' ? 'Previsto' : 'Realizado';
+    const mes = `${MESES[monthIndex]}/${dreYear}`;
+    const edit = edits[editKey(row.row, monthIndex + 1, field)];
+    const base = row.values[monthIndex][field];
+    const meta = edit
+      ? valueTrace.dre.edited(
+          row.label,
+          campo,
+          mes,
+          edit.user_name || 'usuário não identificado',
+          formatWhen(edit.updated_at),
+          base == null ? '—' : formatCurrency(base)
+        )
+      : valueTrace.dre.imported(row.label, row.row, campo, mes, dreSource);
+
+    return (
+      <button
+        onClick={() => startCellEdit(row, monthIndex, field)}
+        className={cn('px-1 py-0.5 rounded hover:bg-emerald-50 transition-colors', edit && 'bg-amber-50/70')}
+        title="Clique para editar"
       >
-        <Money value={cell.dif} />
-      </td>
-    </React.Fragment>
-  );
+        <ValueTrace
+          className={cn(
+            'text-xs tabular-nums',
+            field === 'real' && 'font-medium',
+            value != null && value < 0 ? 'text-red-600' : field === 'real' ? 'text-slate-800' : 'text-slate-600'
+          )}
+          displayValue={value == null ? '—' : formatCurrency(value)}
+          meta={meta}
+        />
+      </button>
+    );
+  };
 
   const renderRow = (row: DRERow): React.ReactNode => {
     const hasChildren = Boolean(row.children?.length);
     const isExpanded = expanded[row.id];
-    const total = totalOf(row.values);
+    const total = totalOf(row);
 
     return (
       <React.Fragment key={row.id}>
@@ -127,8 +271,54 @@ export const DREPage: React.FC = () => {
             </div>
           </td>
 
-          {row.values.map((cell, monthIndex) => renderCells(cell, `${row.id}-${monthIndex}`, true))}
-          {renderCells(total, `${row.id}-total`, true)}
+          {MESES.map((_, monthIndex) => {
+            const cell = effective(row, monthIndex);
+            return (
+              <React.Fragment key={`${row.id}-${monthIndex}`}>
+                <td className="min-w-[120px] px-2 py-1.5 text-right">
+                  {renderEditableCell(row, monthIndex, 'prev')}
+                </td>
+                <td className="min-w-[120px] px-2 py-1.5 text-right">
+                  {renderEditableCell(row, monthIndex, 'real')}
+                </td>
+                <td className="min-w-[120px] px-3 py-1.5 text-right border-r border-slate-200">
+                  <ValueTrace
+                    className={cn(
+                      'text-xs tabular-nums font-semibold',
+                      cell.dif == null ? 'text-slate-400' : cell.dif < 0 ? 'text-red-600' : cell.dif > 0 ? 'text-emerald-600' : 'text-slate-500'
+                    )}
+                    displayValue={cell.dif == null ? '—' : formatCurrency(cell.dif)}
+                    meta={valueTrace.dre.diferenca(row.label, `${MESES[monthIndex]}/${dreYear}`)}
+                  />
+                </td>
+              </React.Fragment>
+            );
+          })}
+
+          <td className="min-w-[120px] px-3 py-1.5 text-right bg-slate-50/60">
+            <ValueTrace
+              className={cn('text-xs tabular-nums', total.prev != null && total.prev < 0 ? 'text-red-600' : 'text-slate-600')}
+              displayValue={total.prev == null ? '—' : formatCurrency(total.prev)}
+              meta={valueTrace.dre.total(row.label, 'Previsto')}
+            />
+          </td>
+          <td className="min-w-[120px] px-3 py-1.5 text-right bg-slate-50/60">
+            <ValueTrace
+              className={cn('text-xs tabular-nums font-medium', total.real != null && total.real < 0 ? 'text-red-600' : 'text-slate-800')}
+              displayValue={total.real == null ? '—' : formatCurrency(total.real)}
+              meta={valueTrace.dre.total(row.label, 'Realizado')}
+            />
+          </td>
+          <td className="min-w-[120px] px-3 py-1.5 text-right border-r border-slate-200 bg-slate-50/60">
+            <ValueTrace
+              className={cn(
+                'text-xs tabular-nums font-semibold',
+                total.dif == null ? 'text-slate-400' : total.dif < 0 ? 'text-red-600' : total.dif > 0 ? 'text-emerald-600' : 'text-slate-500'
+              )}
+              displayValue={total.dif == null ? '—' : formatCurrency(total.dif)}
+              meta={valueTrace.dre.total(row.label, 'Diferença')}
+            />
+          </td>
         </tr>
         {hasChildren && isExpanded && row.children?.map((child) => renderRow(child))}
       </React.Fragment>
@@ -141,7 +331,7 @@ export const DREPage: React.FC = () => {
         <div>
           <h2 className="text-2xl font-bold text-slate-900">DRE Gerencial</h2>
           <p className="text-sm text-slate-500">
-            Previsto x Realizado por mês, importado da planilha Prev x Real {dreYear}.
+            Previsto x Realizado por mês, importado da planilha Prev x Real {dreYear}. Clique em uma célula para editar; passe o mouse para ver a origem do valor.
           </p>
         </div>
         <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 shadow-sm">
@@ -149,6 +339,12 @@ export const DREPage: React.FC = () => {
           <span className="text-sm font-medium text-slate-600">{dreYear}</span>
         </div>
       </div>
+
+      {editsError && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          {editsError} Os valores exibidos são os importados da planilha; edições manuais ficarão disponíveis após resolver o aviso.
+        </div>
+      )}
 
       <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
         <div className="overflow-x-auto overflow-y-visible">
