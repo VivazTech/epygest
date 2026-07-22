@@ -8,7 +8,8 @@ export type ImportHistorySource =
   | "extrato_mensal"
   | "crds"
   | "orcamento"
-  | "ajustes";
+  | "ajustes"
+  | "rel_crd";
 
 export const IMPORT_SOURCE_LABELS: Record<ImportHistorySource, string> = {
   consumo_interno: "Consumo interno",
@@ -16,6 +17,7 @@ export const IMPORT_SOURCE_LABELS: Record<ImportHistorySource, string> = {
   crds: "CRDs",
   orcamento: "Orçamento",
   ajustes: "Ajustes",
+  rel_crd: "Rel. CRD",
 };
 
 export type ImportHistoryLogInput = {

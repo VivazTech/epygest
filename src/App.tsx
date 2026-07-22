@@ -22,6 +22,7 @@ import { PlanilhasPage } from './pages/Planilhas';
 import { PLANILHAS, APURACAO_RECEITA_ITENS, BASE_ORCAMENTO_ITENS, isApuracaoReceitaPlanilha, isBaseOrcamentoTab } from './lib/planilhas';
 import { FolhaPagamentoPage, MESES_FOLHA } from './pages/FolhaPagamento';
 import { FolhaApuracaoPage } from './pages/FolhaApuracao';
+import { RelatorioCrdPage, RelatorioCrdMesPage, MESES_REL_CRD } from './pages/RelatorioCrd';
 import { ComprasPage } from './pages/Compras';
 import { SearchProvider, useSearch } from './context/SearchContext';
 import { ToastProvider } from './context/ToastContext';
@@ -153,6 +154,19 @@ export default function App() {
 
     if (activeTab === 'folha-apuracao') {
       return <FolhaApuracaoPage />;
+    }
+
+    if (activeTab === 'rel-crd') {
+      if (!canAccessPlanilhas) return <Dashboard />;
+      return <RelatorioCrdPage onSelectMonth={(m) => setActiveTab(`rel-crd-${m}`)} />;
+    }
+
+    if (activeTab.startsWith('rel-crd-')) {
+      if (!canAccessPlanilhas) return <Dashboard />;
+      const mes = Number(activeTab.slice('rel-crd-'.length));
+      if (mes >= 1 && mes <= 12) {
+        return <RelatorioCrdMesPage key={mes} month={mes} />;
+      }
     }
 
     if (activeTab.startsWith('folha-')) {
@@ -338,6 +352,10 @@ function AppShell({
             <span className="text-slate-900 text-sm font-bold capitalize truncate">
               {isBaseOrcamentoTab(activeTab)
                 ? `Base de Orçamento / ${BASE_ORCAMENTO_ITENS.find((p) => p.tabId === activeTab)?.nome ?? ''}`
+                : activeTab === 'rel-crd'
+                ? 'Apuração de Resultados / Relatorio de CRD / Resumo'
+                : activeTab.startsWith('rel-crd-')
+                ? `Apuração de Resultados / Relatorio de CRD / ${MESES_REL_CRD[Number(activeTab.slice('rel-crd-'.length))] ?? ''}`
                 : activeTab.startsWith('planilha-') && isApuracaoReceitaPlanilha(Number(activeTab.slice('planilha-'.length)))
                 ? `Apuração de Receita / ${APURACAO_RECEITA_ITENS.find((p) => `planilha-${p.indice}` === activeTab)?.nome ?? ''}`
                 : activeTab === 'planilha-2'
@@ -388,7 +406,7 @@ function AppShell({
           />
         </div>
 
-        <div className={activeTab === 'notas' || activeTab === 'danfe' || activeTab === 'comandas' || activeTab === 'lancamentos-manuais' || activeTab === 'requisicoes' || activeTab === 'cadastros' || activeTab === 'sintase' || activeTab === 'prev-real' || activeTab === 'dre' || activeTab.startsWith('planilha-') || activeTab.startsWith('folha-') || activeTab === 'compras-ordem' ? 'p-8 pt-4 md:pt-8 w-full max-w-none' : 'p-8 pt-4 md:pt-8 max-w-7xl mx-auto'}>
+        <div className={activeTab === 'notas' || activeTab === 'danfe' || activeTab === 'comandas' || activeTab === 'lancamentos-manuais' || activeTab === 'requisicoes' || activeTab === 'cadastros' || activeTab === 'sintase' || activeTab === 'prev-real' || activeTab === 'dre' || activeTab === 'rel-crd' || activeTab.startsWith('rel-crd-') || activeTab.startsWith('planilha-') || activeTab.startsWith('folha-') || activeTab === 'compras-ordem' ? 'p-8 pt-4 md:pt-8 w-full max-w-none' : 'p-8 pt-4 md:pt-8 max-w-7xl mx-auto'}>
           {renderContent()}
         </div>
       </main>

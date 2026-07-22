@@ -29,6 +29,7 @@ export function filterTreeByLabel<T extends { label: string; children?: T[] }>(
 export function getSearchPlaceholder(activeTab: string): string {
   if (activeTab.startsWith('planilha-')) return 'Buscar na planilha...';
   if (activeTab === 'folha-apuracao') return 'Buscar rubrica, código ou descrição...';
+  if (activeTab === 'rel-crd' || activeTab.startsWith('rel-crd-')) return 'Buscar conta, código ou valor...';
   if (activeTab.startsWith('folha-')) return 'Buscar funcionário, cargo ou matrícula...';
 
   const map: Record<string, string> = {

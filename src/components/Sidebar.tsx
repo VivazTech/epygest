@@ -29,7 +29,7 @@ import {
   TrendingUp,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
-import { PLANILHAS_RESULTADOS, APURACAO_RECEITA_ITENS, BASE_ORCAMENTO_ITENS, isApuracaoReceitaPlanilha, isBaseOrcamentoPlanilha, isBaseOrcamentoTab } from '../lib/planilhas';
+import { PLANILHAS_RESULTADOS, APURACAO_RECEITA_ITENS, BASE_ORCAMENTO_ITENS, isApuracaoReceitaPlanilha, isBaseOrcamentoTab, isRelCrdTab, isApuracaoResultadosTab as checkApuracaoResultadosTab } from '../lib/planilhas';
 import logoIcon from '../../logoicon2.svg';
 
 const FOLHA_MESES = [
@@ -37,6 +37,7 @@ const FOLHA_MESES = [
   'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro',
 ];
 
+const REL_CRD_MESES = FOLHA_MESES;
 interface SidebarProps {
   activeTab: string;
   setActiveTab: (tab: string) => void;
@@ -104,16 +105,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const planilhaIndice = activeTab.startsWith('planilha-')
     ? Number(activeTab.slice('planilha-'.length))
     : NaN;
-  const isApuracaoResultadosTab =
-    activeTab.startsWith('planilha-') &&
-    !isApuracaoReceitaPlanilha(planilhaIndice) &&
-    !isBaseOrcamentoPlanilha(planilhaIndice);
+  const isApuracaoResultadosTab = checkApuracaoResultadosTab(activeTab);
   const isApuracaoReceitaTab =
     activeTab.startsWith('planilha-') && isApuracaoReceitaPlanilha(planilhaIndice);
   const isBaseOrcamentoActive = isBaseOrcamentoTab(activeTab);
+  const isRelCrdActive = isRelCrdTab(activeTab);
   const [planilhasExpanded, setPlanilhasExpanded] = React.useState(isApuracaoResultadosTab);
   const [receitaExpanded, setReceitaExpanded] = React.useState(isApuracaoReceitaTab);
   const [baseOrcamentoExpanded, setBaseOrcamentoExpanded] = React.useState(isBaseOrcamentoActive);
+  const [relCrdExpanded, setRelCrdExpanded] = React.useState(isRelCrdActive);
   const [folhaExpanded, setFolhaExpanded] = React.useState(
     activeTab.startsWith('folha-') || activeTab === 'folha-apuracao'
   );
@@ -135,10 +135,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
     if (isBaseOrcamentoActive) {
       setBaseOrcamentoExpanded(true);
     }
+    if (isRelCrdActive) {
+      setRelCrdExpanded(true);
+    }
     if (activeTab.startsWith('folha-') || activeTab === 'folha-apuracao') {
       setFolhaExpanded(true);
     }
-  }, [activeTab, constructionMenu, lancamentosGroupIds, isApuracaoResultadosTab, isApuracaoReceitaTab, isBaseOrcamentoActive]);
+  }, [activeTab, constructionMenu, lancamentosGroupIds, isApuracaoResultadosTab, isApuracaoReceitaTab, isBaseOrcamentoActive, isRelCrdActive]);
 
   return (
     <div className={cn(
@@ -375,28 +378,97 @@ export const Sidebar: React.FC<SidebarProps> = ({
               />
             </button>
 
-            {!collapsed && planilhasExpanded && PLANILHAS_RESULTADOS.map((planilha) => {
-              const tabId = `planilha-${planilha.indice}`;
-              return (
+            {!collapsed && planilhasExpanded && (
+              <>
+                {PLANILHAS_RESULTADOS.map((planilha) => {
+                  const tabId = `planilha-${planilha.indice}`;
+                  return (
+                    <button
+                      key={tabId}
+                      onClick={() => setActiveTab(tabId)}
+                      className={cn(
+                        "w-full flex items-center gap-3 pl-11 pr-4 py-2 rounded-xl transition-all duration-200 group",
+                        activeTab === tabId
+                          ? "bg-emerald-500 text-white shadow-lg shadow-emerald-900/20"
+                          : "text-white/70 hover:bg-white/5 hover:text-white"
+                      )}
+                      title={planilha.nome}
+                    >
+                      <Table2 className={cn(
+                        "w-4 h-4 min-w-4 min-h-4 shrink-0 transition-transform duration-200",
+                        activeTab === tabId ? "scale-110" : "group-hover:scale-110"
+                      )} />
+                      <span className="font-medium text-xs truncate text-left">{planilha.nome}</span>
+                    </button>
+                  );
+                })}
+
                 <button
-                  key={tabId}
-                  onClick={() => setActiveTab(tabId)}
+                  onClick={() => setRelCrdExpanded((prev) => !prev)}
                   className={cn(
                     "w-full flex items-center gap-3 pl-11 pr-4 py-2 rounded-xl transition-all duration-200 group",
-                    activeTab === tabId
-                      ? "bg-emerald-500 text-white shadow-lg shadow-emerald-900/20"
+                    isRelCrdActive
+                      ? "text-white bg-white/10"
                       : "text-white/70 hover:bg-white/5 hover:text-white"
                   )}
-                  title={planilha.nome}
                 >
-                  <Table2 className={cn(
+                  <FileCheck className={cn(
                     "w-4 h-4 min-w-4 min-h-4 shrink-0 transition-transform duration-200",
-                    activeTab === tabId ? "scale-110" : "group-hover:scale-110"
+                    isRelCrdActive ? "scale-110" : "group-hover:scale-110"
                   )} />
-                  <span className="font-medium text-xs truncate text-left">{planilha.nome}</span>
+                  <span className="font-medium text-xs truncate text-left flex-1">Relatorio de CRD</span>
+                  <ChevronDown
+                    className={cn(
+                      "w-3.5 h-3.5 transition-transform duration-200",
+                      relCrdExpanded && "rotate-180"
+                    )}
+                  />
                 </button>
-              );
-            })}
+
+                {relCrdExpanded && (
+                  <>
+                    <button
+                      onClick={() => setActiveTab('rel-crd')}
+                      className={cn(
+                        "w-full flex items-center gap-3 pl-14 pr-4 py-2 rounded-xl transition-all duration-200 group",
+                        activeTab === 'rel-crd'
+                          ? "bg-emerald-500 text-white shadow-lg shadow-emerald-900/20"
+                          : "text-white/70 hover:bg-white/5 hover:text-white"
+                      )}
+                    >
+                      <Calculator className={cn(
+                        "w-3.5 h-3.5 min-w-3.5 min-h-3.5 shrink-0",
+                        activeTab === 'rel-crd' ? "scale-110" : "group-hover:scale-110"
+                      )} />
+                      <span className="font-medium text-xs truncate text-left">Resumo</span>
+                    </button>
+                    {REL_CRD_MESES.map((mes, idx) => {
+                      const tabId = `rel-crd-${idx + 1}`;
+                      return (
+                        <button
+                          key={tabId}
+                          onClick={() => setActiveTab(tabId)}
+                          className={cn(
+                            "w-full flex items-center gap-3 pl-14 pr-4 py-1.5 rounded-xl transition-all duration-200 group",
+                            activeTab === tabId
+                              ? "bg-emerald-500 text-white shadow-lg shadow-emerald-900/20"
+                              : "text-white/60 hover:bg-white/5 hover:text-white"
+                          )}
+                        >
+                          <CalendarDays className={cn(
+                            "w-3.5 h-3.5 min-w-3.5 min-h-3.5 shrink-0",
+                            activeTab === tabId ? "scale-110" : "group-hover:scale-110"
+                          )} />
+                          <span className="font-medium text-[11px] truncate text-left">
+                            {String(idx + 1).padStart(2, '0')} · {mes}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </>
+                )}
+              </>
+            )}
           </div>
         )}
 

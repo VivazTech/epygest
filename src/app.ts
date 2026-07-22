@@ -3056,10 +3056,22 @@ export function createApp() {
   // IMPORTAÇÃO: REL. CRD — COMMIT
   // Grava a coluna "SALDO LANÇ." (saldo_lanc) em crd_realizado por conta,
   // aparecendo na coluna REAL. do Prev x Real MENSAL do mês importado.
+  // Também persiste as linhas completas em rel_crd_rows para o Relatorio de CRD.
   // ====================================================
   app.post("/api/import/rel-crd/commit", async (req, res) => {
     const { rows, month, year } = req.body as {
-      rows: { codigo: string; saldo_lanc?: number; lanc_liquido?: number }[];
+      rows: {
+        codigo: string;
+        nome?: string;
+        nivel?: number;
+        saldo_lanc?: number;
+        lanc_liquido?: number;
+        lancamentos?: number;
+        cancelamentos?: number;
+        baixas?: number;
+        estorno?: number;
+        baixas_liquido?: number;
+      }[];
       month: number;
       year: number;
     };
@@ -3078,30 +3090,180 @@ export function createApp() {
     }
 
     const upserts: { crd_id: number; year: number; month: number; source: string; value: number }[] = [];
+    const reportRows: Record<string, any>[] = [];
     const notFound: string[] = [];
     for (const row of rows) {
-      const crdId = codeToId.get(String(row.codigo ?? "").trim().toLowerCase());
-      if (!crdId) { notFound.push(row.codigo); continue; }
-      const value = Number(row.saldo_lanc ?? row.lanc_liquido ?? 0);
-      upserts.push({ crd_id: crdId, year: Number(year), month: Number(month), source: "rel_crd", value });
+      const codigo = String(row.codigo ?? "").trim();
+      const crdId = codeToId.get(codigo.toLowerCase()) ?? null;
+      if (!crdId) notFound.push(codigo);
+      const saldo = Number(row.saldo_lanc ?? row.lanc_liquido ?? 0);
+      if (crdId) {
+        upserts.push({
+          crd_id: crdId,
+          year: Number(year),
+          month: Number(month),
+          source: "rel_crd",
+          value: saldo,
+        });
+      }
+      reportRows.push({
+        year: Number(year),
+        month: Number(month),
+        nivel: Number(row.nivel) || 1,
+        codigo,
+        nome: String(row.nome ?? "").trim() || null,
+        lancamentos: Number(row.lancamentos) || 0,
+        cancelamentos: Number(row.cancelamentos) || 0,
+        saldo_lanc: saldo,
+        baixas: Number(row.baixas) || 0,
+        estorno: Number(row.estorno) || 0,
+        baixas_liquido: Number(row.baixas_liquido) || 0,
+        lanc_liquido: Number(row.lanc_liquido) || 0,
+        crd_id: crdId,
+      });
     }
 
-    if (!upserts.length) {
+    if (!reportRows.length) {
       return res.status(422).json({
-        error: `Nenhum código encontrado no cadastro de CRDs. Verifique se os códigos do relatório existem no sistema.`,
+        error: `Nenhuma linha válida para importar.`,
         not_found: notFound,
       });
     }
 
-    const { error: upsertErr } = await supabase
-      .from("crd_realizado")
-      .upsert(upserts, { onConflict: "crd_id,year,month,source" });
-    if (upsertErr) return res.status(500).json({ error: upsertErr.message });
+    // Substitui as linhas do mês (reimportação completa das contas enviadas).
+    const { error: delErr } = await supabase
+      .from("rel_crd_rows")
+      .delete()
+      .eq("year", Number(year))
+      .eq("month", Number(month));
+    if (delErr) {
+      console.error("rel_crd_rows delete (execute sql/13_rel_crd_rows.sql):", delErr);
+      return res.status(500).json({
+        error: "Tabela rel_crd_rows indisponível. Execute sql/13_rel_crd_rows.sql no Supabase.",
+        detail: delErr.message,
+      });
+    }
+
+    const { error: insertErr } = await supabase.from("rel_crd_rows").insert(reportRows);
+    if (insertErr) {
+      console.error("rel_crd_rows insert:", insertErr);
+      return res.status(500).json({ error: insertErr.message });
+    }
+
+    if (upserts.length) {
+      const { error: upsertErr } = await supabase
+        .from("crd_realizado")
+        .upsert(upserts, { onConflict: "crd_id,year,month,source" });
+      if (upsertErr) return res.status(500).json({ error: upsertErr.message });
+    }
+
+    try {
+      await logImportHistory({
+        source_type: "rel_crd",
+        file_name: `Rel. CRD ${month}/${year}`,
+        status: "success",
+        year: Number(year),
+        month: Number(month),
+        records_count: reportRows.length,
+        total_amount: reportRows.reduce((s, r) => s + Number(r.saldo_lanc || 0), 0),
+        summary: {
+          matched: upserts.length,
+          not_found: notFound,
+        },
+        user: (req as any).user,
+      });
+    } catch (e) {
+      console.error("Falha ao registrar histórico Rel. CRD:", e);
+    }
 
     res.json({
       success: true,
-      imported: upserts.length,
+      imported: reportRows.length,
+      matched: upserts.length,
       not_found: notFound,
+    });
+  });
+
+  // ====================================================
+  // RELATÓRIO DE CRD (consulta por competência)
+  // ====================================================
+  app.get("/api/rel-crd/competencias", requireRole("admin", "finance", "controle", "manager"), async (req, res) => {
+    const year = Number((req.query as { year?: string }).year) || new Date().getFullYear();
+    const { data, error } = await supabase
+      .from("rel_crd_rows")
+      .select("month, saldo_lanc, codigo")
+      .eq("year", year);
+    if (error) {
+      console.error(error);
+      return res.status(500).json({
+        error: "Não foi possível carregar competências. Execute sql/13_rel_crd_rows.sql se ainda não rodou.",
+      });
+    }
+
+    const byMonth = new Map<number, { contas: number; saldo_lanc: number }>();
+    for (let m = 1; m <= 12; m++) byMonth.set(m, { contas: 0, saldo_lanc: 0 });
+    for (const row of data ?? []) {
+      const m = Number((row as any).month);
+      const agg = byMonth.get(m);
+      if (!agg) continue;
+      agg.contas += 1;
+      agg.saldo_lanc += Number((row as any).saldo_lanc) || 0;
+    }
+
+    res.json({
+      year,
+      months: Array.from(byMonth.entries()).map(([month, agg]) => ({
+        month,
+        importado: agg.contas > 0,
+        contas: agg.contas,
+        saldo_lanc: agg.saldo_lanc,
+      })),
+    });
+  });
+
+  app.get("/api/rel-crd", requireRole("admin", "finance", "controle", "manager"), async (req, res) => {
+    const year = Number((req.query as { year?: string }).year) || new Date().getFullYear();
+    const month = Number((req.query as { month?: string }).month);
+    if (!month || month < 1 || month > 12) {
+      return res.status(400).json({ error: "Informe month (1-12)." });
+    }
+
+    const { data, error } = await supabase
+      .from("rel_crd_rows")
+      .select("*")
+      .eq("year", year)
+      .eq("month", month)
+      .order("nivel", { ascending: true })
+      .order("codigo", { ascending: true });
+
+    if (error) {
+      console.error(error);
+      return res.status(500).json({
+        error: "Não foi possível carregar o Relatorio de CRD. Execute sql/13_rel_crd_rows.sql se ainda não rodou.",
+      });
+    }
+
+    const rows = data ?? [];
+    const nivel1 = rows.filter((r: any) => Number(r.nivel) === 1);
+    const summaryBase = nivel1.length ? nivel1 : rows;
+
+    res.json({
+      year,
+      month,
+      rows,
+      summary: {
+        contas: rows.length,
+        grupos: nivel1.length,
+        total_lancamentos: summaryBase.reduce((s: number, r: any) => s + (Number(r.lancamentos) || 0), 0),
+        total_cancelamentos: summaryBase.reduce((s: number, r: any) => s + (Number(r.cancelamentos) || 0), 0),
+        total_saldo_lanc: summaryBase.reduce((s: number, r: any) => s + (Number(r.saldo_lanc) || 0), 0),
+        total_baixas: summaryBase.reduce((s: number, r: any) => s + (Number(r.baixas) || 0), 0),
+        total_estorno: summaryBase.reduce((s: number, r: any) => s + (Number(r.estorno) || 0), 0),
+        total_baixas_liquido: summaryBase.reduce((s: number, r: any) => s + (Number(r.baixas_liquido) || 0), 0),
+        total_lanc_liquido: summaryBase.reduce((s: number, r: any) => s + (Number(r.lanc_liquido) || 0), 0),
+        matched: rows.filter((r: any) => r.crd_id != null).length,
+        unmatched: rows.filter((r: any) => r.crd_id == null).length,
+      },
     });
   });
 

@@ -13,7 +13,6 @@ export const PLANILHAS: PlanilhaMeta[] = [
   { indice: 2, nome: 'Prev x Real 2026', arquivo: 'aba_002_Prev_x_Real_2026.json' },
   { indice: 3, nome: 'Ajustes', arquivo: 'aba_003_Ajustes.json' },
   { indice: 4, nome: 'Orçamento 2026', arquivo: 'aba_004_Or_amento_2026.json' },
-  { indice: 7, nome: 'Relatorio de CRD', arquivo: 'aba_007_RELAT_RIO_CRD_.json' },
   { indice: 12, nome: 'RDS', arquivo: 'aba_012_RDS.json' },
   { indice: 13, nome: 'Apoio RDS', arquivo: 'aba_013_Apoio_RDS.json' },
   { indice: 14, nome: 'Consumo Interno', arquivo: 'aba_014_Consumo_Interno.json' },
@@ -52,6 +51,15 @@ export const isBaseOrcamentoPlanilha = (indice: number) => BASE_ORCAMENTO_INDICE
 export const isBaseOrcamentoTab = (tab: string) =>
   tab === 'sintase' ||
   (tab.startsWith('planilha-') && isBaseOrcamentoPlanilha(Number(tab.slice('planilha-'.length))));
+
+export const isRelCrdTab = (tab: string) =>
+  tab === 'rel-crd' || /^rel-crd-\d+$/.test(tab);
+
+export const isApuracaoResultadosTab = (tab: string) =>
+  isRelCrdTab(tab) ||
+  (tab.startsWith('planilha-') &&
+    !isApuracaoReceitaPlanilha(Number(tab.slice('planilha-'.length))) &&
+    !isBaseOrcamentoPlanilha(Number(tab.slice('planilha-'.length))));
 
 const normalizeNome = (nome: string) =>
   nome.normalize('NFD').replace(/[̀-ͯ]/g, '').trim().toLowerCase();

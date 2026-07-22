@@ -71,6 +71,7 @@ const IMPORT_HISTORY_LABELS: Record<string, string> = {
   crds: 'CRDs',
   orcamento: 'Orçamento',
   ajustes: 'Ajustes',
+  rel_crd: 'Rel. CRD',
 };
 
 type ImportHistoryRow = {
@@ -695,7 +696,18 @@ export const ImportacaoPage: React.FC = () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          rows: targetRows.map((a) => ({ codigo: a.codigo, saldo_lanc: a.saldo_lanc })),
+          rows: targetRows.map((a) => ({
+            codigo: a.codigo,
+            nome: a.nome,
+            nivel: a.nivel,
+            saldo_lanc: a.saldo_lanc,
+            lancamentos: a.lancamentos,
+            cancelamentos: a.cancelamentos,
+            baixas: a.baixas,
+            estorno: a.estorno,
+            baixas_liquido: a.baixas_liquido,
+            lanc_liquido: a.lanc_liquido,
+          })),
           month: Number(relCrdImportMonth),
           year: Number(relCrdImportYear),
         }),
@@ -706,6 +718,11 @@ export const ImportacaoPage: React.FC = () => {
         return;
       }
       setRelCrdCommitResult({ imported: data.imported, not_found: data.not_found ?? [] });
+      const mesLabel = ['', 'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'][Number(relCrdImportMonth)] || relCrdImportMonth;
+      alert(
+        `${data.imported} conta(s) importada(s) para ${mesLabel}/${relCrdImportYear}.` +
+          `\n→ Prev x Real Mensal (REAL.) e Relatorio de CRD › ${mesLabel}.`
+      );
     } catch (err: any) {
       alert(err?.message || 'Erro inesperado ao importar.');
     } finally {
