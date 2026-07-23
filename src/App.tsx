@@ -24,6 +24,8 @@ import { FolhaPagamentoPage, MESES_FOLHA } from './pages/FolhaPagamento';
 import { FolhaApuracaoPage } from './pages/FolhaApuracao';
 import { RelatorioCrdPage, RelatorioCrdMesPage, MESES_REL_CRD } from './pages/RelatorioCrd';
 import { RelatorioRequisicoesPage, RelatorioRequisicoesMesPage, MESES_REL_REQ } from './pages/RelatorioRequisicoes';
+import { ConsumoInternoPage, ConsumoInternoMesPage, MESES_CONSUMO } from './pages/ConsumoInterno';
+import { RelatorioRdsPage, RelatorioRdsMesPage, MESES_RDS } from './pages/RelatorioRds';
 import { ComprasPage } from './pages/Compras';
 import { SearchProvider, useSearch } from './context/SearchContext';
 import { ToastProvider } from './context/ToastContext';
@@ -127,7 +129,7 @@ export default function App() {
   const getWhatsappSupportLink = () => {
     const errorText = loginError?.trim() ? loginError.trim() : 'Mensagem de erro';
     const message =
-      `Olá, preciso de ajuda para acessar o EpyGest.\n` +
+      `Olá, preciso de ajuda para acessar o Budget.\n` +
       `Estou com o seguinte erro: "${errorText}"`;
     return `https://wa.me/5545991070844?text=${encodeURIComponent(message)}`;
   };
@@ -183,6 +185,32 @@ export default function App() {
       }
     }
 
+    if (activeTab === 'rel-consumo') {
+      if (!canAccessPlanilhas) return <Dashboard />;
+      return <ConsumoInternoPage onSelectMonth={(m) => setActiveTab(`rel-consumo-${m}`)} />;
+    }
+
+    if (activeTab.startsWith('rel-consumo-')) {
+      if (!canAccessPlanilhas) return <Dashboard />;
+      const mes = Number(activeTab.slice('rel-consumo-'.length));
+      if (mes >= 1 && mes <= 12) {
+        return <ConsumoInternoMesPage key={mes} month={mes} />;
+      }
+    }
+
+    if (activeTab === 'rel-rds') {
+      if (!canAccessPlanilhas) return <Dashboard />;
+      return <RelatorioRdsPage onSelectMonth={(m) => setActiveTab(`rel-rds-${m}`)} />;
+    }
+
+    if (activeTab.startsWith('rel-rds-')) {
+      if (!canAccessPlanilhas) return <Dashboard />;
+      const mes = Number(activeTab.slice('rel-rds-'.length));
+      if (mes >= 1 && mes <= 12) {
+        return <RelatorioRdsMesPage key={mes} month={mes} />;
+      }
+    }
+
     if (activeTab.startsWith('folha-')) {
       const mes = Number(activeTab.slice('folha-'.length));
       if (mes >= 1 && mes <= 12) {
@@ -226,7 +254,7 @@ export default function App() {
         <div className="w-full max-w-md">
           <div className="bg-white border border-slate-100 rounded-2xl shadow-sm p-6 space-y-5">
             <div className="text-center">
-              <h1 className="text-2xl font-bold text-slate-900">EpyGest</h1>
+              <h1 className="text-2xl font-bold text-slate-900">Budget</h1>
               <p className="text-sm text-slate-500 mt-1">Acesse sua conta para entrar no sistema.</p>
             </div>
 
@@ -361,7 +389,7 @@ function AppShell({
           <main className={sidebarCollapsed ? 'pl-20 min-h-screen' : 'pl-64 min-h-screen'}>
         <header className="h-20 bg-white/80 backdrop-blur-md border-b border-slate-100 flex items-center gap-4 px-8 sticky top-0 z-40">
           <div className="flex items-center gap-2 min-w-0 shrink-0">
-            <span className="text-slate-400 text-sm font-medium">EpyGest</span>
+            <span className="text-slate-400 text-sm font-medium">Budget</span>
             <span className="text-slate-300">/</span>
             <span className="text-slate-900 text-sm font-bold capitalize truncate">
               {isBaseOrcamentoTab(activeTab)
@@ -371,9 +399,17 @@ function AppShell({
                 : activeTab.startsWith('rel-crd-')
                 ? `Apuração de Resultados / Relatorio de CRD / ${MESES_REL_CRD[Number(activeTab.slice('rel-crd-'.length))] ?? ''}`
                 : activeTab === 'rel-req'
-                ? 'Apuração de Resultados / Requisições / Resumo'
+                ? 'Apuração de Resultados / Requisição Sintética / Resumo'
                 : activeTab.startsWith('rel-req-')
-                ? `Apuração de Resultados / Requisições / ${MESES_REL_REQ[Number(activeTab.slice('rel-req-'.length))] ?? ''}`
+                ? `Apuração de Resultados / Requisição Sintética / ${MESES_REL_REQ[Number(activeTab.slice('rel-req-'.length))] ?? ''}`
+                : activeTab === 'rel-consumo'
+                ? 'Apuração de Resultados / Consumo interno / Resumo'
+                : activeTab.startsWith('rel-consumo-')
+                ? `Apuração de Resultados / Consumo interno / ${MESES_CONSUMO[Number(activeTab.slice('rel-consumo-'.length))] ?? ''}`
+                : activeTab === 'rel-rds'
+                ? 'Apuração de Receita / Relatório Diário de Situação / Resumo'
+                : activeTab.startsWith('rel-rds-')
+                ? `Apuração de Receita / Relatório Diário de Situação / ${MESES_RDS[Number(activeTab.slice('rel-rds-'.length))] ?? ''}`
                 : activeTab.startsWith('planilha-') && isApuracaoReceitaPlanilha(Number(activeTab.slice('planilha-'.length)))
                 ? `Apuração de Receita / ${APURACAO_RECEITA_ITENS.find((p) => `planilha-${p.indice}` === activeTab)?.nome ?? ''}`
                 : activeTab === 'planilha-2'
@@ -424,7 +460,7 @@ function AppShell({
           />
         </div>
 
-        <div className={activeTab === 'notas' || activeTab === 'danfe' || activeTab === 'comandas' || activeTab === 'lancamentos-manuais' || activeTab === 'requisicoes' || activeTab === 'cadastros' || activeTab === 'sintase' || activeTab === 'prev-real' || activeTab === 'dre' || activeTab === 'rel-crd' || activeTab.startsWith('rel-crd-') || activeTab.startsWith('planilha-') || activeTab.startsWith('folha-') || activeTab === 'compras-ordem' ? 'p-8 pt-4 md:pt-8 w-full max-w-none' : 'p-8 pt-4 md:pt-8 max-w-7xl mx-auto'}>
+        <div className={activeTab === 'notas' || activeTab === 'danfe' || activeTab === 'comandas' || activeTab === 'lancamentos-manuais' || activeTab === 'requisicoes' || activeTab === 'cadastros' || activeTab === 'sintase' || activeTab === 'prev-real' || activeTab === 'dre' || activeTab === 'rel-crd' || activeTab.startsWith('rel-crd-') || activeTab === 'rel-req' || activeTab.startsWith('rel-req-') || activeTab === 'rel-consumo' || activeTab.startsWith('rel-consumo-') || activeTab === 'rel-rds' || activeTab.startsWith('rel-rds-') || activeTab.startsWith('planilha-') || activeTab.startsWith('folha-') || activeTab === 'compras-ordem' ? 'p-8 pt-4 md:pt-8 w-full max-w-none' : 'p-8 pt-4 md:pt-8 max-w-7xl mx-auto'}>
           {renderContent()}
         </div>
       </main>

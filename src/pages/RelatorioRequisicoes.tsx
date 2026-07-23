@@ -89,7 +89,7 @@ export const RelatorioRequisicoesPage: React.FC<RelatorioRequisicoesPageProps> =
     <div className="space-y-6 animate-in fade-in duration-500">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-bold text-slate-900">Requisições</h2>
+          <h2 className="text-2xl font-bold text-slate-900">Requisição Sintética</h2>
           <p className="text-sm text-slate-500">
             Resumo das competências importadas em Importação › Requisições Sintética por Grupo de Itens.
           </p>
@@ -267,7 +267,7 @@ export const RelatorioRequisicoesMesPage: React.FC<RelatorioRequisicoesMesPagePr
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h2 className="text-2xl font-bold text-slate-900">
-            Requisições — {MESES_REL_REQ[month]}/{year}
+            Requisição Sintética — {MESES_REL_REQ[month]}/{year}
           </h2>
           <p className="text-sm text-slate-500">
             Requisições por setor e grupo de itens importadas do relatório Requisições Sintética.

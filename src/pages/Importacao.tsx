@@ -73,6 +73,7 @@ const IMPORT_HISTORY_LABELS: Record<string, string> = {
   ajustes: 'Ajustes',
   rel_crd: 'Rel. CRD',
   requisicoes_sintetica: 'Requisições Sintética',
+  rds: 'Relatório Diário de Situação',
 };
 
 type ImportHistoryRow = {
@@ -384,7 +385,8 @@ export const ImportacaoPage: React.FC = () => {
         return;
       }
       setConsumoCommitMsg(
-        `Enviado: ${formatCurrency(data.total)} → ${data.destino.setor} › ${data.destino.conta} › Real de ${periodoLabel(data.period)}.`
+        `Enviado: ${formatCurrency(data.total)} → Prev x Real › ${data.destino.setor} › ${data.destino.conta} › Real` +
+          ` e Apuração de Resultados › Consumo interno › ${periodoLabel(data.period)}.`
       );
       loadImportHistory();
     } finally {
@@ -546,13 +548,18 @@ export const ImportacaoPage: React.FC = () => {
     }
   };
 
-  // Estado da pré-visualização do RDS (somente exibição — destino ainda não definido).
+  // Estado da pré-visualização do RDS.
   const [rdsLoading, setRdsLoading] = useState(false);
   const [rdsFileName, setRdsFileName] = useState('');
   const [rdsError, setRdsError] = useState('');
   const [rdsDate, setRdsDate] = useState('');
   const [rdsSections, setRdsSections] = useState<RdsSection[]>([]);
   const [rdsPrevisaoSemana, setRdsPrevisaoSemana] = useState<RdsWeekRow[]>([]);
+  const [rdsFile, setRdsFile] = useState<File | null>(null);
+  const [rdsMonth, setRdsMonth] = useState('');
+  const [rdsYear, setRdsYear] = useState(String(new Date().getFullYear()));
+  const [rdsCommitting, setRdsCommitting] = useState(false);
+  const [rdsCommitMsg, setRdsCommitMsg] = useState('');
 
   const uploadRds = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -560,6 +567,8 @@ export const ImportacaoPage: React.FC = () => {
     setRdsLoading(true);
     setRdsError('');
     setRdsFileName(file.name);
+    setRdsFile(file);
+    setRdsCommitMsg('');
     try {
       const formData = new FormData();
       formData.append('rds_file', file);
@@ -575,11 +584,45 @@ export const ImportacaoPage: React.FC = () => {
       setRdsDate(data.date || '');
       setRdsSections(Array.isArray(data.sections) ? data.sections : []);
       setRdsPrevisaoSemana(Array.isArray(data.previsao_semana) ? data.previsao_semana : []);
+      if (data.period?.month) setRdsMonth(String(data.period.month));
+      if (data.period?.year) setRdsYear(String(data.period.year));
     } catch (err: any) {
       setRdsError(err?.message || 'Erro inesperado ao importar o arquivo.');
     } finally {
       setRdsLoading(false);
       event.target.value = '';
+    }
+  };
+
+  const commitRds = async () => {
+    if (rdsCommitting || !rdsFile) return;
+    const mes = Number(rdsMonth);
+    const ano = Number(rdsYear);
+    if (!mes || mes < 1 || mes > 12 || !ano) {
+      alert('Selecione o mês e o ano para enviar à Apuração de Receita.');
+      return;
+    }
+    setRdsCommitting(true);
+    setRdsCommitMsg('');
+    const formData = new FormData();
+    formData.append('rds_file', rdsFile);
+    formData.append('month', String(mes));
+    formData.append('year', String(ano));
+    try {
+      const res = await fetch('/api/import/rds/commit', { method: 'POST', body: formData });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        alert(formatApiError(data, 'Falha ao enviar o RDS.'));
+        return;
+      }
+      setRdsCommitMsg(
+        `Enviado: ${data.items_count ?? 0} item(ns) em ${data.sections_count ?? 0} seção(ões)` +
+          ` → Apuração de Receita › Relatório Diário de Situação › ${periodoLabel({ month: mes, year: ano })}.` +
+          ` As planilhas Relatório de RDS e Apoio RDS permanecem disponíveis.`
+      );
+      loadImportHistory();
+    } finally {
+      setRdsCommitting(false);
     }
   };
 
@@ -643,7 +686,7 @@ export const ImportacaoPage: React.FC = () => {
     });
   };
 
-  // Envia as requisições do preview para a competência escolhida (Apuração de Resultados › Requisições).
+  // Envia as requisições do preview para a competência escolhida (Apuração de Resultados › Requisição Sintética).
   const commitRequisicoes = async () => {
     if (reqCommitting || !requisicoesSetores.length) return;
     setReqCommitting(true);
@@ -677,7 +720,7 @@ export const ImportacaoPage: React.FC = () => {
       const mesLabel = ['', 'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'][Number(reqImportMonth)] || reqImportMonth;
       alert(
         `${data.imported ?? 0} grupo(s) importado(s) para ${mesLabel}/${reqImportYear}.` +
-          `\n→ Apuração de Resultados › Requisições › ${mesLabel}.`
+          `\n→ Apuração de Resultados › Requisição Sintética › ${mesLabel}.`
       );
     } catch (err: any) {
       alert(err?.message || 'Erro inesperado ao importar.');
@@ -1270,7 +1313,9 @@ export const ImportacaoPage: React.FC = () => {
                   Total a enviar: <span className="font-bold text-slate-900">{formatCurrency(consumoSummary.total_liquido)}</span>
                 </p>
                 <p className="text-[11px] text-slate-500">
-                  Destino: Prev x Real › <b>{consumoDestino?.setor ?? 'Controle'}</b> › <b>{consumoDestino?.conta ?? 'CONSUMO INTERNO (SEM CRD)'}</b> › Real
+                  Destinos: Prev x Real › <b>{consumoDestino?.setor ?? 'Controle'}</b> › <b>{consumoDestino?.conta ?? 'CONSUMO INTERNO (SEM CRD)'}</b> › Real
+                  {' · '}
+                  Apuração de Resultados › <b>Consumo interno</b> › mês detectado
                 </p>
                 {consumoCommitMsg && (
                   <p className="text-[11px] font-semibold text-emerald-700 inline-flex items-center gap-1">
@@ -1941,11 +1986,67 @@ export const ImportacaoPage: React.FC = () => {
             </div>
           )}
 
+          {rdsSections.length > 0 && !rdsError && (
+            <div className="px-4 py-3 border-b border-slate-100 bg-slate-50/60 flex flex-wrap items-center justify-between gap-3">
+              <div className="text-xs text-slate-600 space-y-1">
+                <p>
+                  {rdsDate ? (
+                    <>Data do relatório: <span className="font-bold text-slate-900">{rdsDate}</span></>
+                  ) : (
+                    <span className="text-amber-700 font-semibold inline-flex items-center gap-1">
+                      <AlertTriangle className="w-3.5 h-3.5" /> Data não detectada — selecione o mês manualmente.
+                    </span>
+                  )}
+                </p>
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] text-slate-500">Enviar para o mês:</span>
+                  <select
+                    value={rdsMonth}
+                    onChange={(e) => setRdsMonth(e.target.value)}
+                    className={`px-2 py-1.5 bg-white border rounded-lg text-xs ${rdsMonth ? 'border-slate-200' : 'border-amber-400'}`}
+                  >
+                    <option value="">Selecione o mês…</option>
+                    {MESES.slice(1).map((m, i) => (
+                      <option key={i + 1} value={String(i + 1)}>{String(i + 1).padStart(2, '0')} · {m}</option>
+                    ))}
+                  </select>
+                  <input
+                    type="number"
+                    min={2000}
+                    max={2100}
+                    value={rdsYear}
+                    onChange={(e) => setRdsYear(e.target.value)}
+                    className="w-20 px-2 py-1.5 bg-white border border-slate-200 rounded-lg text-xs"
+                  />
+                </div>
+                <p className="text-[11px] text-slate-500">
+                  Destino: Apuração de Receita › <b>Relatório Diário de Situação</b>
+                  {' · '}
+                  Planilhas <b>Relatório de RDS</b> e <b>Apoio RDS</b> permanecem nesta seção.
+                </p>
+                {rdsCommitMsg && (
+                  <p className="text-[11px] font-semibold text-emerald-700 inline-flex items-center gap-1">
+                    <CheckCircle2 className="w-3.5 h-3.5" /> {rdsCommitMsg}
+                  </p>
+                )}
+              </div>
+              <button
+                onClick={commitRds}
+                disabled={rdsCommitting || !rdsMonth}
+                title={!rdsMonth ? 'Selecione o mês para enviar' : 'Envia o RDS para Apuração de Receita'}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-[#004D40] text-white text-sm font-bold hover:bg-[#003d33] disabled:opacity-60 transition-colors"
+              >
+                {rdsCommitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowRightCircle className="w-4 h-4" />}
+                {rdsCommitting ? 'Enviando...' : 'Enviar para Apuração de Receita'}
+              </button>
+            </div>
+          )}
+
           {rdsSections.length > 0 && (
             <div className="p-4 space-y-6">
               <p className="text-xs text-slate-500">
-                Relatório completo extraído (todas as seções e linhas). O destino de lançamento ainda não foi
-                definido — os valores ficam disponíveis aqui para decisão posterior.
+                Pré-visualização do relatório. Ao enviar, o snapshot do mês substitui o conteúdo anterior
+                em Apuração de Receita › Relatório Diário de Situação.
               </p>
               {rdsSections.map((section) => (
                 <div key={section.key} className="space-y-2">
@@ -2077,7 +2178,7 @@ export const ImportacaoPage: React.FC = () => {
             {reqCommitResult && (
               <div className="px-4 py-2 text-xs bg-emerald-50 border-b border-emerald-100 flex items-center gap-1 text-emerald-700 font-semibold">
                 <CheckCircle2 className="w-4 h-4" />
-                {reqCommitResult.imported} grupo(s) enviado(s) para Apuração de Resultados › Requisições.
+                {reqCommitResult.imported} grupo(s) enviado(s) para Apuração de Resultados › Requisição Sintética.
               </div>
             )}
 
@@ -2106,7 +2207,7 @@ export const ImportacaoPage: React.FC = () => {
                       ))}
                     </select>
                     <span className="text-slate-400">·</span>
-                    <span>Destino: Apuração de Resultados › Requisições (substitui o mês)</span>
+                    <span>Destino: Apuração de Resultados › Requisição Sintética (substitui o mês)</span>
                   </div>
                   <button
                     onClick={() => commitRequisicoes()}

@@ -58,9 +58,20 @@ export const isRelCrdTab = (tab: string) =>
 export const isRelReqTab = (tab: string) =>
   tab === 'rel-req' || /^rel-req-\d+$/.test(tab);
 
+export const isConsumoInternoTab = (tab: string) =>
+  tab === 'rel-consumo' || /^rel-consumo-\d+$/.test(tab);
+
+export const isRdsTab = (tab: string) =>
+  tab === 'rel-rds' || /^rel-rds-\d+$/.test(tab);
+
+export const isApuracaoReceitaTab = (tab: string) =>
+  isRdsTab(tab) ||
+  (tab.startsWith('planilha-') && isApuracaoReceitaPlanilha(Number(tab.slice('planilha-'.length))));
+
 export const isApuracaoResultadosTab = (tab: string) =>
   isRelCrdTab(tab) ||
   isRelReqTab(tab) ||
+  isConsumoInternoTab(tab) ||
   (tab.startsWith('planilha-') &&
     !isApuracaoReceitaPlanilha(Number(tab.slice('planilha-'.length))) &&
     !isBaseOrcamentoPlanilha(Number(tab.slice('planilha-'.length))));

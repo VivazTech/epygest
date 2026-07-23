@@ -22,6 +22,9 @@ type RelCrdRow = {
   baixas_liquido: number;
   lanc_liquido: number;
   crd_id?: number | null;
+  previsto?: number | null;
+  estourada?: boolean;
+  valor_estouro?: number;
 };
 
 type RelCrdSummary = {
@@ -36,6 +39,8 @@ type RelCrdSummary = {
   total_lanc_liquido: number;
   matched: number;
   unmatched: number;
+  linhas_estouradas: number;
+  valor_estourado: number;
 };
 
 type Competencia = {
@@ -220,6 +225,7 @@ export const RelatorioCrdMesPage: React.FC<RelatorioCrdMesPageProps> = ({ month 
   const [error, setError] = useState('');
   const [rows, setRows] = useState<RelCrdRow[]>([]);
   const [summary, setSummary] = useState<RelCrdSummary | null>(null);
+  const [onlyEstouradas, setOnlyEstouradas] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -244,13 +250,13 @@ export const RelatorioCrdMesPage: React.FC<RelatorioCrdMesPageProps> = ({ month 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [year, month]);
 
-  const visibleRows = useMemo(
-    () =>
-      rows.filter((r) =>
-        matchesSearch(query, r.codigo, r.nome, r.saldo_lanc, r.lanc_liquido, r.lancamentos)
-      ),
-    [rows, query]
-  );
+  const visibleRows = useMemo(() => {
+    let list = rows.filter((r) =>
+      matchesSearch(query, r.codigo, r.nome, r.saldo_lanc, r.lanc_liquido, r.lancamentos)
+    );
+    if (onlyEstouradas) list = list.filter((r) => r.estourada);
+    return list;
+  }, [rows, query, onlyEstouradas]);
 
   const cards = summary
     ? [
@@ -262,6 +268,18 @@ export const RelatorioCrdMesPage: React.FC<RelatorioCrdMesPageProps> = ({ month 
         { label: 'Lanç. líquido', value: summary.total_lanc_liquido },
         { label: 'CRDs vinculados', value: summary.matched, currency: false },
         { label: 'Sem cadastro', value: summary.unmatched, currency: false },
+        {
+          label: 'Linhas estouradas',
+          value: summary.linhas_estouradas ?? 0,
+          currency: false,
+          highlight: (summary.linhas_estouradas ?? 0) > 0,
+          clickable: true,
+        },
+        {
+          label: 'Valor estourado',
+          value: summary.valor_estourado ?? 0,
+          highlight: (summary.valor_estourado ?? 0) > 0,
+        },
       ]
     : [];
 
@@ -306,23 +324,64 @@ export const RelatorioCrdMesPage: React.FC<RelatorioCrdMesPageProps> = ({ month 
 
       {cards.length > 0 && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          {cards.map((card) => (
-            <div key={card.label} className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4">
-              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{card.label}</p>
-              <p className="text-lg font-extrabold text-slate-900 mt-1">
-                {card.currency === false ? card.value : formatCurrency(Number(card.value) || 0)}
-              </p>
-            </div>
-          ))}
+          {cards.map((card) => {
+            const isClickable = Boolean((card as { clickable?: boolean }).clickable);
+            const highlight = Boolean((card as { highlight?: boolean }).highlight);
+            const active = isClickable && onlyEstouradas;
+            const className = cn(
+              'bg-white rounded-2xl border shadow-sm p-4 text-left transition-colors w-full',
+              highlight || active
+                ? 'border-red-200 bg-red-50/60'
+                : 'border-slate-100',
+              isClickable && 'hover:border-red-300 cursor-pointer',
+              active && 'ring-2 ring-red-300'
+            );
+            const body = (
+              <>
+                <p className={cn(
+                  'text-[10px] font-bold uppercase tracking-widest',
+                  highlight || active ? 'text-red-500' : 'text-slate-400'
+                )}>
+                  {card.label}
+                  {isClickable && (
+                    <span className="ml-1 font-semibold normal-case tracking-normal text-[10px] text-red-400">
+                      {onlyEstouradas ? '(filtro on)' : '(clique)'}
+                    </span>
+                  )}
+                </p>
+                <p className={cn(
+                  'text-lg font-extrabold mt-1',
+                  highlight || active ? 'text-red-700' : 'text-slate-900'
+                )}>
+                  {card.currency === false ? card.value : formatCurrency(Number(card.value) || 0)}
+                </p>
+              </>
+            );
+            return isClickable ? (
+              <button
+                key={card.label}
+                type="button"
+                onClick={() => setOnlyEstouradas((v) => !v)}
+                className={className}
+              >
+                {body}
+              </button>
+            ) : (
+              <div key={card.label} className={className}>
+                {body}
+              </div>
+            );
+          })}
         </div>
       )}
 
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-x-auto">
-        <table className="w-full text-left border-collapse min-w-[960px]">
+        <table className="w-full text-left border-collapse min-w-[1100px]">
           <thead>
             <tr className="bg-slate-50/50">
               <th className="px-4 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Código</th>
               <th className="px-4 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Conta</th>
+              <th className="px-4 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-right">Previsto</th>
               <th className="px-4 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-right">Lançamentos</th>
               <th className="px-4 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-right">Cancel.</th>
               <th className="px-4 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-right">Saldo lanç.</th>
@@ -335,7 +394,7 @@ export const RelatorioCrdMesPage: React.FC<RelatorioCrdMesPageProps> = ({ month 
           <tbody className="divide-y divide-slate-50">
             {loading && rows.length === 0 && (
               <tr>
-                <td colSpan={9} className="px-4 py-10 text-center text-sm text-slate-400">
+                <td colSpan={10} className="px-4 py-10 text-center text-sm text-slate-400">
                   <span className="inline-flex items-center gap-2">
                     <Loader2 className="w-4 h-4 animate-spin" /> Carregando...
                   </span>
@@ -344,8 +403,10 @@ export const RelatorioCrdMesPage: React.FC<RelatorioCrdMesPageProps> = ({ month 
             )}
             {!loading && visibleRows.length === 0 && (
               <tr>
-                <td colSpan={9} className="px-4 py-10 text-center text-sm text-slate-400">
-                  Nenhuma conta importada para {MESES_REL_CRD[month]}/{year}. Importe em Importação › Rel. CRD.
+                <td colSpan={10} className="px-4 py-10 text-center text-sm text-slate-400">
+                  {onlyEstouradas
+                    ? `Nenhuma linha estourada em ${MESES_REL_CRD[month]}/${year}.`
+                    : `Nenhuma conta importada para ${MESES_REL_CRD[month]}/${year}. Importe em Importação › Rel. CRD.`}
                 </td>
               </tr>
             )}
@@ -356,7 +417,8 @@ export const RelatorioCrdMesPage: React.FC<RelatorioCrdMesPageProps> = ({ month 
                   'hover:bg-slate-50/60',
                   row.nivel === 1 && 'bg-slate-100/80 font-bold',
                   row.nivel === 2 && 'bg-slate-50/40',
-                  row.crd_id == null && 'opacity-80'
+                  row.crd_id == null && 'opacity-80',
+                  row.estourada && 'bg-red-50/80'
                 )}
               >
                 <td className="px-4 py-2.5 text-xs tabular-nums text-slate-700">
@@ -364,11 +426,22 @@ export const RelatorioCrdMesPage: React.FC<RelatorioCrdMesPageProps> = ({ month 
                   {row.crd_id == null && (
                     <span className="ml-2 text-[10px] font-bold uppercase text-amber-600">sem CRD</span>
                   )}
+                  {row.estourada && (
+                    <span className="ml-2 text-[10px] font-bold uppercase text-red-600">estourada</span>
+                  )}
                 </td>
                 <td className="px-4 py-2.5 text-xs text-slate-800">{row.nome || '—'}</td>
+                <td className="px-4 py-2.5 text-xs text-right tabular-nums text-slate-500">
+                  {row.previsto == null ? '—' : formatCurrency(row.previsto)}
+                </td>
                 <td className="px-4 py-2.5 text-xs text-right tabular-nums">{formatCurrency(row.lancamentos)}</td>
                 <td className="px-4 py-2.5 text-xs text-right tabular-nums text-slate-500">{formatCurrency(row.cancelamentos)}</td>
-                <td className="px-4 py-2.5 text-xs text-right tabular-nums font-semibold">{formatCurrency(row.saldo_lanc)}</td>
+                <td className={cn(
+                  'px-4 py-2.5 text-xs text-right tabular-nums font-semibold',
+                  row.estourada ? 'text-red-700' : 'text-slate-900'
+                )}>
+                  {formatCurrency(row.saldo_lanc)}
+                </td>
                 <td className="px-4 py-2.5 text-xs text-right tabular-nums">{formatCurrency(row.baixas)}</td>
                 <td className="px-4 py-2.5 text-xs text-right tabular-nums text-slate-500">{formatCurrency(row.estorno)}</td>
                 <td className="px-4 py-2.5 text-xs text-right tabular-nums">{formatCurrency(row.baixas_liquido)}</td>

@@ -27,9 +27,10 @@ import {
   ShoppingCart,
   FileCheck,
   TrendingUp,
+  Boxes,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
-import { PLANILHAS_RESULTADOS, APURACAO_RECEITA_ITENS, BASE_ORCAMENTO_ITENS, isApuracaoReceitaPlanilha, isBaseOrcamentoTab, isRelCrdTab, isRelReqTab, isApuracaoResultadosTab as checkApuracaoResultadosTab } from '../lib/planilhas';
+import { PLANILHAS_RESULTADOS, APURACAO_RECEITA_ITENS, BASE_ORCAMENTO_ITENS, isBaseOrcamentoTab, isRelCrdTab, isRelReqTab, isConsumoInternoTab, isRdsTab, isApuracaoReceitaTab as checkApuracaoReceitaTab, isApuracaoResultadosTab as checkApuracaoResultadosTab } from '../lib/planilhas';
 import logoIcon from '../../logoicon2.svg';
 
 const FOLHA_MESES = [
@@ -102,20 +103,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [lancamentosExpanded, setLancamentosExpanded] = React.useState(
     lancamentosGroupIds.includes(activeTab)
   );
-  const planilhaIndice = activeTab.startsWith('planilha-')
-    ? Number(activeTab.slice('planilha-'.length))
-    : NaN;
   const isApuracaoResultadosTab = checkApuracaoResultadosTab(activeTab);
-  const isApuracaoReceitaTab =
-    activeTab.startsWith('planilha-') && isApuracaoReceitaPlanilha(planilhaIndice);
+  const isApuracaoReceitaTab = checkApuracaoReceitaTab(activeTab);
   const isBaseOrcamentoActive = isBaseOrcamentoTab(activeTab);
   const isRelCrdActive = isRelCrdTab(activeTab);
   const isRelReqActive = isRelReqTab(activeTab);
+  const isConsumoActive = isConsumoInternoTab(activeTab);
+  const isRdsActive = isRdsTab(activeTab);
   const [planilhasExpanded, setPlanilhasExpanded] = React.useState(isApuracaoResultadosTab);
   const [receitaExpanded, setReceitaExpanded] = React.useState(isApuracaoReceitaTab);
   const [baseOrcamentoExpanded, setBaseOrcamentoExpanded] = React.useState(isBaseOrcamentoActive);
   const [relCrdExpanded, setRelCrdExpanded] = React.useState(isRelCrdActive);
   const [relReqExpanded, setRelReqExpanded] = React.useState(isRelReqActive);
+  const [consumoExpanded, setConsumoExpanded] = React.useState(isConsumoActive);
+  const [rdsExpanded, setRdsExpanded] = React.useState(isRdsActive);
   const [folhaExpanded, setFolhaExpanded] = React.useState(
     activeTab.startsWith('folha-') || activeTab === 'folha-apuracao'
   );
@@ -143,10 +144,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
     if (isRelReqActive) {
       setRelReqExpanded(true);
     }
+    if (isConsumoActive) {
+      setConsumoExpanded(true);
+    }
+    if (isRdsActive) {
+      setRdsExpanded(true);
+      setReceitaExpanded(true);
+    }
     if (activeTab.startsWith('folha-') || activeTab === 'folha-apuracao') {
       setFolhaExpanded(true);
     }
-  }, [activeTab, constructionMenu, lancamentosGroupIds, isApuracaoResultadosTab, isApuracaoReceitaTab, isBaseOrcamentoActive, isRelCrdActive, isRelReqActive]);
+  }, [activeTab, constructionMenu, lancamentosGroupIds, isApuracaoResultadosTab, isApuracaoReceitaTab, isBaseOrcamentoActive, isRelCrdActive, isRelReqActive, isConsumoActive, isRdsActive]);
 
   return (
     <div className={cn(
@@ -486,7 +494,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     "w-4 h-4 min-w-4 min-h-4 shrink-0 transition-transform duration-200",
                     isRelReqActive ? "scale-110" : "group-hover:scale-110"
                   )} />
-                  <span className="font-medium text-xs truncate text-left flex-1">Requisições</span>
+                  <span className="font-medium text-xs truncate text-left flex-1">Requisição Sintética</span>
                   <ChevronDown
                     className={cn(
                       "w-3.5 h-3.5 transition-transform duration-200",
@@ -514,6 +522,71 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     </button>
                     {REL_CRD_MESES.map((mes, idx) => {
                       const tabId = `rel-req-${idx + 1}`;
+                      return (
+                        <button
+                          key={tabId}
+                          onClick={() => setActiveTab(tabId)}
+                          className={cn(
+                            "w-full flex items-center gap-3 pl-14 pr-4 py-1.5 rounded-xl transition-all duration-200 group",
+                            activeTab === tabId
+                              ? "bg-emerald-500 text-white shadow-lg shadow-emerald-900/20"
+                              : "text-white/60 hover:bg-white/5 hover:text-white"
+                          )}
+                        >
+                          <CalendarDays className={cn(
+                            "w-3.5 h-3.5 min-w-3.5 min-h-3.5 shrink-0",
+                            activeTab === tabId ? "scale-110" : "group-hover:scale-110"
+                          )} />
+                          <span className="font-medium text-[11px] truncate text-left">
+                            {String(idx + 1).padStart(2, '0')} · {mes}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </>
+                )}
+
+                <button
+                  onClick={() => setConsumoExpanded((prev) => !prev)}
+                  className={cn(
+                    "w-full flex items-center gap-3 pl-11 pr-4 py-2 rounded-xl transition-all duration-200 group",
+                    isConsumoActive
+                      ? "text-white bg-white/10"
+                      : "text-white/70 hover:bg-white/5 hover:text-white"
+                  )}
+                >
+                  <Boxes className={cn(
+                    "w-4 h-4 min-w-4 min-h-4 shrink-0 transition-transform duration-200",
+                    isConsumoActive ? "scale-110" : "group-hover:scale-110"
+                  )} />
+                  <span className="font-medium text-xs truncate text-left flex-1">Consumo interno</span>
+                  <ChevronDown
+                    className={cn(
+                      "w-3.5 h-3.5 transition-transform duration-200",
+                      consumoExpanded && "rotate-180"
+                    )}
+                  />
+                </button>
+
+                {consumoExpanded && (
+                  <>
+                    <button
+                      onClick={() => setActiveTab('rel-consumo')}
+                      className={cn(
+                        "w-full flex items-center gap-3 pl-14 pr-4 py-2 rounded-xl transition-all duration-200 group",
+                        activeTab === 'rel-consumo'
+                          ? "bg-emerald-500 text-white shadow-lg shadow-emerald-900/20"
+                          : "text-white/70 hover:bg-white/5 hover:text-white"
+                      )}
+                    >
+                      <Calculator className={cn(
+                        "w-3.5 h-3.5 min-w-3.5 min-h-3.5 shrink-0",
+                        activeTab === 'rel-consumo' ? "scale-110" : "group-hover:scale-110"
+                      )} />
+                      <span className="font-medium text-xs truncate text-left">Resumo</span>
+                    </button>
+                    {REL_CRD_MESES.map((mes, idx) => {
+                      const tabId = `rel-consumo-${idx + 1}`;
                       return (
                         <button
                           key={tabId}
@@ -566,28 +639,97 @@ export const Sidebar: React.FC<SidebarProps> = ({
               />
             </button>
 
-            {!collapsed && receitaExpanded && APURACAO_RECEITA_ITENS.map((item) => {
-              const tabId = `planilha-${item.indice}`;
-              return (
+            {!collapsed && receitaExpanded && (
+              <>
+                {APURACAO_RECEITA_ITENS.map((item) => {
+                  const tabId = `planilha-${item.indice}`;
+                  return (
+                    <button
+                      key={tabId}
+                      onClick={() => setActiveTab(tabId)}
+                      className={cn(
+                        "w-full flex items-center gap-3 pl-11 pr-4 py-2 rounded-xl transition-all duration-200 group",
+                        activeTab === tabId
+                          ? "bg-emerald-500 text-white shadow-lg shadow-emerald-900/20"
+                          : "text-white/70 hover:bg-white/5 hover:text-white"
+                      )}
+                      title={item.nome}
+                    >
+                      <Table2 className={cn(
+                        "w-4 h-4 min-w-4 min-h-4 shrink-0 transition-transform duration-200",
+                        activeTab === tabId ? "scale-110" : "group-hover:scale-110"
+                      )} />
+                      <span className="font-medium text-xs truncate text-left">{item.nome}</span>
+                    </button>
+                  );
+                })}
+
                 <button
-                  key={tabId}
-                  onClick={() => setActiveTab(tabId)}
+                  onClick={() => setRdsExpanded((prev) => !prev)}
                   className={cn(
                     "w-full flex items-center gap-3 pl-11 pr-4 py-2 rounded-xl transition-all duration-200 group",
-                    activeTab === tabId
-                      ? "bg-emerald-500 text-white shadow-lg shadow-emerald-900/20"
+                    isRdsActive
+                      ? "text-white bg-white/10"
                       : "text-white/70 hover:bg-white/5 hover:text-white"
                   )}
-                  title={item.nome}
                 >
-                  <Table2 className={cn(
+                  <ClipboardList className={cn(
                     "w-4 h-4 min-w-4 min-h-4 shrink-0 transition-transform duration-200",
-                    activeTab === tabId ? "scale-110" : "group-hover:scale-110"
+                    isRdsActive ? "scale-110" : "group-hover:scale-110"
                   )} />
-                  <span className="font-medium text-xs truncate text-left">{item.nome}</span>
+                  <span className="font-medium text-xs truncate text-left flex-1">Relatório Diário de Situação</span>
+                  <ChevronDown
+                    className={cn(
+                      "w-3.5 h-3.5 transition-transform duration-200",
+                      rdsExpanded && "rotate-180"
+                    )}
+                  />
                 </button>
-              );
-            })}
+
+                {rdsExpanded && (
+                  <>
+                    <button
+                      onClick={() => setActiveTab('rel-rds')}
+                      className={cn(
+                        "w-full flex items-center gap-3 pl-14 pr-4 py-2 rounded-xl transition-all duration-200 group",
+                        activeTab === 'rel-rds'
+                          ? "bg-emerald-500 text-white shadow-lg shadow-emerald-900/20"
+                          : "text-white/70 hover:bg-white/5 hover:text-white"
+                      )}
+                    >
+                      <Calculator className={cn(
+                        "w-3.5 h-3.5 min-w-3.5 min-h-3.5 shrink-0",
+                        activeTab === 'rel-rds' ? "scale-110" : "group-hover:scale-110"
+                      )} />
+                      <span className="font-medium text-xs truncate text-left">Resumo</span>
+                    </button>
+                    {REL_CRD_MESES.map((mes, idx) => {
+                      const tabId = `rel-rds-${idx + 1}`;
+                      return (
+                        <button
+                          key={tabId}
+                          onClick={() => setActiveTab(tabId)}
+                          className={cn(
+                            "w-full flex items-center gap-3 pl-14 pr-4 py-1.5 rounded-xl transition-all duration-200 group",
+                            activeTab === tabId
+                              ? "bg-emerald-500 text-white shadow-lg shadow-emerald-900/20"
+                              : "text-white/60 hover:bg-white/5 hover:text-white"
+                          )}
+                        >
+                          <CalendarDays className={cn(
+                            "w-3.5 h-3.5 min-w-3.5 min-h-3.5 shrink-0",
+                            activeTab === tabId ? "scale-110" : "group-hover:scale-110"
+                          )} />
+                          <span className="font-medium text-[11px] truncate text-left">
+                            {String(idx + 1).padStart(2, '0')} · {mes}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </>
+                )}
+              </>
+            )}
           </div>
         )}
 

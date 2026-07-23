@@ -3028,6 +3028,51 @@ export function createApp() {
         return res.status(500).json({ error: "Não foi possível gravar o realizado." });
       }
 
+      // Persiste detalhe por linha na Apuração de Resultados › Consumo interno.
+      const { error: delRowsErr } = await supabase
+        .from("consumo_interno_rows")
+        .delete()
+        .eq("year", year)
+        .eq("month", month);
+      if (delRowsErr) {
+        console.error("consumo_interno_rows delete (execute sql/17_consumo_interno_rows.sql):", delRowsErr);
+        return res.status(500).json({
+          error: "Tabela consumo_interno_rows indisponível. Execute sql/17_consumo_interno_rows.sql no Supabase.",
+        });
+      }
+
+      const detailRows = (parsed.lines ?? []).map((l: any) => ({
+        year,
+        month,
+        cliente_id: l.cliente_id != null ? String(l.cliente_id) : null,
+        cliente_nome: String(l.cliente_nome ?? "").trim() || null,
+        produto_codigo: l.produto_codigo != null ? String(l.produto_codigo) : null,
+        produto: String(l.produto ?? "").trim() || null,
+        unidade: String(l.unidade ?? "").trim() || null,
+        nf: l.nf != null ? String(l.nf) : null,
+        data: String(l.data ?? "").trim() || null,
+        data_iso: l.data_iso || null,
+        quantidade: Number(l.quantidade) || 0,
+        vl_unitario: Number(l.vl_unitario) || 0,
+        vl_total: Number(l.vl_total) || 0,
+        vl_desconto: Number(l.vl_desconto) || 0,
+        taxa_servico: Number(l.taxa_servico) || 0,
+        vl_liquido: Number(l.vl_liquido) || 0,
+        forma_pgto: String(l.forma_pgto ?? "").trim() || null,
+      }));
+
+      if (detailRows.length) {
+        const chunkSize = 500;
+        for (let i = 0; i < detailRows.length; i += chunkSize) {
+          const chunk = detailRows.slice(i, i + chunkSize);
+          const { error: insErr } = await supabase.from("consumo_interno_rows").insert(chunk);
+          if (insErr) {
+            console.error("consumo_interno_rows insert:", insErr);
+            return res.status(500).json({ error: "Não foi possível gravar o detalhe do Consumo Interno." });
+          }
+        }
+      }
+
       await logImportHistory({
         source_type: "consumo_interno",
         file_name: req.file.originalname,
@@ -3039,6 +3084,7 @@ export function createApp() {
         user: req.user,
         summary: {
           destino: { setor: CONSUMO_INTERNO_SETOR, conta: CONSUMO_INTERNO_CRD_NOME },
+          destino_apuracao: "Apuração de Resultados › Consumo interno",
           lines_count: parsed.summary.lines_count,
           clientes_count: parsed.summary.clientes_count,
         },
@@ -3047,8 +3093,10 @@ export function createApp() {
       res.json({
         success: true,
         destino: { setor: CONSUMO_INTERNO_SETOR, conta: CONSUMO_INTERNO_CRD_NOME },
+        destino_apuracao: { secao: "Apuração de Resultados", sub: "Consumo interno", month, year },
         period: { month, year },
         total,
+        lines_count: parsed.summary.lines_count,
       });
     } catch (error: any) {
       console.error("Erro no commit do Consumo Interno:", error);
@@ -3063,6 +3111,91 @@ export function createApp() {
     } finally {
       if (req.file?.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
     }
+  });
+
+  // ====================================================
+  // CONSUMO INTERNO (Apuração de Resultados — consulta por competência)
+  // ====================================================
+  app.get("/api/consumo-interno/competencias", requireRole("admin", "finance", "controle", "manager"), async (req, res) => {
+    const year = Number((req.query as { year?: string }).year) || new Date().getFullYear();
+    const { data, error } = await supabase
+      .from("consumo_interno_rows")
+      .select("month, vl_liquido, quantidade, cliente_id")
+      .eq("year", year);
+    if (error) {
+      console.error(error);
+      return res.status(500).json({
+        error: "Não foi possível carregar competências. Execute sql/17_consumo_interno_rows.sql se ainda não rodou.",
+      });
+    }
+
+    const byMonth = new Map<number, { linhas: number; clientes: Set<string>; quantidade: number; valor: number }>();
+    for (let m = 1; m <= 12; m++) {
+      byMonth.set(m, { linhas: 0, clientes: new Set(), quantidade: 0, valor: 0 });
+    }
+    for (const row of data ?? []) {
+      const agg = byMonth.get(Number((row as any).month));
+      if (!agg) continue;
+      agg.linhas += 1;
+      const clienteKey = String((row as any).cliente_id ?? "").trim();
+      if (clienteKey) agg.clientes.add(clienteKey);
+      agg.quantidade += Number((row as any).quantidade) || 0;
+      agg.valor += Number((row as any).vl_liquido) || 0;
+    }
+
+    res.json({
+      year,
+      months: Array.from(byMonth.entries()).map(([month, agg]) => ({
+        month,
+        importado: agg.linhas > 0,
+        linhas: agg.linhas,
+        clientes: agg.clientes.size,
+        quantidade: agg.quantidade,
+        valor: agg.valor,
+      })),
+    });
+  });
+
+  app.get("/api/consumo-interno", requireRole("admin", "finance", "controle", "manager"), async (req, res) => {
+    const year = Number((req.query as { year?: string }).year) || new Date().getFullYear();
+    const month = Number((req.query as { month?: string }).month);
+    if (!month || month < 1 || month > 12) {
+      return res.status(400).json({ error: "Informe o mês (1-12)." });
+    }
+
+    const { data, error } = await supabase
+      .from("consumo_interno_rows")
+      .select("*")
+      .eq("year", year)
+      .eq("month", month)
+      .order("data_iso", { ascending: true })
+      .order("cliente_nome", { ascending: true });
+
+    if (error) {
+      console.error(error);
+      return res.status(500).json({
+        error: "Não foi possível carregar o Consumo Interno. Execute sql/17_consumo_interno_rows.sql se ainda não rodou.",
+      });
+    }
+
+    const lines = data ?? [];
+    const clientes = new Set(
+      lines.map((l: any) => String(l.cliente_id ?? l.cliente_nome ?? "").trim()).filter(Boolean)
+    );
+    const n = (v: any) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+    res.json({
+      year,
+      month,
+      lines,
+      summary: {
+        lines_count: lines.length,
+        clientes_count: clientes.size,
+        total_quantidade: lines.reduce((s: number, l: any) => s + n(l.quantidade), 0),
+        total_liquido: lines.reduce((s: number, l: any) => s + n(l.vl_liquido), 0),
+        total_bruto: lines.reduce((s: number, l: any) => s + n(l.vl_total), 0),
+        total_desconto: lines.reduce((s: number, l: any) => s + n(l.vl_desconto), 0),
+      },
+    });
   });
 
   // ====================================================
@@ -3388,12 +3521,61 @@ export function createApp() {
     const nivel1 = rows.filter((r: any) => Number(r.nivel) === 1);
     const summaryBase = nivel1.length ? nivel1 : rows;
 
+    // Previsto do mês (Síntase / crd_monthly_values) para marcar linhas estouradas.
+    const crdIds = Array.from(
+      new Set(
+        rows
+          .map((r: any) => Number(r.crd_id))
+          .filter((id: number) => Number.isFinite(id) && id > 0)
+      )
+    );
+    const previstoByCrdId = new Map<number, number>();
+    if (crdIds.length) {
+      const { data: crdMeta } = await supabase
+        .from("crds")
+        .select("id, previsto_mes")
+        .in("id", crdIds);
+      for (const c of crdMeta ?? []) {
+        previstoByCrdId.set(Number((c as any).id), sanitizeMonthBudget((c as any).previsto_mes));
+      }
+      const { rows: monthlyRows } = await fetchMonthlyValuesByYear(year);
+      for (const mv of monthlyRows ?? []) {
+        if (Number(mv.month) !== month) continue;
+        const crdId = Number(mv.crd_id);
+        if (!crdIds.includes(crdId)) continue;
+        previstoByCrdId.set(crdId, sanitizeMonthBudget(mv.value));
+      }
+    }
+
+    const enrichedRows = rows.map((r: any) => {
+      const crdId = r.crd_id != null ? Number(r.crd_id) : null;
+      const saldo = Number(r.saldo_lanc) || 0;
+      const previsto =
+        crdId != null && Number.isFinite(crdId) ? (previstoByCrdId.get(crdId) ?? 0) : null;
+      // Só marca estouro quando há orçamento (> 0) e o saldo lanç. ultrapassa o previsto.
+      const estourada =
+        previsto != null && previsto > 0.009 && saldo > previsto + 0.009;
+      const valor_estouro = estourada ? saldo - (previsto as number) : 0;
+      return {
+        ...r,
+        previsto,
+        estourada,
+        valor_estouro,
+      };
+    });
+
+    const linhasEstouradas = enrichedRows.filter((r: any) => r.estourada);
+    const valorEstourado = linhasEstouradas.reduce(
+      (s: number, r: any) => s + (Number(r.valor_estouro) || 0),
+      0
+    );
+
     res.json({
       year,
       month,
-      rows,
+      rows: enrichedRows,
       summary: {
-        contas: rows.length,
+        contas: enrichedRows.length,
         grupos: nivel1.length,
         total_lancamentos: summaryBase.reduce((s: number, r: any) => s + (Number(r.lancamentos) || 0), 0),
         total_cancelamentos: summaryBase.reduce((s: number, r: any) => s + (Number(r.cancelamentos) || 0), 0),
@@ -3402,8 +3584,10 @@ export function createApp() {
         total_estorno: summaryBase.reduce((s: number, r: any) => s + (Number(r.estorno) || 0), 0),
         total_baixas_liquido: summaryBase.reduce((s: number, r: any) => s + (Number(r.baixas_liquido) || 0), 0),
         total_lanc_liquido: summaryBase.reduce((s: number, r: any) => s + (Number(r.lanc_liquido) || 0), 0),
-        matched: rows.filter((r: any) => r.crd_id != null).length,
-        unmatched: rows.filter((r: any) => r.crd_id == null).length,
+        matched: enrichedRows.filter((r: any) => r.crd_id != null).length,
+        unmatched: enrichedRows.filter((r: any) => r.crd_id == null).length,
+        linhas_estouradas: linhasEstouradas.length,
+        valor_estourado: valorEstourado,
       },
     });
   });
@@ -3877,6 +4061,196 @@ export function createApp() {
     }
   });
 
+  // Grava o RDS na competência (Apuração de Receita › Relatório Diário de Situação).
+  // Substitui o snapshot do mês/ano. Planilhas Relatório de RDS / Apoio RDS permanecem.
+  app.post("/api/import/rds/commit", requireRole("admin", "finance", "controle"), upload.single("rds_file"), async (req, res) => {
+    if (!req.file) return res.status(400).json({ error: "Arquivo não enviado" });
+    if (!/\.(xls|xlsx)$/i.test(req.file.originalname || "")) {
+      if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+      return res.status(400).json({ error: "Envie o relatório em Excel (.xls ou .xlsx)." });
+    }
+    try {
+      const result = parseRdsFile(req.file.path);
+      if (!result.sections.length) {
+        return res.status(422).json({
+          error:
+            "O arquivo foi lido, mas nenhuma seção foi reconhecida. Confira se este é o Relatório Diário de Situação (RDS) do Desbravador.",
+        });
+      }
+      const month = Number((req.body as any)?.month) || result.month;
+      const year = Number((req.body as any)?.year) || result.year;
+      if (!month || !year || month < 1 || month > 12) {
+        return res.status(400).json({ error: "Não foi possível determinar o mês do relatório. Informe mês e ano." });
+      }
+
+      const payload = {
+        year,
+        month,
+        report_date: result.date,
+        file_name: req.file.originalname || null,
+        sections: result.sections,
+        previsao_semana: result.previsao_semana ?? [],
+        updated_at: new Date().toISOString(),
+      };
+
+      const { error } = await supabase
+        .from("rds_snapshots")
+        .upsert(payload, { onConflict: "year,month" });
+      if (error) {
+        console.error("rds_snapshots upsert (execute sql/18_rds_snapshots.sql):", error);
+        await logImportHistory({
+          source_type: "rds",
+          file_name: req.file.originalname,
+          status: "error",
+          year,
+          month,
+          user: req.user,
+          error_message: String(error.message || "Não foi possível gravar o RDS.").slice(0, 500),
+        });
+        return res.status(500).json({
+          error: "Tabela rds_snapshots indisponível. Execute sql/18_rds_snapshots.sql no Supabase.",
+        });
+      }
+
+      const sectionsCount = result.sections.length;
+      const itemsCount = result.sections.reduce(
+        (s: number, sec: any) => s + (Array.isArray(sec.items) ? sec.items.length : 0),
+        0
+      );
+
+      await logImportHistory({
+        source_type: "rds",
+        file_name: req.file.originalname,
+        status: "success",
+        year,
+        month,
+        records_count: itemsCount,
+        user: req.user,
+        summary: {
+          destino_apuracao: "Apuração de Receita › Relatório Diário de Situação",
+          report_date: result.date,
+          sections_count: sectionsCount,
+          items_count: itemsCount,
+        },
+      });
+
+      res.json({
+        success: true,
+        period: { month, year },
+        date: result.date,
+        sections_count: sectionsCount,
+        items_count: itemsCount,
+        destino_apuracao: { secao: "Apuração de Receita", sub: "Relatório Diário de Situação", month, year },
+      });
+    } catch (error: any) {
+      console.error("Erro no commit do RDS:", error);
+      await logImportHistory({
+        source_type: "rds",
+        file_name: req.file?.originalname,
+        status: "error",
+        user: req.user,
+        error_message: String(error?.message || "Não foi possível enviar o RDS.").slice(0, 500),
+      });
+      res.status(500).json({ error: "Não foi possível enviar o Relatório Diário de Situação." });
+    } finally {
+      if (req.file?.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+    }
+  });
+
+  app.get("/api/rds/competencias", requireRole("admin", "finance", "controle", "manager"), async (req, res) => {
+    const year = Number((req.query as { year?: string }).year) || new Date().getFullYear();
+    const { data, error } = await supabase
+      .from("rds_snapshots")
+      .select("month, report_date, sections, previsao_semana, file_name, updated_at")
+      .eq("year", year)
+      .order("month");
+    if (error) {
+      console.error(error);
+      return res.status(500).json({
+        error: "Não foi possível carregar competências. Execute sql/18_rds_snapshots.sql se ainda não rodou.",
+      });
+    }
+
+    const byMonth = new Map<number, any>();
+    for (const row of data ?? []) {
+      byMonth.set(Number((row as any).month), row);
+    }
+
+    res.json({
+      year,
+      months: Array.from({ length: 12 }, (_, i) => {
+        const month = i + 1;
+        const row = byMonth.get(month);
+        const sections = Array.isArray(row?.sections) ? row.sections : [];
+        const items = sections.reduce(
+          (s: number, sec: any) => s + (Array.isArray(sec?.items) ? sec.items.length : 0),
+          0
+        );
+        return {
+          month,
+          importado: Boolean(row),
+          report_date: row?.report_date ?? null,
+          file_name: row?.file_name ?? null,
+          sections: sections.length,
+          items,
+          updated_at: row?.updated_at ?? null,
+        };
+      }),
+    });
+  });
+
+  app.get("/api/rds", requireRole("admin", "finance", "controle", "manager"), async (req, res) => {
+    const year = Number((req.query as { year?: string }).year) || new Date().getFullYear();
+    const month = Number((req.query as { month?: string }).month);
+    if (!month || month < 1 || month > 12) {
+      return res.status(400).json({ error: "Informe o mês (1-12)." });
+    }
+
+    const { data, error } = await supabase
+      .from("rds_snapshots")
+      .select("*")
+      .eq("year", year)
+      .eq("month", month)
+      .maybeSingle();
+
+    if (error) {
+      console.error(error);
+      return res.status(500).json({
+        error: "Não foi possível carregar o RDS. Execute sql/18_rds_snapshots.sql se ainda não rodou.",
+      });
+    }
+
+    if (!data) {
+      return res.json({
+        year,
+        month,
+        importado: false,
+        report_date: null,
+        sections: [],
+        previsao_semana: [],
+        summary: { sections: 0, items: 0 },
+      });
+    }
+
+    const sections = Array.isArray((data as any).sections) ? (data as any).sections : [];
+    const items = sections.reduce(
+      (s: number, sec: any) => s + (Array.isArray(sec?.items) ? sec.items.length : 0),
+      0
+    );
+
+    res.json({
+      year,
+      month,
+      importado: true,
+      report_date: (data as any).report_date,
+      file_name: (data as any).file_name,
+      sections,
+      previsao_semana: Array.isArray((data as any).previsao_semana) ? (data as any).previsao_semana : [],
+      updated_at: (data as any).updated_at,
+      summary: { sections: sections.length, items },
+    });
+  });
+
   // ====================================================
   // IMPORTAÇÃO: REQUISIÇÕES SINTÉTICA POR GRUPO DE ITENS (.xls do Desbravador)
   // Hierarquia Setor > Grupo de itens > valor requisitado no período.
@@ -3976,7 +4350,7 @@ export function createApp() {
   });
 
   // Grava as Requisições Sintética do mês em requisicoes_rows (substitui a competência).
-  // Alimenta Apuração de Resultados › Requisições (Resumo + meses).
+  // Alimenta Apuração de Resultados › Requisição Sintética (Resumo + meses).
   app.post("/api/import/requisicoes-sintetica/commit", async (req, res) => {
     const { setores, month, year, file_name } = req.body as {
       setores: {
