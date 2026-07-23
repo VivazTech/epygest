@@ -25,6 +25,8 @@ export const CadastrosPage: React.FC = () => {
   const [paymentMethods, setPaymentMethods] = useState<any[]>([]);
   const [crds, setCrds] = useState<any[]>([]);
   const [requisitions, setRequisitions] = useState<any[]>([]);
+  const [cargos, setCargos] = useState<any[]>([]);
+  const [newCargoForm, setNewCargoForm] = useState({ name: '', sector_id: '' });
   const [newName, setNewName] = useState('');
   const [newKey, setNewKey] = useState('');
   const [newCrdForm, setNewCrdForm] = useState({
@@ -103,6 +105,13 @@ export const CadastrosPage: React.FC = () => {
     () => paymentMethods.filter((pm) => matchesSearch(query, pm.name, pm.key)),
     [paymentMethods, query]
   );
+  const filteredCargos = useMemo(
+    () =>
+      cargos.filter((c) =>
+        matchesSearch(query, c.name, c.sector_name, c.sector_id)
+      ),
+    [cargos, query]
+  );
   const filteredRequisitions = useMemo(
     () =>
       requisitions.filter((r) =>
@@ -113,10 +122,15 @@ export const CadastrosPage: React.FC = () => {
 
   const refreshCrds = () => fetch('/api/crds').then(res => res.json()).then(data => setCrds(data));
   const refreshSectors = () => fetch('/api/sectors').then(res => res.json()).then(data => setSectors(data));
+  const refreshCargos = () =>
+    fetch('/api/cargos')
+      .then((res) => res.json())
+      .then((data) => setCargos(Array.isArray(data) ? data : []));
 
   useEffect(() => {
     fetch('/api/categories').then(res => res.json()).then(data => setCategories(data));
     refreshSectors();
+    refreshCargos();
     fetch('/api/payment-methods').then(res => res.json()).then(data => setPaymentMethods(data));
     refreshCrds();
     fetch('/api/requisitions').then(res => res.json()).then(data => setRequisitions(data));
@@ -318,6 +332,51 @@ export const CadastrosPage: React.FC = () => {
     refreshSectors();
     refreshCrds();
     alert(`Importação concluída: ${data.imported ?? 0} CRDs em ${data.groups ?? 0} grupos.`);
+  };
+
+  const createCargo = async () => {
+    const name = newCargoForm.name.trim();
+    if (!name || !newCargoForm.sector_id) {
+      alert('Informe o nome do cargo e o setor.');
+      return;
+    }
+    const res = await fetch('/api/cargos', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, sector_id: Number(newCargoForm.sector_id) }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      alert(data.error || 'Erro ao cadastrar cargo.');
+      return;
+    }
+    setNewCargoForm({ name: '', sector_id: newCargoForm.sector_id });
+    refreshCargos();
+  };
+
+  const toggleCargoActive = async (cargo: any) => {
+    const res = await fetch(`/api/cargos/${cargo.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ active: !cargo.active }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      alert(data.error || 'Erro ao atualizar cargo.');
+      return;
+    }
+    refreshCargos();
+  };
+
+  const deleteCargo = async (cargo: any) => {
+    if (!window.confirm(`Remover o cargo "${cargo.name}"?`)) return;
+    const res = await fetch(`/api/cargos/${cargo.id}`, { method: 'DELETE' });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      alert(data.error || 'Erro ao excluir cargo.');
+      return;
+    }
+    refreshCargos();
   };
 
   return (
@@ -621,8 +680,151 @@ export const CadastrosPage: React.FC = () => {
         </div>
       )}
 
+      {/* ============ Setores / Centros de Custo + Cargos ============ */}
+      {activeTab === 'setores' && (
+        <div className="space-y-4">
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+            <div className="px-4 py-3 border-b border-slate-50">
+              <h3 className="text-sm font-bold text-slate-800">Setores / Centros de Custo</h3>
+              <p className="text-xs text-slate-500">Estrutura organizacional usada no orçamento e na atribuição de cargos.</p>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-slate-50/50">
+                    <th className="px-6 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Nome</th>
+                    <th className="px-6 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Limite de Orçamento</th>
+                    <th className="px-6 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-right">Cargos</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-50">
+                  {filteredSectors.length === 0 && (
+                    <tr>
+                      <td colSpan={3} className="px-6 py-8 text-center text-sm text-slate-400">
+                        Nenhum setor cadastrado.
+                      </td>
+                    </tr>
+                  )}
+                  {filteredSectors.map((sector) => (
+                    <tr key={sector.id} className="hover:bg-slate-50/50 transition-colors">
+                      <td className="px-6 py-3">
+                        <span className="text-sm font-medium text-slate-700">{sector.name}</span>
+                      </td>
+                      <td className="px-6 py-3">
+                        <ValueTrace
+                          className="text-sm font-bold text-slate-900"
+                          displayValue={formatCurrency(sector.budget_limit)}
+                          source={`Setor ${sector.name}`}
+                          calculation="Campo budget_limit na tabela sectors"
+                        />
+                      </td>
+                      <td className="px-6 py-3 text-right text-xs text-slate-500">
+                        {cargos.filter((c) => Number(c.sector_id) === Number(sector.id) && c.active).length} ativos
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+            <div className="p-4 border-b border-slate-50 flex flex-wrap items-end justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2">
+                  <Users className="w-4 h-4 text-[#004D40]" />
+                  Cargos por setor
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Cadastre os cargos e vincule a um setor. Eles aparecerão no select ao importar a folha.
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <input
+                  value={newCargoForm.name}
+                  onChange={(e) => setNewCargoForm((p) => ({ ...p, name: e.target.value }))}
+                  placeholder="Nome do cargo"
+                  className="w-52 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+                />
+                <select
+                  value={newCargoForm.sector_id}
+                  onChange={(e) => setNewCargoForm((p) => ({ ...p, sector_id: e.target.value }))}
+                  className="w-52 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+                >
+                  <option value="">Setor / Centro de custo</option>
+                  {sectors.map((s: any) => (
+                    <option key={s.id} value={s.id}>{s.name}</option>
+                  ))}
+                </select>
+                <button
+                  onClick={createCargo}
+                  className="inline-flex items-center gap-2 px-4 py-2 bg-[#004D40] text-white font-bold rounded-xl hover:bg-[#003d33] transition-colors"
+                >
+                  <Plus className="w-4 h-4" />
+                  Adicionar cargo
+                </button>
+              </div>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-slate-50/50">
+                    <th className="px-6 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Cargo</th>
+                    <th className="px-6 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Setor</th>
+                    <th className="px-6 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Status</th>
+                    <th className="px-6 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-right">Ações</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-50">
+                  {filteredCargos.length === 0 && (
+                    <tr>
+                      <td colSpan={4} className="px-6 py-8 text-center text-sm text-slate-400">
+                        Nenhum cargo cadastrado. Adicione cargos e atribua a um setor acima.
+                      </td>
+                    </tr>
+                  )}
+                  {filteredCargos.map((cargo) => (
+                    <tr key={cargo.id} className="hover:bg-slate-50/50 transition-colors group">
+                      <td className="px-6 py-3 text-sm font-medium text-slate-800">{cargo.name}</td>
+                      <td className="px-6 py-3 text-sm text-slate-600">{cargo.sector_name || '—'}</td>
+                      <td className="px-6 py-3">
+                        <span
+                          className={cn(
+                            'text-[10px] font-bold px-2 py-1 rounded-lg uppercase tracking-wider',
+                            cargo.active ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-600'
+                          )}
+                        >
+                          {cargo.active ? 'Ativo' : 'Inativo'}
+                        </span>
+                      </td>
+                      <td className="px-6 py-3 text-right">
+                        <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button
+                            onClick={() => toggleCargoActive(cargo)}
+                            className="px-2 py-1 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-lg"
+                          >
+                            {cargo.active ? 'Desativar' : 'Ativar'}
+                          </button>
+                          <button
+                            onClick={() => deleteCargo(cargo)}
+                            className="p-2 text-red-400 hover:bg-red-50 rounded-lg transition-colors"
+                            title="Excluir cargo"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ============ Outras tabs — layout de tabela padrão ============ */}
-      {activeTab !== 'crd' && (
+      {activeTab !== 'crd' && activeTab !== 'setores' && (
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
         <div className="p-4 border-b border-slate-50 flex items-center justify-between">
           {activeTab === 'formas-pagamento' && (
@@ -697,7 +899,7 @@ export const CadastrosPage: React.FC = () => {
               <tr className="bg-slate-50/50">
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Nome</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-                  {activeTab === 'categorias' ? 'Tipo' : activeTab === 'setores' ? 'Limite de Orçamento' : 'Status'}
+                  {activeTab === 'categorias' ? 'Tipo' : 'Status'}
                 </th>
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-right">Ações</th>
               </tr>
@@ -721,27 +923,6 @@ export const CadastrosPage: React.FC = () => {
                     )}>
                       {cat.type === 'revenue' ? 'Receita' : 'Despesa'}
                     </span>
-                  </td>
-                  <td className="px-6 py-4 text-right">
-                    <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <button className="p-2 text-slate-400 hover:bg-slate-100 rounded-lg transition-colors"><Edit2 className="w-4 h-4" /></button>
-                      <button className="p-2 text-red-400 hover:bg-red-50 rounded-lg transition-colors"><Trash2 className="w-4 h-4" /></button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-              {activeTab === 'setores' && filteredSectors.map((sector) => (
-                <tr key={sector.id} className="hover:bg-slate-50/50 transition-colors group">
-                  <td className="px-6 py-4">
-                    <span className="text-sm font-medium text-slate-700">{sector.name}</span>
-                  </td>
-                  <td className="px-6 py-4">
-                    <ValueTrace
-                      className="text-sm font-bold text-slate-900"
-                      displayValue={formatCurrency(sector.budget_limit)}
-                      source={`Setor ${sector.name}`}
-                      calculation="Campo budget_limit na tabela sectors"
-                    />
                   </td>
                   <td className="px-6 py-4 text-right">
                     <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">

@@ -70,6 +70,11 @@ export const FolhaApuracaoPage: React.FC = () => {
   const [processResumo, setProcessResumo] = useState<any>(null);
 
   const [filtros, setFiltros] = useState({ rubrica: '', tipo: '', funcionario: '', cargo: '', setor: '' });
+  const [opcoesFiltro, setOpcoesFiltro] = useState<{ funcionarios: string[]; setores: string[]; cargos: string[] }>({
+    funcionarios: [],
+    setores: [],
+    cargos: [],
+  });
   const [rubricaForm, setRubricaForm] = useState({ ...emptyRubricaForm });
   const [editRubricaId, setEditRubricaId] = useState<number | null>(null);
 
@@ -86,26 +91,38 @@ export const FolhaApuracaoPage: React.FC = () => {
   const [novoSetor, setNovoSetor] = useState({ nome: '', codigo: '' });
   const [novoCargo, setNovoCargo] = useState({ nome: '', codigo: '', cbo: '' });
 
-  const buildApuracaoUrl = useCallback(() => {
+  const buildApuracaoUrl = useCallback((override?: Partial<typeof filtros>) => {
+    const f = { ...filtros, ...override };
     const p = new URLSearchParams({ year, month: String(month) });
-    if (filtros.rubrica) p.set('rubrica', filtros.rubrica);
-    if (filtros.tipo) p.set('tipo', filtros.tipo);
-    if (filtros.funcionario) p.set('funcionario', filtros.funcionario);
-    if (filtros.cargo) p.set('cargo', filtros.cargo);
-    if (filtros.setor) p.set('setor', filtros.setor);
+    if (f.rubrica) p.set('rubrica', f.rubrica);
+    if (f.tipo) p.set('tipo', f.tipo);
+    if (f.funcionario) {
+      const raw = f.funcionario;
+      const matMatch = raw.match(/^(\S+)\s+—\s+/);
+      p.set('funcionario', matMatch ? matMatch[1] : raw);
+    }
+    if (f.cargo) p.set('cargo', f.cargo);
+    if (f.setor) p.set('setor', f.setor);
     return `/api/folha/apuracao?${p}`;
   }, [year, month, filtros]);
 
-  const loadApuracao = useCallback(async () => {
+  const loadApuracao = useCallback(async (override?: Partial<typeof filtros>) => {
     setLoading(true);
     setError('');
     try {
-      const { res, json } = await fetchJson<any>(buildApuracaoUrl());
+      const { res, json } = await fetchJson<any>(buildApuracaoUrl(override));
       if (!res.ok) throw new Error(formatApiError(json, 'Erro ao carregar apuração.'));
       setApuracao(json.apuracao);
       setImportStatus(json.import_status ?? null);
       setLancamentos(json.lancamentos ?? []);
       setSituacoes(json.situacoes ?? []);
+      if (json.filtros_disponiveis) {
+        setOpcoesFiltro({
+          funcionarios: Array.isArray(json.filtros_disponiveis.funcionarios) ? json.filtros_disponiveis.funcionarios : [],
+          setores: Array.isArray(json.filtros_disponiveis.setores) ? json.filtros_disponiveis.setores : [],
+          cargos: Array.isArray(json.filtros_disponiveis.cargos) ? json.filtros_disponiveis.cargos : [],
+        });
+      }
     } catch (e: any) {
       setApuracao(null);
       setImportStatus(null);
@@ -478,10 +495,46 @@ export const FolhaApuracaoPage: React.FC = () => {
             <select value={filtros.tipo} onChange={(e) => setFiltros((p) => ({ ...p, tipo: e.target.value }))} className="px-2 py-1.5 text-sm border rounded-lg">
               <option value="">Tipo</option><option value="P">P</option><option value="D">D</option>
             </select>
-            <input placeholder="Funcionário" value={filtros.funcionario} onChange={(e) => setFiltros((p) => ({ ...p, funcionario: e.target.value }))} className="w-36 px-2 py-1.5 text-sm border rounded-lg" />
-            <input placeholder="Cargo" value={filtros.cargo} onChange={(e) => setFiltros((p) => ({ ...p, cargo: e.target.value }))} className="w-32 px-2 py-1.5 text-sm border rounded-lg" />
-            <input placeholder="Setor" value={filtros.setor} onChange={(e) => setFiltros((p) => ({ ...p, setor: e.target.value }))} className="w-32 px-2 py-1.5 text-sm border rounded-lg" />
-            <button onClick={loadApuracao} className="px-3 py-1.5 text-sm font-bold bg-slate-100 rounded-lg hover:bg-slate-200">Filtrar</button>
+            <select
+              value={filtros.setor}
+              onChange={(e) => setFiltros((p) => ({ ...p, setor: e.target.value, funcionario: '' }))}
+              className="min-w-[160px] px-2 py-1.5 text-sm border rounded-lg"
+            >
+              <option value="">Todos os setores</option>
+              {opcoesFiltro.setores.map((s) => (
+                <option key={s} value={s}>{s}</option>
+              ))}
+            </select>
+            <select
+              value={filtros.funcionario}
+              onChange={(e) => setFiltros((p) => ({ ...p, funcionario: e.target.value }))}
+              className="min-w-[220px] px-2 py-1.5 text-sm border rounded-lg"
+            >
+              <option value="">Todos os funcionários</option>
+              {opcoesFiltro.funcionarios.map((f) => (
+                <option key={f} value={f}>{f}</option>
+              ))}
+            </select>
+            <select value={filtros.cargo} onChange={(e) => setFiltros((p) => ({ ...p, cargo: e.target.value }))} className="min-w-[140px] px-2 py-1.5 text-sm border rounded-lg">
+              <option value="">Todos os cargos</option>
+              {opcoesFiltro.cargos.map((c) => (
+                <option key={c} value={c}>{c}</option>
+              ))}
+            </select>
+            <button onClick={() => loadApuracao()} className="px-3 py-1.5 text-sm font-bold bg-slate-100 rounded-lg hover:bg-slate-200">Filtrar</button>
+            {(filtros.setor || filtros.funcionario || filtros.cargo || filtros.rubrica || filtros.tipo) && (
+              <button
+                type="button"
+                onClick={() => {
+                  const empty = { rubrica: '', tipo: '', funcionario: '', cargo: '', setor: '' };
+                  setFiltros(empty);
+                  loadApuracao(empty);
+                }}
+                className="px-3 py-1.5 text-sm font-bold text-slate-600 border rounded-lg hover:bg-slate-50"
+              >
+                Limpar
+              </button>
+            )}
           </div>
 
           {!apuracao && !loading && (
@@ -605,6 +658,7 @@ export const FolhaApuracaoPage: React.FC = () => {
                   <th className="th-sticky-top px-3 py-2 text-[10px] font-bold uppercase">Descrição</th>
                   <th className="th-sticky-top px-3 py-2 text-[10px] font-bold uppercase">Tipo</th>
                   <th className="th-sticky-top px-3 py-2 text-[10px] font-bold uppercase">Funcionário</th>
+                  <th className="th-sticky-top px-3 py-2 text-[10px] font-bold uppercase">Setor</th>
                   <th className="th-sticky-top px-3 py-2 text-[10px] font-bold uppercase">Cargo</th>
                   <th className="th-sticky-top px-3 py-2 text-[10px] font-bold uppercase text-right">Original</th>
                   <th className="th-sticky-top px-3 py-2 text-[10px] font-bold uppercase text-right">Provento</th>
@@ -616,7 +670,7 @@ export const FolhaApuracaoPage: React.FC = () => {
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {lancamentosFiltrados.length === 0 && (
-                  <tr><td colSpan={11} className="px-4 py-8 text-center text-sm text-slate-400">{loading ? 'Carregando...' : 'Sem lançamentos.'}</td></tr>
+                  <tr><td colSpan={12} className="px-4 py-8 text-center text-sm text-slate-400">{loading ? 'Carregando...' : 'Sem lançamentos.'}</td></tr>
                 )}
                 {lancamentosFiltrados.map((l) => (
                   <tr key={l.id} className="hover:bg-slate-50/60 text-sm">
@@ -624,6 +678,7 @@ export const FolhaApuracaoPage: React.FC = () => {
                     <td className="px-3 py-2">{l.descricao_rubrica}</td>
                     <td className="px-3 py-2 text-xs">{l.tipo_original}</td>
                     <td className="px-3 py-2 text-xs">{l.nome_funcionario || '—'}</td>
+                    <td className="px-3 py-2 text-xs">{l.setor_nome || '—'}</td>
                     <td className="px-3 py-2 text-xs">{l.cargo_nome || '—'}</td>
                     <td className="px-3 py-2 text-xs text-right">{formatCurrency(l.valor_original)}</td>
                     <td className="px-3 py-2 text-xs text-right">{formatCurrency(l.valor_provento)}</td>

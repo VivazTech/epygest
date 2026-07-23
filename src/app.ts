@@ -2372,6 +2372,102 @@ export function createApp() {
   });
 
   // ====================================================
+  // CARGOS (vinculados a setores / centros de custo)
+  // ====================================================
+  app.get("/api/cargos", async (req, res) => {
+    const activeOnly = String((req.query as any)?.active ?? "") === "1" || String((req.query as any)?.active ?? "") === "true";
+    let query = supabase
+      .from("cargos")
+      .select("id, name, sector_id, active, created_at, sectors(name)")
+      .order("name");
+    if (activeOnly) query = query.eq("active", true);
+    const { data, error } = await query;
+    if (error) {
+      console.error("Erro ao listar cargos:", error);
+      if (String(error.message || "").includes("cargos") || error.code === "42P01" || error.code === "PGRST205") {
+        return res.status(500).json({
+          error: "Tabela de cargos não encontrada. Execute sql/16_cargos.sql no Supabase.",
+        });
+      }
+      return res.status(500).json({ error: "Erro interno ao processar a solicitação." });
+    }
+    res.json(
+      (data ?? []).map((row: any) => ({
+        id: row.id,
+        name: row.name,
+        sector_id: row.sector_id,
+        sector_name: row.sectors?.name ?? null,
+        active: row.active !== false,
+        created_at: row.created_at,
+      }))
+    );
+  });
+
+  app.post("/api/cargos", requireRole("admin", "controle"), async (req, res) => {
+    const name = String(req.body?.name ?? "").trim();
+    const sectorId = Number(req.body?.sector_id);
+    if (!name || !Number.isFinite(sectorId)) {
+      return res.status(400).json({ error: "name e sector_id são obrigatórios." });
+    }
+    const { data: sector } = await supabase.from("sectors").select("id").eq("id", sectorId).maybeSingle();
+    if (!sector) return res.status(400).json({ error: "Setor inválido." });
+
+    const { data, error } = await supabase
+      .from("cargos")
+      .insert({ name, sector_id: sectorId, active: true })
+      .select("id")
+      .single();
+    if (error) {
+      console.error("Erro ao cadastrar cargo:", error);
+      if (String(error.message || "").toLowerCase().includes("duplicate") || error.code === "23505") {
+        return res.status(400).json({ error: "Já existe um cargo com este nome neste setor." });
+      }
+      if (String(error.message || "").includes("cargos") || error.code === "42P01" || error.code === "PGRST205") {
+        return res.status(500).json({
+          error: "Tabela de cargos não encontrada. Execute sql/16_cargos.sql no Supabase.",
+        });
+      }
+      return res.status(500).json({ error: "Não foi possível cadastrar o cargo." });
+    }
+    res.json({ id: data.id });
+  });
+
+  app.patch("/api/cargos/:id", requireRole("admin", "controle"), async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: "id inválido." });
+    const patch: Record<string, any> = { updated_at: new Date().toISOString() };
+    if (req.body?.name != null) {
+      const name = String(req.body.name).trim();
+      if (!name) return res.status(400).json({ error: "Nome inválido." });
+      patch.name = name;
+    }
+    if (req.body?.sector_id != null) {
+      const sectorId = Number(req.body.sector_id);
+      if (!Number.isFinite(sectorId)) return res.status(400).json({ error: "sector_id inválido." });
+      patch.sector_id = sectorId;
+    }
+    if (req.body?.active != null) patch.active = Boolean(req.body.active);
+
+    const { error } = await supabase.from("cargos").update(patch).eq("id", id);
+    if (error) {
+      console.error("Erro ao atualizar cargo:", error);
+      return res.status(500).json({ error: "Não foi possível atualizar o cargo." });
+    }
+    res.json({ success: true });
+  });
+
+  app.delete("/api/cargos/:id", requireRole("admin", "controle"), async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: "id inválido." });
+    const { error } = await supabase.from("cargos").delete().eq("id", id);
+    if (error) {
+      console.error("Erro ao excluir cargo:", error);
+      return res.status(500).json({ error: "Não foi possível excluir o cargo." });
+    }
+    res.json({ success: true });
+  });
+
+  // ====================================================
   // CRDs
   // ====================================================
   app.get("/api/crds", async (req, res) => {
@@ -4150,6 +4246,7 @@ export function createApp() {
           cpf: String(after(cells, "CPF:") ?? "").trim(),
           cargo_cod: null,
           cargo: "",
+          setor: "",
           salario: 0,
           proventos: 0,
           descontos: 0,
@@ -4165,6 +4262,14 @@ export function createApp() {
         cur.cargo_cod = after(cells, "Cargo:") ?? null;
         cur.cargo = cells[2] ? String(cells[2].v).trim() : "";
         cur.salario = num(after(cells, "Salário:"));
+      } else if (
+        /^(setor|c\.?\s*custo|cc|centro de custo|lota[cç][aã]o|depto|departamento)\s*:/i.test(first)
+      ) {
+        const labelMatch = first.match(/^[^:]+:\s*(.*)$/);
+        const fromLabel = labelMatch?.[1]?.trim() || "";
+        const fromNext = cells[1] ? String(cells[1].v).trim() : "";
+        const fromThird = cells[2] ? String(cells[2].v).trim() : "";
+        cur.setor = fromThird || fromNext || fromLabel || cur.setor;
       } else if (first.startsWith("ND:")) {
         cur.proventos = num(after(cells, "Proventos:"));
         cur.descontos = num(after(cells, "Descontos:"));
@@ -4256,12 +4361,21 @@ export function createApp() {
           situacao: String(after(cells, "Situação:") ?? "").trim(),
           cpf: String(after(cells, "CPF:") ?? "").trim(),
           cargo: "",
+          setor: "",
         };
         continue;
       }
       if (!emp) continue;
       if (first.startsWith("Cargo:")) {
         emp.cargo = cells[2] ? String(cells[2].v).trim() : "";
+        continue;
+      }
+      if (/^(setor|c\.?\s*custo|cc|centro de custo|lota[cç][aã]o|depto|departamento)\s*:/i.test(first)) {
+        const labelMatch = first.match(/^[^:]+:\s*(.*)$/);
+        const fromLabel = labelMatch?.[1]?.trim() || "";
+        const fromNext = cells[1] ? String(cells[1].v).trim() : "";
+        const fromThird = cells[2] ? String(cells[2].v).trim() : "";
+        emp.setor = fromThird || fromNext || fromLabel || emp.setor;
         continue;
       }
       if (first.startsWith("ND:") || first.startsWith("NF:")) continue;
@@ -4294,6 +4408,7 @@ export function createApp() {
         cpf: emp.cpf,
         situacao: emp.situacao,
         cargo: emp.cargo,
+        setor: emp.setor,
         codigo: codigoStr || String(codigoRaw),
         nome_rubrica: descricao,
         horas,
@@ -4392,6 +4507,9 @@ export function createApp() {
     const month = Number((req.query as any)?.month);
     if (!month || month < 1 || month > 12) return res.status(400).json({ error: "month deve estar entre 1 e 12" });
 
+    const filtroSetor = String((req.query as any)?.setor ?? "").trim().toLowerCase();
+    const filtroFuncionario = String((req.query as any)?.funcionario ?? "").trim().toLowerCase();
+
     const { data, error } = await supabase
       .from("folha_pagamento")
       .select("matricula, nome, cargo, situacao, cpf, salario, proventos, descontos, liquido, base_inss, base_fgts, base_irrf")
@@ -4403,7 +4521,48 @@ export function createApp() {
       return res.status(500).json({ error: "Erro interno ao processar a solicitação." });
     }
 
-    const employees = data ?? [];
+    const mats = Array.from(
+      new Set((data ?? []).map((e: any) => String(e.matricula ?? "").trim()).filter(Boolean))
+    );
+    const setorByMatricula = new Map<string, string>();
+    if (mats.length) {
+      const [{ data: funcs }, { data: lancSetores }] = await Promise.all([
+        supabase.from("folha_funcionarios").select("codigo_funcionario, setor_nome").in("codigo_funcionario", mats),
+        supabase
+          .from("folha_lancamentos")
+          .select("codigo_funcionario, setor_nome")
+          .eq("competencia_ano", year)
+          .eq("competencia_mes", month)
+          .not("setor_nome", "is", null),
+      ]);
+      for (const l of lancSetores ?? []) {
+        const mat = String((l as any).codigo_funcionario ?? "").trim();
+        const setor = String((l as any).setor_nome ?? "").trim();
+        if (mat && setor) setorByMatricula.set(mat, setor);
+      }
+      for (const f of funcs ?? []) {
+        const mat = String((f as any).codigo_funcionario ?? "").trim();
+        const setor = String((f as any).setor_nome ?? "").trim();
+        if (mat && setor) setorByMatricula.set(mat, setor);
+      }
+    }
+
+    let employees = (data ?? []).map((e: any) => ({
+      ...e,
+      setor: setorByMatricula.get(String(e.matricula ?? "").trim()) || "",
+    }));
+
+    if (filtroSetor) {
+      employees = employees.filter((e: any) => String(e.setor || "").toLowerCase().includes(filtroSetor));
+    }
+    if (filtroFuncionario) {
+      employees = employees.filter(
+        (e: any) =>
+          String(e.nome ?? "").toLowerCase().includes(filtroFuncionario) ||
+          String(e.matricula ?? "").toLowerCase().includes(filtroFuncionario)
+      );
+    }
+
     const n = (v: any) => (Number.isFinite(Number(v)) ? Number(v) : 0);
     res.json({
       year,
@@ -4446,6 +4605,53 @@ export function createApp() {
         });
       }
 
+      // Mapa opcional de cargos definidos na pré-visualização: [{ matricula, cargo_id }]
+      let cargoByMatricula = new Map<string, { cargo_id: number; cargo_name: string; sector_id: number; sector_name: string }>();
+      try {
+        const rawMap = (req.body as any)?.cargo_map;
+        const parsed = typeof rawMap === "string" ? JSON.parse(rawMap || "[]") : Array.isArray(rawMap) ? rawMap : [];
+        const cargoIds = Array.from(
+          new Set(
+            (parsed as any[])
+              .map((r) => Number(r?.cargo_id))
+              .filter((id) => Number.isFinite(id) && id > 0)
+          )
+        );
+        if (cargoIds.length) {
+          const { data: cargoRows } = await supabase
+            .from("cargos")
+            .select("id, name, sector_id, sectors(name)")
+            .in("id", cargoIds)
+            .eq("active", true);
+          const byId = new Map<number, any>((cargoRows ?? []).map((c: any) => [Number(c.id), c]));
+          for (const row of parsed as any[]) {
+            const mat = String(row?.matricula ?? "").trim();
+            const cargoId = Number(row?.cargo_id);
+            const cargo = byId.get(cargoId);
+            if (!mat || !cargo) continue;
+            cargoByMatricula.set(mat, {
+              cargo_id: cargoId,
+              cargo_name: String(cargo.name ?? "").trim(),
+              sector_id: Number(cargo.sector_id),
+              sector_name: String(cargo.sectors?.name ?? "").trim(),
+            });
+          }
+        }
+      } catch (e) {
+        console.warn("cargo_map inválido na importação da folha:", e);
+      }
+
+      for (const e of employees) {
+        const mat = String(e.matricula ?? "").trim() || "SEM-MATRICULA";
+        const assigned = cargoByMatricula.get(mat);
+        if (assigned) {
+          e.cargo = assigned.cargo_name;
+          e.setor = assigned.sector_name;
+          e.cargo_id = assigned.cargo_id;
+          e.sector_id = assigned.sector_id;
+        }
+      }
+
       const rows = employees.map((e) => ({
         year,
         month,
@@ -4462,6 +4668,12 @@ export function createApp() {
         base_fgts: e.base_fgts || 0,
         base_irrf: e.base_irrf || 0,
       }));
+      const setorByMatriculaImport = new Map<string, string>();
+      for (const e of employees) {
+        const mat = String(e.matricula ?? "").trim() || "SEM-MATRICULA";
+        const setor = String(e.setor ?? "").trim();
+        if (setor) setorByMatriculaImport.set(mat, setor);
+      }
 
       // Substitui a folha do mês.
       await supabase.from("folha_pagamento").delete().eq("year", year).eq("month", month);
@@ -4511,6 +4723,13 @@ export function createApp() {
 
       // Parser de detalhe (reutilizado no cadastro e no v2)
       const detalheRubricas = parseExtratoEmployeeRubricas(grid);
+      for (const d of detalheRubricas) {
+        const mat = String(d.matricula ?? "").trim();
+        const setor = String(d.setor ?? "").trim();
+        if (mat && setor && !setorByMatriculaImport.has(mat)) {
+          setorByMatriculaImport.set(mat, setor);
+        }
+      }
 
       // Mapeamento importação → cadastro de parâmetros (folha_rubricas_parametros)
       let rubricasCadastradasNaImportacao = 0;
@@ -4574,6 +4793,7 @@ export function createApp() {
             nome_funcionario: d.nome,
             cpf_funcionario: d.cpf,
             cargo_nome: d.cargo,
+            setor_nome: d.setor || null,
             situacao: d.situacao,
             codigo_rubrica: d.codigo,
             descricao_rubrica: d.nome_rubrica,
@@ -4586,19 +4806,19 @@ export function createApp() {
 
         for (const r of rows) {
           const mat = String(r.matricula || "SEM-MATRICULA");
-          await supabase.from("folha_funcionarios").upsert(
-            {
-              codigo_funcionario: mat,
-              nome: r.nome,
-              cpf: r.cpf,
-              cargo_nome: r.cargo,
-              situacao_atual: r.situacao,
-              salario_base: r.salario,
-              ativo: true,
-              updated_at: new Date().toISOString(),
-            },
-            { onConflict: "codigo_funcionario" }
-          );
+          const setorNome = setorByMatriculaImport.get(mat);
+          const payload: Record<string, any> = {
+            codigo_funcionario: mat,
+            nome: r.nome,
+            cpf: r.cpf,
+            cargo_nome: r.cargo,
+            situacao_atual: r.situacao,
+            salario_base: r.salario,
+            ativo: true,
+            updated_at: new Date().toISOString(),
+          };
+          if (setorNome) payload.setor_nome = setorNome;
+          await supabase.from("folha_funcionarios").upsert(payload, { onConflict: "codigo_funcionario" });
         }
         const situacoes = new Map<string, number>();
         for (const r of rows) {
@@ -5509,6 +5729,20 @@ export function createApp() {
     }
 
     let lancamentos = lancamentosRaw ?? [];
+    const funcionariosOpts = new Set<string>();
+    const setoresOpts = new Set<string>();
+    const cargosOpts = new Set<string>();
+    for (const l of lancamentos as any[]) {
+      const nome = String(l.nome_funcionario ?? "").trim();
+      const mat = String(l.codigo_funcionario ?? "").trim();
+      const label = nome ? (mat ? `${mat} — ${nome}` : nome) : mat;
+      if (label) funcionariosOpts.add(label);
+      const setor = String(l.setor_nome ?? "").trim();
+      if (setor) setoresOpts.add(setor);
+      const cargo = String(l.cargo_nome ?? "").trim();
+      if (cargo) cargosOpts.add(cargo);
+    }
+
     const filtroRubrica = String(q?.rubrica ?? "").trim();
     const filtroTipo = String(q?.tipo ?? "").trim().toUpperCase();
     const filtroFuncionario = String(q?.funcionario ?? "").trim().toLowerCase();
@@ -5533,6 +5767,11 @@ export function createApp() {
       lancamentos,
       situacoes: situacoes ?? [],
       importacao: importacao ?? null,
+      filtros_disponiveis: {
+        funcionarios: Array.from(funcionariosOpts).sort((a, b) => a.localeCompare(b, "pt-BR")),
+        setores: Array.from(setoresOpts).sort((a, b) => a.localeCompare(b, "pt-BR")),
+        cargos: Array.from(cargosOpts).sort((a, b) => a.localeCompare(b, "pt-BR")),
+      },
       import_status: {
         dados_importados: dadosImportados,
         funcionarios: funcCount ?? 0,

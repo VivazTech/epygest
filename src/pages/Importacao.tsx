@@ -137,6 +137,7 @@ type ExtratoEmployee = {
   cpf: string;
   cargo_cod: number | string | null;
   cargo: string;
+  cargo_id?: string;
   salario: number;
   proventos: number;
   descontos: number;
@@ -144,6 +145,14 @@ type ExtratoEmployee = {
   base_inss: number;
   base_fgts: number;
   base_irrf: number;
+};
+
+type CadastroCargo = {
+  id: number;
+  name: string;
+  sector_id: number;
+  sector_name: string | null;
+  active: boolean;
 };
 
 type ExtratoSummary = {
@@ -395,6 +404,14 @@ export const ImportacaoPage: React.FC = () => {
   const [extratoYear, setExtratoYear] = useState<string>(String(new Date().getFullYear()));
   const [extratoCommitting, setExtratoCommitting] = useState(false);
   const [extratoCommitMsg, setExtratoCommitMsg] = useState('');
+  const [cadastroCargos, setCadastroCargos] = useState<CadastroCargo[]>([]);
+
+  useEffect(() => {
+    fetch('/api/cargos?active=1')
+      .then((res) => res.json())
+      .then((data) => setCadastroCargos(Array.isArray(data) ? data : []))
+      .catch(() => setCadastroCargos([]));
+  }, []);
 
   const commitExtratoToFolha = async () => {
     if (extratoCommitting || !extratoFile) return;
@@ -410,6 +427,15 @@ export const ImportacaoPage: React.FC = () => {
     formData.append('extrato_file', extratoFile);
     formData.append('month', String(mes));
     formData.append('year', String(ano));
+    const cargoMap = extratoEmployees
+      .filter((e) => e.cargo_id)
+      .map((e) => ({
+        matricula: String(e.matricula ?? '').trim() || 'SEM-MATRICULA',
+        cargo_id: Number(e.cargo_id),
+      }));
+    if (cargoMap.length) {
+      formData.append('cargo_map', JSON.stringify(cargoMap));
+    }
     try {
       const res = await fetch('/api/folha/import', { method: 'POST', body: formData });
       const data = await res.json().catch(() => ({}));
@@ -741,6 +767,16 @@ export const ImportacaoPage: React.FC = () => {
       ),
     [extratoEmployees, query]
   );
+
+  const updateExtratoCargo = (matricula: string | number | null, cargoId: string) => {
+    const key = String(matricula ?? '').trim();
+    setExtratoEmployees((prev) =>
+      prev.map((emp) =>
+        String(emp.matricula ?? '').trim() === key ? { ...emp, cargo_id: cargoId } : emp
+      )
+    );
+  };
+
   const filteredRelCrdAccounts = useMemo(
     () =>
       relCrdAccounts.filter((acc) =>
@@ -907,7 +943,17 @@ export const ImportacaoPage: React.FC = () => {
         setExtratoPeriod(null);
         return;
       }
-      setExtratoEmployees(Array.isArray(data.employees) ? data.employees : []);
+      const employees = (Array.isArray(data.employees) ? data.employees : []).map((emp: ExtratoEmployee) => {
+        const cargoFromFile = String(emp.cargo ?? '').trim().toLowerCase();
+        const matched = cargoFromFile
+          ? cadastroCargos.find((c) => c.name.trim().toLowerCase() === cargoFromFile)
+          : undefined;
+        return {
+          ...emp,
+          cargo_id: matched ? String(matched.id) : '',
+        };
+      });
+      setExtratoEmployees(employees);
       setExtratoSummary(data.summary || null);
       const period = data.period || null;
       setExtratoPeriod(period);
@@ -1377,10 +1423,10 @@ export const ImportacaoPage: React.FC = () => {
 
           {extratoEmployees.length > 0 && (
             <div className="overflow-auto max-h-[520px]">
-              <table className="w-full text-left border-collapse min-w-[1100px]">
+              <table className="w-full text-left border-collapse min-w-[1200px]">
                 <thead className="sticky top-0">
                   <tr className="bg-slate-50 border-b border-slate-200">
-                    {['Matríc.', 'Funcionário', 'Cargo', 'Situação', 'Salário', 'Proventos', 'Descontos', 'Líquido', 'Base INSS', 'Base FGTS', 'Base IRRF'].map((h) => (
+                    {['Matríc.', 'Funcionário', 'Cargo (cadastro)', 'Cargo (arquivo)', 'Situação', 'Salário', 'Proventos', 'Descontos', 'Líquido', 'Base INSS', 'Base FGTS', 'Base IRRF'].map((h) => (
                       <th
                         key={h}
                         className={`px-3 py-2 text-[10px] font-bold text-slate-500 uppercase tracking-widest ${
@@ -1397,7 +1443,30 @@ export const ImportacaoPage: React.FC = () => {
                     <tr key={idx} className="hover:bg-slate-50/70">
                       <td className="px-3 py-2 text-xs text-slate-500 tabular-nums">{emp.matricula}</td>
                       <td className="px-3 py-2 text-xs text-slate-800 whitespace-nowrap">{emp.nome}</td>
-                      <td className="px-3 py-2 text-xs text-slate-600 whitespace-nowrap">{emp.cargo}</td>
+                      <td className="px-3 py-2 text-xs min-w-[220px]">
+                        <select
+                          value={emp.cargo_id || ''}
+                          onChange={(e) => updateExtratoCargo(emp.matricula, e.target.value)}
+                          className="w-full min-w-[200px] px-2 py-1.5 bg-white border border-slate-200 rounded-lg text-xs"
+                          title={
+                            cadastroCargos.length === 0
+                              ? 'Cadastre cargos em Cadastros › Setores / Centros de Custo'
+                              : 'Selecione o cargo cadastrado'
+                          }
+                        >
+                          <option value="">
+                            {cadastroCargos.length === 0 ? 'Cadastre cargos em Cadastros' : 'Selecionar cargo…'}
+                          </option>
+                          {cadastroCargos.map((c) => (
+                            <option key={c.id} value={String(c.id)}>
+                              {c.sector_name ? `${c.sector_name} › ${c.name}` : c.name}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td className="px-3 py-2 text-xs text-slate-500 whitespace-nowrap" title="Cargo lido do extrato">
+                        {emp.cargo || '—'}
+                      </td>
                       <td className="px-3 py-2 text-xs text-slate-600">{emp.situacao}</td>
                       <td className="px-3 py-2 text-xs text-right tabular-nums text-slate-700">{formatCurrency(emp.salario)}</td>
                       <td className="px-3 py-2 text-xs text-right tabular-nums text-emerald-700">{formatCurrency(emp.proventos)}</td>

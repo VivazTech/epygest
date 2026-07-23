@@ -13,6 +13,7 @@ interface FolhaEmployee {
   matricula: string;
   nome: string;
   cargo: string;
+  setor?: string;
   situacao: string;
   cpf: string;
   salario: number;
@@ -83,6 +84,8 @@ export const FolhaPagamentoPage: React.FC<FolhaPagamentoPageProps> = ({ month })
     fgts: '', fgts_prov_ferias: '', fgts_prov_13: '',
   });
   const [savingFgts, setSavingFgts] = useState(false);
+  const [filtroSetor, setFiltroSetor] = useState('');
+  const [filtroFuncionario, setFiltroFuncionario] = useState('');
 
   const loadRubricas = useCallback(async () => {
     try {
@@ -248,14 +251,54 @@ export const FolhaPagamentoPage: React.FC<FolhaPagamentoPageProps> = ({ month })
     }
   };
 
+  useEffect(() => {
+    setFiltroSetor('');
+    setFiltroFuncionario('');
+  }, [month, year]);
+
   const canImport = userRole === 'admin' || userRole === 'finance' || userRole === 'controle';
-  const employees = useMemo(
-    () =>
-      (data?.employees ?? []).filter((emp) =>
-        matchesSearch(query, emp.matricula, emp.nome, emp.cargo, emp.situacao, emp.cpf)
-      ),
-    [data, query]
-  );
+
+  const setoresDisponiveis = useMemo(() => {
+    const set = new Set<string>();
+    for (const emp of data?.employees ?? []) {
+      const s = String(emp.setor ?? '').trim();
+      if (s) set.add(s);
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  }, [data]);
+
+  const funcionariosDisponiveis = useMemo(() => {
+    return (data?.employees ?? [])
+      .filter((emp) => {
+        if (!filtroSetor) return true;
+        return String(emp.setor ?? '').trim() === filtroSetor;
+      })
+      .slice()
+      .sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
+  }, [data, filtroSetor]);
+
+  const employees = useMemo(() => {
+    return (data?.employees ?? []).filter((emp) => {
+      if (filtroSetor && String(emp.setor ?? '').trim() !== filtroSetor) return false;
+      if (filtroFuncionario) {
+        const key = String(emp.matricula ?? '').trim();
+        if (key !== filtroFuncionario) return false;
+      }
+      return matchesSearch(query, emp.matricula, emp.nome, emp.cargo, emp.setor, emp.situacao, emp.cpf);
+    });
+  }, [data, query, filtroSetor, filtroFuncionario]);
+
+  const summaryFiltrado = useMemo(() => {
+    const n = (v: any) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+    return {
+      funcionarios: employees.length,
+      total_proventos: employees.reduce((s, e) => s + n(e.proventos), 0),
+      total_descontos: employees.reduce((s, e) => s + n(e.descontos), 0),
+      total_liquido: employees.reduce((s, e) => s + n(e.liquido), 0),
+    };
+  }, [employees]);
+
+  const temFiltroAtivo = Boolean(filtroSetor || filtroFuncionario);
 
   return (
     <div className="space-y-6">
@@ -305,6 +348,59 @@ export const FolhaPagamentoPage: React.FC<FolhaPagamentoPageProps> = ({ month })
         <div className="flex items-center gap-2 text-xs text-red-700 bg-red-50 border border-red-100 rounded-xl px-3 py-2">
           <AlertTriangle className="w-4 h-4" />
           {error}
+        </div>
+      )}
+
+      {(data?.employees?.length ?? 0) > 0 && (
+        <div className="flex flex-wrap items-end gap-3 bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">
+          <div className="space-y-1.5 min-w-[200px] flex-1">
+            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Setor</label>
+            <select
+              value={filtroSetor}
+              onChange={(e) => {
+                setFiltroSetor(e.target.value);
+                setFiltroFuncionario('');
+              }}
+              className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+            >
+              <option value="">Todos os setores</option>
+              {setoresDisponiveis.map((s) => (
+                <option key={s} value={s}>{s}</option>
+              ))}
+            </select>
+            {setoresDisponiveis.length === 0 && (
+              <p className="text-[11px] text-amber-700">
+                Nenhum setor vinculado aos funcionários deste mês. Reimporte o extrato se ele trouxer setor/C.Custo, ou cadastre o setor no módulo de Apuração.
+              </p>
+            )}
+          </div>
+          <div className="space-y-1.5 min-w-[240px] flex-[1.4]">
+            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Funcionário</label>
+            <select
+              value={filtroFuncionario}
+              onChange={(e) => setFiltroFuncionario(e.target.value)}
+              className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+            >
+              <option value="">Todos os funcionários</option>
+              {funcionariosDisponiveis.map((emp) => (
+                <option key={emp.matricula} value={emp.matricula}>
+                  {emp.matricula} — {emp.nome}
+                </option>
+              ))}
+            </select>
+          </div>
+          {temFiltroAtivo && (
+            <button
+              type="button"
+              onClick={() => {
+                setFiltroSetor('');
+                setFiltroFuncionario('');
+              }}
+              className="px-3 py-2 text-sm font-bold text-slate-600 border border-slate-200 rounded-xl hover:bg-slate-50"
+            >
+              Limpar filtros
+            </button>
+          )}
         </div>
       )}
 
@@ -499,20 +595,22 @@ export const FolhaPagamentoPage: React.FC<FolhaPagamentoPageProps> = ({ month })
       {data && (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <div className="bg-white border border-slate-200 rounded-2xl p-4">
-            <p className="text-[11px] uppercase tracking-wider font-bold text-slate-400">Funcionários</p>
-            <p className="text-xl font-extrabold text-slate-900">{data.summary.funcionarios}</p>
+            <p className="text-[11px] uppercase tracking-wider font-bold text-slate-400">
+              Funcionários{temFiltroAtivo ? ' (filtro)' : ''}
+            </p>
+            <p className="text-xl font-extrabold text-slate-900">{summaryFiltrado.funcionarios}</p>
           </div>
           <div className="bg-white border border-slate-200 rounded-2xl p-4">
             <p className="text-[11px] uppercase tracking-wider font-bold text-slate-400">Proventos</p>
-            <p className="text-xl font-extrabold text-emerald-700">{formatCurrency(data.summary.total_proventos)}</p>
+            <p className="text-xl font-extrabold text-emerald-700">{formatCurrency(summaryFiltrado.total_proventos)}</p>
           </div>
           <div className="bg-white border border-slate-200 rounded-2xl p-4">
             <p className="text-[11px] uppercase tracking-wider font-bold text-slate-400">Descontos</p>
-            <p className="text-xl font-extrabold text-red-600">{formatCurrency(data.summary.total_descontos)}</p>
+            <p className="text-xl font-extrabold text-red-600">{formatCurrency(summaryFiltrado.total_descontos)}</p>
           </div>
           <div className="bg-white border border-slate-200 rounded-2xl p-4">
             <p className="text-[11px] uppercase tracking-wider font-bold text-slate-400">Líquido</p>
-            <p className="text-xl font-extrabold text-slate-900">{formatCurrency(data.summary.total_liquido)}</p>
+            <p className="text-xl font-extrabold text-slate-900">{formatCurrency(summaryFiltrado.total_liquido)}</p>
           </div>
         </div>
       )}
@@ -521,15 +619,21 @@ export const FolhaPagamentoPage: React.FC<FolhaPagamentoPageProps> = ({ month })
         {employees.length === 0 ? (
           <div className="py-16 flex flex-col items-center justify-center gap-2 text-slate-400">
             <Users className="w-10 h-10" />
-            <p className="text-sm font-medium">Nenhuma folha importada para {MESES_FOLHA[month]}/{year}.</p>
-            {canImport && <p className="text-xs">Use “Importar Extrato de {MESES_FOLHA[month]}” para carregar.</p>}
+            <p className="text-sm font-medium">
+              {temFiltroAtivo || query.trim()
+                ? 'Nenhum funcionário encontrado com os filtros atuais.'
+                : `Nenhuma folha importada para ${MESES_FOLHA[month]}/${year}.`}
+            </p>
+            {!temFiltroAtivo && !query.trim() && canImport && (
+              <p className="text-xs">Use “Importar Extrato de {MESES_FOLHA[month]}” para carregar.</p>
+            )}
           </div>
         ) : (
           <div className="overflow-auto max-h-[600px]">
-            <table className="w-full text-left border-collapse min-w-[1100px]">
+            <table className="w-full text-left border-collapse min-w-[1200px]">
               <thead className="sticky top-0">
                 <tr className="bg-slate-50 border-b border-slate-200">
-                  {['Matríc.', 'Funcionário', 'Cargo', 'Situação', 'Salário', 'Proventos', 'Descontos', 'Líquido', 'Base INSS', 'Base FGTS', 'Base IRRF'].map((h) => (
+                  {['Matríc.', 'Funcionário', 'Setor', 'Cargo', 'Situação', 'Salário', 'Proventos', 'Descontos', 'Líquido', 'Base INSS', 'Base FGTS', 'Base IRRF'].map((h) => (
                     <th
                       key={h}
                       className={`px-3 py-2 text-[10px] font-bold text-slate-500 uppercase tracking-widest ${
@@ -546,6 +650,7 @@ export const FolhaPagamentoPage: React.FC<FolhaPagamentoPageProps> = ({ month })
                   <tr key={idx} className="hover:bg-slate-50/70">
                     <td className="px-3 py-2 text-xs text-slate-500 tabular-nums">{emp.matricula}</td>
                     <td className="px-3 py-2 text-xs text-slate-800 whitespace-nowrap">{emp.nome}</td>
+                    <td className="px-3 py-2 text-xs text-slate-600 whitespace-nowrap">{emp.setor || '—'}</td>
                     <td className="px-3 py-2 text-xs text-slate-600 whitespace-nowrap">{emp.cargo}</td>
                     <td className="px-3 py-2 text-xs text-slate-600">{emp.situacao}</td>
                     <td className="px-3 py-2 text-xs text-right tabular-nums text-slate-700">{formatCurrency(emp.salario)}</td>
