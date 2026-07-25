@@ -27,7 +27,6 @@ import { RelatorioRequisicoesPage, RelatorioRequisicoesMesPage, MESES_REL_REQ } 
 import { ConsumoInternoPage, ConsumoInternoMesPage, MESES_CONSUMO } from './pages/ConsumoInterno';
 import { RelatorioRdsPage, RelatorioRdsMesPage, MESES_RDS } from './pages/RelatorioRds';
 import { ComprasPage } from './pages/Compras';
-import { AvaliacaoUIPage } from './pages/AvaliacaoUI';
 import { SearchProvider, useSearch } from './context/SearchContext';
 import { ToastProvider } from './context/ToastContext';
 import { SearchBar } from './components/SearchBar';
@@ -237,7 +236,6 @@ export default function App() {
       case 'usuarios': return <Usuarios />;
       case 'configuracoes': return <Configuracoes />;
       case 'compras-ordem': return <ComprasPage />;
-      case 'avaliacao-ui': return <AvaliacaoUIPage />;
       default: return <Dashboard />;
     }
   };
@@ -432,8 +430,6 @@ function AppShell({
                   }`
                 : activeTab === 'prev-real'
                 ? 'Prev x Real Diario'
-                : activeTab === 'avaliacao-ui'
-                ? 'Avaliação de UI'
                 : activeTab.replace('-', ' ')}
             </span>
           </div>
