@@ -304,3 +304,17 @@ export const AvaliacaoUIPage: React.FC = () => {
     </div>
   );
 };
+
+{/* <Section title="Avisos (feedback visual)">
+        <div className="space-y-3">
+          <div className="flex items-center gap-2 text-sm text-emerald-800 bg-emerald-50 border border-emerald-100 rounded-xl px-4 py-3">
+            <Check className="w-4 h-4 shrink-0" /> Operação concluída com sucesso.
+          </div>
+          <div className="flex items-center gap-2 text-sm text-blue-800 bg-blue-50 border border-blue-100 rounded-xl px-4 py-3">
+            <Info className="w-4 h-4 shrink-0" /> Informação de contexto para o usuário.
+          </div>
+          <div className="flex items-center gap-2 text-sm text-red-700 bg-red-50 border border-red-100 rounded-xl px-4 py-3">
+            <AlertTriangle className="w-4 h-4 shrink-0" /> Algo deu errado — verifique os dados.
+          </div>
+        </div>
+      </Section> */}
