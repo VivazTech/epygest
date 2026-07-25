@@ -8,7 +8,6 @@ import {
   Settings,
   Users,
   User,
-  ContactRound,
   LogOut,
   Receipt,
   PlusCircle,
@@ -66,7 +65,6 @@ const menuItems = [
   { id: 'cadastros', label: 'Cadastros', icon: Database, roles: ['admin', 'controle'] },
   { id: 'prev-real', label: 'Prev x Real Diario', icon: BarChart3, roles: ['admin', 'controle', 'manager'] },
   { id: 'usuarios', label: 'Usuários', icon: Users, roles: ['admin'] },
-  { id: 'diretorio-usuarios', label: 'Diretório de Usuários', icon: ContactRound, roles: ['admin'] },
   { id: 'configuracoes', label: 'Configurações', icon: Settings, roles: ['admin'] },
 ];
 
@@ -80,7 +78,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 }) => {
   const constructionGroupIds = ['dashboard', 'analise', 'planejamento'];
   const lancamentosGroupIds = lancamentosMenuItems.map((item) => item.id);
-  const adminGroupIds = ['usuarios', 'diretorio-usuarios', 'configuracoes'];
+  const adminGroupIds = ['usuarios', 'configuracoes'];
   const planilhasRoles = ['admin', 'controle'];
   const baseOrcamentoRoles = ['admin', 'controle', 'manager'];
   const filteredMenu = menuItems.filter(item => item.roles.includes(user?.role));
