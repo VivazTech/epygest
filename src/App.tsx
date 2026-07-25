@@ -18,6 +18,7 @@ import { SintasePage as Sintase } from './pages/Sintase';
 import { PrevRealPage as PrevReal } from './pages/PrevReal';
 import { ConfiguracoesPage as Configuracoes } from './pages/Configuracoes';
 import { UsuariosPage as Usuarios } from './pages/Usuarios';
+import { DiretorioUsuariosPage as DiretorioUsuarios } from './pages/DiretorioUsuarios';
 import { PlanilhasPage } from './pages/Planilhas';
 import { PLANILHAS, APURACAO_RECEITA_ITENS, BASE_ORCAMENTO_ITENS, isApuracaoReceitaPlanilha, isBaseOrcamentoTab } from './lib/planilhas';
 import { FolhaPagamentoPage, MESES_FOLHA } from './pages/FolhaPagamento';
@@ -234,6 +235,7 @@ export default function App() {
       case 'prev-real': return <PrevReal mode="diario" />;
       case 'supabase-teste': return <SupabaseTeste />;
       case 'usuarios': return <Usuarios />;
+      case 'diretorio-usuarios': return <DiretorioUsuarios />;
       case 'configuracoes': return <Configuracoes />;
       case 'compras-ordem': return <ComprasPage />;
       default: return <Dashboard />;
@@ -430,6 +432,8 @@ function AppShell({
                   }`
                 : activeTab === 'prev-real'
                 ? 'Prev x Real Diario'
+                : activeTab === 'diretorio-usuarios'
+                ? 'Diretório de Usuários'
                 : activeTab.replace('-', ' ')}
             </span>
           </div>

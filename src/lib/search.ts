@@ -46,6 +46,7 @@ export function getSearchPlaceholder(activeTab: string): string {
     sintase: 'Buscar CRD, grupo ou detalhado...',
     'prev-real': 'Buscar CRD, grupo ou detalhado...',
     usuarios: 'Buscar nome, e-mail ou setor...',
+    'diretorio-usuarios': 'Buscar nome, e-mail ou setor...',
     configuracoes: 'Buscar configuração ou local PDV...',
   };
 
