@@ -28,6 +28,7 @@ import {
   FileCheck,
   TrendingUp,
   Boxes,
+  FlaskConical,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { PLANILHAS_RESULTADOS, APURACAO_RECEITA_ITENS, BASE_ORCAMENTO_ITENS, isBaseOrcamentoTab, isRelCrdTab, isRelReqTab, isConsumoInternoTab, isRdsTab, isApuracaoReceitaTab as checkApuracaoReceitaTab, isApuracaoResultadosTab as checkApuracaoResultadosTab } from '../lib/planilhas';
@@ -66,6 +67,7 @@ const menuItems = [
   { id: 'prev-real', label: 'Prev x Real Diario', icon: BarChart3, roles: ['admin', 'controle', 'manager'] },
   { id: 'usuarios', label: 'Usuários', icon: Users, roles: ['admin'] },
   { id: 'configuracoes', label: 'Configurações', icon: Settings, roles: ['admin'] },
+  { id: 'avaliacao-ui', label: 'Avaliação de UI', icon: FlaskConical, roles: ['admin'] },
 ];
 
 export const Sidebar: React.FC<SidebarProps> = ({
