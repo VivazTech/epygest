@@ -906,23 +906,74 @@ export function createApp() {
     const selectedYear = Number(year) || now.getFullYear();
     const { dateFrom, dateTo } = getMonthDateRange(selectedYear, selectedMonth);
 
-    const [{ data: allRevenue }, { data: allExpenses }, { data: monthRevenue }, { data: monthExpenses }] =
-      await Promise.all([
-        supabase.from("financial_records").select("amount").eq("type", "revenue"),
-        supabase.from("financial_records").select("amount").eq("type", "expense"),
-        supabase
-          .from("financial_records")
-          .select("amount")
-          .eq("type", "revenue")
-          .gte("date", dateFrom)
-          .lte("date", dateTo),
-        supabase
-          .from("financial_records")
-          .select("amount")
-          .eq("type", "expense")
-          .gte("date", dateFrom)
-          .lte("date", dateTo),
-      ]);
+    const monthLabels = [
+      "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
+      "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro",
+    ];
+
+    // Índice Acumulado (R$) nas seções RDS com colunas
+    // [Diário (R$), Diário %, Acumulado (R$), Acumulado %]
+    const RDS_ACUMULADO_IDX = 2;
+    const RDS_REVENUE_KEYS = [
+      { key: "hospedagem", label: "Hospedagem" },
+      { key: "alimentos_bebidas", label: "Alimentos & Bebidas" },
+      { key: "eventos", label: "Eventos" },
+      { key: "diversos", label: "Diversos" },
+    ] as const;
+
+    const extractRdsAcumuladoTotal = (sections: any[], sectionKey: string): number => {
+      const section = (sections ?? []).find((s: any) => String(s?.key ?? "") === sectionKey);
+      if (!section || !Array.isArray(section.total) || section.total.length <= RDS_ACUMULADO_IDX) return 0;
+      return Number(section.total[RDS_ACUMULADO_IDX]) || 0;
+    };
+
+    const extractRdsSectionDetails = (sections: any[], sectionKey: string) => {
+      const section = (sections ?? []).find((s: any) => String(s?.key ?? "") === sectionKey);
+      if (!section) return { total: 0, items: [] as Array<{ label: string; acumulado: number }> };
+      const items = (Array.isArray(section.items) ? section.items : []).map((item: any) => ({
+        label: String(item?.label ?? ""),
+        acumulado: Number(Array.isArray(item?.values) ? item.values[RDS_ACUMULADO_IDX] : 0) || 0,
+      }));
+      return {
+        total: extractRdsAcumuladoTotal(sections, sectionKey),
+        items,
+      };
+    };
+
+    const [
+      { data: allRevenue },
+      { data: allExpenses },
+      { data: monthRevenue },
+      { data: monthExpenses },
+      { data: rdsMonth },
+      { data: rdsYearRows },
+    ] = await Promise.all([
+      supabase.from("financial_records").select("amount").eq("type", "revenue"),
+      supabase.from("financial_records").select("amount").eq("type", "expense"),
+      supabase
+        .from("financial_records")
+        .select("amount")
+        .eq("type", "revenue")
+        .gte("date", dateFrom)
+        .lte("date", dateTo),
+      supabase
+        .from("financial_records")
+        .select("amount")
+        .eq("type", "expense")
+        .gte("date", dateFrom)
+        .lte("date", dateTo),
+      supabase
+        .from("rds_snapshots")
+        .select("report_date, sections, month, year")
+        .eq("year", selectedYear)
+        .eq("month", selectedMonth)
+        .maybeSingle(),
+      supabase
+        .from("rds_snapshots")
+        .select("month, sections")
+        .eq("year", selectedYear)
+        .order("month", { ascending: true }),
+    ]);
 
     const totalRevenue = (allRevenue ?? []).reduce((s: number, r: any) => s + Number(r.amount), 0);
     const totalExpenses = (allExpenses ?? []).reduce((s: number, r: any) => s + Number(r.amount), 0);
@@ -930,10 +981,55 @@ export function createApp() {
     const monthlyExpenses = (monthExpenses ?? []).reduce((s: number, r: any) => s + Number(r.amount), 0);
     const monthlyProfit = (monthlyRevenue - monthlyExpenses) * 0.8;
 
+    const monthSections = Array.isArray((rdsMonth as any)?.sections) ? (rdsMonth as any).sections : [];
+    const receitaHospedagem = extractRdsAcumuladoTotal(monthSections, "hospedagem");
+    const receitaAlimentosBebidas = extractRdsAcumuladoTotal(monthSections, "alimentos_bebidas");
+    const receitaEventos = extractRdsAcumuladoTotal(monthSections, "eventos");
+    const receitaDiversos = extractRdsAcumuladoTotal(monthSections, "diversos");
+
+    const rdsDetalhes = Object.fromEntries(
+      RDS_REVENUE_KEYS.map(({ key, label }) => {
+        const detail = extractRdsSectionDetails(monthSections, key);
+        return [key, { label, ...detail }];
+      })
+    );
+
+    const rdsByMonth = new Map<number, any[]>(
+      (rdsYearRows ?? []).map((row: any) => [Number(row.month), Array.isArray(row.sections) ? row.sections : []])
+    );
+
+    const realizadoMensal = Array.from({ length: 12 }, (_, i) => {
+      const m = i + 1;
+      const sections = rdsByMonth.get(m) ?? [];
+      const hospedagem = extractRdsAcumuladoTotal(sections, "hospedagem");
+      const alimentos_bebidas = extractRdsAcumuladoTotal(sections, "alimentos_bebidas");
+      const eventos = extractRdsAcumuladoTotal(sections, "eventos");
+      const diversos = extractRdsAcumuladoTotal(sections, "diversos");
+      return {
+        month: m,
+        name: monthLabels[i].slice(0, 3),
+        label: monthLabels[i],
+        hospedagem,
+        alimentos_bebidas,
+        eventos,
+        diversos,
+        total: hospedagem + alimentos_bebidas + eventos + diversos,
+        importado: rdsByMonth.has(m),
+      };
+    });
+
     res.json({
       month: selectedMonth,
       year: selectedYear,
       receitaMensal: monthlyRevenue,
+      receitaHospedagem,
+      receitaAlimentosBebidas,
+      receitaEventos,
+      receitaDiversos,
+      rdsImportado: Boolean(rdsMonth),
+      rdsReportDate: (rdsMonth as any)?.report_date ?? null,
+      rdsDetalhes,
+      realizadoMensal,
       receitaAcumulada: totalRevenue,
       faturamentoMensal: monthlyRevenue * 1.1,
       faturamentoAcumulado: totalRevenue * 1.1,
@@ -6469,6 +6565,161 @@ export function createApp() {
   // DRE GERENCIAL: edições manuais por célula
   // Sobrepõem os valores importados da planilha Prev x Real (src/data/dre2026.json).
   // ====================================================
+
+  // Realizado de linhas do DRE a partir do RDS (Acumulado R$).
+  const RDS_ACUMULADO_IDX = 2;
+  const DRE_RDS_MAPPINGS = [
+    {
+      rowId: "l54-diaria",
+      rowLabel: "Diária",
+      sectionKey: "hospedagem",
+      labels: ["HOSPEDAGEM", "HOSPEDAGEM NO-SHOW", "UPGRADE / UPSELLING", "TAXA DE SERVICO"],
+      source:
+        "Apuração de Receita › Relatório Diário de Situação › Hospedagem › Acumulado (R$) — HOSPEDAGEM + HOSPEDAGEM NO-SHOW + UPGRADE / UPSELLING + Taxa de serviço",
+    },
+    {
+      rowId: "l55-cafe-da-manha",
+      rowLabel: "Café da manhã",
+      sectionKey: "alimentos_bebidas",
+      labels: ["CAFE DA MANHA (PENSAO)"],
+      source:
+        "Apuração de Receita › Relatório Diário de Situação › Alimentos & Bebidas › CAFE DA MANHA (PENSAO) › Acumulado (R$)",
+    },
+    {
+      rowId: "l56-map-e-fap",
+      rowLabel: "MAP e FAP",
+      sectionKey: "alimentos_bebidas",
+      labels: ["ALMOCO (PENSAO)", "JANTAR (PENSAO)"],
+      source:
+        "Apuração de Receita › Relatório Diário de Situação › Alimentos & Bebidas › Acumulado (R$) — ALMOCO (PENSAO) + JANTAR (PENSAO)",
+    },
+    {
+      rowId: "l58-frigobar",
+      rowLabel: "Frigobar",
+      sectionKey: "alimentos_bebidas",
+      labels: ["FRIGOBAR"],
+      source:
+        "Apuração de Receita › Relatório Diário de Situação › Alimentos & Bebidas › FRIGOBAR › Acumulado (R$)",
+    },
+    {
+      rowId: "l59-room-service",
+      rowLabel: "Room Service",
+      sectionKey: "alimentos_bebidas",
+      labels: ["ROOM SERVICE"],
+      source:
+        "Apuração de Receita › Relatório Diário de Situação › Alimentos & Bebidas › ROOM SERVICE › Acumulado (R$)",
+    },
+    {
+      rowId: "l60-bar-gaia",
+      rowLabel: "Bar Gaia",
+      sectionKey: "alimentos_bebidas",
+      labels: ["BAR GAIA"],
+      source:
+        "Apuração de Receita › Relatório Diário de Situação › Alimentos & Bebidas › BAR GAIA › Acumulado (R$)",
+    },
+    {
+      rowId: "l61-rest-allegro",
+      rowLabel: "Rest. Allegro",
+      sectionKey: "alimentos_bebidas",
+      labels: ["RESTAURANTE ALLEGRO"],
+      source:
+        "Apuração de Receita › Relatório Diário de Situação › Alimentos & Bebidas › RESTAURANTE ALLEGRO › Acumulado (R$)",
+    },
+    {
+      rowId: "l62-rest-terraza",
+      rowLabel: "Rest. Terraza",
+      sectionKey: "alimentos_bebidas",
+      labels: ["RESTAURANTE TERRAZA"],
+      source:
+        "Apuração de Receita › Relatório Diário de Situação › Alimentos & Bebidas › RESTAURANTE TERRAZA › Acumulado (R$)",
+    },
+    {
+      rowId: "l63-eventos-banquete",
+      rowLabel: "Eventos Banquete",
+      sectionKey: "alimentos_bebidas",
+      labels: ["EVENTOS/BANQUETES"],
+      source:
+        "Apuração de Receita › Relatório Diário de Situação › Alimentos & Bebidas › EVENTOS/BANQUETES › Acumulado (R$)",
+    },
+  ] as const;
+
+  const normalizeRdsLabel = (value: unknown) =>
+    String(value ?? "")
+      .trim()
+      .toUpperCase()
+      .normalize("NFD")
+      .replace(/\p{Diacritic}/gu, "")
+      .replace(/\s+/g, " ");
+
+  const sumRdsSectionLabels = (sections: any[], sectionKey: string, labels: readonly string[]): number | null => {
+    const section = (sections ?? []).find((s: any) => String(s?.key ?? "") === sectionKey);
+    if (!section || !Array.isArray(section.items) || section.items.length === 0) return null;
+    const wanted = new Set(labels.map((l) => normalizeRdsLabel(l)));
+    let sum = 0;
+    let matched = 0;
+    for (const item of section.items) {
+      const label = normalizeRdsLabel(item?.label);
+      if (!wanted.has(label)) continue;
+      const acumulado = Number(Array.isArray(item?.values) ? item.values[RDS_ACUMULADO_IDX] : 0) || 0;
+      sum += acumulado;
+      matched += 1;
+    }
+    return matched > 0 ? sum : null;
+  };
+
+  app.get("/api/dre/realizado-rds", requireRole("admin", "controle"), async (req, res) => {
+    const year = Number((req.query as { year?: string }).year) || new Date().getFullYear();
+
+    const { data, error } = await supabase
+      .from("rds_snapshots")
+      .select("month, sections, report_date")
+      .eq("year", year)
+      .order("month", { ascending: true });
+
+    if (error) {
+      console.error("dre realizado-rds:", error);
+      return res.status(500).json({
+        error: "Não foi possível carregar o realizado do RDS. Execute sql/18_rds_snapshots.sql se ainda não rodou.",
+      });
+    }
+
+    const reportDates: Array<string | null> = Array.from({ length: 12 }, () => null);
+    const byRowId: Record<string, Array<number | null>> = {};
+    const sources: Record<string, string> = {};
+    for (const mapping of DRE_RDS_MAPPINGS) {
+      byRowId[mapping.rowId] = Array.from({ length: 12 }, () => null);
+      sources[mapping.rowId] = mapping.source;
+    }
+
+    for (const row of data ?? []) {
+      const month = Number((row as any).month);
+      if (!Number.isFinite(month) || month < 1 || month > 12) continue;
+      const sections = Array.isArray((row as any).sections) ? (row as any).sections : [];
+      reportDates[month - 1] = (row as any).report_date ?? null;
+      for (const mapping of DRE_RDS_MAPPINGS) {
+        byRowId[mapping.rowId][month - 1] = sumRdsSectionLabels(
+          sections,
+          mapping.sectionKey,
+          mapping.labels
+        );
+      }
+    }
+
+    res.json({
+      year,
+      reportDates,
+      byRowId,
+      sources,
+      // Compatibilidade com o front antigo
+      diariaByMonth: byRowId["l54-diaria"],
+      mappings: DRE_RDS_MAPPINGS.map((m) => ({
+        row_id: m.rowId,
+        row_label: m.rowLabel,
+        source: m.source,
+      })),
+    });
+  });
+
   app.get("/api/dre/edits", requireRole("admin", "controle"), async (req, res) => {
     const year = Number((req.query as { year?: string }).year) || new Date().getFullYear();
     const { data, error } = await supabase

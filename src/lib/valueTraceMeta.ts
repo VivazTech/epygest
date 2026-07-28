@@ -292,6 +292,27 @@ export const valueTrace = {
       calculation:
         '|Diferença| ÷ |Previsto| × 100 — quanto a diferença representa do previsto (ex.: previsto R$ 1.000, realizado R$ 400 → diferença R$ 600 = 60%). Só aparece quando o mês tem Previsto e Diferença. Considera edições manuais.',
     }),
+    rdsDiaria: (mes: string, reportDate?: string | null): ValueTraceMeta => ({
+      source: `Realizado — Diária — ${mes}`,
+      tables: 'rds_snapshots',
+      calculation:
+        `Soma Acumulado (R$) das linhas HOSPEDAGEM + HOSPEDAGEM NO-SHOW + UPGRADE / UPSELLING + Taxa de serviço na seção Hospedagem do Relatório Diário de Situação` +
+        (reportDate ? ` (data do RDS: ${reportDate})` : '') +
+        '. Clique na célula para sobrescrever com edição manual.',
+    }),
+    rdsMapped: (label: string, mes: string, source: string, reportDate?: string | null): ValueTraceMeta => ({
+      source: `Realizado — ${label} — ${mes}`,
+      tables: 'rds_snapshots',
+      calculation:
+        `${source}` +
+        (reportDate ? ` (data do RDS: ${reportDate})` : '') +
+        '. Clique na célula para sobrescrever com edição manual.',
+    }),
+    rdsRollup: (label: string, mes: string, parts: string): ValueTraceMeta => ({
+      source: `Realizado — ${label} — ${mes}`,
+      tables: 'rds_snapshots (+ edições manuais dos filhos, se houver)',
+      calculation: `Soma do Realizado de ${parts}. Clique na célula para sobrescrever com edição manual.`,
+    }),
   },
 
   cadastros: {

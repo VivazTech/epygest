@@ -61,6 +61,83 @@ const RESULTADO_FOOTER_IDS = [
 
 const LIQUIDO_LABEL = '(=) Resultado Líquido';
 
+/** Mapeamentos RDS → linhas do DRE (mesma regra do backend /api/dre/realizado-rds). */
+const DRE_RDS_MAPPINGS = [
+  {
+    rowId: 'l54-diaria',
+    sectionKey: 'hospedagem',
+    labels: ['HOSPEDAGEM', 'HOSPEDAGEM NO-SHOW', 'UPGRADE / UPSELLING', 'TAXA DE SERVICO'],
+    source:
+      'Apuração de Receita › Relatório Diário de Situação › Hospedagem › Acumulado (R$) — HOSPEDAGEM + HOSPEDAGEM NO-SHOW + UPGRADE / UPSELLING + Taxa de serviço',
+  },
+  {
+    rowId: 'l55-cafe-da-manha',
+    sectionKey: 'alimentos_bebidas',
+    labels: ['CAFE DA MANHA (PENSAO)'],
+    source:
+      'Apuração de Receita › Relatório Diário de Situação › Alimentos & Bebidas › CAFE DA MANHA (PENSAO) › Acumulado (R$)',
+  },
+  {
+    rowId: 'l56-map-e-fap',
+    sectionKey: 'alimentos_bebidas',
+    labels: ['ALMOCO (PENSAO)', 'JANTAR (PENSAO)'],
+    source:
+      'Apuração de Receita › Relatório Diário de Situação › Alimentos & Bebidas › Acumulado (R$) — ALMOCO (PENSAO) + JANTAR (PENSAO)',
+  },
+  {
+    rowId: 'l58-frigobar',
+    sectionKey: 'alimentos_bebidas',
+    labels: ['FRIGOBAR'],
+    source:
+      'Apuração de Receita › Relatório Diário de Situação › Alimentos & Bebidas › FRIGOBAR › Acumulado (R$)',
+  },
+  {
+    rowId: 'l59-room-service',
+    sectionKey: 'alimentos_bebidas',
+    labels: ['ROOM SERVICE'],
+    source:
+      'Apuração de Receita › Relatório Diário de Situação › Alimentos & Bebidas › ROOM SERVICE › Acumulado (R$)',
+  },
+  {
+    rowId: 'l60-bar-gaia',
+    sectionKey: 'alimentos_bebidas',
+    labels: ['BAR GAIA'],
+    source:
+      'Apuração de Receita › Relatório Diário de Situação › Alimentos & Bebidas › BAR GAIA › Acumulado (R$)',
+  },
+  {
+    rowId: 'l61-rest-allegro',
+    sectionKey: 'alimentos_bebidas',
+    labels: ['RESTAURANTE ALLEGRO'],
+    source:
+      'Apuração de Receita › Relatório Diário de Situação › Alimentos & Bebidas › RESTAURANTE ALLEGRO › Acumulado (R$)',
+  },
+  {
+    rowId: 'l62-rest-terraza',
+    sectionKey: 'alimentos_bebidas',
+    labels: ['RESTAURANTE TERRAZA'],
+    source:
+      'Apuração de Receita › Relatório Diário de Situação › Alimentos & Bebidas › RESTAURANTE TERRAZA › Acumulado (R$)',
+  },
+  {
+    rowId: 'l63-eventos-banquete',
+    sectionKey: 'alimentos_bebidas',
+    labels: ['EVENTOS/BANQUETES'],
+    source:
+      'Apuração de Receita › Relatório Diário de Situação › Alimentos & Bebidas › EVENTOS/BANQUETES › Acumulado (R$)',
+  },
+] as const;
+
+/** Pais cujo Realizado é a soma de filhos (após RDS/edições). */
+const DRE_RDS_ROLLUPS: Record<string, readonly string[]> = {
+  'l53-receita-de-diarias': ['l54-diaria', 'l55-cafe-da-manha', 'l56-map-e-fap'],
+};
+
+const emptyRdsByRow = (): Record<string, Array<number | null>> =>
+  Object.fromEntries(
+    DRE_RDS_MAPPINGS.map((m) => [m.rowId, Array.from({ length: 12 }, () => null as number | null)])
+  );
+
 const findDreRow = (rows: DRERow[], id: string): DRERow | null => {
   for (const row of rows) {
     if (row.id === id) return row;
@@ -89,6 +166,13 @@ export const DREPage: React.FC = () => {
   });
   const [edits, setEdits] = useState<Record<string, CellEdit>>({});
   const [editsError, setEditsError] = useState('');
+  const [rdsByRowId, setRdsByRowId] = useState<Record<string, Array<number | null>>>(emptyRdsByRow);
+  const [rdsSources, setRdsSources] = useState<Record<string, string>>(() =>
+    Object.fromEntries(DRE_RDS_MAPPINGS.map((m) => [m.rowId, m.source]))
+  );
+  const [rdsReportDates, setRdsReportDates] = useState<Array<string | null>>(
+    () => Array.from({ length: 12 }, () => null)
+  );
   const [editingCell, setEditingCell] = useState<EditingCell | null>(null);
   const [editingValue, setEditingValue] = useState('');
   const [savingCell, setSavingCell] = useState(false);
@@ -125,21 +209,8 @@ export const DREPage: React.FC = () => {
 
   const allMonthsSelected = visibleMonths.length === 12;
 
-  const toggleMonth = (monthIndex: number) => {
-    setSelectedMonths((prev) => {
-      const set = new Set(prev);
-      if (set.has(monthIndex)) {
-        if (set.size <= 1) return prev; // mantém ao menos um mês
-        set.delete(monthIndex);
-      } else {
-        set.add(monthIndex);
-      }
-      return Array.from(set).sort((a, b) => a - b);
-    });
-  };
-
-  /** Duplo clique: fica só o mês clicado. */
-  const soloMonth = (monthIndex: number) => {
+  /** Clique: mostra apenas o mês selecionado. Use "Mostrar todos" para voltar. */
+  const selectMonth = (monthIndex: number) => {
     setSelectedMonths([monthIndex]);
   };
 
@@ -161,8 +232,95 @@ export const DREPage: React.FC = () => {
     }
   };
 
+  const loadRdsRealizado = async () => {
+    const RDS_ACUMULADO_IDX = 2;
+    const normalize = (value: unknown) =>
+      String(value ?? '')
+        .trim()
+        .toUpperCase()
+        .normalize('NFD')
+        .replace(/\p{Diacritic}/gu, '')
+        .replace(/\s+/g, ' ');
+
+    const sumLabels = (sections: any[], sectionKey: string, labels: readonly string[]): number | null => {
+      const section = (sections ?? []).find((s: any) => String(s?.key ?? '') === sectionKey);
+      if (!section || !Array.isArray(section.items)) return null;
+      const wanted = new Set(labels.map((l) => normalize(l)));
+      let sum = 0;
+      let matched = 0;
+      for (const item of section.items) {
+        if (!wanted.has(normalize(item?.label))) continue;
+        sum += Number(Array.isArray(item?.values) ? item.values[RDS_ACUMULADO_IDX] : 0) || 0;
+        matched += 1;
+      }
+      return matched > 0 ? sum : null;
+    };
+
+    const applyByRowId = (raw: Record<string, any>) => {
+      const next = emptyRdsByRow();
+      for (const mapping of DRE_RDS_MAPPINGS) {
+        const arr = Array.isArray(raw[mapping.rowId]) ? raw[mapping.rowId] : [];
+        next[mapping.rowId] = Array.from({ length: 12 }, (_, i) => {
+          const v = arr[i];
+          return v == null || !Number.isFinite(Number(v)) ? null : Number(v);
+        });
+      }
+      setRdsByRowId(next);
+    };
+
+    try {
+      const dedicated = await fetch(`/api/dre/realizado-rds?year=${dreYear}`);
+      if (dedicated.ok) {
+        const json = await dedicated.json().catch(() => ({}));
+        const dates = Array.isArray(json.reportDates) ? json.reportDates : [];
+        setRdsReportDates(Array.from({ length: 12 }, (_, i) => dates[i] ?? null));
+        if (json.sources && typeof json.sources === 'object') {
+          setRdsSources((prev) => ({ ...prev, ...json.sources }));
+        }
+        if (json.byRowId && typeof json.byRowId === 'object') {
+          applyByRowId(json.byRowId);
+          return;
+        }
+        // API antiga (só Diária): completa o restante via snapshots mensais abaixo.
+      }
+
+      const compRes = await fetch(`/api/rds/competencias?year=${dreYear}`);
+      const compJson = await compRes.json().catch(() => ({}));
+      if (!compRes.ok) {
+        console.warn('DRE RDS competências:', compJson.error || compRes.status);
+        return;
+      }
+      const imported = (Array.isArray(compJson.months) ? compJson.months : []).filter(
+        (m: any) => m?.importado
+      );
+      const next = emptyRdsByRow();
+      const dates: Array<string | null> = Array.from({ length: 12 }, () => null);
+
+      await Promise.all(
+        imported.map(async (m: any) => {
+          const month = Number(m.month);
+          if (!month || month < 1 || month > 12) return;
+          const res = await fetch(`/api/rds?year=${dreYear}&month=${month}`);
+          const json = await res.json().catch(() => ({}));
+          if (!res.ok) return;
+          const sections = json.sections ?? [];
+          dates[month - 1] = json.report_date ?? m.report_date ?? null;
+          for (const mapping of DRE_RDS_MAPPINGS) {
+            next[mapping.rowId][month - 1] = sumLabels(sections, mapping.sectionKey, mapping.labels);
+          }
+        })
+      );
+
+      setRdsByRowId(next);
+      setRdsReportDates(dates);
+    } catch (err) {
+      console.warn('DRE realizado RDS falhou:', err);
+    }
+  };
+
   useEffect(() => {
     loadEdits();
+    loadRdsRealizado();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -185,18 +343,60 @@ export const DREPage: React.FC = () => {
     setExpanded((prev) => ({ ...prev, [id]: !prev[id] }));
   };
 
-  // Valor efetivo da célula: edição manual (se houver) senão o importado.
+  // Valor efetivo da célula: edição manual > rollup de filhos > RDS mapeado > planilha.
   const effective = (row: DRERow, monthIndex: number): MonthCell => {
     const base = row.values[monthIndex];
     const prevEdit = edits[editKey(row.row, monthIndex + 1, 'prev')];
     const realEdit = edits[editKey(row.row, monthIndex + 1, 'real')];
     const prev = prevEdit ? prevEdit.value : base.prev;
-    const real = realEdit ? realEdit.value : base.real;
-    // Se alguma célula foi editada, a diferença é recalculada; senão vale a da planilha.
-    const dif = prevEdit || realEdit
+
+    if (realEdit) {
+      const real = realEdit.value;
+      const dif = prev != null && real != null ? real - prev : null;
+      return { prev, real, dif };
+    }
+
+    const childIds = DRE_RDS_ROLLUPS[row.id];
+    if (childIds) {
+      let sum = 0;
+      let any = false;
+      for (const childId of childIds) {
+        const child = findDreRow(dreRows, childId);
+        if (!child) continue;
+        const childReal = effective(child, monthIndex).real;
+        if (childReal != null) {
+          sum += childReal;
+          any = true;
+        }
+      }
+      if (any) {
+        const real = sum;
+        const dif = prev != null ? real - prev : null;
+        return { prev, real, dif };
+      }
+    }
+
+    const rdsValue = rdsByRowId[row.id]?.[monthIndex] ?? null;
+    const rdsReal = rdsValue != null && Number.isFinite(rdsValue) ? rdsValue : null;
+    const real = rdsReal != null ? rdsReal : base.real;
+    const fromRds = rdsReal != null;
+    const dif = prevEdit || fromRds
       ? (prev != null && real != null ? real - prev : null)
       : base.dif;
     return { prev, real, dif };
+  };
+
+  const isRdsDerivedReal = (row: DRERow, monthIndex: number): boolean => {
+    if (edits[editKey(row.row, monthIndex + 1, 'real')]) return false;
+    if (rdsByRowId[row.id]?.[monthIndex] != null) return true;
+    const childIds = DRE_RDS_ROLLUPS[row.id];
+    if (!childIds) return false;
+    // Pai com rollup: destaca se algum filho tem Realizado (RDS ou edição).
+    return childIds.some((childId) => {
+      const child = findDreRow(dreRows, childId);
+      if (!child) return false;
+      return effective(child, monthIndex).real != null;
+    });
   };
 
   const totalOf = (row: DRERow, monthIndexes: number[] = visibleMonths): MonthCell => {
@@ -381,7 +581,7 @@ export const DREPage: React.FC = () => {
       atingimento: number | null;
     }>;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [edits, visibleMonths, showResultadoLiquido]);
+  }, [edits, visibleMonths, showResultadoLiquido, rdsByRowId]);
 
   const resultadoOperacional = resultadosFooter.find((r) => r.id === 'l309-resultado-operacional');
   const resultadoLiquidoFooter = resultadosFooter.find((r) => r.id === 'resultado-liquido');
@@ -414,6 +614,12 @@ export const DREPage: React.FC = () => {
     const mes = `${MESES[monthIndex]}/${dreYear}`;
     const edit = edits[editKey(row.row, monthIndex + 1, field)];
     const base = row.values[monthIndex][field];
+    const fromRds = field === 'real' && isRdsDerivedReal(row, monthIndex);
+    const isRollup =
+      field === 'real' &&
+      !edit &&
+      Boolean(DRE_RDS_ROLLUPS[row.id]) &&
+      fromRds;
     const meta = edit
       ? valueTrace.dre.edited(
           row.label,
@@ -423,12 +629,25 @@ export const DREPage: React.FC = () => {
           formatWhen(edit.updated_at),
           base == null ? '—' : formatCurrency(base)
         )
-      : valueTrace.dre.imported(row.label, row.row, campo, mes, dreSource);
+      : isRollup
+        ? valueTrace.dre.rdsRollup(row.label, mes, 'Diária + Café da manhã + MAP e FAP')
+        : fromRds
+          ? valueTrace.dre.rdsMapped(
+              row.label,
+              mes,
+              rdsSources[row.id] || 'Relatório Diário de Situação',
+              rdsReportDates[monthIndex]
+            )
+          : valueTrace.dre.imported(row.label, row.row, campo, mes, dreSource);
 
     return (
       <button
         onClick={() => startCellEdit(row, monthIndex, field)}
-        className={cn('px-1 py-0.5 rounded hover:bg-emerald-50 transition-colors', edit && 'bg-amber-50/70')}
+        className={cn(
+          'px-1 py-0.5 rounded hover:bg-emerald-50 transition-colors',
+          edit && 'bg-amber-50/70',
+          fromRds && 'bg-sky-50/80'
+        )}
         title="Clique para editar"
       >
         <ValueTrace
@@ -614,7 +833,7 @@ export const DREPage: React.FC = () => {
         <div>
           <h2 className="text-2xl font-bold text-slate-900">DRE Gerencial</h2>
           <p className="text-sm text-slate-500">
-            Previsto x Realizado por mês, importado da planilha Prev x Real {dreYear}. Clique em uma célula para editar; passe o mouse para ver a origem do valor.
+            Previsto da planilha Prev x Real {dreYear}. Realizado de Diárias e A&B alimentado pelo RDS. Clique em uma célula para editar; passe o mouse para ver a origem do valor.
           </p>
         </div>
         <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 shadow-sm shrink-0">
@@ -681,12 +900,8 @@ export const DREPage: React.FC = () => {
               <button
                 key={mes}
                 type="button"
-                onClick={() => toggleMonth(monthIndex)}
-                onDoubleClick={(e) => {
-                  e.preventDefault();
-                  soloMonth(monthIndex);
-                }}
-                title="Clique para marcar/desmarcar · Clique duas vezes para ver só este mês"
+                onClick={() => selectMonth(monthIndex)}
+                title="Clique para ver só este mês · Use Mostrar todos para voltar"
                 className={cn(
                   'px-2.5 py-1.5 rounded-lg text-xs font-bold transition-colors border',
                   active
