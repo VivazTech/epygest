@@ -2564,6 +2564,110 @@ export function createApp() {
   });
 
   // ====================================================
+  // COLABORADORES (Cadastros e Parametrizações)
+  // ====================================================
+  const colaboradorTableMissing = (error: any) =>
+    String(error?.message || "").includes("colaboradores") ||
+    error?.code === "42P01" ||
+    error?.code === "PGRST205";
+
+  app.get("/api/colaboradores", async (req, res) => {
+    const activeOnly =
+      String((req.query as any)?.active ?? "") === "1" ||
+      String((req.query as any)?.active ?? "") === "true";
+    let query = supabase
+      .from("colaboradores")
+      .select("id, nome, cargo_descricao, ccusto_descricao, active, created_at")
+      .order("nome");
+    if (activeOnly) query = query.eq("active", true);
+    const { data, error } = await query;
+    if (error) {
+      console.error("Erro ao listar colaboradores:", error);
+      if (colaboradorTableMissing(error)) {
+        return res.status(500).json({
+          error: "Tabela de colaboradores não encontrada. Execute sql/19_colaboradores.sql no Supabase.",
+        });
+      }
+      return res.status(500).json({ error: "Erro interno ao processar a solicitação." });
+    }
+    res.json(
+      (data ?? []).map((row: any) => ({
+        id: row.id,
+        nome: row.nome,
+        cargo_descricao: row.cargo_descricao ?? "",
+        ccusto_descricao: row.ccusto_descricao ?? "",
+        active: row.active !== false,
+        created_at: row.created_at,
+      }))
+    );
+  });
+
+  app.post("/api/colaboradores", requireRole("admin", "controle"), async (req, res) => {
+    const nome = String(req.body?.nome ?? "").trim();
+    const cargo = String(req.body?.cargo_descricao ?? "").trim();
+    const ccusto = String(req.body?.ccusto_descricao ?? "").trim();
+    if (!nome) {
+      return res.status(400).json({ error: "O nome do colaborador é obrigatório." });
+    }
+    const { data, error } = await supabase
+      .from("colaboradores")
+      .insert({
+        nome,
+        cargo_descricao: cargo || null,
+        ccusto_descricao: ccusto || null,
+        active: true,
+      })
+      .select("id")
+      .single();
+    if (error) {
+      console.error("Erro ao cadastrar colaborador:", error);
+      if (colaboradorTableMissing(error)) {
+        return res.status(500).json({
+          error: "Tabela de colaboradores não encontrada. Execute sql/19_colaboradores.sql no Supabase.",
+        });
+      }
+      return res.status(500).json({ error: "Não foi possível cadastrar o colaborador." });
+    }
+    res.json({ id: data.id });
+  });
+
+  app.patch("/api/colaboradores/:id", requireRole("admin", "controle"), async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: "id inválido." });
+    const patch: Record<string, any> = { updated_at: new Date().toISOString() };
+    if (req.body?.nome != null) {
+      const nome = String(req.body.nome).trim();
+      if (!nome) return res.status(400).json({ error: "Nome inválido." });
+      patch.nome = nome;
+    }
+    if (req.body?.cargo_descricao != null) {
+      patch.cargo_descricao = String(req.body.cargo_descricao).trim() || null;
+    }
+    if (req.body?.ccusto_descricao != null) {
+      patch.ccusto_descricao = String(req.body.ccusto_descricao).trim() || null;
+    }
+    if (req.body?.active != null) patch.active = Boolean(req.body.active);
+
+    const { error } = await supabase.from("colaboradores").update(patch).eq("id", id);
+    if (error) {
+      console.error("Erro ao atualizar colaborador:", error);
+      return res.status(500).json({ error: "Não foi possível atualizar o colaborador." });
+    }
+    res.json({ success: true });
+  });
+
+  app.delete("/api/colaboradores/:id", requireRole("admin", "controle"), async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: "id inválido." });
+    const { error } = await supabase.from("colaboradores").delete().eq("id", id);
+    if (error) {
+      console.error("Erro ao excluir colaborador:", error);
+      return res.status(500).json({ error: "Não foi possível excluir o colaborador." });
+    }
+    res.json({ success: true });
+  });
+
+  // ====================================================
   // CRDs
   // ====================================================
   app.get("/api/crds", async (req, res) => {

@@ -10,7 +10,8 @@ import {
   ChevronRight,
   ChevronDown,
   Upload,
-  FolderOpen
+  FolderOpen,
+  UserRound
 } from 'lucide-react';
 import { cn, formatCurrency } from '../lib/utils';
 import { ValueTrace } from '../components/ValueTrace';
@@ -27,6 +28,12 @@ export const CadastrosPage: React.FC = () => {
   const [requisitions, setRequisitions] = useState<any[]>([]);
   const [cargos, setCargos] = useState<any[]>([]);
   const [newCargoForm, setNewCargoForm] = useState({ name: '', sector_id: '' });
+  const [colaboradores, setColaboradores] = useState<any[]>([]);
+  const [newColaboradorForm, setNewColaboradorForm] = useState({
+    nome: '',
+    cargo_descricao: '',
+    ccusto_descricao: '',
+  });
   const [newName, setNewName] = useState('');
   const [newKey, setNewKey] = useState('');
   const [newCrdForm, setNewCrdForm] = useState({
@@ -112,6 +119,13 @@ export const CadastrosPage: React.FC = () => {
       ),
     [cargos, query]
   );
+  const filteredColaboradores = useMemo(
+    () =>
+      colaboradores.filter((c) =>
+        matchesSearch(query, c.nome, c.cargo_descricao, c.ccusto_descricao)
+      ),
+    [colaboradores, query]
+  );
   const filteredRequisitions = useMemo(
     () =>
       requisitions.filter((r) =>
@@ -126,11 +140,16 @@ export const CadastrosPage: React.FC = () => {
     fetch('/api/cargos')
       .then((res) => res.json())
       .then((data) => setCargos(Array.isArray(data) ? data : []));
+  const refreshColaboradores = () =>
+    fetch('/api/colaboradores')
+      .then((res) => res.json())
+      .then((data) => setColaboradores(Array.isArray(data) ? data : []));
 
   useEffect(() => {
     fetch('/api/categories').then(res => res.json()).then(data => setCategories(data));
     refreshSectors();
     refreshCargos();
+    refreshColaboradores();
     fetch('/api/payment-methods').then(res => res.json()).then(data => setPaymentMethods(data));
     refreshCrds();
     fetch('/api/requisitions').then(res => res.json()).then(data => setRequisitions(data));
@@ -139,6 +158,7 @@ export const CadastrosPage: React.FC = () => {
   const tabs = [
     { id: 'categorias', label: 'Categorias', icon: Layers },
     { id: 'setores', label: 'Setores / Centros de Custo', icon: Briefcase },
+    { id: 'colaboradores', label: 'Colaboradores', icon: UserRound },
     { id: 'contas', label: 'Contas Gerenciais', icon: Database },
     { id: 'formas-pagamento', label: 'Formas de Pagamento', icon: Database },
     { id: 'crd', label: 'CRD', icon: Database },
@@ -377,6 +397,55 @@ export const CadastrosPage: React.FC = () => {
       return;
     }
     refreshCargos();
+  };
+
+  const createColaborador = async () => {
+    const nome = newColaboradorForm.nome.trim();
+    if (!nome) {
+      alert('Informe o nome do colaborador.');
+      return;
+    }
+    const res = await fetch('/api/colaboradores', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        nome,
+        cargo_descricao: newColaboradorForm.cargo_descricao.trim(),
+        ccusto_descricao: newColaboradorForm.ccusto_descricao.trim(),
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      alert(data.error || 'Erro ao cadastrar colaborador.');
+      return;
+    }
+    setNewColaboradorForm({ nome: '', cargo_descricao: '', ccusto_descricao: '' });
+    refreshColaboradores();
+  };
+
+  const toggleColaboradorActive = async (colaborador: any) => {
+    const res = await fetch(`/api/colaboradores/${colaborador.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ active: !colaborador.active }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      alert(data.error || 'Erro ao atualizar colaborador.');
+      return;
+    }
+    refreshColaboradores();
+  };
+
+  const deleteColaborador = async (colaborador: any) => {
+    if (!window.confirm(`Remover o colaborador "${colaborador.nome}"?`)) return;
+    const res = await fetch(`/api/colaboradores/${colaborador.id}`, { method: 'DELETE' });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      alert(data.error || 'Erro ao excluir colaborador.');
+      return;
+    }
+    refreshColaboradores();
   };
 
   return (
@@ -823,8 +892,108 @@ export const CadastrosPage: React.FC = () => {
         </div>
       )}
 
+      {/* ============ Colaboradores ============ */}
+      {activeTab === 'colaboradores' && (
+        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+          <div className="p-4 border-b border-slate-50 flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2">
+                <UserRound className="w-4 h-4 text-[#004D40]" />
+                Colaboradores
+              </h3>
+              <p className="text-xs text-slate-500">
+                Cadastro de colaboradores com nome, descrição do cargo e do centro de custo.
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                value={newColaboradorForm.nome}
+                onChange={(e) => setNewColaboradorForm((p) => ({ ...p, nome: e.target.value }))}
+                placeholder="Nome"
+                className="w-56 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+              />
+              <input
+                value={newColaboradorForm.cargo_descricao}
+                onChange={(e) => setNewColaboradorForm((p) => ({ ...p, cargo_descricao: e.target.value }))}
+                placeholder="Descrição cargo"
+                className="w-52 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+              />
+              <input
+                value={newColaboradorForm.ccusto_descricao}
+                onChange={(e) => setNewColaboradorForm((p) => ({ ...p, ccusto_descricao: e.target.value }))}
+                placeholder="Descrição Ccusto"
+                className="w-52 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+              />
+              <button
+                onClick={createColaborador}
+                className="inline-flex items-center gap-2 px-4 py-2 bg-[#004D40] text-white font-bold rounded-xl hover:bg-[#003d33] transition-colors"
+              >
+                <Plus className="w-4 h-4" />
+                Adicionar
+              </button>
+            </div>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="bg-slate-50/50">
+                  <th className="px-6 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Nome</th>
+                  <th className="px-6 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Descrição cargo</th>
+                  <th className="px-6 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Descrição Ccusto</th>
+                  <th className="px-6 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Status</th>
+                  <th className="px-6 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-right">Ações</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-50">
+                {filteredColaboradores.length === 0 && (
+                  <tr>
+                    <td colSpan={5} className="px-6 py-8 text-center text-sm text-slate-400">
+                      {query ? 'Nenhum resultado encontrado.' : 'Nenhum colaborador cadastrado.'}
+                    </td>
+                  </tr>
+                )}
+                {filteredColaboradores.map((colaborador) => (
+                  <tr key={colaborador.id} className="hover:bg-slate-50/50 transition-colors group">
+                    <td className="px-6 py-3 text-sm font-medium text-slate-800">{colaborador.nome}</td>
+                    <td className="px-6 py-3 text-sm text-slate-600">{colaborador.cargo_descricao || '—'}</td>
+                    <td className="px-6 py-3 text-sm text-slate-600">{colaborador.ccusto_descricao || '—'}</td>
+                    <td className="px-6 py-3">
+                      <span
+                        className={cn(
+                          'text-[10px] font-bold px-2 py-1 rounded-lg uppercase tracking-wider',
+                          colaborador.active ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-600'
+                        )}
+                      >
+                        {colaborador.active ? 'Ativo' : 'Inativo'}
+                      </span>
+                    </td>
+                    <td className="px-6 py-3 text-right">
+                      <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button
+                          onClick={() => toggleColaboradorActive(colaborador)}
+                          className="px-2 py-1 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-lg"
+                        >
+                          {colaborador.active ? 'Desativar' : 'Ativar'}
+                        </button>
+                        <button
+                          onClick={() => deleteColaborador(colaborador)}
+                          className="p-2 text-red-400 hover:bg-red-50 rounded-lg transition-colors"
+                          title="Excluir colaborador"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       {/* ============ Outras tabs — layout de tabela padrão ============ */}
-      {activeTab !== 'crd' && activeTab !== 'setores' && (
+      {activeTab !== 'crd' && activeTab !== 'setores' && activeTab !== 'colaboradores' && (
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
         <div className="p-4 border-b border-slate-50 flex items-center justify-between">
           {activeTab === 'formas-pagamento' && (
