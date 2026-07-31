@@ -69,6 +69,39 @@ def num(v):
         return 0.0
 
 
+# 2018 usa layout LEGADO (diferente de 2019+):
+#  - receita de hospedagem na coluna N (não K)
+#  - repasses MAP/Café nas colunas AX/AY (não O/P)
+#  - sem CSLL/IR, Investimentos, Pessoal ZZ, Despesas ZZ mensais (ficam 0)
+#  - meses identificados por NOME na coluna D (não data)
+COLS_2018 = [(f, ("N" if f == "receita_hospedagem" else
+                  "AX" if f == "map_repasse" else
+                  "AY" if f == "cafe_repasse" else col)) for f, col in COLS]
+MESES_NOME = {
+    "janeiro": 1, "fevereiro": 2, "março": 3, "marco": 3, "abril": 4, "maio": 5,
+    "junho": 6, "julho": 7, "agosto": 8, "setembro": 9, "outubro": 10,
+    "novembro": 11, "dezembro": 12,
+}
+
+
+def extract_2018(ws):
+    """2018 (layout legado): linhas com nome de mês na col D e ano 2018 na col A."""
+    out = {}
+    for r in range(1, 30):
+        d = ws.cell(r, cidx("D")).value
+        a = ws.cell(r, cidx("A")).value
+        if not (isinstance(d, str) and d.strip().lower() in MESES_NOME):
+            continue
+        if a != 2018:
+            continue
+        rn_val = ws.cell(r, cidx("I")).value
+        if not isinstance(rn_val, (int, float)):
+            continue
+        m = MESES_NOME[d.strip().lower()]
+        out[(2018, m)] = {field: num(ws.cell(r, cidx(col)).value) for field, col in COLS_2018}
+    return out
+
+
 def extract(ws):
     """Retorna {(year, month): {field: value}} a partir dos blocos com DATA em col D."""
     out = {}
@@ -113,15 +146,10 @@ def main():
     wb = openpyxl.load_workbook(XLSX, data_only=True)
     dados, dup_d = extract(wb["Dados"])
     metas, dup_m = extract(wb["Metas"])
-    # Realizado: 2019..2025.
-    #  - 2018 usa layout legado na aba Dados (coluna K = "Peso", não receita) e não
-    #    tem meta para comparar -> excluído.
-    #  - 2026+ será preenchido dentro do sistema -> excluído do import.
-    MIN_REALIZADO_YEAR, MAX_REALIZADO_YEAR = 2019, 2025
-    dados = {
-        (y, m): v for (y, m), v in dados.items()
-        if MIN_REALIZADO_YEAR <= y <= MAX_REALIZADO_YEAR
-    }
+    # Realizado: 2018..2025 (2018 vem do bloco legado; 2026+ será digitado no sistema).
+    MAX_REALIZADO_YEAR = 2025
+    dados = {(y, m): v for (y, m), v in dados.items() if y <= MAX_REALIZADO_YEAR}
+    dados.update(extract_2018(wb["Dados"]))  # 2018 com mapeamento legado
     anos = sorted({y for (y, _m) in list(dados) + list(metas)})
 
     with open(OUT, "w", encoding="utf-8") as f:

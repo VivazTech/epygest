@@ -4,11 +4,13 @@ import { cn, formatCurrency } from '../lib/utils';
 
 // ---------------------------------------------------------------------------
 // Indicadores Gerenciais (Números Vivaz) — Realizado x Metas por (ano, mês)
+// Layout espelhado no DRE Gerencial: tabela larga (w-full) com 1ª coluna e
+// cabeçalho fixos, e filtro de meses (clique num mês mostra só ele).
 // Modelo "inputs + cálculo no sistema": guardamos os inputs; o backend calcula
 // ocupação, diária média, RevPAR, faturamento, EBITDA, resultado etc.
 // ---------------------------------------------------------------------------
 
-const MESES = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+const MESES = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
 
 type Escopo = 'realizado' | 'meta';
 type ViewMode = 'comparativo' | 'realizado' | 'meta';
@@ -64,11 +66,38 @@ const INPUT_GROUPS: { group: string; fields: [string, string][] }[] = [
   { group: 'Repasses / Equipe', fields: [['map_repasse', 'MAP (repasse)'], ['cafe_repasse', 'Café (repasse)'], ['qtd_equipe', 'Qtd. Equipe']] },
 ];
 
-// Lê um valor (input ou calculado) de um mês
+// Lê um valor (input ou calculado) de um mês/agregado
 const readVal = (m: MonthData | undefined, key: string, src?: 'input') => {
   if (!m) return 0;
   if (src === 'input') return Number(m.inputs?.[key]) || 0;
   return Number(m[key] ?? m.inputs?.[key]) || 0;
+};
+
+// Agrega uma lista de meses num "mês sintético" com os indicadores corretos.
+// Aditivos são somados; razões (ocupação, diária média, RevPAR, margem) são
+// recalculadas a partir dos componentes somados.
+const aggregate = (months: MonthData[]): MonthData => {
+  const sum = (f: (m: MonthData) => number) => months.reduce((s, m) => s + f(m), 0);
+  const rn = sum((m) => readVal(m, 'rn', 'input'));
+  const rn_totais = sum((m) => Number(m.rn_totais) || 0);
+  const receita = sum((m) => readVal(m, 'receita_hospedagem', 'input'));
+  const faturamento = sum((m) => Number(m.faturamento) || 0);
+  const ebitda = sum((m) => Number(m.ebitda) || 0);
+  return {
+    month: 0,
+    inputs: { rn, receita_hospedagem: receita },
+    rn_totais,
+    ocupacao: rn_totais > 0 ? rn / rn_totais : 0,
+    diaria_media: rn > 0 ? receita / rn : 0,
+    revpar: rn_totais > 0 ? receita / rn_totais : 0,
+    total_pdvs: sum((m) => Number(m.total_pdvs) || 0),
+    total_outras: sum((m) => Number(m.total_outras) || 0),
+    faturamento,
+    despesas_op: sum((m) => Number(m.despesas_op) || 0),
+    ebitda,
+    margem_ebitda: faturamento > 0 ? ebitda / faturamento : 0,
+    resultado_liquido: sum((m) => Number(m.resultado_liquido) || 0),
+  };
 };
 
 export const IndicadoresPage: React.FC = () => {
@@ -81,11 +110,23 @@ export const IndicadoresPage: React.FC = () => {
   const [userRole, setUserRole] = useState<string>('viewer');
   const [uhsDraft, setUhsDraft] = useState<string>('172');
 
+  // Filtro de meses (índices 0–11). Vazio = todos.
+  const [selectedMonths, setSelectedMonths] = useState<number[]>(() => Array.from({ length: 12 }, (_, i) => i));
+
   // edição de células (edit grid)
   const [edits, setEdits] = useState<Record<string, string>>({});
   const [savingKey, setSavingKey] = useState<string | null>(null);
 
   const canEdit = userRole === 'admin' || userRole === 'controle' || userRole === 'finance';
+
+  const visibleMonths = useMemo(() => {
+    const set = new Set(selectedMonths);
+    const months = MESES.map((_, i) => i).filter((i) => set.has(i));
+    return months.length ? months : MESES.map((_, i) => i);
+  }, [selectedMonths]);
+  const allMonthsSelected = visibleMonths.length === 12;
+  const selectMonth = (monthIndex: number) => setSelectedMonths([monthIndex]);
+  const selectAllMonths = () => setSelectedMonths(Array.from({ length: 12 }, (_, i) => i));
 
   const loadYears = async () => {
     try {
@@ -126,19 +167,19 @@ export const IndicadoresPage: React.FC = () => {
   // ---- Comparativo ----
   const comparativoRows = useMemo(() => {
     if (!data) return [];
+    const totalReal = aggregate(visibleMonths.map((i) => data.realizado.months[i]));
+    const totalMeta = aggregate(visibleMonths.map((i) => data.meta.months[i]));
     return KEY_INDICATORS.map((ind) => {
-      const months = MESES.map((_, idx) => {
+      const months = visibleMonths.map((idx) => {
         const prev = readVal(data.meta.months[idx], ind.key, ind.src);
         const real = readVal(data.realizado.months[idx], ind.key, ind.src);
-        const varc = prev !== 0 ? real / prev - 1 : real !== 0 ? 1 : 0;
-        return { prev, real, varc };
+        return { monthIndex: idx, prev, real, dif: real - prev };
       });
-      const totalPrev = readVal(data.meta.total, ind.key, ind.src);
-      const totalReal = readVal(data.realizado.total, ind.key, ind.src);
-      const totalVar = totalPrev !== 0 ? totalReal / totalPrev - 1 : totalReal !== 0 ? 1 : 0;
-      return { ind, months, totalPrev, totalReal, totalVar };
+      const tPrev = readVal(totalMeta, ind.key, ind.src);
+      const tReal = readVal(totalReal, ind.key, ind.src);
+      return { ind, months, totalPrev: tPrev, totalReal: tReal, totalDif: tReal - tPrev };
     });
-  }, [data]);
+  }, [data, visibleMonths]);
 
   // ---- Edição de célula ----
   const cellKey = (field: string, month: number) => `${field}:${month}`;
@@ -188,103 +229,205 @@ export const IndicadoresPage: React.FC = () => {
     await loadData(y);
   };
 
-  // Grid de edição (inputs x meses)
+  // ---- Card de filtro de meses (igual ao DRE) ----
+  const renderMonthFilter = () => (
+    <div className="rounded-2xl border border-slate-200 bg-white shadow-sm px-4 py-3 space-y-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+          Filtrar meses
+          {!allMonthsSelected && (
+            <span className="ml-2 normal-case tracking-normal text-slate-500 font-semibold">
+              · {visibleMonths.length} selecionado{visibleMonths.length === 1 ? '' : 's'}
+            </span>
+          )}
+        </p>
+        {!allMonthsSelected && (
+          <button type="button" onClick={selectAllMonths} className="text-xs font-bold text-[#004D40] hover:underline">
+            Mostrar todos
+          </button>
+        )}
+      </div>
+      <div className="flex flex-wrap gap-1.5">
+        {MESES.map((mes, monthIndex) => {
+          const active = visibleMonths.includes(monthIndex);
+          return (
+            <button
+              key={mes}
+              type="button"
+              onClick={() => selectMonth(monthIndex)}
+              title="Clique para ver só este mês · Use Mostrar todos para voltar"
+              className={cn(
+                'px-2.5 py-1.5 rounded-lg text-xs font-bold transition-colors border',
+                active
+                  ? 'bg-[#004D40] text-white border-[#004D40] shadow-sm'
+                  : 'bg-white text-slate-400 border-slate-200 hover:border-slate-300 hover:text-slate-600'
+              )}
+            >
+              {mes.slice(0, 3)}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+
+  // ---- Comparativo (layout DRE) ----
+  const renderComparativo = () => (
+    <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+      <div className="overflow-x-auto overflow-y-visible">
+        <table className="w-full border-collapse text-left">
+          <thead className="sticky top-0 z-30">
+            <tr className="bg-slate-100 border-b border-slate-200">
+              <th rowSpan={2} className="sticky left-0 z-30 min-w-[240px] max-w-[240px] border-r border-slate-200 bg-slate-100 px-4 py-3 text-[11px] font-bold uppercase tracking-wider text-slate-600">
+                Indicador
+              </th>
+              {visibleMonths.map((monthIndex) => (
+                <th key={MESES[monthIndex]} colSpan={3} className="border-r border-slate-200 px-3 py-2 text-center text-[11px] font-bold uppercase tracking-wider text-slate-600">
+                  {MESES[monthIndex]} {data?.year}
+                </th>
+              ))}
+              <th colSpan={3} className="border-r border-slate-200 px-3 py-2 text-center text-[11px] font-bold uppercase tracking-wider text-slate-700 bg-slate-200/70">
+                {allMonthsSelected ? `Total ${data?.year ?? ''}` : `Total (${visibleMonths.length} mês${visibleMonths.length === 1 ? '' : 'es'})`}
+              </th>
+            </tr>
+            <tr className="bg-slate-50 border-b border-slate-200">
+              {[...visibleMonths.map((i) => MESES[i]), 'Total'].map((mes) => (
+                <React.Fragment key={`${mes}-sub`}>
+                  <th className="min-w-[110px] border-r border-slate-100 px-3 py-2 text-right text-[10px] font-bold uppercase tracking-wide text-slate-500">Previsto</th>
+                  <th className="min-w-[110px] border-r border-slate-100 px-3 py-2 text-right text-[10px] font-bold uppercase tracking-wide text-slate-500">Realizado</th>
+                  <th className="min-w-[110px] border-r border-slate-200 px-3 py-2 text-right text-[10px] font-bold uppercase tracking-wide text-slate-500">Diferença</th>
+                </React.Fragment>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {comparativoRows.map(({ ind, months, totalPrev, totalReal, totalDif }) => (
+              <tr key={ind.key} className="hover:bg-slate-50 text-slate-600">
+                <td className="sticky left-0 z-20 bg-white border-r border-slate-200 min-w-[240px] max-w-[240px] px-4 py-2.5">
+                  <span className="text-sm font-semibold text-slate-700">{ind.label}</span>
+                </td>
+                {months.map((c) => (
+                  <React.Fragment key={c.monthIndex}>
+                    <td className="min-w-[110px] border-r border-slate-100 px-3 py-1.5 text-right text-xs tabular-nums text-slate-600">
+                      {fmtVal(ind.fmt, c.prev)}
+                    </td>
+                    <td className="min-w-[110px] border-r border-slate-100 px-3 py-1.5 text-right text-xs tabular-nums font-medium text-slate-800">
+                      {fmtVal(ind.fmt, c.real)}
+                    </td>
+                    <td className={cn('min-w-[110px] border-r border-slate-200 px-3 py-1.5 text-right text-xs tabular-nums font-semibold',
+                      c.dif < 0 ? 'text-red-600' : c.dif > 0 ? 'text-emerald-600' : 'text-slate-400')}>
+                      {c.prev === 0 && c.real === 0 ? '—' : fmtVal(ind.fmt, c.dif)}
+                    </td>
+                  </React.Fragment>
+                ))}
+                <td className="min-w-[110px] px-3 py-1.5 text-right text-xs tabular-nums text-slate-600 bg-slate-50/60">{fmtVal(ind.fmt, totalPrev)}</td>
+                <td className="min-w-[110px] px-3 py-1.5 text-right text-xs tabular-nums font-bold text-slate-900 bg-slate-50/60">{fmtVal(ind.fmt, totalReal)}</td>
+                <td className={cn('min-w-[110px] px-3 py-1.5 text-right text-xs tabular-nums font-bold bg-slate-50/60',
+                  totalDif < 0 ? 'text-red-600' : totalDif > 0 ? 'text-emerald-600' : 'text-slate-400')}>
+                  {fmtVal(ind.fmt, totalDif)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+
+  // ---- Grid de edição (inputs x meses) — layout DRE ----
   const renderEditGrid = (esc: Escopo) => {
     const ed = escopoData(esc);
+    const sumField = (field: string) =>
+      visibleMonths.reduce((s, idx) => s + (Number(ed?.months?.[idx]?.inputs?.[field]) || 0), 0);
+    const totalAgg = ed ? aggregate(visibleMonths.map((i) => ed.months[i])) : undefined;
+
     return (
-      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-        <div className="px-5 py-4 border-b border-slate-100 flex items-center gap-2">
+      <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+        <div className="px-5 py-3 border-b border-slate-100 flex items-center gap-2">
           <Pencil className="w-4 h-4 text-emerald-700" />
           <h3 className="text-sm font-bold text-slate-800">
-            Editar {esc === 'realizado' ? 'Realizado' : 'Metas'} — {year}
+            Editar {esc === 'realizado' ? 'Realizado' : 'Metas'} — {data?.year}
           </h3>
           {!canEdit && <span className="text-xs text-amber-600">(somente leitura para seu perfil)</span>}
         </div>
-        <div className="table-scroll-panel overflow-x-auto">
-          <table className="w-full text-left border-collapse min-w-[1400px]">
-            <thead>
-              <tr className="bg-slate-100/70">
-                <th className="sticky left-0 z-20 bg-slate-100 px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-widest min-w-[220px]">Campo</th>
-                {MESES.map((m) => (
-                  <th key={m} className="px-2 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-right min-w-[92px]">{m}</th>
+        <div className="overflow-x-auto overflow-y-visible">
+          <table className="w-full border-collapse text-left">
+            <thead className="sticky top-0 z-30">
+              <tr className="bg-slate-100 border-b border-slate-200">
+                <th className="sticky left-0 z-30 min-w-[240px] max-w-[240px] border-r border-slate-200 bg-slate-100 px-4 py-3 text-[11px] font-bold uppercase tracking-wider text-slate-600">
+                  Campo
+                </th>
+                {visibleMonths.map((idx) => (
+                  <th key={idx} className="min-w-[104px] border-r border-slate-100 px-2 py-3 text-right text-[10px] font-bold uppercase tracking-wide text-slate-500">
+                    {MESES[idx].slice(0, 3)}
+                  </th>
                 ))}
-                <th className="px-3 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-right min-w-[110px]">Total</th>
+                <th className="min-w-[120px] px-3 py-3 text-right text-[10px] font-bold uppercase tracking-wide text-slate-600 bg-slate-200/70">Total</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {INPUT_GROUPS.map((g) => (
                 <React.Fragment key={g.group}>
                   <tr className="bg-emerald-50/50">
-                    <td colSpan={14} className="px-4 py-1.5 text-[10px] font-bold uppercase tracking-widest text-emerald-800">{g.group}</td>
+                    <td className="sticky left-0 z-20 bg-emerald-50/50 px-4 py-1.5 text-[10px] font-bold uppercase tracking-widest text-emerald-800">{g.group}</td>
+                    <td colSpan={visibleMonths.length + 1} className="bg-emerald-50/50" />
                   </tr>
-                  {g.fields.map(([field, label]) => {
-                    const totalVal = ed?.total?.inputs?.[field] ?? 0;
-                    return (
-                      <tr key={field} className="hover:bg-slate-50/60">
-                        <td className="sticky left-0 z-10 bg-white px-4 py-1.5 text-xs text-slate-700 min-w-[220px]">{label}</td>
-                        {MESES.map((_, idx) => {
-                          const month = idx + 1;
-                          const orig = Number(ed?.months?.[idx]?.inputs?.[field] ?? 0);
-                          const k = cellKey(field, month);
-                          const value = edits[k] ?? String(orig ?? 0);
-                          return (
-                            <td key={month} className="px-1 py-1 text-right">
-                              <input
-                                type="number"
-                                step="0.01"
-                                disabled={!canEdit || savingKey === k}
-                                value={value}
-                                onChange={(e) => setEdits((p) => ({ ...p, [k]: e.target.value }))}
-                                onBlur={() => { if ((edits[k] ?? String(orig)) !== String(orig)) saveCell(esc, field, month); }}
-                                onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
-                                className="w-[84px] px-2 py-1 text-right text-xs bg-slate-50 border border-slate-200 rounded-md focus:border-emerald-400 focus:bg-white disabled:opacity-60"
-                              />
-                            </td>
-                          );
-                        })}
-                        <td className="px-3 py-1.5 text-xs text-right font-bold text-slate-800 tabular-nums">{fmtInt(Number(totalVal))}</td>
-                      </tr>
-                    );
-                  })}
+                  {g.fields.map(([field, label]) => (
+                    <tr key={field} className="hover:bg-slate-50/60">
+                      <td className="sticky left-0 z-10 bg-white border-r border-slate-200 min-w-[240px] max-w-[240px] px-4 py-1.5 text-xs text-slate-700">{label}</td>
+                      {visibleMonths.map((idx) => {
+                        const month = idx + 1;
+                        const orig = Number(ed?.months?.[idx]?.inputs?.[field] ?? 0);
+                        const k = cellKey(field, month);
+                        const value = edits[k] ?? String(orig ?? 0);
+                        return (
+                          <td key={month} className="min-w-[104px] border-r border-slate-100 px-1 py-1 text-right">
+                            <input
+                              type="number"
+                              step="0.01"
+                              disabled={!canEdit || savingKey === k}
+                              value={value}
+                              onChange={(e) => setEdits((p) => ({ ...p, [k]: e.target.value }))}
+                              onBlur={() => { if ((edits[k] ?? String(orig)) !== String(orig)) saveCell(esc, field, month); }}
+                              onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+                              className="w-full max-w-[96px] px-2 py-1 text-right text-xs bg-slate-50 border border-slate-200 rounded-md focus:border-emerald-400 focus:bg-white disabled:opacity-60"
+                            />
+                          </td>
+                        );
+                      })}
+                      <td className="min-w-[120px] px-3 py-1.5 text-right text-xs tabular-nums font-bold text-slate-800 bg-slate-50/60">{fmtInt(sumField(field))}</td>
+                    </tr>
+                  ))}
                 </React.Fragment>
+              ))}
+              {/* Indicadores calculados (read-only) */}
+              <tr className="bg-slate-100/70">
+                <td colSpan={visibleMonths.length + 2} className="px-4 py-1.5 text-[10px] font-bold uppercase tracking-widest text-slate-500">
+                  Indicadores calculados (automático)
+                </td>
+              </tr>
+              {KEY_INDICATORS.filter((i) => !i.src).map((ind) => (
+                <tr key={ind.key} className="text-slate-600">
+                  <td className="sticky left-0 z-10 bg-white border-r border-slate-200 min-w-[240px] max-w-[240px] px-4 py-1.5 text-xs text-slate-600">{ind.label}</td>
+                  {visibleMonths.map((idx) => (
+                    <td key={idx} className="min-w-[104px] border-r border-slate-100 px-2 py-1.5 text-right text-xs tabular-nums text-slate-700">
+                      {fmtVal(ind.fmt, readVal(ed?.months?.[idx], ind.key))}
+                    </td>
+                  ))}
+                  <td className="min-w-[120px] px-3 py-1.5 text-right text-xs tabular-nums font-semibold text-slate-800 bg-slate-50/60">
+                    {fmtVal(ind.fmt, readVal(totalAgg, ind.key))}
+                  </td>
+                </tr>
               ))}
             </tbody>
           </table>
-        </div>
-        {/* Indicadores calculados (read-only) */}
-        <div className="px-5 py-4 border-t border-slate-100">
-          <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Indicadores calculados (automático)</p>
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse min-w-[1400px]">
-              <thead>
-                <tr>
-                  <th className="sticky left-0 bg-white px-4 py-2 text-[10px] font-bold text-slate-500 uppercase min-w-[220px]">Indicador</th>
-                  {MESES.map((m) => <th key={m} className="px-2 py-2 text-[10px] font-bold text-slate-500 uppercase text-right min-w-[92px]">{m}</th>)}
-                  <th className="px-3 py-2 text-[10px] font-bold text-slate-500 uppercase text-right min-w-[110px]">Total</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-50">
-                {KEY_INDICATORS.filter((i) => !i.src).map((ind) => (
-                  <tr key={ind.key}>
-                    <td className="sticky left-0 bg-white px-4 py-1.5 text-xs text-slate-600 min-w-[220px]">{ind.label}</td>
-                    {MESES.map((_, idx) => (
-                      <td key={idx} className="px-2 py-1.5 text-xs text-right text-slate-700 tabular-nums">
-                        {fmtVal(ind.fmt, readVal(ed?.months?.[idx], ind.key))}
-                      </td>
-                    ))}
-                    <td className="px-3 py-1.5 text-xs text-right font-semibold text-slate-800 tabular-nums">{fmtVal(ind.fmt, readVal(ed?.total, ind.key))}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
         </div>
       </div>
     );
   };
 
   return (
-    <div className="space-y-6 animate-in fade-in duration-500">
+    <div className="space-y-5 animate-in fade-in duration-500">
       <div className="flex flex-col gap-1">
         <h2 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
           <TrendingUp className="w-6 h-6 text-emerald-700" /> Indicadores — Previsto x Realizado
@@ -349,55 +492,10 @@ export const IndicadoresPage: React.FC = () => {
         ))}
       </div>
 
-      {/* Comparativo */}
-      {view === 'comparativo' && (
-        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-          <div className="table-scroll-panel overflow-x-auto">
-            <table className="w-full text-left border-collapse min-w-[2600px]">
-              <thead>
-                <tr className="bg-slate-100/70">
-                  <th rowSpan={2} className="sticky left-0 z-20 bg-slate-100 px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-widest min-w-[200px]">Indicador</th>
-                  {MESES.map((m) => (
-                    <th key={m} colSpan={3} className="px-3 py-2 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center border-l border-slate-200">{m}</th>
-                  ))}
-                  <th colSpan={3} className="px-3 py-2 text-[10px] font-bold text-emerald-700 uppercase tracking-widest text-center border-l border-slate-200">Total</th>
-                </tr>
-                <tr className="bg-slate-100/70">
-                  {[...MESES, 'Total'].map((m) => (
-                    <React.Fragment key={m}>
-                      <th className="px-2 py-1.5 text-[9px] font-bold text-slate-400 uppercase text-right border-l border-slate-200">Prev</th>
-                      <th className="px-2 py-1.5 text-[9px] font-bold text-slate-400 uppercase text-right">Real</th>
-                      <th className="px-2 py-1.5 text-[9px] font-bold text-slate-400 uppercase text-right">Var</th>
-                    </React.Fragment>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {comparativoRows.map(({ ind, months, totalPrev, totalReal, totalVar }) => (
-                  <tr key={ind.key} className="hover:bg-slate-50/60">
-                    <td className="sticky left-0 z-10 bg-white px-4 py-2 text-xs font-semibold text-slate-700 min-w-[200px]">{ind.label}</td>
-                    {months.map((c, idx) => (
-                      <React.Fragment key={idx}>
-                        <td className="px-2 py-2 text-xs text-right text-slate-500 tabular-nums border-l border-slate-100">{fmtVal(ind.fmt, c.prev)}</td>
-                        <td className="px-2 py-2 text-xs text-right text-slate-800 font-medium tabular-nums">{fmtVal(ind.fmt, c.real)}</td>
-                        <td className={cn('px-2 py-2 text-xs text-right font-semibold tabular-nums', c.varc < 0 ? 'text-red-600' : 'text-emerald-700')}>
-                          {c.prev === 0 && c.real === 0 ? '—' : fmtPct(c.varc)}
-                        </td>
-                      </React.Fragment>
-                    ))}
-                    <td className="px-2 py-2 text-xs text-right text-slate-500 tabular-nums border-l border-slate-200">{fmtVal(ind.fmt, totalPrev)}</td>
-                    <td className="px-2 py-2 text-xs text-right text-slate-900 font-bold tabular-nums">{fmtVal(ind.fmt, totalReal)}</td>
-                    <td className={cn('px-2 py-2 text-xs text-right font-bold tabular-nums', totalVar < 0 ? 'text-red-700' : 'text-emerald-700')}>
-                      {totalPrev === 0 && totalReal === 0 ? '—' : fmtPct(totalVar)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
+      {/* Filtro de meses (igual ao DRE) */}
+      {renderMonthFilter()}
 
+      {view === 'comparativo' && renderComparativo()}
       {view === 'realizado' && renderEditGrid('realizado')}
       {view === 'meta' && renderEditGrid('meta')}
     </div>
