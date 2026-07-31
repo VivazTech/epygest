@@ -7450,6 +7450,223 @@ export function createApp() {
     return realized;
   };
 
+  // =========================================================================
+  // Indicadores Gerenciais (Números Vivaz): Realizado x Metas por (ano, mês)
+  // Modelo "inputs + cálculo no sistema": guardamos apenas os inputs; os
+  // indicadores derivados são calculados aqui com as mesmas fórmulas da planilha.
+  // =========================================================================
+  const INDICADOR_INPUT_FIELDS = [
+    "rn", "receita_hospedagem", "pax",
+    "frigobar", "room_service", "bar_gaia", "rest_allegro", "rest_terraza",
+    "map_comercial", "eventos_banquetes",
+    "eventos", "outras_receitas", "nao_operacional",
+    "cmv", "csp", "impostos_faturamento", "desp_operacional", "desp_pessoal", "desp_vendas",
+    "pessoal_zz", "despesas_zz", "csll_ir", "investimentos",
+    "map_repasse", "cafe_repasse", "qtd_equipe",
+  ] as const;
+  type IndicadorInputField = (typeof INDICADOR_INPUT_FIELDS)[number];
+  const INDICADOR_INPUT_SET = new Set<string>(INDICADOR_INPUT_FIELDS);
+
+  const daysInMonth = (year: number, month: number) => new Date(year, month, 0).getDate();
+
+  const emptyIndicadorInputs = () =>
+    INDICADOR_INPUT_FIELDS.reduce((acc, f) => {
+      acc[f] = 0;
+      return acc;
+    }, {} as Record<IndicadorInputField, number>);
+
+  // Calcula os indicadores derivados de um mês a partir dos inputs.
+  const computeIndicadores = (
+    inp: Record<string, number>,
+    uhs: number,
+    diasNoMes: number,
+    rnAnual: number
+  ) => {
+    const n = (v: any) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+    const rn = n(inp.rn);
+    const receita_hospedagem = n(inp.receita_hospedagem);
+    const total_pdvs =
+      n(inp.frigobar) + n(inp.room_service) + n(inp.bar_gaia) + n(inp.rest_allegro) +
+      n(inp.rest_terraza) + n(inp.map_comercial) + n(inp.eventos_banquetes);
+    const total_outras = n(inp.eventos) + n(inp.outras_receitas) + n(inp.nao_operacional);
+    const faturamento = receita_hospedagem + total_pdvs + total_outras;
+    const rn_totais = diasNoMes * uhs;
+    const despesas_op =
+      n(inp.cmv) + n(inp.csp) + n(inp.impostos_faturamento) +
+      n(inp.desp_operacional) + n(inp.desp_pessoal) + n(inp.desp_vendas);
+    const ebitda = faturamento - despesas_op;
+    const resultado_antes_impostos = ebitda - n(inp.pessoal_zz) - n(inp.despesas_zz);
+    const resultado_liquido = resultado_antes_impostos - n(inp.csll_ir) - n(inp.investimentos);
+    return {
+      rn_totais,
+      ocupacao: rn_totais > 0 ? rn / rn_totais : 0,
+      diaria_media: rn > 0 ? receita_hospedagem / rn : 0,
+      revpar: rn_totais > 0 ? receita_hospedagem / rn_totais : 0,
+      peso: rnAnual > 0 ? rn / rnAnual : 0,
+      total_pdvs,
+      total_outras,
+      faturamento,
+      consumo_medio_uh: rn > 0 ? faturamento / rn : 0,
+      pax_uh: rn > 0 ? n(inp.pax) / rn : 0,
+      consumo_rn: rn > 0 ? total_pdvs / rn : 0,
+      despesas_op,
+      ebitda,
+      margem_ebitda: faturamento > 0 ? ebitda / faturamento : 0,
+      resultado_antes_impostos,
+      resultado_liquido,
+      repasses: n(inp.map_repasse) + n(inp.cafe_repasse),
+    };
+  };
+
+  // Monta os 12 meses (inputs + calculados) e o total anual de um escopo.
+  const buildIndicadorEscopo = (
+    rows: any[],
+    escopo: string,
+    year: number,
+    uhs: number
+  ) => {
+    const byMonth = new Map<number, Record<string, number>>();
+    for (const r of rows) {
+      if (String(r.escopo) !== escopo) continue;
+      const m = Number(r.month);
+      const inputs = emptyIndicadorInputs() as Record<string, number>;
+      for (const f of INDICADOR_INPUT_FIELDS) inputs[f] = Number((r as any)[f]) || 0;
+      byMonth.set(m, inputs);
+    }
+    const rnAnual = Array.from(byMonth.values()).reduce((s, i) => s + (Number(i.rn) || 0), 0);
+    const months = Array.from({ length: 12 }, (_, idx) => {
+      const month = idx + 1;
+      const inputs = byMonth.get(month) || (emptyIndicadorInputs() as Record<string, number>);
+      const calc = computeIndicadores(inputs, uhs, daysInMonth(year, month), rnAnual);
+      return { month, inputs, ...calc };
+    });
+    // Total anual: soma inputs, recalcula derivados com rn_totais anual.
+    const totalInputs = emptyIndicadorInputs() as Record<string, number>;
+    for (const m of months)
+      for (const f of INDICADOR_INPUT_FIELDS) totalInputs[f] += Number(m.inputs[f]) || 0;
+    const diasAno = months.reduce((s, _m, idx) => s + daysInMonth(year, idx + 1), 0);
+    const total = { inputs: totalInputs, ...computeIndicadores(totalInputs, uhs, diasAno, rnAnual) };
+    return { months, total };
+  };
+
+  const getIndicadorUhs = async (year: number) => {
+    const { data } = await supabase
+      .from("indicadores_parametros")
+      .select("uhs")
+      .eq("year", year)
+      .limit(1);
+    return data?.length ? Number((data[0] as any).uhs) || 172 : 172;
+  };
+
+  // GET /api/indicadores?year=YYYY  -> realizado + meta (inputs e calculados) + total
+  app.get("/api/indicadores", async (req, res) => {
+    const year = Number((req.query as any).year) || new Date().getFullYear();
+    const { data, error } = await supabase
+      .from("indicadores_mensais")
+      .select("*")
+      .eq("year", year);
+    if (error) {
+      if (error.message?.toLowerCase().includes("indicadores_mensais")) {
+        return res.status(500).json({
+          error: "Tabela indicadores_mensais não encontrada. Execute sql/20_indicadores.sql no Supabase.",
+        });
+      }
+      console.error("Erro ao carregar indicadores:", error);
+      return res.status(500).json({ error: "Erro interno ao carregar indicadores." });
+    }
+    const uhs = await getIndicadorUhs(year);
+    res.json({
+      year,
+      uhs,
+      realizado: buildIndicadorEscopo(data ?? [], "realizado", year, uhs),
+      meta: buildIndicadorEscopo(data ?? [], "meta", year, uhs),
+    });
+  });
+
+  // GET /api/indicadores/anos  -> anos disponíveis (para o seletor)
+  app.get("/api/indicadores/anos", async (_req, res) => {
+    const { data, error } = await supabase
+      .from("indicadores_mensais")
+      .select("year");
+    if (error) {
+      console.error(error);
+      return res.status(500).json({ error: "Erro interno ao processar a solicitação." });
+    }
+    const years = Array.from(new Set((data ?? []).map((r: any) => Number(r.year)))).sort((a, b) => a - b);
+    res.json({ years });
+  });
+
+  // PATCH /api/indicadores/cell  -> upsert de UM input { escopo, year, month, field, value }
+  app.patch("/api/indicadores/cell", requireRole("admin", "controle", "finance"), async (req, res) => {
+    const { escopo, year, month, field, value } = req.body as {
+      escopo?: string; year?: number; month?: number; field?: string; value?: number | string;
+    };
+    if (escopo !== "realizado" && escopo !== "meta")
+      return res.status(400).json({ error: "escopo deve ser 'realizado' ou 'meta'." });
+    if (!Number.isFinite(Number(year))) return res.status(400).json({ error: "year inválido." });
+    if (!Number.isFinite(Number(month)) || Number(month) < 1 || Number(month) > 12)
+      return res.status(400).json({ error: "month deve estar entre 1 e 12." });
+    if (!field || !INDICADOR_INPUT_SET.has(field))
+      return res.status(400).json({ error: "campo (field) inválido." });
+    const parsed = Number(String(value).replace(",", "."));
+    if (!Number.isFinite(parsed)) return res.status(400).json({ error: "valor numérico inválido." });
+
+    const payload: Record<string, any> = {
+      escopo, year: Number(year), month: Number(month), [field]: parsed,
+    };
+    const { error } = await supabase
+      .from("indicadores_mensais")
+      .upsert(payload, { onConflict: "escopo,year,month" });
+    if (error) {
+      console.error("Erro ao salvar indicador:", error);
+      return res.status(500).json({ error: "Não foi possível salvar a alteração." });
+    }
+    res.json({ success: true, saved: payload });
+  });
+
+  // POST /api/indicadores/month -> upsert do mês inteiro { escopo, year, month, inputs:{...} }
+  app.post("/api/indicadores/month", requireRole("admin", "controle", "finance"), async (req, res) => {
+    const { escopo, year, month, inputs } = req.body as {
+      escopo?: string; year?: number; month?: number; inputs?: Record<string, number | string>;
+    };
+    if (escopo !== "realizado" && escopo !== "meta")
+      return res.status(400).json({ error: "escopo deve ser 'realizado' ou 'meta'." });
+    if (!Number.isFinite(Number(year))) return res.status(400).json({ error: "year inválido." });
+    if (!Number.isFinite(Number(month)) || Number(month) < 1 || Number(month) > 12)
+      return res.status(400).json({ error: "month deve estar entre 1 e 12." });
+    const payload: Record<string, any> = { escopo, year: Number(year), month: Number(month) };
+    for (const f of INDICADOR_INPUT_FIELDS) {
+      const raw = inputs?.[f];
+      const v = Number(String(raw ?? 0).replace(",", "."));
+      payload[f] = Number.isFinite(v) ? v : 0;
+    }
+    const { error } = await supabase
+      .from("indicadores_mensais")
+      .upsert(payload, { onConflict: "escopo,year,month" });
+    if (error) {
+      console.error("Erro ao salvar mês de indicadores:", error);
+      return res.status(500).json({ error: "Não foi possível salvar o mês." });
+    }
+    res.json({ success: true });
+  });
+
+  // PATCH /api/indicadores/parametros -> upsert { year, uhs }
+  app.patch("/api/indicadores/parametros", requireRole("admin", "controle", "finance"), async (req, res) => {
+    const { year, uhs } = req.body as { year?: number; uhs?: number | string };
+    if (!Number.isFinite(Number(year))) return res.status(400).json({ error: "year inválido." });
+    const uhsNum = Math.round(Number(uhs));
+    if (!Number.isFinite(uhsNum) || uhsNum <= 0)
+      return res.status(400).json({ error: "uhs deve ser um inteiro positivo." });
+    const { error } = await supabase
+      .from("indicadores_parametros")
+      .upsert({ year: Number(year), uhs: uhsNum }, { onConflict: "year" });
+    if (error) {
+      console.error("Erro ao salvar parâmetro de indicadores:", error);
+      return res.status(500).json({ error: "Não foi possível salvar o parâmetro." });
+    }
+    res.json({ success: true, year: Number(year), uhs: uhsNum });
+  });
+
   app.get("/api/orcamento", async (req, res) => {
     const { year, crd } = req.query as { year?: string; crd?: string };
     const selectedYear = Number(year) || 2026;

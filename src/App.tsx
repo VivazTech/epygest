@@ -16,6 +16,7 @@ import { ComandasPage as Comandas } from './pages/Comandas';
 import { SupabaseConnectionTestPage as SupabaseTeste } from './pages/SupabaseConnectionTest';
 import { SintasePage as Sintase } from './pages/Sintase';
 import { PrevRealPage as PrevReal } from './pages/PrevReal';
+import { IndicadoresPage as Indicadores } from './pages/Indicadores';
 import { ConfiguracoesPage as Configuracoes } from './pages/Configuracoes';
 import { UsuariosPage as Usuarios } from './pages/Usuarios';
 import { PlanilhasPage } from './pages/Planilhas';
@@ -232,6 +233,7 @@ export default function App() {
       case 'cadastros': return <Cadastros />;
       case 'sintase': return <Sintase />;
       case 'prev-real': return <PrevReal mode="diario" />;
+      case 'indicadores': return <Indicadores />;
       case 'supabase-teste': return <SupabaseTeste />;
       case 'usuarios': return <Usuarios />;
       case 'configuracoes': return <Configuracoes />;

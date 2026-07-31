@@ -64,6 +64,7 @@ const menuItems = [
   { id: 'importacao', label: 'Importação', icon: PlusCircle, roles: ['admin', 'controle'] },
   { id: 'cadastros', label: 'Cadastros', icon: Database, roles: ['admin', 'controle'] },
   { id: 'prev-real', label: 'Prev x Real Diario', icon: BarChart3, roles: ['admin', 'controle', 'manager'] },
+  { id: 'indicadores', label: 'Indicadores (Números)', icon: TrendingUp, roles: ['admin', 'controle', 'manager'] },
   { id: 'usuarios', label: 'Usuários', icon: Users, roles: ['admin'] },
   { id: 'configuracoes', label: 'Configurações', icon: Settings, roles: ['admin'] },
 ];
