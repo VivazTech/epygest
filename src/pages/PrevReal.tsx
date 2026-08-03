@@ -77,6 +77,18 @@ const getCrdLabel = (row: PrevRealRow) => {
   return name || code || '—';
 };
 
+const sumMonths = (months: PrevRealMonth[], indexes: number[]) => {
+  let previsto = 0;
+  let realizado = 0;
+  let diferenca = 0;
+  for (const i of indexes) {
+    previsto += months[i]?.previsto || 0;
+    realizado += months[i]?.realizado || 0;
+    diferenca += months[i]?.diferenca || 0;
+  }
+  return { previsto, realizado, diferenca };
+};
+
 const VIEW_CONFIG_KEY = 'prevReal:viewConfig:v1';
 
 type PrevRealMode = 'mensal' | 'diario';
@@ -122,6 +134,22 @@ export const PrevRealPage: React.FC<PrevRealPageProps> = ({ mode = 'diario' }) =
   const [usoConsumoSubgrupos, setUsoConsumoSubgrupos] = useState<UsoConsumoSubgrupo[]>([]);
   const [expandedSubgrupos, setExpandedSubgrupos] = useState<Set<number>>(new Set());
   const [allowedSectorNames, setAllowedSectorNames] = useState<string[]>([]);
+  /** Índices 0–11. Clique = só aquele mês; "Mostrar todos" volta aos 12. Só no modo mensal. */
+  const [selectedMonths, setSelectedMonths] = useState<number[]>(() =>
+    Array.from({ length: 12 }, (_, i) => i)
+  );
+
+  const visibleMonths = useMemo(() => {
+    if (mode !== 'mensal') return monthHeaders.map((_, i) => i);
+    const set = new Set(selectedMonths);
+    const months = monthHeaders.map((_, i) => i).filter((i) => set.has(i));
+    return months.length ? months : monthHeaders.map((_, i) => i);
+  }, [mode, selectedMonths]);
+  const allMonthsSelected = visibleMonths.length === 12;
+  const selectMonth = (monthIndex: number) => setSelectedMonths([monthIndex]);
+  const selectAllMonths = () => setSelectedMonths(Array.from({ length: 12 }, (_, i) => i));
+  const tableMinWidth = Math.max(800, 400 + visibleMonths.length * 240);
+  const monthColsSpan = 2 + visibleMonths.length * 3 + 3;
 
   const loadData = async () => {
     setLoading(true);
@@ -265,13 +293,14 @@ export const PrevRealPage: React.FC<PrevRealPageProps> = ({ mode = 'diario' }) =
       realizado: filteredRows.reduce((sum, row) => sum + (row.months[idx]?.realizado || 0), 0),
       diferenca: filteredRows.reduce((sum, row) => sum + (row.months[idx]?.diferenca || 0), 0),
     }));
+    const totals = sumMonths(months, visibleMonths);
     return {
       months,
-      previsto: months.reduce((sum, m) => sum + m.previsto, 0),
-      realizado: months.reduce((sum, m) => sum + m.realizado, 0),
-      diferenca: months.reduce((sum, m) => sum + m.diferenca, 0),
+      previsto: totals.previsto,
+      realizado: totals.realizado,
+      diferenca: totals.diferenca,
     };
-  }, [filteredRows]);
+  }, [filteredRows, visibleMonths]);
 
   const rowsByGroup = useMemo(() => {
     const grouped = new Map<string, PrevRealRow[]>();
@@ -286,16 +315,17 @@ export const PrevRealPage: React.FC<PrevRealPageProps> = ({ mode = 'diario' }) =
         realizado: rows.reduce((sum, row) => sum + (row.months[idx]?.realizado || 0), 0),
         diferenca: rows.reduce((sum, row) => sum + (row.months[idx]?.diferenca || 0), 0),
       }));
+      const totals = sumMonths(months, visibleMonths);
       return {
         groupName,
         rows,
         months,
-        total_previsto: months.reduce((sum, m) => sum + m.previsto, 0),
-        total_realizado: months.reduce((sum, m) => sum + m.realizado, 0),
-        total_diferenca: months.reduce((sum, m) => sum + m.diferenca, 0),
+        total_previsto: totals.previsto,
+        total_realizado: totals.realizado,
+        total_diferenca: totals.diferenca,
       };
     });
-  }, [filteredRows, groupBy]);
+  }, [filteredRows, groupBy, visibleMonths]);
 
   useEffect(() => {
     if (!rowsByGroup.length) {
@@ -546,6 +576,51 @@ export const PrevRealPage: React.FC<PrevRealPageProps> = ({ mode = 'diario' }) =
         )}
       </div>
 
+      {mode === 'mensal' && (
+        <div className="rounded-2xl border border-slate-200 bg-white shadow-sm px-4 py-3 space-y-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+              Filtrar meses
+              {!allMonthsSelected && (
+                <span className="ml-2 normal-case tracking-normal text-slate-500 font-semibold">
+                  · {visibleMonths.length} selecionado{visibleMonths.length === 1 ? '' : 's'}
+                </span>
+              )}
+            </p>
+            {!allMonthsSelected && (
+              <button
+                type="button"
+                onClick={selectAllMonths}
+                className="text-xs font-bold text-[#004D40] hover:underline"
+              >
+                Mostrar todos
+              </button>
+            )}
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {monthHeaders.map((mes, monthIndex) => {
+              const active = visibleMonths.includes(monthIndex);
+              return (
+                <button
+                  key={mes}
+                  type="button"
+                  onClick={() => selectMonth(monthIndex)}
+                  title="Clique para ver só este mês · Use Mostrar todos para voltar"
+                  className={cn(
+                    'px-2.5 py-1.5 rounded-lg text-xs font-bold transition-colors border',
+                    active
+                      ? 'bg-[#004D40] text-white border-[#004D40] shadow-sm'
+                      : 'bg-white text-slate-400 border-slate-200 hover:border-slate-300 hover:text-slate-600'
+                  )}
+                >
+                  {mes.slice(0, 3)}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
         <div className="divide-y divide-slate-100">
           {rowsByGroup.map((group) => {
@@ -576,14 +651,14 @@ export const PrevRealPage: React.FC<PrevRealPageProps> = ({ mode = 'diario' }) =
 
                 {isOpen && (
                   <div className="table-scroll-panel bg-slate-50/40 border-t border-slate-100">
-                    <table className="w-full text-left border-collapse min-w-[2800px]">
+                    <table className="w-full text-left border-collapse" style={{ minWidth: tableMinWidth }}>
                       <thead>
                         <tr className="bg-slate-100/70">
                           <th rowSpan={2} className="th-sticky-corner px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-widest min-w-[120px]">Grupo</th>
                           <th rowSpan={2} className="th-sticky-corner-2 px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-widest min-w-[260px]">Detalhado</th>
-                          {monthHeaders.map((month) => (
-                            <th key={`${group.groupName}-${month}`} colSpan={3} className="th-sticky-top px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center border-l border-slate-200">
-                              {month}
+                          {visibleMonths.map((monthIndex) => (
+                            <th key={`${group.groupName}-${monthHeaders[monthIndex]}`} colSpan={3} className="th-sticky-top px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-center border-l border-slate-200">
+                              {monthHeaders[monthIndex]}
                             </th>
                           ))}
                           <th rowSpan={2} className="th-sticky-top px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-right">Total Prev.</th>
@@ -591,8 +666,8 @@ export const PrevRealPage: React.FC<PrevRealPageProps> = ({ mode = 'diario' }) =
                           <th rowSpan={2} className="th-sticky-top px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-right">Total Dif.</th>
                         </tr>
                         <tr className="bg-slate-100/70">
-                          {monthHeaders.map((month) => (
-                            <React.Fragment key={`${group.groupName}-${month}-sub`}>
+                          {visibleMonths.map((monthIndex) => (
+                            <React.Fragment key={`${group.groupName}-${monthHeaders[monthIndex]}-sub`}>
                               <th className="th-sticky-top-sub px-3 py-2 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-right border-l border-slate-200">Prev.</th>
                               <th className="th-sticky-top-sub px-3 py-2 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-right">Real.</th>
                               <th className="th-sticky-top-sub px-3 py-2 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-right">Dif.</th>
@@ -605,6 +680,7 @@ export const PrevRealPage: React.FC<PrevRealPageProps> = ({ mode = 'diario' }) =
                           const isUsoConsumo = row.detalhado.trim().toUpperCase() === USO_CONSUMO_CRD_NAME;
                           const subgruposOpen = expandedSubgrupos.has(row.id);
                           const rowBg = rowIndex % 2 === 0;
+                          const rowTotals = sumMonths(row.months, visibleMonths);
                           return (
                           <React.Fragment key={row.id}>
                           <tr
@@ -630,7 +706,9 @@ export const PrevRealPage: React.FC<PrevRealPageProps> = ({ mode = 'diario' }) =
                                 )}
                               </span>
                             </td>
-                            {row.months.map((m, idx) => (
+                            {visibleMonths.map((idx) => {
+                              const m = row.months[idx] || { previsto: 0, realizado: 0, diferenca: 0 };
+                              return (
                               <React.Fragment key={`${row.id}-${idx}`}>
                                 <td className="px-3 py-2 text-xs text-right text-slate-700 border-l border-slate-200">
                                   {editingCell?.rowId === row.id && editingCell?.monthIndex === idx ? (
@@ -676,25 +754,26 @@ export const PrevRealPage: React.FC<PrevRealPageProps> = ({ mode = 'diario' }) =
                                   />
                                 </td>
                               </React.Fragment>
-                            ))}
+                              );
+                            })}
                             <td className="px-4 py-3 text-xs text-right font-bold text-slate-800">
                               <ValueTrace
                                 className="text-xs font-bold text-slate-800"
-                                displayValue={formatCurrency(row.total_previsto || 0)}
+                                displayValue={formatCurrency(rowTotals.previsto || 0)}
                                 meta={valueTrace.prevReal.totalPrevisto(`Total previsto — ${row.detalhado}`)}
                               />
                             </td>
                             <td className="px-4 py-3 text-xs text-right font-bold text-slate-800">
                               <ValueTrace
                                 className="text-xs font-bold text-slate-800"
-                                displayValue={formatCurrency(row.total_realizado || 0)}
+                                displayValue={formatCurrency(rowTotals.realizado || 0)}
                                 meta={valueTrace.prevReal.totalRealizado(`Total realizado — ${row.detalhado}`)}
                               />
                             </td>
-                            <td className={`px-4 py-3 text-xs text-right font-extrabold ${(row.total_diferenca || 0) < 0 ? 'text-red-700' : 'text-emerald-700'}`}>
+                            <td className={`px-4 py-3 text-xs text-right font-extrabold ${(rowTotals.diferenca || 0) < 0 ? 'text-red-700' : 'text-emerald-700'}`}>
                               <ValueTrace
-                                className={`text-xs font-extrabold ${(row.total_diferenca || 0) < 0 ? 'text-red-700' : 'text-emerald-700'}`}
-                                displayValue={formatCurrency(row.total_diferenca || 0)}
+                                className={`text-xs font-extrabold ${(rowTotals.diferenca || 0) < 0 ? 'text-red-700' : 'text-emerald-700'}`}
+                                displayValue={formatCurrency(rowTotals.diferenca || 0)}
                                 meta={valueTrace.prevReal.totalDiferenca(`Total diferença — ${row.detalhado}`)}
                               />
                             </td>
@@ -702,7 +781,7 @@ export const PrevRealPage: React.FC<PrevRealPageProps> = ({ mode = 'diario' }) =
                           {/* Subgrupos de USO E CONSUMO (SEM CRD) */}
                           {isUsoConsumo && subgruposOpen && usoConsumoSubgrupos.length > 0 && (
                             <tr>
-                              <td colSpan={3 + 12 * 3} className="p-0 bg-blue-50/40 border-t border-blue-100">
+                              <td colSpan={monthColsSpan} className="p-0 bg-blue-50/40 border-t border-blue-100">
                                 <div className="px-6 py-3">
                                   <p className="text-[10px] font-bold uppercase tracking-widest text-blue-700 mb-2">
                                     Subgrupos — {USO_CONSUMO_CRD_NAME}
@@ -738,7 +817,9 @@ export const PrevRealPage: React.FC<PrevRealPageProps> = ({ mode = 'diario' }) =
                           <td className="sticky left-0 z-20 bg-slate-100 px-4 py-3 text-xs font-bold text-slate-700 min-w-[120px]" colSpan={2}>
                             Total {groupLabel} {group.groupName}
                           </td>
-                          {group.months.map((m, idx) => (
+                          {visibleMonths.map((idx) => {
+                            const m = group.months[idx] || { previsto: 0, realizado: 0, diferenca: 0 };
+                            return (
                             <React.Fragment key={`subtotal-${group.groupName}-${idx}`}>
                               <td className="px-3 py-2 text-xs text-right font-bold text-slate-800 border-l border-slate-200">
                                 <ValueTrace
@@ -762,7 +843,8 @@ export const PrevRealPage: React.FC<PrevRealPageProps> = ({ mode = 'diario' }) =
                                 />
                               </td>
                             </React.Fragment>
-                          ))}
+                            );
+                          })}
                           <td className="px-4 py-3 text-xs text-right font-bold text-slate-900">
                             <ValueTrace
                               className="text-xs font-bold text-slate-900"
@@ -796,12 +878,12 @@ export const PrevRealPage: React.FC<PrevRealPageProps> = ({ mode = 'diario' }) =
       </div>
 
       <div className="bg-white rounded-2xl border border-emerald-100 shadow-sm overflow-auto">
-        <table className="w-full text-left border-collapse min-w-[2800px]">
+        <table className="w-full text-left border-collapse" style={{ minWidth: tableMinWidth }}>
           <thead>
             <tr className="bg-emerald-50/50 border-t border-emerald-100">
               <th className="px-4 py-3 text-xs font-bold text-emerald-800">Total geral ({data?.year || currentYear})</th>
-              {monthHeaders.map((month) => (
-                <th key={`tot-head-${month}`} colSpan={3} className="px-4 py-3 text-[10px] font-bold text-emerald-700 uppercase tracking-widest text-center border-l border-emerald-200">{month}</th>
+              {visibleMonths.map((monthIndex) => (
+                <th key={`tot-head-${monthHeaders[monthIndex]}`} colSpan={3} className="px-4 py-3 text-[10px] font-bold text-emerald-700 uppercase tracking-widest text-center border-l border-emerald-200">{monthHeaders[monthIndex]}</th>
               ))}
               <th className="px-4 py-3 text-[10px] font-bold text-emerald-700 uppercase tracking-widest text-right">Total Prev.</th>
               <th className="px-4 py-3 text-[10px] font-bold text-emerald-700 uppercase tracking-widest text-right">Total Real.</th>
@@ -811,7 +893,9 @@ export const PrevRealPage: React.FC<PrevRealPageProps> = ({ mode = 'diario' }) =
           <tbody>
             <tr className="bg-white">
               <td className="px-4 py-3 text-xs text-emerald-800 font-bold">Consolidado</td>
-              {(visibleTotals.months || Array.from({ length: 12 }, () => ({ previsto: 0, realizado: 0, diferenca: 0 }))).map((m, idx) => (
+              {visibleMonths.map((idx) => {
+                const m = visibleTotals.months[idx] || { previsto: 0, realizado: 0, diferenca: 0 };
+                return (
                 <React.Fragment key={`tot-${idx}`}>
                   <td className="px-3 py-2 text-xs text-right text-emerald-800 border-l border-emerald-100">
                     <ValueTrace
@@ -835,7 +919,8 @@ export const PrevRealPage: React.FC<PrevRealPageProps> = ({ mode = 'diario' }) =
                     />
                   </td>
                 </React.Fragment>
-              ))}
+                );
+              })}
               <td className="px-4 py-3 text-xs text-right font-bold text-emerald-900">
                 <ValueTrace
                   className="text-xs font-bold text-emerald-900"

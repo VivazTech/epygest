@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { cn, formatCurrency } from '../lib/utils';
 import { ValueTrace } from '../components/ValueTrace';
+import { SearchableSelect } from '../components/SearchableSelect';
 import { useSearch } from '../context/SearchContext';
 import { matchesSearch } from '../lib/search';
 
@@ -31,8 +32,7 @@ export const CadastrosPage: React.FC = () => {
   const [colaboradores, setColaboradores] = useState<any[]>([]);
   const [newColaboradorForm, setNewColaboradorForm] = useState({
     nome: '',
-    cargo_descricao: '',
-    ccusto_descricao: '',
+    funcao_id: '',
   });
   const [newName, setNewName] = useState('');
   const [newKey, setNewKey] = useState('');
@@ -122,9 +122,28 @@ export const CadastrosPage: React.FC = () => {
   const filteredColaboradores = useMemo(
     () =>
       colaboradores.filter((c) =>
-        matchesSearch(query, c.nome, c.cargo_descricao, c.ccusto_descricao)
+        matchesSearch(
+          query,
+          c.nome,
+          c.cargo_descricao,
+          c.ccusto_descricao,
+          c.sector_name,
+          ...(Array.isArray(c.funcoes) ? c.funcoes.map((f: any) => f.name) : [])
+        )
       ),
     [colaboradores, query]
+  );
+
+  const funcaoOptions = useMemo(
+    () =>
+      cargos
+        .filter((c) => c.active !== false)
+        .map((c) => ({
+          value: String(c.id),
+          label: c.sector_name ? `${c.name} · ${c.sector_name}` : c.name,
+          keywords: `${c.name} ${c.sector_name || ''}`,
+        })),
+    [cargos]
   );
   const filteredRequisitions = useMemo(
     () =>
@@ -357,7 +376,7 @@ export const CadastrosPage: React.FC = () => {
   const createCargo = async () => {
     const name = newCargoForm.name.trim();
     if (!name || !newCargoForm.sector_id) {
-      alert('Informe o nome do cargo e o setor.');
+      alert('Informe o nome da função e o setor.');
       return;
     }
     const res = await fetch('/api/cargos', {
@@ -410,8 +429,7 @@ export const CadastrosPage: React.FC = () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         nome,
-        cargo_descricao: newColaboradorForm.cargo_descricao.trim(),
-        ccusto_descricao: newColaboradorForm.ccusto_descricao.trim(),
+        funcao_id: newColaboradorForm.funcao_id ? Number(newColaboradorForm.funcao_id) : null,
       }),
     });
     const data = await res.json().catch(() => ({}));
@@ -419,7 +437,58 @@ export const CadastrosPage: React.FC = () => {
       alert(data.error || 'Erro ao cadastrar colaborador.');
       return;
     }
-    setNewColaboradorForm({ nome: '', cargo_descricao: '', ccusto_descricao: '' });
+    setNewColaboradorForm({ nome: '', funcao_id: '' });
+    refreshColaboradores();
+  };
+
+  const setColaboradorFuncao = async (colaborador: any, funcaoId: string) => {
+    const res = await fetch(`/api/colaboradores/${colaborador.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        funcao_id: funcaoId ? Number(funcaoId) : null,
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      alert(data.error || 'Erro ao vincular função.');
+      return;
+    }
+    refreshColaboradores();
+  };
+
+  const addColaboradorFuncao = async (colaborador: any, funcaoId: string) => {
+    if (!funcaoId) return;
+    const already = (colaborador.funcoes || []).some((f: any) => String(f.id) === funcaoId);
+    if (already) {
+      await setColaboradorFuncao(colaborador, funcaoId);
+      return;
+    }
+    const res = await fetch(`/api/colaboradores/${colaborador.id}/funcoes`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        funcao_id: Number(funcaoId),
+        as_primary: !(colaborador.funcoes || []).length,
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      alert(data.error || 'Erro ao adicionar função.');
+      return;
+    }
+    refreshColaboradores();
+  };
+
+  const removeColaboradorFuncao = async (colaborador: any, cargoId: number) => {
+    const res = await fetch(`/api/colaboradores/${colaborador.id}/funcoes/${cargoId}`, {
+      method: 'DELETE',
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      alert(data.error || 'Erro ao remover função.');
+      return;
+    }
     refreshColaboradores();
   };
 
@@ -755,7 +824,7 @@ export const CadastrosPage: React.FC = () => {
           <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
             <div className="px-4 py-3 border-b border-slate-50">
               <h3 className="text-sm font-bold text-slate-800">Setores / Centros de Custo</h3>
-              <p className="text-xs text-slate-500">Estrutura organizacional usada no orçamento e na atribuição de cargos.</p>
+              <p className="text-xs text-slate-500">Estrutura organizacional usada no orçamento e na atribuição de funções.</p>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse">
@@ -802,17 +871,17 @@ export const CadastrosPage: React.FC = () => {
               <div>
                 <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2">
                   <Users className="w-4 h-4 text-[#004D40]" />
-                  Cargos por setor
+                  Funções por setor
                 </h3>
                 <p className="text-xs text-slate-500">
-                  Cadastre os cargos e vincule a um setor. Eles aparecerão no select ao importar a folha.
+                  Cadastre as funções e vincule a um setor. Cada setor pode ter várias funções; ao escolher a função no colaborador, o setor é definido automaticamente.
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <input
                   value={newCargoForm.name}
                   onChange={(e) => setNewCargoForm((p) => ({ ...p, name: e.target.value }))}
-                  placeholder="Nome do cargo"
+                  placeholder="Nome da função"
                   className="w-52 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
                 />
                 <select
@@ -830,7 +899,7 @@ export const CadastrosPage: React.FC = () => {
                   className="inline-flex items-center gap-2 px-4 py-2 bg-[#004D40] text-white font-bold rounded-xl hover:bg-[#003d33] transition-colors"
                 >
                   <Plus className="w-4 h-4" />
-                  Adicionar cargo
+                  Adicionar função
                 </button>
               </div>
             </div>
@@ -838,7 +907,7 @@ export const CadastrosPage: React.FC = () => {
               <table className="w-full text-left border-collapse">
                 <thead>
                   <tr className="bg-slate-50/50">
-                    <th className="px-6 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Cargo</th>
+                    <th className="px-6 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Função</th>
                     <th className="px-6 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Setor</th>
                     <th className="px-6 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Status</th>
                     <th className="px-6 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-right">Ações</th>
@@ -848,7 +917,7 @@ export const CadastrosPage: React.FC = () => {
                   {filteredCargos.length === 0 && (
                     <tr>
                       <td colSpan={4} className="px-6 py-8 text-center text-sm text-slate-400">
-                        Nenhum cargo cadastrado. Adicione cargos e atribua a um setor acima.
+                        Nenhuma função cadastrada. Adicione funções e atribua a um setor acima.
                       </td>
                     </tr>
                   )}
@@ -902,7 +971,7 @@ export const CadastrosPage: React.FC = () => {
                 Colaboradores
               </h3>
               <p className="text-xs text-slate-500">
-                Cadastro de colaboradores com nome, descrição do cargo e do centro de custo.
+                Vincule funções (cargos) ao colaborador. A função principal define automaticamente o setor / centro de custo.
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
@@ -912,18 +981,21 @@ export const CadastrosPage: React.FC = () => {
                 placeholder="Nome"
                 className="w-56 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
               />
-              <input
-                value={newColaboradorForm.cargo_descricao}
-                onChange={(e) => setNewColaboradorForm((p) => ({ ...p, cargo_descricao: e.target.value }))}
-                placeholder="Descrição cargo"
-                className="w-52 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
-              />
-              <input
-                value={newColaboradorForm.ccusto_descricao}
-                onChange={(e) => setNewColaboradorForm((p) => ({ ...p, ccusto_descricao: e.target.value }))}
-                placeholder="Descrição Ccusto"
-                className="w-52 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
-              />
+              <div className="w-72">
+                <SearchableSelect
+                  value={newColaboradorForm.funcao_id}
+                  onChange={(value) => setNewColaboradorForm((p) => ({ ...p, funcao_id: value }))}
+                  options={funcaoOptions}
+                  placeholder="Função (define o setor)"
+                  emptyMessage="Cadastre funções na aba Setores"
+                />
+              </div>
+              <span className="text-xs text-slate-400 min-w-[8rem]">
+                {(() => {
+                  const cargo = cargos.find((c) => String(c.id) === newColaboradorForm.funcao_id);
+                  return cargo?.sector_name ? `Setor: ${cargo.sector_name}` : 'Setor: —';
+                })()}
+              </span>
               <button
                 onClick={createColaborador}
                 className="inline-flex items-center gap-2 px-4 py-2 bg-[#004D40] text-white font-bold rounded-xl hover:bg-[#003d33] transition-colors"
@@ -938,8 +1010,8 @@ export const CadastrosPage: React.FC = () => {
               <thead>
                 <tr className="bg-slate-50/50">
                   <th className="px-6 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Nome</th>
-                  <th className="px-6 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Descrição cargo</th>
-                  <th className="px-6 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Descrição Ccusto</th>
+                  <th className="px-6 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest min-w-[220px]">Função</th>
+                  <th className="px-6 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Setor / Ccusto</th>
                   <th className="px-6 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Status</th>
                   <th className="px-6 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-right">Ações</th>
                 </tr>
@@ -952,11 +1024,79 @@ export const CadastrosPage: React.FC = () => {
                     </td>
                   </tr>
                 )}
-                {filteredColaboradores.map((colaborador) => (
+                {filteredColaboradores.map((colaborador) => {
+                  const funcoes = Array.isArray(colaborador.funcoes) ? colaborador.funcoes : [];
+                  const primaryId = colaborador.funcao_id != null ? String(colaborador.funcao_id) : '';
+                  const sectorLabel =
+                    colaborador.sector_name ||
+                    colaborador.ccusto_descricao ||
+                    funcoes.find((f: any) => f.is_primary)?.sector_name ||
+                    '—';
+                  return (
                   <tr key={colaborador.id} className="hover:bg-slate-50/50 transition-colors group">
                     <td className="px-6 py-3 text-sm font-medium text-slate-800">{colaborador.nome}</td>
-                    <td className="px-6 py-3 text-sm text-slate-600">{colaborador.cargo_descricao || '—'}</td>
-                    <td className="px-6 py-3 text-sm text-slate-600">{colaborador.ccusto_descricao || '—'}</td>
+                    <td className="px-6 py-3">
+                      <div className="space-y-2 min-w-[220px]">
+                        <SearchableSelect
+                          value={primaryId}
+                          onChange={(value) => setColaboradorFuncao(colaborador, value)}
+                          options={funcaoOptions}
+                          placeholder="Selecionar função"
+                          emptyMessage="Cadastre funções na aba Setores"
+                        />
+                        {funcoes.length > 0 && (
+                          <div className="flex flex-wrap gap-1.5">
+                            {funcoes.map((f: any) => (
+                              <button
+                                key={f.id}
+                                type="button"
+                                title={f.is_primary ? 'Função principal' : 'Clique para tornar principal · X remove'}
+                                onClick={() => {
+                                  if (!f.is_primary) setColaboradorFuncao(colaborador, String(f.id));
+                                }}
+                                className={cn(
+                                  'inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-semibold border transition-colors',
+                                  f.is_primary
+                                    ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                    : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                                )}
+                              >
+                                {f.name}
+                                <span
+                                  role="button"
+                                  tabIndex={0}
+                                  className="ml-0.5 text-slate-400 hover:text-red-500"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    removeColaboradorFuncao(colaborador, f.id);
+                                  }}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter' || e.key === ' ') {
+                                      e.stopPropagation();
+                                      removeColaboradorFuncao(colaborador, f.id);
+                                    }
+                                  }}
+                                >
+                                  ×
+                                </span>
+                              </button>
+                            ))}
+                            <div className="w-full max-w-[200px]">
+                              <SearchableSelect
+                                value=""
+                                onChange={(value) => addColaboradorFuncao(colaborador, value)}
+                                options={funcaoOptions.filter(
+                                  (o) => !funcoes.some((f: any) => String(f.id) === o.value)
+                                )}
+                                placeholder="+ Outra função"
+                                emptyMessage="Sem funções restantes"
+                              />
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </td>
+                    <td className="px-6 py-3 text-sm text-slate-600">{sectorLabel}</td>
                     <td className="px-6 py-3">
                       <span
                         className={cn(
@@ -985,7 +1125,8 @@ export const CadastrosPage: React.FC = () => {
                       </div>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>

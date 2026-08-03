@@ -21,7 +21,7 @@ type RdsItemKey = 'hospedagem' | 'alimentos_bebidas' | 'eventos' | 'diversos' | 
 type RdsDetail = {
   label: string;
   total: number;
-  items: Array<{ label: string; acumulado: number }>;
+  items: Array<{ label: string; acumulado: number; section?: string }>;
 };
 
 type RealizadoMensalRow = {
@@ -38,25 +38,53 @@ type RealizadoMensalRow = {
 
 const ITEM_OPTIONS: Array<{ key: RdsItemKey; label: string }> = [
   { key: 'all', label: 'Todos os itens' },
-  { key: 'hospedagem', label: 'Hospedagem' },
-  { key: 'alimentos_bebidas', label: 'Alimentos & Bebidas' },
-  { key: 'eventos', label: 'Eventos' },
-  { key: 'diversos', label: 'Diversos' },
+  { key: 'hospedagem', label: 'Receita Hospedagem' },
+  { key: 'alimentos_bebidas', label: 'Receita A&B' },
+  { key: 'eventos', label: 'Receita Eventos' },
+  { key: 'diversos', label: 'Outras Receitas' },
 ];
 
 const SERIES_META = [
   { key: 'hospedagem' as const, label: 'Hospedagem', color: '#0077a8' },
   { key: 'alimentos_bebidas' as const, label: 'A&B', color: '#10b981' },
   { key: 'eventos' as const, label: 'Eventos', color: '#f59e0b' },
-  { key: 'diversos' as const, label: 'Diversos', color: '#8b5cf6' },
+  { key: 'diversos' as const, label: 'Outras', color: '#8b5cf6' },
 ];
 
 const PIE_COLORS = ['#0077a8', '#10b981', '#f59e0b', '#8b5cf6'];
 
-const rdsTrace = (sectionLabel: string, month: number, year: number) => ({
-  source: `Apuração de Receita › Relatório Diário de Situação › ${MONTH_LABELS[month - 1]}/${year} › ${sectionLabel}`,
-  calculation: `Valor da linha Total, coluna Acumulado (R$), da seção ${sectionLabel} em rds_snapshots.`,
-});
+const formatTraceMoney = (value: number) =>
+  value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+
+/** Texto do hover: lista real das linhas RDS que entraram na soma do card. */
+const buildRdsCardTrace = (
+  cardLabel: string,
+  month: number,
+  year: number,
+  detail?: RdsDetail | null
+) => {
+  const source = `Apuração de Receita › Relatório Diário de Situação › ${MONTH_LABELS[month - 1]}/${year} › ${cardLabel}`;
+  const items = detail?.items ?? [];
+  if (!items.length) {
+    return {
+      source,
+      tables: 'rds_snapshots',
+      calculation:
+        `Soma Acumulado (R$) das linhas específicas mapeadas para ${cardLabel} (não usa o Total da seção).\nNenhuma linha encontrada no RDS deste período — confira a importação.`,
+    };
+  }
+  const lines = items.map((item) => {
+    const section = item.section ? ` [${item.section}]` : '';
+    return `• ${item.label}${section}: ${formatTraceMoney(Number(item.acumulado) || 0)}`;
+  });
+  const total = Number(detail?.total) || items.reduce((s, i) => s + (Number(i.acumulado) || 0), 0);
+  return {
+    source,
+    tables: 'rds_snapshots',
+    calculation:
+      `Soma Acumulado (R$) das linhas abaixo (não usa o Total da seção):\n${lines.join('\n')}\n= Total: ${formatTraceMoney(total)}`,
+  };
+};
 
 export const Dashboard: React.FC = () => {
   const { query } = useSearch();
@@ -112,36 +140,18 @@ export const Dashboard: React.FC = () => {
 
   const revenueCards = useMemo(() => {
     if (!indicators) return [];
-    const cards = [
-      {
-        key: 'hospedagem' as const,
-        title: 'Receita Hospedagem',
-        value: Number(indicators.receitaHospedagem) || 0,
-        color: 'blue' as const,
-        ...rdsTrace('Hospedagem', monthNum, yearNum),
-      },
-      {
-        key: 'alimentos_bebidas' as const,
-        title: 'Receita A&B',
-        value: Number(indicators.receitaAlimentosBebidas) || 0,
-        color: 'green' as const,
-        ...rdsTrace('Alimentos & Bebidas', monthNum, yearNum),
-      },
-      {
-        key: 'eventos' as const,
-        title: 'Receita Eventos',
-        value: Number(indicators.receitaEventos) || 0,
-        color: 'orange' as const,
-        ...rdsTrace('Eventos', monthNum, yearNum),
-      },
-      {
-        key: 'diversos' as const,
-        title: 'Receita Diversos',
-        value: Number(indicators.receitaDiversos) || 0,
-        color: 'neutral' as const,
-        ...rdsTrace('Diversos', monthNum, yearNum),
-      },
-    ];
+    const detalhes = (indicators.rdsDetalhes ?? {}) as Record<string, RdsDetail>;
+    const cards = (
+      [
+        { key: 'hospedagem' as const, title: 'Receita Hospedagem', value: Number(indicators.receitaHospedagem) || 0, color: 'blue' as const },
+        { key: 'alimentos_bebidas' as const, title: 'Receita A&B', value: Number(indicators.receitaAlimentosBebidas) || 0, color: 'green' as const },
+        { key: 'eventos' as const, title: 'Receita Eventos', value: Number(indicators.receitaEventos) || 0, color: 'orange' as const },
+        { key: 'diversos' as const, title: 'Outras Receitas', value: Number(indicators.receitaDiversos) || 0, color: 'neutral' as const },
+      ] as const
+    ).map((card) => ({
+      ...card,
+      ...buildRdsCardTrace(card.title, monthNum, yearNum, detalhes[card.key]),
+    }));
     return itemFilter === 'all' ? cards : cards.filter((c) => c.key === itemFilter);
   }, [indicators, itemFilter, monthNum, yearNum]);
 
@@ -157,7 +167,7 @@ export const Dashboard: React.FC = () => {
         const section = detalhes[key];
         if (!section) return null;
         const items = (section.items ?? []).filter((item) =>
-          matchesSearch(query, item.label, item.acumulado, section.label)
+          matchesSearch(query, item.label, item.acumulado, item.section, section.label)
         );
         return {
           key,
@@ -166,7 +176,12 @@ export const Dashboard: React.FC = () => {
           items,
         };
       })
-      .filter(Boolean) as Array<{ key: string; label: string; total: number; items: Array<{ label: string; acumulado: number }> }>;
+      .filter(Boolean) as Array<{
+      key: string;
+      label: string;
+      total: number;
+      items: Array<{ label: string; acumulado: number; section?: string }>;
+    }>;
   }, [indicators, itemFilter, query]);
 
   const realizadoData = useMemo(() => {
@@ -192,12 +207,12 @@ export const Dashboard: React.FC = () => {
       { name: 'Hospedagem', value: Number(indicators?.receitaHospedagem) || 0 },
       { name: 'A&B', value: Number(indicators?.receitaAlimentosBebidas) || 0 },
       { name: 'Eventos', value: Number(indicators?.receitaEventos) || 0 },
-      { name: 'Diversos', value: Number(indicators?.receitaDiversos) || 0 },
+      { name: 'Outras', value: Number(indicators?.receitaDiversos) || 0 },
     ].filter((c) => itemFilter === 'all' || (
       (itemFilter === 'hospedagem' && c.name === 'Hospedagem') ||
       (itemFilter === 'alimentos_bebidas' && c.name === 'A&B') ||
       (itemFilter === 'eventos' && c.name === 'Eventos') ||
-      (itemFilter === 'diversos' && c.name === 'Diversos')
+      (itemFilter === 'diversos' && c.name === 'Outras')
     ));
 
     const total = cards.reduce((s, c) => s + c.value, 0);
@@ -228,7 +243,7 @@ export const Dashboard: React.FC = () => {
         <div>
           <h2 className="text-2xl font-bold text-slate-900">Resumo Executivo</h2>
           <p className="text-slate-500 text-sm">
-            Receitas do Relatório Diário de Situação (Acumulado R$ › Total) por competência.
+            Receitas do RDS por competência — soma de linhas específicas (Acumulado R$), não o Total da seção.
           </p>
         </div>
 
@@ -327,10 +342,11 @@ export const Dashboard: React.FC = () => {
             value={card.value}
             type="currency"
             variation={0}
-            description={indicators.rdsReportDate ? `RDS ${indicators.rdsReportDate}` : 'Acumulado (R$) › Total'}
+            description={indicators.rdsReportDate ? `RDS ${indicators.rdsReportDate}` : 'Soma linhas específicas'}
             color={card.color}
             traceSource={card.source}
             traceCalculation={card.calculation}
+            traceTables={card.tables}
           />
         ))}
       </div>
@@ -471,6 +487,7 @@ export const Dashboard: React.FC = () => {
                     <thead>
                       <tr className="bg-slate-50/80">
                         <th className="px-3 py-2 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Item</th>
+                        <th className="px-3 py-2 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Seção RDS</th>
                         <th className="px-3 py-2 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-right">
                           Acumulado (R$)
                         </th>
@@ -478,8 +495,9 @@ export const Dashboard: React.FC = () => {
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                       {section.items.map((item) => (
-                        <tr key={`${section.key}-${item.label}`} className="hover:bg-slate-50/60">
+                        <tr key={`${section.key}-${item.section ?? ''}-${item.label}`} className="hover:bg-slate-50/60">
                           <td className="px-3 py-2 text-xs text-slate-700">{item.label}</td>
+                          <td className="px-3 py-2 text-xs text-slate-500">{item.section || '—'}</td>
                           <td className="px-3 py-2 text-xs text-right tabular-nums text-slate-800 font-medium">
                             {formatCurrency(item.acumulado)}
                           </td>

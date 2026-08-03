@@ -12,10 +12,11 @@ interface IndicatorCardProps {
   color?: 'green' | 'orange' | 'blue' | 'neutral';
   traceSource?: string;
   traceCalculation?: string;
+  traceTables?: string;
 }
 
 export const IndicatorCard: React.FC<IndicatorCardProps> = ({ 
-  title, value, type, variation, description, color = 'neutral', traceSource, traceCalculation
+  title, value, type, variation, description, color = 'neutral', traceSource, traceCalculation, traceTables
 }) => {
   const isPositive = variation >= 0;
   
@@ -44,6 +45,7 @@ export const IndicatorCard: React.FC<IndicatorCardProps> = ({
           displayValue={type === 'currency' ? formatCurrency(value) : formatPercent(value)}
           source={traceSource || `Indicador ${title}`}
           calculation={traceCalculation || 'Valor retornado pela API de indicadores'}
+          tables={traceTables}
         />
       </div>
 

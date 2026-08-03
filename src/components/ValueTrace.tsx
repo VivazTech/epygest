@@ -50,7 +50,7 @@ export const ValueTrace: React.FC<ValueTraceProps> = ({
     createPortal(
       <div
         role="tooltip"
-        className="pointer-events-none fixed z-[9999] w-[min(20rem,calc(100vw-1.5rem))] -translate-x-1/2 rounded-xl border border-slate-200 bg-white px-3.5 py-3 text-left shadow-2xl shadow-slate-300/40 ring-1 ring-slate-100"
+        className="pointer-events-none fixed z-[9999] w-[min(24rem,calc(100vw-1.5rem))] -translate-x-1/2 rounded-xl border border-slate-200 bg-white px-3.5 py-3 text-left shadow-2xl shadow-slate-300/40 ring-1 ring-slate-100"
         style={{ top: pos.top, left: pos.left }}
       >
         <p className="text-[10px] font-bold uppercase tracking-wide text-emerald-800">Origem</p>
@@ -62,7 +62,7 @@ export const ValueTrace: React.FC<ValueTraceProps> = ({
           </>
         )}
         <p className="mt-2 text-[10px] font-bold uppercase tracking-wide text-slate-500">Como foi calculado</p>
-        <p className="mt-0.5 text-[11px] leading-relaxed text-slate-700">{resolvedCalculation}</p>
+        <p className="mt-0.5 text-[11px] leading-relaxed text-slate-700 whitespace-pre-line">{resolvedCalculation}</p>
       </div>,
       document.body
     );

@@ -914,30 +914,112 @@ export function createApp() {
     // Índice Acumulado (R$) nas seções RDS com colunas
     // [Diário (R$), Diário %, Acumulado (R$), Acumulado %]
     const RDS_ACUMULADO_IDX = 2;
-    const RDS_REVENUE_KEYS = [
-      { key: "hospedagem", label: "Hospedagem" },
-      { key: "alimentos_bebidas", label: "Alimentos & Bebidas" },
-      { key: "eventos", label: "Eventos" },
-      { key: "diversos", label: "Diversos" },
+
+    // Cards do Resumo Executivo: soma de linhas específicas (não o Total da seção).
+    const DASHBOARD_RDS_GROUPS = [
+      {
+        key: "hospedagem",
+        label: "Receita Hospedagem",
+        parts: [
+          {
+            sectionKey: "hospedagem",
+            labels: ["HOSPEDAGEM", "HOSPEDAGEM NO-SHOW", "UPGRADE / UPSELLING", "TAXA DE ISS"],
+          },
+          {
+            sectionKey: "alimentos_bebidas",
+            labels: ["CAFE DA MANHA (PENSAO)", "ALMOCO (PENSAO)", "JANTAR (PENSAO)"],
+          },
+        ],
+      },
+      {
+        key: "alimentos_bebidas",
+        label: "Receita A&B",
+        parts: [
+          {
+            sectionKey: "alimentos_bebidas",
+            labels: [
+              "RESTAURANTE ALLEGRO",
+              "RESTAURANTE TERRAZA",
+              "BAR GAIA",
+              "ROOM SERVICE",
+              "FRIGOBAR",
+              "EVENTOS/BANQUETES",
+            ],
+          },
+        ],
+      },
+      {
+        key: "eventos",
+        label: "Receita Eventos",
+        parts: [{ sectionKey: "eventos", labels: ["EVENTOS - SERVICOS"] }],
+      },
+      {
+        key: "diversos",
+        label: "Outras Receitas",
+        parts: [
+          {
+            sectionKey: "diversos",
+            labels: [
+              "TAXA DE TURISMO",
+              "LAVANDERIA",
+              "ESTACIONAMENTO",
+              "DAY PASS",
+              "RECREACAO",
+              "RECEPCAO DIVERSOS",
+              "RECEPCAO SERVICOS",
+              "TARIFADOR",
+              "SPA",
+              "TAXA DE ISS",
+            ],
+          },
+        ],
+      },
     ] as const;
 
-    const extractRdsAcumuladoTotal = (sections: any[], sectionKey: string): number => {
-      const section = (sections ?? []).find((s: any) => String(s?.key ?? "") === sectionKey);
-      if (!section || !Array.isArray(section.total) || section.total.length <= RDS_ACUMULADO_IDX) return 0;
-      return Number(section.total[RDS_ACUMULADO_IDX]) || 0;
-    };
+    const normalizeRdsDashLabel = (value: unknown) =>
+      String(value ?? "")
+        .trim()
+        .toUpperCase()
+        .normalize("NFD")
+        .replace(/\p{Diacritic}/gu, "")
+        .replace(/\s+/g, " ");
 
-    const extractRdsSectionDetails = (sections: any[], sectionKey: string) => {
-      const section = (sections ?? []).find((s: any) => String(s?.key ?? "") === sectionKey);
-      if (!section) return { total: 0, items: [] as Array<{ label: string; acumulado: number }> };
-      const items = (Array.isArray(section.items) ? section.items : []).map((item: any) => ({
-        label: String(item?.label ?? ""),
-        acumulado: Number(Array.isArray(item?.values) ? item.values[RDS_ACUMULADO_IDX] : 0) || 0,
-      }));
-      return {
-        total: extractRdsAcumuladoTotal(sections, sectionKey),
-        items,
-      };
+    const sumRdsLabels = (
+      sections: any[],
+      parts: ReadonlyArray<{ sectionKey: string; labels: readonly string[] }>
+    ): { total: number; items: Array<{ label: string; section: string; acumulado: number }> } => {
+      const items: Array<{ label: string; section: string; acumulado: number }> = [];
+      let total = 0;
+      for (const part of parts) {
+        const section = (sections ?? []).find((s: any) => String(s?.key ?? "") === part.sectionKey);
+        const sectionTitle = String(section?.title || part.sectionKey);
+        const byLabel = new Map<string, { label: string; acumulado: number }>();
+        if (section && Array.isArray(section.items)) {
+          for (const item of section.items) {
+            const label = String(item?.label ?? "");
+            const key = normalizeRdsDashLabel(label);
+            if (!key) continue;
+            const acumulado = Number(Array.isArray(item?.values) ? item.values[RDS_ACUMULADO_IDX] : 0) || 0;
+            // Mantém o rótulo original do arquivo; se houver duplicata, soma.
+            const prev = byLabel.get(key);
+            byLabel.set(key, {
+              label: prev?.label || label,
+              acumulado: (prev?.acumulado || 0) + acumulado,
+            });
+          }
+        }
+        for (const wantedLabel of part.labels) {
+          const found = byLabel.get(normalizeRdsDashLabel(wantedLabel));
+          const acumulado = found?.acumulado || 0;
+          items.push({
+            label: found?.label || wantedLabel,
+            section: sectionTitle,
+            acumulado,
+          });
+          total += acumulado;
+        }
+      }
+      return { total, items };
     };
 
     const [
@@ -982,17 +1064,20 @@ export function createApp() {
     const monthlyProfit = (monthlyRevenue - monthlyExpenses) * 0.8;
 
     const monthSections = Array.isArray((rdsMonth as any)?.sections) ? (rdsMonth as any).sections : [];
-    const receitaHospedagem = extractRdsAcumuladoTotal(monthSections, "hospedagem");
-    const receitaAlimentosBebidas = extractRdsAcumuladoTotal(monthSections, "alimentos_bebidas");
-    const receitaEventos = extractRdsAcumuladoTotal(monthSections, "eventos");
-    const receitaDiversos = extractRdsAcumuladoTotal(monthSections, "diversos");
 
+    const groupTotals: Record<string, number> = {};
     const rdsDetalhes = Object.fromEntries(
-      RDS_REVENUE_KEYS.map(({ key, label }) => {
-        const detail = extractRdsSectionDetails(monthSections, key);
-        return [key, { label, ...detail }];
+      DASHBOARD_RDS_GROUPS.map((group) => {
+        const detail = sumRdsLabels(monthSections, group.parts);
+        groupTotals[group.key] = detail.total;
+        return [group.key, { label: group.label, total: detail.total, items: detail.items }];
       })
     );
+
+    const receitaHospedagem = groupTotals.hospedagem || 0;
+    const receitaAlimentosBebidas = groupTotals.alimentos_bebidas || 0;
+    const receitaEventos = groupTotals.eventos || 0;
+    const receitaDiversos = groupTotals.diversos || 0;
 
     const rdsByMonth = new Map<number, any[]>(
       (rdsYearRows ?? []).map((row: any) => [Number(row.month), Array.isArray(row.sections) ? row.sections : []])
@@ -1001,10 +1086,14 @@ export function createApp() {
     const realizadoMensal = Array.from({ length: 12 }, (_, i) => {
       const m = i + 1;
       const sections = rdsByMonth.get(m) ?? [];
-      const hospedagem = extractRdsAcumuladoTotal(sections, "hospedagem");
-      const alimentos_bebidas = extractRdsAcumuladoTotal(sections, "alimentos_bebidas");
-      const eventos = extractRdsAcumuladoTotal(sections, "eventos");
-      const diversos = extractRdsAcumuladoTotal(sections, "diversos");
+      const values: Record<string, number> = {};
+      for (const group of DASHBOARD_RDS_GROUPS) {
+        values[group.key] = sumRdsLabels(sections, group.parts).total;
+      }
+      const hospedagem = values.hospedagem || 0;
+      const alimentos_bebidas = values.alimentos_bebidas || 0;
+      const eventos = values.eventos || 0;
+      const diversos = values.diversos || 0;
       return {
         month: m,
         name: monthLabels[i].slice(0, 3),
@@ -1026,6 +1115,7 @@ export function createApp() {
       receitaAlimentosBebidas,
       receitaEventos,
       receitaDiversos,
+      receitaOutras: receitaDiversos,
       rdsImportado: Boolean(rdsMonth),
       rdsReportDate: (rdsMonth as any)?.report_date ?? null,
       rdsDetalhes,
@@ -2565,11 +2655,113 @@ export function createApp() {
 
   // ====================================================
   // COLABORADORES (Cadastros e Parametrizações)
+  // Funções = cargos; setores ↔ funções via cargos.sector_id;
+  // colaboradores ↔ funções via colaborador_funcoes (N:N).
   // ====================================================
   const colaboradorTableMissing = (error: any) =>
     String(error?.message || "").includes("colaboradores") ||
     error?.code === "42P01" ||
     error?.code === "PGRST205";
+
+  const colaboradorFuncoesMissing = (error: any) =>
+    String(error?.message || "").includes("colaborador_funcoes") ||
+    error?.code === "42P01" ||
+    error?.code === "PGRST205";
+
+  const mapColaboradorFuncoes = (links: any[] | null | undefined) =>
+    (links ?? [])
+      .map((link: any) => {
+        const cargo = link?.cargos;
+        if (!cargo) return null;
+        return {
+          id: Number(cargo.id),
+          name: String(cargo.name ?? ""),
+          sector_id: Number(cargo.sector_id) || null,
+          sector_name: cargo.sectors?.name ?? null,
+          is_primary: Boolean(link.is_primary),
+        };
+      })
+      .filter(Boolean) as Array<{
+      id: number;
+      name: string;
+      sector_id: number | null;
+      sector_name: string | null;
+      is_primary: boolean;
+    }>;
+
+  const fetchCargoWithSector = async (cargoId: number) => {
+    const { data, error } = await supabase
+      .from("cargos")
+      .select("id, name, sector_id, active, sectors(name)")
+      .eq("id", cargoId)
+      .maybeSingle();
+    if (error) throw error;
+    return data as {
+      id: number;
+      name: string;
+      sector_id: number;
+      active: boolean;
+      sectors?: { name?: string } | null;
+    } | null;
+  };
+
+  /** Define/atualiza a função principal e sincroniza cargo_descricao + ccusto (setor). */
+  const setColaboradorFuncaoPrincipal = async (colaboradorId: number, cargoId: number) => {
+    const cargo = await fetchCargoWithSector(cargoId);
+    if (!cargo) return { error: "Função inválida." as const };
+    if (cargo.active === false) return { error: "Função inativa." as const };
+
+    // Garante no máximo uma primary: zera e upserta
+    const { error: clearErr } = await supabase
+      .from("colaborador_funcoes")
+      .update({ is_primary: false })
+      .eq("colaborador_id", colaboradorId);
+    if (clearErr && !colaboradorFuncoesMissing(clearErr)) throw clearErr;
+    if (clearErr && colaboradorFuncoesMissing(clearErr)) {
+      return {
+        error:
+          "Tabela colaborador_funcoes não encontrada. Execute sql/20_colaborador_funcoes.sql no Supabase." as const,
+      };
+    }
+
+    const { error: upsertErr } = await supabase.from("colaborador_funcoes").upsert(
+      {
+        colaborador_id: colaboradorId,
+        cargo_id: cargoId,
+        is_primary: true,
+      },
+      { onConflict: "colaborador_id,cargo_id" }
+    );
+    if (upsertErr) {
+      if (colaboradorFuncoesMissing(upsertErr)) {
+        return {
+          error:
+            "Tabela colaborador_funcoes não encontrada. Execute sql/20_colaborador_funcoes.sql no Supabase." as const,
+        };
+      }
+      throw upsertErr;
+    }
+
+    const sectorName = cargo.sectors?.name ?? null;
+    const { error: syncErr } = await supabase
+      .from("colaboradores")
+      .update({
+        cargo_descricao: cargo.name,
+        ccusto_descricao: sectorName,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", colaboradorId);
+    if (syncErr) throw syncErr;
+
+    return {
+      cargo: {
+        id: cargo.id,
+        name: cargo.name,
+        sector_id: cargo.sector_id,
+        sector_name: sectorName,
+      },
+    };
+  };
 
   app.get("/api/colaboradores", async (req, res) => {
     const activeOnly =
@@ -2577,10 +2769,30 @@ export function createApp() {
       String((req.query as any)?.active ?? "") === "true";
     let query = supabase
       .from("colaboradores")
-      .select("id, nome, cargo_descricao, ccusto_descricao, active, created_at")
+      .select(
+        `id, nome, cargo_descricao, ccusto_descricao, active, created_at,
+         colaborador_funcoes (
+           is_primary,
+           cargo_id,
+           cargos ( id, name, sector_id, sectors(name) )
+         )`
+      )
       .order("nome");
     if (activeOnly) query = query.eq("active", true);
-    const { data, error } = await query;
+    let { data, error } = await query;
+
+    // Fallback se a junction ainda não existir no PostgREST cache
+    if (error && colaboradorFuncoesMissing(error)) {
+      let fbQuery = supabase
+        .from("colaboradores")
+        .select("id, nome, cargo_descricao, ccusto_descricao, active, created_at")
+        .order("nome");
+      if (activeOnly) fbQuery = fbQuery.eq("active", true);
+      const fb = await fbQuery;
+      data = (fb.data ?? []).map((row: any) => ({ ...row, colaborador_funcoes: [] }));
+      error = fb.error;
+    }
+
     if (error) {
       console.error("Erro ao listar colaboradores:", error);
       if (colaboradorTableMissing(error)) {
@@ -2590,15 +2802,24 @@ export function createApp() {
       }
       return res.status(500).json({ error: "Erro interno ao processar a solicitação." });
     }
+
     res.json(
-      (data ?? []).map((row: any) => ({
-        id: row.id,
-        nome: row.nome,
-        cargo_descricao: row.cargo_descricao ?? "",
-        ccusto_descricao: row.ccusto_descricao ?? "",
-        active: row.active !== false,
-        created_at: row.created_at,
-      }))
+      (data ?? []).map((row: any) => {
+        const funcoes = mapColaboradorFuncoes(row.colaborador_funcoes);
+        const primary = funcoes.find((f) => f.is_primary) || funcoes[0] || null;
+        return {
+          id: row.id,
+          nome: row.nome,
+          cargo_descricao: row.cargo_descricao ?? "",
+          ccusto_descricao: row.ccusto_descricao ?? "",
+          active: row.active !== false,
+          created_at: row.created_at,
+          funcoes,
+          funcao_id: primary?.id ?? null,
+          sector_id: primary?.sector_id ?? null,
+          sector_name: primary?.sector_name ?? row.ccusto_descricao ?? null,
+        };
+      })
     );
   });
 
@@ -2606,15 +2827,32 @@ export function createApp() {
     const nome = String(req.body?.nome ?? "").trim();
     const cargo = String(req.body?.cargo_descricao ?? "").trim();
     const ccusto = String(req.body?.ccusto_descricao ?? "").trim();
+    const funcaoIdRaw = req.body?.funcao_id ?? req.body?.cargo_id;
+    const funcaoId = funcaoIdRaw != null && funcaoIdRaw !== "" ? Number(funcaoIdRaw) : null;
     if (!nome) {
       return res.status(400).json({ error: "O nome do colaborador é obrigatório." });
     }
+
+    let cargoDescricao = cargo || null;
+    let ccustoDescricao = ccusto || null;
+    if (funcaoId != null && Number.isFinite(funcaoId)) {
+      try {
+        const cargoRow = await fetchCargoWithSector(funcaoId);
+        if (!cargoRow) return res.status(400).json({ error: "Função inválida." });
+        cargoDescricao = cargoRow.name;
+        ccustoDescricao = cargoRow.sectors?.name ?? null;
+      } catch (e) {
+        console.error("Erro ao resolver função:", e);
+        return res.status(500).json({ error: "Não foi possível validar a função." });
+      }
+    }
+
     const { data, error } = await supabase
       .from("colaboradores")
       .insert({
         nome,
-        cargo_descricao: cargo || null,
-        ccusto_descricao: ccusto || null,
+        cargo_descricao: cargoDescricao,
+        ccusto_descricao: ccustoDescricao,
         active: true,
       })
       .select("id")
@@ -2628,6 +2866,22 @@ export function createApp() {
       }
       return res.status(500).json({ error: "Não foi possível cadastrar o colaborador." });
     }
+
+    if (funcaoId != null && Number.isFinite(funcaoId)) {
+      try {
+        const result = await setColaboradorFuncaoPrincipal(data.id, funcaoId);
+        if (result.error) {
+          return res.status(500).json({ id: data.id, error: result.error });
+        }
+      } catch (e) {
+        console.error("Erro ao vincular função ao colaborador:", e);
+        return res.status(500).json({
+          id: data.id,
+          error: "Colaborador criado, mas não foi possível vincular a função.",
+        });
+      }
+    }
+
     res.json({ id: data.id });
   });
 
@@ -2648,10 +2902,92 @@ export function createApp() {
     }
     if (req.body?.active != null) patch.active = Boolean(req.body.active);
 
-    const { error } = await supabase.from("colaboradores").update(patch).eq("id", id);
-    if (error) {
-      console.error("Erro ao atualizar colaborador:", error);
-      return res.status(500).json({ error: "Não foi possível atualizar o colaborador." });
+    const funcaoIdRaw = req.body?.funcao_id ?? req.body?.cargo_id;
+    const hasFuncao = funcaoIdRaw !== undefined;
+    const funcaoId =
+      hasFuncao && funcaoIdRaw !== null && funcaoIdRaw !== ""
+        ? Number(funcaoIdRaw)
+        : hasFuncao
+          ? null
+          : undefined;
+
+    // Lista completa de funções (substitui vínculos); a primeira / primary_id vira principal
+    const funcaoIdsRaw = req.body?.funcao_ids;
+    if (Array.isArray(funcaoIdsRaw)) {
+      const ids = [...new Set(funcaoIdsRaw.map((v: any) => Number(v)).filter((n) => Number.isFinite(n)))];
+      const primaryFromBody =
+        req.body?.funcao_id != null && req.body.funcao_id !== ""
+          ? Number(req.body.funcao_id)
+          : ids[0] ?? null;
+
+      const { error: delErr } = await supabase
+        .from("colaborador_funcoes")
+        .delete()
+        .eq("colaborador_id", id);
+      if (delErr) {
+        console.error("Erro ao limpar funções do colaborador:", delErr);
+        if (colaboradorFuncoesMissing(delErr)) {
+          return res.status(500).json({
+            error:
+              "Tabela colaborador_funcoes não encontrada. Execute sql/20_colaborador_funcoes.sql no Supabase.",
+          });
+        }
+        return res.status(500).json({ error: "Não foi possível atualizar as funções." });
+      }
+
+      if (ids.length) {
+        const primary = primaryFromBody && ids.includes(primaryFromBody) ? primaryFromBody : ids[0];
+        const { error: insErr } = await supabase.from("colaborador_funcoes").insert(
+          ids.map((cargoId) => ({
+            colaborador_id: id,
+            cargo_id: cargoId,
+            is_primary: cargoId === primary,
+          }))
+        );
+        if (insErr) {
+          console.error("Erro ao vincular funções:", insErr);
+          return res.status(500).json({ error: "Não foi possível vincular as funções." });
+        }
+        try {
+          const result = await setColaboradorFuncaoPrincipal(id, primary);
+          if (result.error) return res.status(400).json({ error: result.error });
+        } catch (e) {
+          console.error("Erro ao sincronizar setor da função:", e);
+          return res.status(500).json({ error: "Não foi possível sincronizar o setor." });
+        }
+        return res.json({ success: true });
+      }
+
+      patch.cargo_descricao = null;
+      patch.ccusto_descricao = null;
+    } else if (hasFuncao) {
+      if (funcaoId == null) {
+        // Remove todas as funções
+        await supabase.from("colaborador_funcoes").delete().eq("colaborador_id", id);
+        patch.cargo_descricao = null;
+        patch.ccusto_descricao = null;
+      } else if (!Number.isFinite(funcaoId)) {
+        return res.status(400).json({ error: "funcao_id inválido." });
+      } else {
+        try {
+          const result = await setColaboradorFuncaoPrincipal(id, funcaoId);
+          if (result.error) return res.status(400).json({ error: result.error });
+          // sync já atualizou cargo/ccusto; só aplica demais campos do patch se houver
+          delete patch.cargo_descricao;
+          delete patch.ccusto_descricao;
+        } catch (e) {
+          console.error("Erro ao definir função do colaborador:", e);
+          return res.status(500).json({ error: "Não foi possível definir a função." });
+        }
+      }
+    }
+
+    if (Object.keys(patch).length > 1 || patch.active != null || patch.nome != null) {
+      const { error } = await supabase.from("colaboradores").update(patch).eq("id", id);
+      if (error) {
+        console.error("Erro ao atualizar colaborador:", error);
+        return res.status(500).json({ error: "Não foi possível atualizar o colaborador." });
+      }
     }
     res.json({ success: true });
   });
@@ -2663,6 +2999,99 @@ export function createApp() {
     if (error) {
       console.error("Erro ao excluir colaborador:", error);
       return res.status(500).json({ error: "Não foi possível excluir o colaborador." });
+    }
+    res.json({ success: true });
+  });
+
+  /** Adiciona uma função extra (sem trocar a principal, a menos que não haja nenhuma). */
+  app.post("/api/colaboradores/:id/funcoes", requireRole("admin", "controle"), async (req, res) => {
+    const id = Number(req.params.id);
+    const cargoId = Number(req.body?.funcao_id ?? req.body?.cargo_id);
+    const asPrimary = Boolean(req.body?.as_primary);
+    if (!Number.isFinite(id) || !Number.isFinite(cargoId)) {
+      return res.status(400).json({ error: "id e funcao_id são obrigatórios." });
+    }
+    try {
+      if (asPrimary) {
+        const result = await setColaboradorFuncaoPrincipal(id, cargoId);
+        if (result.error) return res.status(400).json({ error: result.error });
+        return res.json({ success: true, ...result.cargo });
+      }
+      const cargo = await fetchCargoWithSector(cargoId);
+      if (!cargo) return res.status(400).json({ error: "Função inválida." });
+      const { data: existing } = await supabase
+        .from("colaborador_funcoes")
+        .select("cargo_id, is_primary")
+        .eq("colaborador_id", id);
+      const hasPrimary = (existing ?? []).some((r: any) => r.is_primary);
+      if (!hasPrimary) {
+        const result = await setColaboradorFuncaoPrincipal(id, cargoId);
+        if (result.error) return res.status(400).json({ error: result.error });
+        return res.json({ success: true, ...result.cargo });
+      }
+      const { error } = await supabase.from("colaborador_funcoes").upsert(
+        { colaborador_id: id, cargo_id: cargoId, is_primary: false },
+        { onConflict: "colaborador_id,cargo_id" }
+      );
+      if (error) {
+        console.error("Erro ao adicionar função:", error);
+        return res.status(500).json({ error: "Não foi possível adicionar a função." });
+      }
+      res.json({
+        success: true,
+        id: cargo.id,
+        name: cargo.name,
+        sector_id: cargo.sector_id,
+        sector_name: cargo.sectors?.name ?? null,
+      });
+    } catch (e) {
+      console.error("Erro em POST funcoes:", e);
+      res.status(500).json({ error: "Não foi possível vincular a função." });
+    }
+  });
+
+  app.delete("/api/colaboradores/:id/funcoes/:cargoId", requireRole("admin", "controle"), async (req, res) => {
+    const id = Number(req.params.id);
+    const cargoId = Number(req.params.cargoId);
+    if (!Number.isFinite(id) || !Number.isFinite(cargoId)) {
+      return res.status(400).json({ error: "Parâmetros inválidos." });
+    }
+    const { data: removed } = await supabase
+      .from("colaborador_funcoes")
+      .select("is_primary")
+      .eq("colaborador_id", id)
+      .eq("cargo_id", cargoId)
+      .maybeSingle();
+
+    const { error } = await supabase
+      .from("colaborador_funcoes")
+      .delete()
+      .eq("colaborador_id", id)
+      .eq("cargo_id", cargoId);
+    if (error) {
+      console.error("Erro ao remover função:", error);
+      return res.status(500).json({ error: "Não foi possível remover a função." });
+    }
+
+    if (removed?.is_primary) {
+      const { data: remaining } = await supabase
+        .from("colaborador_funcoes")
+        .select("cargo_id")
+        .eq("colaborador_id", id)
+        .limit(1);
+      const nextId = remaining?.[0]?.cargo_id;
+      if (nextId) {
+        await setColaboradorFuncaoPrincipal(id, Number(nextId));
+      } else {
+        await supabase
+          .from("colaboradores")
+          .update({
+            cargo_descricao: null,
+            ccusto_descricao: null,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", id);
+      }
     }
     res.json({ success: true });
   });
