@@ -478,8 +478,11 @@ export const Dashboard: React.FC = () => {
                   <ValueTrace
                     className="text-sm font-bold text-slate-900 tabular-nums"
                     displayValue={formatCurrency(section.total)}
-                    source={rdsTrace(section.label, monthNum, yearNum).source}
-                    calculation={rdsTrace(section.label, monthNum, yearNum).calculation}
+                    {...buildRdsCardTrace(section.label, monthNum, yearNum, {
+                      label: section.label,
+                      total: section.total,
+                      items: section.items,
+                    })}
                   />
                 </div>
                 <div className="overflow-auto">
