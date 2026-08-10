@@ -2,7 +2,16 @@ import type { NextFunction, Request, Response } from "express";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 
-export type UserRole = "admin" | "finance" | "controle" | "manager" | "viewer";
+export type UserRole = "admin" | "finance" | "controle" | "manager" | "viewer" | "diretoria";
+
+export const USER_ROLES: UserRole[] = [
+  "admin",
+  "finance",
+  "controle",
+  "manager",
+  "viewer",
+  "diretoria",
+];
 
 export interface SessionUser {
   id: number | string;

@@ -21,8 +21,13 @@ import { useToast } from '../context/ToastContext';
 import { matchesSearch } from '../lib/search';
 import { isDirectDocumentUrl, type StorageDocumentField } from '../lib/storagePath';
 
-export const Invoices: React.FC = () => {
+export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'servico' }) => {
   const { query } = useSearch();
+  const isDanfe = mode === 'danfe';
+  const pageTitle = isDanfe ? 'DANFE' : 'Notas de Serviço';
+  const pageSubtitle = isDanfe
+    ? 'Fluxo DANFE: Setor solicitante importa → Controle aprova → Financeiro paga e anexa comprovante.'
+    : 'Fluxo: Setor solicitante importa → Controle aprova → Financeiro paga e anexa comprovante.';
   const { showSuccess } = useToast();
   const now = new Date();
   const initialMonth = (() => {
@@ -609,7 +614,7 @@ export const Invoices: React.FC = () => {
       perfilLabel = userRole === 'manager' ? 'Gestor' : 'Solicitante';
     }
 
-    
+
     return {
       perfilLabel,
       pendentesParaVoce,
@@ -639,8 +644,8 @@ export const Invoices: React.FC = () => {
     <div className="space-y-6 animate-in fade-in duration-500">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-2xl font-bold text-slate-900">Notas de Serviço</h2>
-          <p className="text-slate-500 text-sm">Fluxo: Setor solicitante importa → Controle aprova → Financeiro paga e anexa comprovante.</p>
+          <h2 className="text-2xl font-bold text-slate-900">{pageTitle}</h2>
+          <p className="text-slate-500 text-sm">{pageSubtitle}</p>
         </div>
         
         <div className="flex items-center gap-3">

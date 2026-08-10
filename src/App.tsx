@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Eye, EyeOff } from 'lucide-react';
 import { Sidebar } from './components/Sidebar';
 import { Dashboard } from './pages/Dashboard';
+import { DashboardDiretoria } from './pages/DashboardDiretoria';
 import { Invoices } from './pages/Invoices';
 
 // Mock Pages for now to avoid empty imports
@@ -28,6 +29,8 @@ import { RelatorioRequisicoesPage, RelatorioRequisicoesMesPage, MESES_REL_REQ } 
 import { ConsumoInternoPage, ConsumoInternoMesPage, MESES_CONSUMO } from './pages/ConsumoInterno';
 import { RelatorioRdsPage, RelatorioRdsMesPage, MESES_RDS } from './pages/RelatorioRds';
 import { ComprasPage } from './pages/Compras';
+import { MensalidadesPage } from './pages/Mensalidades';
+import { InvestimentosPage } from './pages/Investimentos';
 import { PainelSetorial } from './pages/PainelSetorial';
 import { getPainelByTab, isPainelSetorialTab } from './lib/paineisSetoriais';
 import { SearchProvider, useSearch } from './context/SearchContext';
@@ -62,6 +65,7 @@ export default function App() {
           setUser(data);
           localStorage.setItem('user', JSON.stringify(data)); // cache só para a UI
           if (data.role === 'finance') setActiveTab('notas');
+          else if (data.role === 'diretoria') setActiveTab('dashboard');
         }
       } catch {
         if (!cancelled) {
@@ -123,6 +127,7 @@ export default function App() {
       setUser(data);
       localStorage.setItem('user', JSON.stringify(data));
       if (data.role === 'finance') setActiveTab('notas');
+      else setActiveTab('dashboard');
       setLoginForm({ email: '', password: '' });
     } finally {
       setLoginLoading(false);
@@ -227,12 +232,17 @@ export default function App() {
     }
 
     switch (activeTab) {
-      case 'dashboard': return <Dashboard />;
+      case 'dashboard':
+        return user?.role === 'diretoria' ? (
+          <DashboardDiretoria onNavigate={setActiveTab} />
+        ) : (
+          <Dashboard />
+        );
       case 'analise': return <AnaliseFinanceira />;
-      case 'dre': return <DRE />;
+      case 'dre': return <DRE user={user} />;
       case 'planejamento': return <Planejamento />;
-      case 'notas': return <Invoices />;
-      case 'danfe': return <Invoices />;
+      case 'notas': return <Invoices mode="servico" />;
+      case 'danfe': return <Invoices mode="danfe" />;
       case 'requisicoes': return <Requisicoes />;
       case 'lancamentos-manuais': return <LancamentosManuais />;
       case 'comandas': return <Comandas />;
@@ -245,7 +255,16 @@ export default function App() {
       case 'usuarios': return <Usuarios />;
       case 'configuracoes': return <Configuracoes />;
       case 'compras-ordem': return <ComprasPage />;
-      default: return <Dashboard />;
+      case 'mensalidades':
+      case 'compras-mensalidades': // compatibilidade com atalho antigo
+        return <MensalidadesPage />;
+      case 'investimentos': return <InvestimentosPage />;
+      default:
+        return user?.role === 'diretoria' ? (
+          <DashboardDiretoria onNavigate={setActiveTab} />
+        ) : (
+          <Dashboard />
+        );
     }
   };
 
@@ -429,14 +448,19 @@ function AppShell({
                 ? 'Apuração da Folha / Apuração'
                 : activeTab.startsWith('folha-')
                 ? `Apuração da Folha / ${MESES_FOLHA[Number(activeTab.slice('folha-'.length))] ?? ''}`
-                : ['comandas', 'lancamentos-manuais', 'requisicoes', 'notas', 'danfe'].includes(activeTab)
+                : ['comandas', 'lancamentos-manuais', 'requisicoes', 'notas', 'danfe', 'mensalidades', 'compras-mensalidades'].includes(activeTab)
                 ? `Lançamentos / ${
                     activeTab === 'comandas' ? 'Comandas'
                     : activeTab === 'lancamentos-manuais' ? 'Lançamentos Manuais'
                     : activeTab === 'requisicoes' ? 'Requisições'
                     : activeTab === 'danfe' ? 'DANFE'
+                    : activeTab === 'mensalidades' || activeTab === 'compras-mensalidades' ? 'Mensalidades'
                     : 'Notas de Serviço'
                   }`
+                : activeTab === 'compras-ordem'
+                ? 'Compras / Ordem de Compra'
+                : activeTab === 'investimentos'
+                ? 'Investimentos'
                 : activeTab === 'prev-real'
                 ? 'Prev x Real Diario'
                 : isPainelSetorialTab(activeTab)
@@ -471,7 +495,7 @@ function AppShell({
           />
         </div>
 
-        <div className={activeTab === 'notas' || activeTab === 'danfe' || activeTab === 'comandas' || activeTab === 'lancamentos-manuais' || activeTab === 'requisicoes' || activeTab === 'cadastros' || activeTab === 'sintase' || activeTab === 'prev-real' || activeTab === 'indicadores' || activeTab === 'dre' || activeTab === 'rel-crd' || activeTab.startsWith('rel-crd-') || activeTab === 'rel-req' || activeTab.startsWith('rel-req-') || activeTab === 'rel-consumo' || activeTab.startsWith('rel-consumo-') || activeTab === 'rel-rds' || activeTab.startsWith('rel-rds-') || activeTab.startsWith('planilha-') || activeTab.startsWith('folha-') || activeTab === 'compras-ordem' || isPainelSetorialTab(activeTab) ? 'p-8 pt-4 md:pt-8 w-full max-w-none' : 'p-8 pt-4 md:pt-8 max-w-7xl mx-auto'}>
+        <div className={activeTab === 'notas' || activeTab === 'danfe' || activeTab === 'comandas' || activeTab === 'lancamentos-manuais' || activeTab === 'requisicoes' || activeTab === 'mensalidades' || activeTab === 'compras-mensalidades' || activeTab === 'cadastros' || activeTab === 'sintase' || activeTab === 'prev-real' || activeTab === 'indicadores' || activeTab === 'dre' || activeTab === 'rel-crd' || activeTab.startsWith('rel-crd-') || activeTab === 'rel-req' || activeTab.startsWith('rel-req-') || activeTab === 'rel-consumo' || activeTab.startsWith('rel-consumo-') || activeTab === 'rel-rds' || activeTab.startsWith('rel-rds-') || activeTab.startsWith('planilha-') || activeTab.startsWith('folha-') || activeTab === 'compras-ordem' || activeTab === 'investimentos' || isPainelSetorialTab(activeTab) ? 'p-8 pt-4 md:pt-8 w-full max-w-none' : 'p-8 pt-4 md:pt-8 max-w-7xl mx-auto'}>
           {renderContent()}
         </div>
       </main>

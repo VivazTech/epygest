@@ -35,7 +35,7 @@ export const PAINEIS_SETORIAIS: PainelConfig[] = [
       gas: ['GAS', 'GÁS'],
       energia: ['ENERGIA'],
     },
-    roles: ['admin', 'controle', 'manager'],
+    roles: ['admin', 'controle', 'manager', 'diretoria'],
   },
   {
     key: 'ab',
@@ -51,7 +51,7 @@ export const PAINEIS_SETORIAIS: PainelConfig[] = [
       cafe: ['CAFE', 'CAFÉ', 'CAFE DA MANHA'],
       comissao: ['COMISSAO', 'COMISSÃO'],
     },
-    roles: ['admin', 'controle', 'manager'],
+    roles: ['admin', 'controle', 'manager', 'diretoria'],
   },
   {
     key: 'spa',
@@ -65,7 +65,7 @@ export const PAINEIS_SETORIAIS: PainelConfig[] = [
       mao_obra: ['PESSOAL', 'FOLHA', 'MAO DE OBRA', 'MÃO DE OBRA'],
       uso_consumo: ['USO', 'CONSUMO'],
     },
-    roles: ['admin', 'controle', 'manager'],
+    roles: ['admin', 'controle', 'manager', 'diretoria'],
   },
   {
     key: 'hospedagem',
@@ -78,7 +78,7 @@ export const PAINEIS_SETORIAIS: PainelConfig[] = [
       lavanderia: ['LAVANDER'],
       receita: ['HOSPEDAGEM', 'DIARIA', 'DIÁRIA'],
     },
-    roles: ['admin', 'controle', 'manager'],
+    roles: ['admin', 'controle', 'manager', 'diretoria'],
   },
   {
     key: 'nutricionista',
@@ -88,7 +88,7 @@ export const PAINEIS_SETORIAIS: PainelConfig[] = [
     description:
       'Ações e despesas: responsável, prazo, status, custo previsto/realizado e observações (conteúdo a expandir com a equipe).',
     sectorNames: [],
-    roles: ['admin', 'controle', 'manager'],
+    roles: ['admin', 'controle', 'manager', 'diretoria'],
   },
   {
     key: 'controladoria',
@@ -98,7 +98,7 @@ export const PAINEIS_SETORIAIS: PainelConfig[] = [
     description:
       'Relatório semanal de uso e consumo: previsto, realizado, estouro, setor responsável e observações.',
     sectorNames: ['Controle'],
-    roles: ['admin', 'controle'],
+    roles: ['admin', 'controle', 'diretoria'],
   },
 ];
 

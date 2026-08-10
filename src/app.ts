@@ -681,7 +681,7 @@ export function createApp() {
       name?: string;
       email?: string;
       password?: string;
-      role?: "admin" | "finance" | "controle" | "manager" | "viewer";
+      role?: "admin" | "finance" | "controle" | "manager" | "viewer" | "diretoria";
       sector_id?: number | null;
       sector_ids?: number[];
     };
@@ -690,7 +690,7 @@ export function createApp() {
       return res.status(400).json({ error: "name, email, password e role são obrigatórios" });
     }
 
-    if (!["admin", "finance", "controle", "manager", "viewer"].includes(role)) {
+    if (!["admin", "finance", "controle", "manager", "viewer", "diretoria"].includes(role)) {
       return res.status(400).json({ error: "role inválido" });
     }
 
@@ -765,7 +765,7 @@ export function createApp() {
       name?: string;
       email?: string;
       password?: string;
-      role?: "admin" | "finance" | "controle" | "manager" | "viewer";
+      role?: "admin" | "finance" | "controle" | "manager" | "viewer" | "diretoria";
       sector_id?: number | null;
       sector_ids?: number[];
     };
@@ -773,7 +773,7 @@ export function createApp() {
     if (!name || !email || !role) {
       return res.status(400).json({ error: "name, email e role são obrigatórios" });
     }
-    if (!["admin", "finance", "controle", "manager", "viewer"].includes(role)) {
+    if (!["admin", "finance", "controle", "manager", "viewer", "diretoria"].includes(role)) {
       return res.status(400).json({ error: "role inválido" });
     }
 
@@ -1433,6 +1433,85 @@ export function createApp() {
       })
     );
     res.json(enriched);
+  });
+
+  app.post("/api/sectors", requireRole("admin", "controle"), async (req, res) => {
+    const name = String(req.body?.name ?? "").trim();
+    if (!name) return res.status(400).json({ error: "O nome do setor / centro de custo é obrigatório." });
+    const budget_limit = Number(req.body?.budget_limit);
+    const { data, error } = await supabase
+      .from("sectors")
+      .insert({
+        name,
+        budget_limit: Number.isFinite(budget_limit) ? budget_limit : 0,
+      })
+      .select("id, name, budget_limit, created_at")
+      .single();
+    if (error) {
+      console.error("Erro ao criar setor:", error);
+      const detail = String(error.message || "").toLowerCase();
+      if (detail.includes("duplicate") || detail.includes("unique")) {
+        return res.status(409).json({ error: "Já existe um setor com este nome." });
+      }
+      return res.status(500).json({ error: "Não foi possível criar o setor." });
+    }
+    res.json(data);
+  });
+
+  app.patch("/api/sectors/:id", requireRole("admin", "controle"), async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: "id inválido." });
+    const patch: Record<string, any> = {};
+    if (req.body?.name != null) {
+      const name = String(req.body.name).trim();
+      if (!name) return res.status(400).json({ error: "Nome inválido." });
+      patch.name = name;
+    }
+    if (req.body?.budget_limit != null) {
+      const budget_limit = Number(req.body.budget_limit);
+      patch.budget_limit = Number.isFinite(budget_limit) ? budget_limit : 0;
+    }
+    if (!Object.keys(patch).length) {
+      return res.status(400).json({ error: "Nenhum campo para atualizar." });
+    }
+
+    let previousName = String(req.body?.previous_name ?? "").trim();
+    if (patch.name && !previousName) {
+      const { data: current } = await supabase.from("sectors").select("name").eq("id", id).maybeSingle();
+      previousName = current?.name ? String(current.name) : "";
+    }
+
+    const { data, error } = await supabase
+      .from("sectors")
+      .update(patch)
+      .eq("id", id)
+      .select("id, name, budget_limit, created_at")
+      .single();
+    if (error) {
+      console.error("Erro ao atualizar setor:", error);
+      return res.status(500).json({ error: "Não foi possível atualizar o setor." });
+    }
+    if (patch.name && previousName && previousName !== patch.name) {
+      await supabase
+        .from("colaboradores")
+        .update({ ccusto_descricao: patch.name, updated_at: new Date().toISOString() })
+        .eq("ccusto_descricao", previousName);
+    }
+    res.json(data ?? { success: true });
+  });
+
+  app.delete("/api/sectors/:id", requireRole("admin", "controle"), async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: "id inválido." });
+    const { error } = await supabase.from("sectors").delete().eq("id", id);
+    if (error) {
+      console.error("Erro ao excluir setor:", error);
+      return res.status(500).json({
+        error:
+          "Não foi possível excluir o setor. Verifique se não há CRDs, cargos ou lançamentos vinculados.",
+      });
+    }
+    res.json({ success: true });
   });
 
   // ====================================================
@@ -2817,7 +2896,7 @@ export function createApp() {
           funcoes,
           funcao_id: primary?.id ?? null,
           sector_id: primary?.sector_id ?? null,
-          sector_name: primary?.sector_name ?? row.ccusto_descricao ?? null,
+          sector_name: row.ccusto_descricao || primary?.sector_name || null,
         };
       })
     );
@@ -2827,6 +2906,9 @@ export function createApp() {
     const nome = String(req.body?.nome ?? "").trim();
     const cargo = String(req.body?.cargo_descricao ?? "").trim();
     const ccusto = String(req.body?.ccusto_descricao ?? "").trim();
+    const sectorIdRaw = req.body?.sector_id;
+    const sectorId =
+      sectorIdRaw != null && sectorIdRaw !== "" ? Number(sectorIdRaw) : null;
     const funcaoIdRaw = req.body?.funcao_id ?? req.body?.cargo_id;
     const funcaoId = funcaoIdRaw != null && funcaoIdRaw !== "" ? Number(funcaoIdRaw) : null;
     if (!nome) {
@@ -2835,12 +2917,23 @@ export function createApp() {
 
     let cargoDescricao = cargo || null;
     let ccustoDescricao = ccusto || null;
+    if (sectorId != null && Number.isFinite(sectorId) && !ccustoDescricao) {
+      const { data: sectorRow } = await supabase
+        .from("sectors")
+        .select("name")
+        .eq("id", sectorId)
+        .maybeSingle();
+      ccustoDescricao = sectorRow?.name ? String(sectorRow.name) : null;
+    }
     if (funcaoId != null && Number.isFinite(funcaoId)) {
       try {
         const cargoRow = await fetchCargoWithSector(funcaoId);
         if (!cargoRow) return res.status(400).json({ error: "Função inválida." });
         cargoDescricao = cargoRow.name;
-        ccustoDescricao = cargoRow.sectors?.name ?? null;
+        // Função define o setor, salvo se o cliente enviou setor/ccusto explicitamente
+        if (!ccusto && !(sectorId != null && Number.isFinite(sectorId))) {
+          ccustoDescricao = cargoRow.sectors?.name ?? null;
+        }
       } catch (e) {
         console.error("Erro ao resolver função:", e);
         return res.status(500).json({ error: "Não foi possível validar a função." });
@@ -2899,6 +2992,25 @@ export function createApp() {
     }
     if (req.body?.ccusto_descricao != null) {
       patch.ccusto_descricao = String(req.body.ccusto_descricao).trim() || null;
+    }
+    if (req.body?.sector_id !== undefined && req.body?.ccusto_descricao == null) {
+      const sectorId =
+        req.body.sector_id != null && req.body.sector_id !== ""
+          ? Number(req.body.sector_id)
+          : null;
+      if (sectorId == null) {
+        patch.ccusto_descricao = null;
+      } else if (Number.isFinite(sectorId)) {
+        const { data: sectorRow } = await supabase
+          .from("sectors")
+          .select("name")
+          .eq("id", sectorId)
+          .maybeSingle();
+        if (!sectorRow) return res.status(400).json({ error: "Setor inválido." });
+        patch.ccusto_descricao = String(sectorRow.name);
+      } else {
+        return res.status(400).json({ error: "sector_id inválido." });
+      }
     }
     if (req.body?.active != null) patch.active = Boolean(req.body.active);
 
@@ -3357,6 +3469,176 @@ export function createApp() {
       return res.status(500).json({ error: detail || "Erro ao carregar histórico de importações." });
     }
     res.json(data ?? []);
+  });
+
+  /** Desfaz uma importação do histórico: apaga os dados daquela competência e remove o registro. */
+  app.post("/api/import/history/:id/undo", requireRole("admin", "finance", "controle"), async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: "ID inválido." });
+
+    const confirm = String((req.body as { confirm?: string })?.confirm ?? "").trim();
+    if (confirm !== "DESFAZER") {
+      return res.status(400).json({
+        error: 'Confirmação inválida. Digite DESFAZER para confirmar.',
+      });
+    }
+
+    const { data: row, error: loadErr } = await supabase
+      .from("import_history")
+      .select("*")
+      .eq("id", id)
+      .maybeSingle();
+    if (loadErr) {
+      return res.status(500).json({ error: loadErr.message || "Não foi possível carregar a importação." });
+    }
+    if (!row) return res.status(404).json({ error: "Importação não encontrada no histórico." });
+
+    const sourceType = String((row as any).source_type || "");
+    const year = Number((row as any).year);
+    const month = Number((row as any).month);
+    const status = String((row as any).status || "");
+    const deleted: string[] = [];
+    const warnings: string[] = [];
+
+    const tryDelete = async (
+      table: string,
+      apply: (q: any) => any,
+      label?: string
+    ) => {
+      try {
+        const { error } = await apply(supabase.from(table).delete());
+        if (error) {
+          warnings.push(`${label || table}: ${error.message}`);
+          return;
+        }
+        deleted.push(label || table);
+      } catch (e: any) {
+        warnings.push(`${label || table}: ${e?.message || "falha"}`);
+      }
+    };
+
+    // Importações com erro não gravaram dados (ou falharam no meio) — só remove o histórico.
+    if (status === "error") {
+      const { error: delHistErr } = await supabase.from("import_history").delete().eq("id", id);
+      if (delHistErr) return res.status(500).json({ error: delHistErr.message });
+      return res.json({
+        success: true,
+        message: "Registro de erro removido do histórico.",
+        deleted: ["import_history"],
+        warnings: [],
+      });
+    }
+
+    if (sourceType === "crds") {
+      return res.status(400).json({
+        error:
+          "Não é possível desfazer a importação de CRDs automaticamente — isso alteraria o cadastro mestre. Remova ou inative os CRDs manualmente em Cadastros, se necessário.",
+      });
+    }
+
+    const needsMonth = ["consumo_interno", "extrato_mensal", "rel_crd", "rds", "requisicoes_sintetica"].includes(
+      sourceType
+    );
+    const needsYear = needsMonth || sourceType === "orcamento" || sourceType === "ajustes";
+
+    if (needsYear && (!Number.isFinite(year) || year < 2000)) {
+      return res.status(400).json({
+        error: "Esta importação não tem ano no histórico; não é seguro desfazer automaticamente.",
+      });
+    }
+    if (needsMonth && (!Number.isFinite(month) || month < 1 || month > 12)) {
+      return res.status(400).json({
+        error: "Esta importação não tem mês no histórico; não é seguro desfazer automaticamente.",
+      });
+    }
+
+    if (sourceType === "consumo_interno") {
+      await tryDelete("consumo_interno_rows", (q) => q.eq("year", year).eq("month", month));
+      await tryDelete(
+        "crd_realizado",
+        (q) => q.eq("year", year).eq("month", month).eq("source", "consumo_interno"),
+        "crd_realizado (consumo_interno)"
+      );
+    } else if (sourceType === "rel_crd") {
+      await tryDelete("rel_crd_rows", (q) => q.eq("year", year).eq("month", month));
+      await tryDelete(
+        "crd_realizado",
+        (q) =>
+          q
+            .eq("year", year)
+            .eq("month", month)
+            .in("source", ["rel_crd", "rel_crd_diario", "rel_crd_mensal"]),
+        "crd_realizado (Rel. CRD)"
+      );
+    } else if (sourceType === "rds") {
+      await tryDelete("rds_snapshots", (q) => q.eq("year", year).eq("month", month));
+    } else if (sourceType === "requisicoes_sintetica") {
+      await tryDelete("requisicoes_rows", (q) => q.eq("year", year).eq("month", month));
+    } else if (sourceType === "extrato_mensal") {
+      await tryDelete("folha_pagamento", (q) => q.eq("year", year).eq("month", month));
+      await tryDelete("folha_rubricas", (q) => q.eq("year", year).eq("month", month));
+      await tryDelete(
+        "folha_lancamentos_importados",
+        (q) => q.eq("competencia_ano", year).eq("competencia_mes", month)
+      );
+      await tryDelete(
+        "folha_situacoes_resumo",
+        (q) => q.eq("competencia_ano", year).eq("competencia_mes", month)
+      );
+      await tryDelete(
+        "folha_lancamentos",
+        (q) => q.eq("competencia_ano", year).eq("competencia_mes", month)
+      );
+      await tryDelete(
+        "folha_apuracoes_mensais",
+        (q) => q.eq("competencia_ano", year).eq("competencia_mes", month)
+      );
+      await tryDelete(
+        "folha_importacoes",
+        (q) => q.eq("competencia_ano", year).eq("competencia_mes", month)
+      );
+      await tryDelete(
+        "crd_realizado",
+        (q) => q.eq("year", year).eq("month", month).eq("source", "folha_pagamento"),
+        "crd_realizado (folha)"
+      );
+    } else if (sourceType === "orcamento") {
+      await tryDelete("crd_monthly_values", (q) => q.eq("year", year), "crd_monthly_values (orçamento do ano)");
+    } else if (sourceType === "ajustes") {
+      await tryDelete("orcamento_ajustes", (q) => q.eq("year", year), "orcamento_ajustes (ano)");
+    } else {
+      return res.status(400).json({
+        error: `Tipo de importação "${sourceType}" ainda não tem desfazer automático.`,
+      });
+    }
+
+    if (deleted.length === 0 && warnings.length) {
+      return res.status(500).json({
+        error: "Não foi possível apagar os dados desta importação.",
+        warnings,
+      });
+    }
+
+    const { error: delHistErr } = await supabase.from("import_history").delete().eq("id", id);
+    if (delHistErr) {
+      return res.status(500).json({
+        error:
+          "Os dados da importação foram apagados, mas o histórico não pôde ser removido. Atualize a página.",
+        deleted,
+        warnings: [...warnings, delHistErr.message],
+      });
+    }
+    deleted.push("import_history");
+
+    res.json({
+      success: true,
+      message: "Importação desfeita. Os dados daquela competência foram apagados.",
+      source_type: sourceType,
+      year: Number.isFinite(year) ? year : null,
+      month: Number.isFinite(month) ? month : null,
+      deleted,
+      warnings,
+    });
   });
 
   app.post("/api/import/desbravador/preview", upload.single("report_pdf"), async (req, res) => {
@@ -3939,13 +4221,31 @@ export function createApp() {
     if (!month || !year || month < 1 || month > 12 || year < 2000)
       return res.status(400).json({ error: "Mês/ano inválido." });
 
-    const { data: crds, error: crdErr } = await supabase.from("crds").select("id, code");
+    const { data: crds, error: crdErr } = await supabase.from("crds").select("id, code, name");
     if (crdErr) return res.status(500).json({ error: crdErr.message });
 
+    // Match preferencial: código contábil entre parênteses no nome do CRD (ex.: "TELEFONE (366)").
+    // Fallback: campo crds.code.
     const codeToId = new Map<string, number>();
+    const parenToId = new Map<string, number>();
     for (const c of crds ?? []) {
-      if (c.code) codeToId.set(String(c.code).trim().toLowerCase(), Number(c.id));
+      const id = Number((c as any).id);
+      if (!Number.isFinite(id)) continue;
+      const code = String((c as any).code ?? "").trim().toLowerCase();
+      if (code) codeToId.set(code, id);
+      const paren = /\((\d+)\)\s*$/.exec(String((c as any).name ?? "").trim());
+      if (paren) parenToId.set(paren[1], id);
     }
+    const resolveCrdId = (codigoRaw: string): number | null => {
+      const codigo = String(codigoRaw ?? "").trim();
+      if (!codigo) return null;
+      if (parenToId.has(codigo)) return parenToId.get(codigo)!;
+      const byCode = codeToId.get(codigo.toLowerCase());
+      return byCode ?? null;
+    };
+
+    // Só grava realizado nas contas folha (nível mais profundo) para não duplicar pais+filhos.
+    const maxNivel = rows.reduce((m, r) => Math.max(m, Number(r.nivel) || 1), 1);
 
     const upserts: { crd_id: number; year: number; month: number; source: string; value: number }[] = [];
     const reportRows: Record<string, any>[] = [];
@@ -3955,7 +4255,8 @@ export function createApp() {
 
     for (const row of rows) {
       const codigo = String(row.codigo ?? "").trim();
-      const crdId = codeToId.get(codigo.toLowerCase()) ?? null;
+      const nivel = Number(row.nivel) || 1;
+      const crdId = resolveCrdId(codigo);
       if (!crdId) notFound.push(codigo);
       const saldo = Number(row.saldo_lanc ?? row.lanc_liquido ?? 0);
       const destinosRaw = Array.isArray(row.destinos) ? row.destinos : ["D", "M"];
@@ -3963,7 +4264,8 @@ export function createApp() {
       const wantM = destinosRaw.some((d) => String(d).toUpperCase() === "M");
       if (!wantD && !wantM) continue;
 
-      if (crdId) {
+      // Realizado por CRD: apenas folhas (nível máximo do arquivo).
+      if (crdId && nivel >= maxNivel) {
         if (wantD) {
           upserts.push({
             crd_id: crdId,
@@ -3989,7 +4291,7 @@ export function createApp() {
       reportRows.push({
         year: Number(year),
         month: Number(month),
-        nivel: Number(row.nivel) || 1,
+        nivel,
         codigo,
         nome: String(row.nome ?? "").trim() || null,
         lancamentos: Number(row.lancamentos) || 0,
@@ -7174,6 +7476,47 @@ export function createApp() {
       source:
         "Apuração de Receita › Relatório Diário de Situação › Alimentos & Bebidas › EVENTOS/BANQUETES › Acumulado (R$)",
     },
+    {
+      rowId: "l66-estacionamento",
+      rowLabel: "Estacionamento",
+      sectionKey: "diversos",
+      labels: ["ESTACIONAMENTO"],
+      source:
+        "Apuração de Receita › Relatório Diário de Situação › Diversos › ESTACIONAMENTO › Acumulado (R$)",
+    },
+    {
+      rowId: "l67-outras",
+      rowLabel: "Outras",
+      sectionKey: "diversos",
+      labels: [
+        "TAXA DE TURISMO",
+        "LAVANDERIA",
+        "DAY PASS",
+        "RECREACAO",
+        "RECEPCAO DIVERSOS",
+        "RECEPCAO SERVICOS",
+        "TARIFADOR",
+        "TAXA DE ISS",
+      ],
+      source:
+        "Apuração de Receita › Relatório Diário de Situação › Diversos › Acumulado (R$) — TAXA DE TURISMO + LAVANDERIA + DAY PASS + RECREACAO + RECEPCAO DIVERSOS + RECEPCAO SERVICOS + TARIFADOR + TAXA DE ISS",
+    },
+    {
+      rowId: "l68-aluguel-eventos",
+      rowLabel: "Aluguel Eventos",
+      sectionKey: "eventos",
+      labels: ["EVENTOS - SERVICOS"],
+      source:
+        "Apuração de Receita › Relatório Diário de Situação › Eventos › EVENTOS - SERVICOS › Acumulado (R$)",
+    },
+    {
+      rowId: "l69-spa",
+      rowLabel: "SPA",
+      sectionKey: "diversos",
+      labels: ["SPA"],
+      source:
+        "Apuração de Receita › Relatório Diário de Situação › Diversos › SPA › Acumulado (R$)",
+    },
   ] as const;
 
   const normalizeRdsLabel = (value: unknown) =>
@@ -7200,7 +7543,7 @@ export function createApp() {
     return matched > 0 ? sum : null;
   };
 
-  app.get("/api/dre/realizado-rds", requireRole("admin", "controle"), async (req, res) => {
+  app.get("/api/dre/realizado-rds", requireRole("admin", "controle", "diretoria"), async (req, res) => {
     const year = Number((req.query as { year?: string }).year) || new Date().getFullYear();
 
     const { data, error } = await supabase
@@ -7253,29 +7596,97 @@ export function createApp() {
     });
   });
 
-  app.get("/api/dre/edits", requireRole("admin", "controle"), async (req, res) => {
+  // Realizado do DRE a partir do Rel. CRD (SALDO LANÇ), chaveado pelo código contábil
+  // que aparece no label das linhas (ex.: "ENERGIA (367)").
+  app.get("/api/dre/realizado-crd", requireRole("admin", "controle", "diretoria"), async (req, res) => {
+    const year = Number((req.query as { year?: string }).year) || new Date().getFullYear();
+
+    const { data, error } = await supabase
+      .from("rel_crd_rows")
+      .select("month, nivel, codigo, nome, saldo_lanc")
+      .eq("year", year);
+
+    if (error) {
+      console.error("dre realizado-crd:", error);
+      return res.status(500).json({
+        error: "Não foi possível carregar o realizado do Rel. CRD. Execute sql/13_rel_crd_rows.sql se ainda não rodou.",
+      });
+    }
+
+    const maxNivelByMonth = new Map<number, number>();
+    for (const row of data ?? []) {
+      const month = Number((row as any).month);
+      if (!Number.isFinite(month) || month < 1 || month > 12) continue;
+      const nivel = Number((row as any).nivel) || 1;
+      maxNivelByMonth.set(month, Math.max(maxNivelByMonth.get(month) ?? 1, nivel));
+    }
+
+    const byCodigo: Record<string, Array<number | null>> = {};
+    const nomes: Record<string, string> = {};
+    for (const row of data ?? []) {
+      const month = Number((row as any).month);
+      if (!Number.isFinite(month) || month < 1 || month > 12) continue;
+      const nivel = Number((row as any).nivel) || 1;
+      if (nivel < (maxNivelByMonth.get(month) ?? 1)) continue; // só folhas — evita dupla contagem
+      const codigo = String((row as any).codigo ?? "").trim();
+      if (!codigo) continue;
+      if (!byCodigo[codigo]) byCodigo[codigo] = Array.from({ length: 12 }, () => null);
+      const saldo = Number((row as any).saldo_lanc);
+      byCodigo[codigo][month - 1] = Number.isFinite(saldo) ? saldo : 0;
+      const nome = String((row as any).nome ?? "").trim();
+      if (nome && !nomes[codigo]) nomes[codigo] = nome;
+    }
+
+    res.json({
+      year,
+      byCodigo,
+      nomes,
+      source: "Importação › Rel. CRD › coluna SALDO LANÇ (contas folha)",
+    });
+  });
+
+  app.get("/api/dre/edits", requireRole("admin", "controle", "diretoria"), async (req, res) => {
     const year = Number((req.query as { year?: string }).year) || new Date().getFullYear();
     const { data, error } = await supabase
       .from("dre_cell_edits")
-      .select("row_key, month, field, value, user_name, updated_at")
+      .select("row_key, month, field, value, previous_value, motivo, user_name, user_email, updated_at")
       .eq("year", year);
     if (error) {
-      console.error("dre_cell_edits select (execute sql/15_dre_cell_edits.sql):", error);
+      console.error("dre_cell_edits select (execute sql/15_dre_cell_edits.sql + sql/26_dre_ajustes.sql):", error);
       return res.status(500).json({
-        error: "Não foi possível carregar as edições do DRE. Execute sql/15_dre_cell_edits.sql no Supabase.",
+        error: "Não foi possível carregar as edições do DRE. Execute sql/15_dre_cell_edits.sql e sql/26_dre_ajustes.sql no Supabase.",
       });
     }
     res.json({ year, edits: data ?? [] });
   });
 
+  app.get("/api/dre/ajustes", requireRole("admin", "controle", "diretoria"), async (req, res) => {
+    const year = Number((req.query as { year?: string }).year) || new Date().getFullYear();
+    const { data, error } = await supabase
+      .from("dre_cell_edit_history")
+      .select("id, year, row_key, row_label, month, field, previous_value, new_value, motivo, user_name, user_email, created_at")
+      .eq("year", year)
+      .order("created_at", { ascending: false })
+      .limit(500);
+    if (error) {
+      console.error("dre_cell_edit_history select (execute sql/26_dre_ajustes.sql):", error);
+      return res.status(500).json({
+        error: "Não foi possível carregar o histórico de ajustes. Execute sql/26_dre_ajustes.sql no Supabase.",
+      });
+    }
+    res.json({ year, ajustes: data ?? [] });
+  });
+
   app.patch("/api/dre/cell", requireRole("admin", "controle"), async (req, res) => {
-    const { year, row_key, row_label, month, field, value } = req.body as {
+    const { year, row_key, row_label, month, field, value, motivo, previous_value } = req.body as {
       year?: number;
       row_key?: number;
       row_label?: string;
       month?: number;
       field?: string;
       value?: number | string;
+      motivo?: string;
+      previous_value?: number | string | null;
     };
     if (!Number.isFinite(Number(year)) || Number(year) < 2000)
       return res.status(400).json({ error: "year inválido" });
@@ -7285,11 +7696,22 @@ export function createApp() {
       return res.status(400).json({ error: "month deve estar entre 1 e 12" });
     if (field !== "prev" && field !== "real")
       return res.status(400).json({ error: "field deve ser 'prev' ou 'real'" });
+    const motivoText = String(motivo ?? "").trim();
+    if (!motivoText)
+      return res.status(400).json({ error: "Informe o motivo do ajuste." });
     const numValue = Number(String(value).replace(",", "."));
     if (!Number.isFinite(numValue))
       return res.status(400).json({ error: "value inválido" });
+    const prevRaw = previous_value;
+    const numPrevious =
+      prevRaw == null || prevRaw === ""
+        ? null
+        : Number(String(prevRaw).replace(",", "."));
+    if (numPrevious != null && !Number.isFinite(numPrevious))
+      return res.status(400).json({ error: "previous_value inválido" });
 
     const user = (req as any).user;
+    const nowIso = new Date().toISOString();
     const record = {
       year: Number(year),
       row_key: Number(row_key),
@@ -7297,21 +7719,43 @@ export function createApp() {
       month: Number(month),
       field,
       value: numValue,
+      previous_value: numPrevious,
+      motivo: motivoText.slice(0, 2000),
       user_name: user?.name ?? null,
       user_email: user?.email ?? null,
-      updated_at: new Date().toISOString(),
+      updated_at: nowIso,
     };
+
     const { data, error } = await supabase
       .from("dre_cell_edits")
       .upsert(record, { onConflict: "year,row_key,month,field" })
-      .select("row_key, month, field, value, user_name, updated_at")
+      .select("row_key, month, field, value, previous_value, motivo, user_name, user_email, updated_at")
       .single();
     if (error) {
-      console.error("dre_cell_edits upsert (execute sql/15_dre_cell_edits.sql):", error);
+      console.error("dre_cell_edits upsert (execute sql/15 + sql/26):", error);
       return res.status(500).json({
-        error: "Não foi possível salvar. Execute sql/15_dre_cell_edits.sql no Supabase se ainda não rodou.",
+        error: "Não foi possível salvar. Execute sql/15_dre_cell_edits.sql e sql/26_dre_ajustes.sql no Supabase se ainda não rodou.",
       });
     }
+
+    const { error: histError } = await supabase.from("dre_cell_edit_history").insert({
+      year: record.year,
+      row_key: record.row_key,
+      row_label: record.row_label,
+      month: record.month,
+      field: record.field,
+      previous_value: record.previous_value,
+      new_value: record.value,
+      motivo: record.motivo,
+      user_name: record.user_name,
+      user_email: record.user_email,
+      created_at: nowIso,
+    });
+    if (histError) {
+      console.error("dre_cell_edit_history insert:", histError);
+      // Célula já foi salva; histórico é complementar.
+    }
+
     res.json({ success: true, edit: data });
   });
 
@@ -7634,6 +8078,349 @@ export function createApp() {
       .order("id", { ascending: true });
     if (error) return res.status(500).json({ error: error.message });
     res.json(data ?? []);
+  });
+
+  // ====================================================
+  // CONTRATOS / MENSALIDADES (Fase 4.8)
+  // ====================================================
+  const CONTRATO_STATUSES = new Set(["ativo", "vencido", "pendente_assinatura", "encerrado"]);
+  const CONTRATO_PERIODS = new Set(["unica", "mensal", "trimestral", "semestral", "anual"]);
+  const CONTRATO_ALERT_DAYS = 30;
+
+  const mapContratoRow = (row: any) => {
+    const vencimento = row.vencimento ? String(row.vencimento).slice(0, 10) : null;
+    let dias_para_vencer: number | null = null;
+    if (vencimento) {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const due = new Date(`${vencimento}T00:00:00`);
+      dias_para_vencer = Math.round((due.getTime() - today.getTime()) / 86400000);
+    }
+    const alerta_vencimento =
+      dias_para_vencer != null &&
+      dias_para_vencer <= CONTRATO_ALERT_DAYS &&
+      row.status !== "encerrado";
+    const crd = row.crds;
+    const crd_label = crd
+      ? [crd.code, crd.name].filter(Boolean).join(" — ") || null
+      : null;
+    return {
+      id: row.id,
+      fornecedor: row.fornecedor,
+      valor: Number(row.valor) || 0,
+      status: row.status,
+      ativo: row.ativo !== false,
+      assinado: Boolean(row.assinado),
+      sector_id: row.sector_id != null ? Number(row.sector_id) : null,
+      sector_name: row.sectors?.name ?? null,
+      crd_id: row.crd_id != null ? Number(row.crd_id) : null,
+      crd_label,
+      vencimento,
+      periodicidade: row.periodicidade || "mensal",
+      responsavel: row.responsavel ?? null,
+      observacoes: row.observacoes ?? null,
+      dias_para_vencer,
+      alerta_vencimento,
+      created_at: row.created_at,
+      updated_at: row.updated_at,
+    };
+  };
+
+  const deriveContratoStatus = (status: string, vencimento: string | null, assinado: boolean) => {
+    if (status === "encerrado") return "encerrado";
+    if (status === "pendente_assinatura" || (!assinado && status !== "vencido")) {
+      // Mantém pendente se explicitamente pedido ou não assinado (exceto se já marcado vencido)
+      if (status === "pendente_assinatura" || !assinado) {
+        if (vencimento) {
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
+          const due = new Date(`${vencimento}T00:00:00`);
+          if (due < today && status !== "pendente_assinatura") return "vencido";
+        }
+        if (!assinado && status !== "vencido") return status === "ativo" ? "ativo" : status;
+      }
+    }
+    if (vencimento) {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const due = new Date(`${vencimento}T00:00:00`);
+      if (due < today && status === "ativo") return "vencido";
+    }
+    return status;
+  };
+
+  app.get("/api/contratos", requireRole("admin", "controle", "manager", "finance", "diretoria"), async (req, res) => {
+    const status = String((req.query as any)?.status || "");
+    const sectorId = (req.query as any)?.sector_id;
+    let query = supabase
+      .from("contratos")
+      .select("*, sectors(name), crds(id, code, name)")
+      .order("vencimento", { ascending: true, nullsFirst: false });
+    if (status && CONTRATO_STATUSES.has(status)) query = query.eq("status", status);
+    if (sectorId != null && sectorId !== "" && Number.isFinite(Number(sectorId))) {
+      query = query.eq("sector_id", Number(sectorId));
+    }
+    const { data, error } = await query;
+    if (error) {
+      console.error("Erro ao listar contratos:", error);
+      if (String(error.message || "").includes("contratos") || error.code === "42P01" || error.code === "PGRST205") {
+        return res.status(500).json({
+          error: "Tabela contratos não encontrada. Execute sql/23_contratos.sql no Supabase.",
+        });
+      }
+      return res.status(500).json({ error: "Erro ao listar contratos." });
+    }
+    res.json((data ?? []).map(mapContratoRow));
+  });
+
+  app.post("/api/contratos", requireRole("admin", "controle", "finance"), async (req, res) => {
+    const fornecedor = String(req.body?.fornecedor ?? "").trim();
+    if (!fornecedor) return res.status(400).json({ error: "fornecedor é obrigatório." });
+    const periodicidade = String(req.body?.periodicidade ?? "mensal");
+    if (!CONTRATO_PERIODS.has(periodicidade)) {
+      return res.status(400).json({ error: "periodicidade inválida." });
+    }
+    const assinado = Boolean(req.body?.assinado);
+    const vencimento = req.body?.vencimento ? String(req.body.vencimento).slice(0, 10) : null;
+    let status = String(req.body?.status ?? "ativo");
+    if (!CONTRATO_STATUSES.has(status)) status = "ativo";
+    status = deriveContratoStatus(status, vencimento, assinado);
+
+    const { data, error } = await supabase
+      .from("contratos")
+      .insert({
+        fornecedor,
+        valor: Number(req.body?.valor) || 0,
+        status,
+        ativo: req.body?.ativo != null ? Boolean(req.body.ativo) : true,
+        assinado,
+        sector_id: req.body?.sector_id != null && req.body.sector_id !== "" ? Number(req.body.sector_id) : null,
+        crd_id: req.body?.crd_id != null && req.body.crd_id !== "" ? Number(req.body.crd_id) : null,
+        vencimento,
+        periodicidade,
+        responsavel: String(req.body?.responsavel ?? "").trim() || null,
+        observacoes: String(req.body?.observacoes ?? "").trim() || null,
+      })
+      .select("id")
+      .single();
+    if (error) {
+      console.error("Erro ao criar contrato:", error);
+      return res.status(500).json({ error: "Não foi possível criar o contrato." });
+    }
+    res.json({ id: data.id });
+  });
+
+  app.patch("/api/contratos/:id", requireRole("admin", "controle", "finance"), async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: "id inválido." });
+    const patch: Record<string, any> = { updated_at: new Date().toISOString() };
+    if (req.body?.fornecedor != null) {
+      const fornecedor = String(req.body.fornecedor).trim();
+      if (!fornecedor) return res.status(400).json({ error: "fornecedor inválido." });
+      patch.fornecedor = fornecedor;
+    }
+    if (req.body?.valor != null) patch.valor = Number(req.body.valor) || 0;
+    if (req.body?.ativo != null) patch.ativo = Boolean(req.body.ativo);
+    if (req.body?.assinado != null) patch.assinado = Boolean(req.body.assinado);
+    if (req.body?.sector_id !== undefined) {
+      patch.sector_id = req.body.sector_id != null && req.body.sector_id !== "" ? Number(req.body.sector_id) : null;
+    }
+    if (req.body?.crd_id !== undefined) {
+      patch.crd_id = req.body.crd_id != null && req.body.crd_id !== "" ? Number(req.body.crd_id) : null;
+    }
+    if (req.body?.vencimento !== undefined) {
+      patch.vencimento = req.body.vencimento ? String(req.body.vencimento).slice(0, 10) : null;
+    }
+    if (req.body?.periodicidade != null) {
+      const p = String(req.body.periodicidade);
+      if (!CONTRATO_PERIODS.has(p)) return res.status(400).json({ error: "periodicidade inválida." });
+      patch.periodicidade = p;
+    }
+    if (req.body?.responsavel !== undefined) {
+      patch.responsavel = String(req.body.responsavel ?? "").trim() || null;
+    }
+    if (req.body?.observacoes !== undefined) {
+      patch.observacoes = String(req.body.observacoes ?? "").trim() || null;
+    }
+    if (req.body?.status != null) {
+      let status = String(req.body.status);
+      if (!CONTRATO_STATUSES.has(status)) return res.status(400).json({ error: "status inválido." });
+      const assinado = patch.assinado != null ? patch.assinado : Boolean(req.body.assinado);
+      const venc = patch.vencimento !== undefined ? patch.vencimento : req.body.vencimento;
+      status = deriveContratoStatus(status, venc ? String(venc).slice(0, 10) : null, assinado);
+      patch.status = status;
+    }
+
+    const { error } = await supabase.from("contratos").update(patch).eq("id", id);
+    if (error) {
+      console.error("Erro ao atualizar contrato:", error);
+      return res.status(500).json({ error: "Não foi possível atualizar o contrato." });
+    }
+    res.json({ success: true });
+  });
+
+  app.delete("/api/contratos/:id", requireRole("admin", "controle"), async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: "id inválido." });
+    const { error } = await supabase.from("contratos").delete().eq("id", id);
+    if (error) {
+      console.error("Erro ao excluir contrato:", error);
+      return res.status(500).json({ error: "Não foi possível excluir o contrato." });
+    }
+    res.json({ success: true });
+  });
+
+  // ====================================================
+  // INVESTIMENTOS (Fase 4.7)
+  // ====================================================
+  const INVESTIMENTO_STATUSES = new Set(["planejado", "em_andamento", "concluido", "cancelado"]);
+
+  const mapInvestimentoRow = (row: any) => {
+    const valor_previsto = Number(row.valor_previsto) || 0;
+    const valor_lancado = Number(row.valor_lancado) || 0;
+    const valor_realizado = Number(row.valor_realizado) || 0;
+    const saldo_a_realizar = valor_previsto - valor_realizado;
+    const pct_executado = valor_previsto > 0 ? valor_realizado / valor_previsto : 0;
+    const estouro_orcamento =
+      (valor_previsto > 0 && valor_realizado > valor_previsto + 0.009) ||
+      (valor_previsto > 0 && valor_lancado > valor_previsto + 0.009);
+    const crd = row.crds;
+    const crd_label = crd
+      ? [crd.code, crd.name].filter(Boolean).join(" — ") || null
+      : null;
+    return {
+      id: row.id,
+      nome: row.nome,
+      valor_previsto,
+      valor_lancado,
+      valor_realizado,
+      saldo_a_realizar,
+      pct_executado,
+      estouro_orcamento,
+      status: row.status || "planejado",
+      sector_id: row.sector_id != null ? Number(row.sector_id) : null,
+      sector_name: row.sectors?.name ?? null,
+      crd_id: row.crd_id != null ? Number(row.crd_id) : null,
+      crd_label,
+      responsavel: row.responsavel ?? null,
+      observacoes: row.observacoes ?? null,
+      created_at: row.created_at,
+      updated_at: row.updated_at,
+    };
+  };
+
+  app.get(
+    "/api/investimentos",
+    requireRole("admin", "controle", "manager", "finance", "diretoria"),
+    async (req, res) => {
+      const status = String((req.query as any)?.status || "");
+      const sectorId = (req.query as any)?.sector_id;
+      let query = supabase
+        .from("investimentos")
+        .select("*, sectors(name), crds(id, code, name)")
+        .order("updated_at", { ascending: false });
+      if (status && INVESTIMENTO_STATUSES.has(status)) query = query.eq("status", status);
+      if (sectorId != null && sectorId !== "" && Number.isFinite(Number(sectorId))) {
+        query = query.eq("sector_id", Number(sectorId));
+      }
+      const { data, error } = await query;
+      if (error) {
+        console.error("Erro ao listar investimentos:", error);
+        if (
+          String(error.message || "").includes("investimentos") ||
+          error.code === "42P01" ||
+          error.code === "PGRST205"
+        ) {
+          return res.status(500).json({
+            error: "Tabela investimentos não encontrada. Execute sql/25_investimentos.sql no Supabase.",
+          });
+        }
+        return res.status(500).json({ error: "Erro ao listar investimentos." });
+      }
+      res.json((data ?? []).map(mapInvestimentoRow));
+    }
+  );
+
+  app.post("/api/investimentos", requireRole("admin", "controle", "finance"), async (req, res) => {
+    const nome = String(req.body?.nome ?? "").trim();
+    if (!nome) return res.status(400).json({ error: "nome é obrigatório." });
+    let status = String(req.body?.status ?? "planejado");
+    if (!INVESTIMENTO_STATUSES.has(status)) status = "planejado";
+
+    const { data, error } = await supabase
+      .from("investimentos")
+      .insert({
+        nome,
+        valor_previsto: Number(req.body?.valor_previsto) || 0,
+        valor_lancado: Number(req.body?.valor_lancado) || 0,
+        valor_realizado: Number(req.body?.valor_realizado) || 0,
+        status,
+        sector_id:
+          req.body?.sector_id != null && req.body.sector_id !== ""
+            ? Number(req.body.sector_id)
+            : null,
+        crd_id:
+          req.body?.crd_id != null && req.body.crd_id !== "" ? Number(req.body.crd_id) : null,
+        responsavel: String(req.body?.responsavel ?? "").trim() || null,
+        observacoes: String(req.body?.observacoes ?? "").trim() || null,
+      })
+      .select("id")
+      .single();
+    if (error) {
+      console.error("Erro ao criar investimento:", error);
+      return res.status(500).json({ error: "Não foi possível criar o investimento." });
+    }
+    res.json({ id: data.id });
+  });
+
+  app.patch("/api/investimentos/:id", requireRole("admin", "controle", "finance"), async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: "id inválido." });
+    const patch: Record<string, any> = { updated_at: new Date().toISOString() };
+    if (req.body?.nome != null) {
+      const nome = String(req.body.nome).trim();
+      if (!nome) return res.status(400).json({ error: "nome inválido." });
+      patch.nome = nome;
+    }
+    if (req.body?.valor_previsto != null) patch.valor_previsto = Number(req.body.valor_previsto) || 0;
+    if (req.body?.valor_lancado != null) patch.valor_lancado = Number(req.body.valor_lancado) || 0;
+    if (req.body?.valor_realizado != null) patch.valor_realizado = Number(req.body.valor_realizado) || 0;
+    if (req.body?.status != null) {
+      const status = String(req.body.status);
+      if (!INVESTIMENTO_STATUSES.has(status)) return res.status(400).json({ error: "status inválido." });
+      patch.status = status;
+    }
+    if (req.body?.sector_id !== undefined) {
+      patch.sector_id =
+        req.body.sector_id != null && req.body.sector_id !== "" ? Number(req.body.sector_id) : null;
+    }
+    if (req.body?.crd_id !== undefined) {
+      patch.crd_id =
+        req.body.crd_id != null && req.body.crd_id !== "" ? Number(req.body.crd_id) : null;
+    }
+    if (req.body?.responsavel !== undefined) {
+      patch.responsavel = String(req.body.responsavel ?? "").trim() || null;
+    }
+    if (req.body?.observacoes !== undefined) {
+      patch.observacoes = String(req.body.observacoes ?? "").trim() || null;
+    }
+    const { error } = await supabase.from("investimentos").update(patch).eq("id", id);
+    if (error) {
+      console.error("Erro ao atualizar investimento:", error);
+      return res.status(500).json({ error: "Não foi possível atualizar o investimento." });
+    }
+    res.json({ success: true });
+  });
+
+  app.delete("/api/investimentos/:id", requireRole("admin", "controle"), async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: "id inválido." });
+    const { error } = await supabase.from("investimentos").delete().eq("id", id);
+    if (error) {
+      console.error("Erro ao excluir investimento:", error);
+      return res.status(500).json({ error: "Não foi possível excluir o investimento." });
+    }
+    res.json({ success: true });
   });
 
   // ====================================================
@@ -8254,16 +9041,72 @@ export function createApp() {
     }
 
     // Realizado importado (ex.: Consumo Interno, Rel. CRD).
-    // Rel. CRD: source rel_crd = Mensal (M); rel_crd_diario = Diario (D).
+    // Rel. CRD: rematch a partir de rel_crd_rows (código entre parênteses no nome do CRD)
+    // para o SALDO LANÇ alimentar o setor competente mesmo em imports antigos.
     const { data: realizadoImport } = await supabase
       .from("crd_realizado")
       .select("crd_id, month, value, source")
       .eq("year", selectedYear);
+
+    const { data: relCrdRows } = await supabase
+      .from("rel_crd_rows")
+      .select("month, nivel, codigo, saldo_lanc")
+      .eq("year", selectedYear);
+    const hasRelCrdRows = (relCrdRows?.length ?? 0) > 0;
+
     for (const row of realizadoImport ?? []) {
       const source = String((row as any).source || "");
+      const isRelCrd =
+        source === "rel_crd" || source === "rel_crd_mensal" || source === "rel_crd_diario";
+      // Quando há linhas do Rel. CRD, o rematch abaixo substitui essas sources.
+      if (hasRelCrdRows && isRelCrd) continue;
       if (viewMode === "diario" && (source === "rel_crd" || source === "rel_crd_mensal")) continue;
       if (viewMode === "mensal" && source === "rel_crd_diario") continue;
       addRealized(Number((row as any).crd_id), Number((row as any).month), (row as any).value);
+    }
+
+    if (hasRelCrdRows) {
+      const parenToId = new Map<string, number>();
+      const codeToId = new Map<string, number>();
+      for (const c of allCrds ?? []) {
+        const id = Number((c as any).id);
+        if (!Number.isFinite(id)) continue;
+        const code = String((c as any).code ?? "").trim().toLowerCase();
+        if (code) codeToId.set(code, id);
+      }
+      // Nomes dos CRDs ativos (com setor) para match preferencial "(codigo)".
+      for (const c of crdData ?? []) {
+        const id = Number((c as any).id);
+        if (!Number.isFinite(id)) continue;
+        const paren = /\((\d+)\)\s*$/.exec(String((c as any).name ?? "").trim());
+        if (paren) parenToId.set(paren[1], id);
+        const code = String((c as any).code ?? "").trim().toLowerCase();
+        if (code) codeToId.set(code, id);
+      }
+      const resolveCrdId = (codigoRaw: string): number | null => {
+        const codigo = String(codigoRaw ?? "").trim();
+        if (!codigo) return null;
+        if (parenToId.has(codigo)) return parenToId.get(codigo)!;
+        return codeToId.get(codigo.toLowerCase()) ?? null;
+      };
+
+      const maxNivelByMonth = new Map<number, number>();
+      for (const row of relCrdRows ?? []) {
+        const month = Number((row as any).month);
+        if (!Number.isFinite(month) || month < 1 || month > 12) continue;
+        const nivel = Number((row as any).nivel) || 1;
+        maxNivelByMonth.set(month, Math.max(maxNivelByMonth.get(month) ?? 1, nivel));
+      }
+
+      for (const row of relCrdRows ?? []) {
+        const month = Number((row as any).month);
+        if (!Number.isFinite(month) || month < 1 || month > 12) continue;
+        const nivel = Number((row as any).nivel) || 1;
+        if (nivel < (maxNivelByMonth.get(month) ?? 1)) continue;
+        const crdId = resolveCrdId(String((row as any).codigo ?? ""));
+        if (!crdId) continue;
+        addRealized(crdId, month, (row as any).saldo_lanc);
+      }
     }
 
     const rows = (crdData ?? [])
@@ -8518,6 +9361,371 @@ export function createApp() {
       realizado: buildIndicadorEscopo(data ?? [], "realizado", year, uhs),
       meta: buildIndicadorEscopo(data ?? [], "meta", year, uhs),
     });
+  });
+
+  // ====================================================
+  // DASHBOARD DIRETORIA (consolidado — Fase 4.9)
+  // ====================================================
+  app.get("/api/dashboard/diretoria", requireRole("admin", "controle", "diretoria"), async (req, res) => {
+    const now = new Date();
+    const selectedMonth = Number((req.query as any).month) || now.getMonth() + 1;
+    const selectedYear = Number((req.query as any).year) || now.getFullYear();
+    const monthIdx = Math.max(1, Math.min(12, selectedMonth));
+    const prevYear = selectedYear - 1;
+
+    const pickKpis = (monthRow: any, ytdRows: any[]) => {
+      const sum = (key: string) => ytdRows.reduce((s, m) => s + (Number(m?.[key]) || 0), 0);
+      const fatYtd = sum("faturamento");
+      const ebitdaYtd = sum("ebitda");
+      const rlYtd = sum("resultado_liquido");
+      const fatM = Number(monthRow?.faturamento) || 0;
+      const ebitdaM = Number(monthRow?.ebitda) || 0;
+      const rlM = Number(monthRow?.resultado_liquido) || 0;
+      return {
+        mes: {
+          faturamento: fatM,
+          ebitda: ebitdaM,
+          margem_ebitda: fatM > 0 ? ebitdaM / fatM : 0,
+          resultado_liquido: rlM,
+          rl_sobre_faturamento: fatM > 0 ? rlM / fatM : 0,
+        },
+        acumulado: {
+          faturamento: fatYtd,
+          ebitda: ebitdaYtd,
+          margem_ebitda: fatYtd > 0 ? ebitdaYtd / fatYtd : 0,
+          resultado_liquido: rlYtd,
+          rl_sobre_faturamento: fatYtd > 0 ? rlYtd / fatYtd : 0,
+        },
+      };
+    };
+
+    const varPct = (atual: number, base: number) =>
+      base !== 0 ? (atual - base) / Math.abs(base) : atual !== 0 ? 1 : 0;
+
+    const normalizeSector = (value: unknown) =>
+      String(value ?? "")
+        .trim()
+        .toUpperCase()
+        .normalize("NFD")
+        .replace(/\p{Diacritic}/gu, "");
+
+    try {
+      const [{ data: indYear }, { data: indPrev }, uhs, uhsPrev] = await Promise.all([
+        supabase.from("indicadores_mensais").select("*").eq("year", selectedYear),
+        supabase.from("indicadores_mensais").select("*").eq("year", prevYear),
+        getIndicadorUhs(selectedYear),
+        getIndicadorUhs(prevYear),
+      ]);
+
+      const realizado = buildIndicadorEscopo(indYear ?? [], "realizado", selectedYear, uhs);
+      const meta = buildIndicadorEscopo(indYear ?? [], "meta", selectedYear, uhs);
+      const realizadoPrev = buildIndicadorEscopo(indPrev ?? [], "realizado", prevYear, uhsPrev);
+
+      const ytdReal = realizado.months.slice(0, monthIdx);
+      const ytdMeta = meta.months.slice(0, monthIdx);
+      const ytdPrev = realizadoPrev.months.slice(0, monthIdx);
+      const monthReal = realizado.months[monthIdx - 1];
+      const monthMeta = meta.months[monthIdx - 1];
+      const monthPrev = realizadoPrev.months[monthIdx - 1];
+
+      const kpisReal = pickKpis(monthReal, ytdReal);
+      const kpisMeta = pickKpis(monthMeta, ytdMeta);
+      const kpisPrev = pickKpis(monthPrev, ytdPrev);
+
+      const comparativos = {
+        mensal: {
+          realizado: kpisReal.mes,
+          meta: kpisMeta.mes,
+          ano_anterior: kpisPrev.mes,
+          vs_meta: {
+            faturamento: varPct(kpisReal.mes.faturamento, kpisMeta.mes.faturamento),
+            ebitda: varPct(kpisReal.mes.ebitda, kpisMeta.mes.ebitda),
+            resultado_liquido: varPct(kpisReal.mes.resultado_liquido, kpisMeta.mes.resultado_liquido),
+          },
+          vs_ano_anterior: {
+            faturamento: varPct(kpisReal.mes.faturamento, kpisPrev.mes.faturamento),
+            ebitda: varPct(kpisReal.mes.ebitda, kpisPrev.mes.ebitda),
+            resultado_liquido: varPct(kpisReal.mes.resultado_liquido, kpisPrev.mes.resultado_liquido),
+          },
+        },
+        acumulado: {
+          realizado: kpisReal.acumulado,
+          meta: kpisMeta.acumulado,
+          ano_anterior: kpisPrev.acumulado,
+          vs_meta: {
+            faturamento: varPct(kpisReal.acumulado.faturamento, kpisMeta.acumulado.faturamento),
+            ebitda: varPct(kpisReal.acumulado.ebitda, kpisMeta.acumulado.ebitda),
+            resultado_liquido: varPct(
+              kpisReal.acumulado.resultado_liquido,
+              kpisMeta.acumulado.resultado_liquido
+            ),
+          },
+          vs_ano_anterior: {
+            faturamento: varPct(kpisReal.acumulado.faturamento, kpisPrev.acumulado.faturamento),
+            ebitda: varPct(kpisReal.acumulado.ebitda, kpisPrev.acumulado.ebitda),
+            resultado_liquido: varPct(
+              kpisReal.acumulado.resultado_liquido,
+              kpisPrev.acumulado.resultado_liquido
+            ),
+          },
+        },
+      };
+
+      const monthNamesShort = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
+      const serieMensal = realizado.months.map((m: any, i: number) => ({
+        month: m.month,
+        name: monthNamesShort[i],
+        realizado: Number(m.faturamento) || 0,
+        meta: Number(meta.months[i]?.faturamento) || 0,
+        ebitda: Number(m.ebitda) || 0,
+        resultado_liquido: Number(m.resultado_liquido) || 0,
+      }));
+
+      const { data: contratosRows } = await supabase
+        .from("contratos")
+        .select("id, fornecedor, valor, status, ativo, assinado, vencimento, sectors(name)")
+        .eq("ativo", true)
+        .order("vencimento", { ascending: true, nullsFirst: false })
+        .limit(200);
+
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const in30 = new Date(today);
+      in30.setDate(in30.getDate() + 30);
+
+      const alertasContratos: Array<{
+        id: number;
+        tipo: string;
+        fornecedor: string;
+        valor: number;
+        vencimento: string | null;
+        setor: string | null;
+        mensagem: string;
+      }> = [];
+
+      for (const c of contratosRows ?? []) {
+        const status = String((c as any).status || "");
+        const venc = (c as any).vencimento ? String((c as any).vencimento).slice(0, 10) : null;
+        const fornecedor = String((c as any).fornecedor || "");
+        const valor = Number((c as any).valor) || 0;
+        const setor = (c as any).sectors?.name ? String((c as any).sectors.name) : null;
+        const due = venc ? new Date(`${venc}T00:00:00`) : null;
+        const assinado = Boolean((c as any).assinado);
+
+        if (status === "vencido" || (due && due < today && status === "ativo")) {
+          alertasContratos.push({
+            id: Number((c as any).id),
+            tipo: "vencido",
+            fornecedor,
+            valor,
+            vencimento: venc,
+            setor,
+            mensagem: `Contrato vencido${venc ? ` em ${venc}` : ""}`,
+          });
+        } else if (due && due >= today && due <= in30) {
+          alertasContratos.push({
+            id: Number((c as any).id),
+            tipo: "vence_em_30",
+            fornecedor,
+            valor,
+            vencimento: venc,
+            setor,
+            mensagem: `Vence em ${venc}`,
+          });
+        }
+        if (status === "pendente_assinatura" || (!assinado && status !== "encerrado" && status !== "vencido")) {
+          alertasContratos.push({
+            id: Number((c as any).id),
+            tipo: "pendente_assinatura",
+            fornecedor,
+            valor,
+            vencimento: venc,
+            setor,
+            mensagem: "Pendente de assinatura",
+          });
+        }
+      }
+
+      const { data: semanal } = await supabase
+        .from("painel_controladoria_semanal")
+        .select("*")
+        .order("semana_inicio", { ascending: false })
+        .limit(80);
+
+      const consumoRows = (semanal ?? []).map((r: any) => {
+        const previsto = Number(r.previsto) || 0;
+        const realizadoVal = Number(r.realizado) || 0;
+        const estouro = previsto > 0 && realizadoVal > previsto;
+        return {
+          id: Number(r.id),
+          semana_inicio: r.semana_inicio,
+          item: String(r.item || ""),
+          previsto,
+          realizado: realizadoVal,
+          diferenca: realizadoVal - previsto,
+          estouro,
+          setor_responsavel: r.setor_responsavel ? String(r.setor_responsavel) : null,
+        };
+      });
+
+      const principaisEstouros = [...consumoRows]
+        .filter((r) => r.estouro)
+        .sort((a, b) => b.diferenca - a.diferenca)
+        .slice(0, 8);
+
+      const consumoResumo = {
+        itens: consumoRows.length,
+        estourados: consumoRows.filter((r) => r.estouro).length,
+        total_previsto: consumoRows.reduce((s, r) => s + r.previsto, 0),
+        total_realizado: consumoRows.reduce((s, r) => s + r.realizado, 0),
+        recentes: consumoRows.slice(0, 6),
+      };
+
+      const sectorDefs = [
+        { key: "operacional", label: "Operacional", tabId: "painel-operacional", sectorNames: ["Operacional"] },
+        { key: "ab", label: "A&B", tabId: "painel-ab", sectorNames: ["A&B"] },
+        { key: "hospedagem", label: "Hospedagem", tabId: "painel-hospedagem", sectorNames: ["Hospedagem"] },
+        { key: "spa", label: "SPA", tabId: "painel-spa", sectorNames: [] as string[], keywords: ["SPA"] },
+      ];
+
+      const { data: allSectors } = await supabase.from("sectors").select("id, name");
+      const { data: allCrds } = await supabase
+        .from("crds")
+        .select("id, code, name, sector_id, previsto_mes")
+        .eq("active", true);
+      const { rows: monthlyRows } = await fetchMonthlyValuesByYear(selectedYear);
+      const { data: realizadoRows } = await supabase
+        .from("crd_realizado")
+        .select("crd_id, month, value")
+        .eq("year", selectedYear);
+
+      const setores = sectorDefs.map((def) => {
+        const sectorIds = new Set<number>();
+        for (const s of allSectors ?? []) {
+          const name = String((s as any).name || "");
+          if (def.sectorNames.some((n) => normalizeSector(n) === normalizeSector(name))) {
+            sectorIds.add(Number((s as any).id));
+          }
+        }
+        let crds = (allCrds ?? []) as any[];
+        if (def.keywords?.length) {
+          crds = crds.filter((c) =>
+            def.keywords!.some((k) =>
+              normalizeSector(`${c.code} ${c.name}`).includes(normalizeSector(k))
+            )
+          );
+        } else if (sectorIds.size) {
+          crds = crds.filter((c) => sectorIds.has(Number(c.sector_id)));
+        } else {
+          crds = [];
+        }
+        const crdIds = new Set(crds.map((c) => Number(c.id)));
+        let previsto = 0;
+        for (const row of monthlyRows ?? []) {
+          const m = Number((row as any).month);
+          if (!crdIds.has(Number((row as any).crd_id)) || m < 1 || m > monthIdx) continue;
+          previsto += Number((row as any).value) || 0;
+        }
+        if (previsto === 0) {
+          for (const c of crds) previsto += (Number(c.previsto_mes) || 0) * monthIdx;
+        }
+        let realizadoVal = 0;
+        for (const row of realizadoRows ?? []) {
+          const m = Number((row as any).month);
+          if (!crdIds.has(Number((row as any).crd_id)) || m < 1 || m > monthIdx) continue;
+          realizadoVal += Number((row as any).value ?? (row as any).amount) || 0;
+        }
+        return {
+          key: def.key,
+          label: def.label,
+          tabId: def.tabId,
+          previsto,
+          realizado: realizadoVal,
+          diferenca: realizadoVal - previsto,
+          estouro: previsto > 0 && realizadoVal > previsto,
+        };
+      });
+
+      const atalhos = [
+        { tabId: "painel-operacional", label: "Gerência Operacional" },
+        { tabId: "painel-ab", label: "A&B" },
+        { tabId: "painel-spa", label: "SPA" },
+        { tabId: "painel-hospedagem", label: "Hospedagem" },
+        { tabId: "painel-nutricionista", label: "Nutricionista" },
+        { tabId: "painel-controladoria", label: "Controladoria" },
+        { tabId: "investimentos", label: "Investimentos" },
+        { tabId: "mensalidades", label: "Mensalidades" },
+        { tabId: "indicadores", label: "Indicadores" },
+        { tabId: "dre", label: "DRE Gerencial" },
+      ];
+
+      const { data: investRows } = await supabase
+        .from("investimentos")
+        .select("id, nome, valor_previsto, valor_lancado, valor_realizado, status, sectors(name)")
+        .neq("status", "cancelado")
+        .order("updated_at", { ascending: false })
+        .limit(100);
+
+      const alertasInvestimentos: Array<{
+        id: number;
+        tipo: string;
+        nome: string;
+        valor_previsto: number;
+        valor_lancado: number;
+        valor_realizado: number;
+        saldo_a_realizar: number;
+        pct_executado: number;
+        setor: string | null;
+        mensagem: string;
+      }> = [];
+
+      for (const inv of investRows ?? []) {
+        const previsto = Number((inv as any).valor_previsto) || 0;
+        const lancado = Number((inv as any).valor_lancado) || 0;
+        const realizado = Number((inv as any).valor_realizado) || 0;
+        const nome = String((inv as any).nome || "");
+        const setor = (inv as any).sectors?.name ? String((inv as any).sectors.name) : null;
+        const saldo = previsto - realizado;
+        const pct = previsto > 0 ? realizado / previsto : 0;
+        if (previsto > 0 && (realizado > previsto + 0.009 || lancado > previsto + 0.009)) {
+          alertasInvestimentos.push({
+            id: Number((inv as any).id),
+            tipo: "estouro_orcamento",
+            nome,
+            valor_previsto: previsto,
+            valor_lancado: lancado,
+            valor_realizado: realizado,
+            saldo_a_realizar: saldo,
+            pct_executado: pct,
+            setor,
+            mensagem:
+              realizado > previsto
+                ? `Realizado acima do previsto (${(pct * 100).toFixed(0)}%)`
+                : "Lançado acima do previsto",
+          });
+        }
+      }
+
+      res.json({
+        month: monthIdx,
+        year: selectedYear,
+        kpis: kpisReal,
+        meta: kpisMeta,
+        comparativos,
+        serieMensal,
+        setores,
+        principaisEstouros,
+        alertas: {
+          contratos: alertasContratos.slice(0, 15),
+          investimentos: alertasInvestimentos.slice(0, 15),
+        },
+        consumo: consumoResumo,
+        atalhos,
+      });
+    } catch (err) {
+      console.error("Erro no dashboard da diretoria:", err);
+      return res.status(500).json({ error: "Não foi possível carregar o dashboard da diretoria." });
+    }
   });
 
   // GET /api/indicadores/anos  -> anos disponíveis (para o seletor)

@@ -47,6 +47,9 @@ export function getSearchPlaceholder(activeTab: string): string {
     'prev-real': 'Buscar CRD, grupo ou detalhado...',
     usuarios: 'Buscar nome, e-mail ou setor...',
     configuracoes: 'Buscar configuração ou local PDV...',
+    mensalidades: 'Buscar fornecedor, setor ou contrato...',
+    'compras-mensalidades': 'Buscar fornecedor, setor ou contrato...',
+    investimentos: 'Buscar investimento, setor ou CRD...',
   };
 
   return map[activeTab] ?? 'Buscar...';

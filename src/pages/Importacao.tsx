@@ -14,6 +14,8 @@ import {
   ArrowRightCircle,
   History,
   RefreshCcw,
+  Undo2,
+  X,
 } from 'lucide-react';
 import { formatCurrency, formatApiError, formatDate } from '../lib/utils';
 import { useSearch } from '../context/SearchContext';
@@ -339,6 +341,10 @@ export const ImportacaoPage: React.FC = () => {
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState('');
   const [historyFilter, setHistoryFilter] = useState('');
+  const [undoTarget, setUndoTarget] = useState<ImportHistoryRow | null>(null);
+  const [undoConfirmText, setUndoConfirmText] = useState('');
+  const [undoLoading, setUndoLoading] = useState(false);
+  const [undoError, setUndoError] = useState('');
   const [month, setMonth] = useState(String(new Date().getMonth() + 1));
   const [year, setYear] = useState(String(new Date().getFullYear()));
   const [loadingImport, setLoadingImport] = useState(false);
@@ -777,6 +783,60 @@ export const ImportacaoPage: React.FC = () => {
     if (!row.year) return '—';
     if (row.month && row.month >= 1 && row.month <= 12) return `${MESES[row.month]}/${row.year}`;
     return String(row.year);
+  };
+
+  const canUndoImport = (row: ImportHistoryRow) => {
+    if (row.status === 'error') return true;
+    if (row.source_type === 'crds') return false;
+    const monthOk = Boolean(row.month && row.month >= 1 && row.month <= 12);
+    const yearOk = Boolean(row.year && row.year >= 2000);
+    if (['consumo_interno', 'extrato_mensal', 'rel_crd', 'rds', 'requisicoes_sintetica'].includes(row.source_type)) {
+      return yearOk && monthOk;
+    }
+    if (row.source_type === 'orcamento' || row.source_type === 'ajustes') return yearOk;
+    return false;
+  };
+
+  const openUndoModal = (row: ImportHistoryRow) => {
+    setUndoTarget(row);
+    setUndoConfirmText('');
+    setUndoError('');
+  };
+
+  const closeUndoModal = () => {
+    if (undoLoading) return;
+    setUndoTarget(null);
+    setUndoConfirmText('');
+    setUndoError('');
+  };
+
+  const confirmUndoImport = async () => {
+    if (!undoTarget || undoLoading) return;
+    if (undoConfirmText.trim() !== 'DESFAZER') {
+      setUndoError('Digite DESFAZER (em maiúsculas) para confirmar.');
+      return;
+    }
+    setUndoLoading(true);
+    setUndoError('');
+    try {
+      const res = await fetch(`/api/import/history/${undoTarget.id}/undo`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirm: 'DESFAZER' }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setUndoError(formatApiError(data, 'Não foi possível desfazer a importação.'));
+        return;
+      }
+      setUndoTarget(null);
+      setUndoConfirmText('');
+      await loadImportHistory();
+    } catch (err: any) {
+      setUndoError(err?.message || 'Erro ao desfazer a importação.');
+    } finally {
+      setUndoLoading(false);
+    }
   };
 
   const filteredImportSources = useMemo(
@@ -2483,12 +2543,13 @@ export const ImportacaoPage: React.FC = () => {
                 <th className="px-4 py-2 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-right">Total</th>
                 <th className="px-4 py-2 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Usuário</th>
                 <th className="px-4 py-2 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Status</th>
+                <th className="px-4 py-2 text-[10px] font-bold text-slate-500 uppercase tracking-widest text-right">Ações</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {historyLoading && filteredHistoryRows.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="px-4 py-8 text-center text-sm text-slate-400">
+                  <td colSpan={9} className="px-4 py-8 text-center text-sm text-slate-400">
                     <Loader2 className="w-5 h-5 animate-spin inline-block mr-2" />
                     Carregando histórico...
                   </td>
@@ -2496,7 +2557,7 @@ export const ImportacaoPage: React.FC = () => {
               )}
               {!historyLoading && filteredHistoryRows.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="px-4 py-8 text-center text-sm text-slate-400">
+                  <td colSpan={9} className="px-4 py-8 text-center text-sm text-slate-400">
                     Nenhuma importação registrada ainda.
                   </td>
                 </tr>
@@ -2539,12 +2600,144 @@ export const ImportacaoPage: React.FC = () => {
                       </span>
                     )}
                   </td>
+                  <td className="px-4 py-2 text-right">
+                    {canUndoImport(row) ? (
+                      <button
+                        type="button"
+                        onClick={() => openUndoModal(row)}
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-red-200 bg-red-50 text-[11px] font-bold text-red-700 hover:bg-red-100 transition-colors"
+                        title="Desfazer esta importação e apagar os dados"
+                      >
+                        <Undo2 className="w-3.5 h-3.5" />
+                        Desfazer
+                      </button>
+                    ) : (
+                      <span
+                        className="text-[11px] text-slate-400"
+                        title={
+                          row.source_type === 'crds'
+                            ? 'Importação de CRDs não pode ser desfeita automaticamente'
+                            : 'Sem competência suficiente para desfazer'
+                        }
+                      >
+                        —
+                      </span>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
       </div>
+
+      {undoTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-[2px]">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="undo-import-title"
+            className="w-full max-w-md rounded-2xl border border-slate-200 bg-white shadow-xl"
+          >
+            <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-slate-100">
+              <div>
+                <p id="undo-import-title" className="text-sm font-bold text-slate-900">
+                  Desfazer importação
+                </p>
+                <p className="mt-1 text-xs text-slate-500">
+                  Esta ação apaga os dados daquela importação e não pode ser revertida.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={closeUndoModal}
+                disabled={undoLoading}
+                className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-600 disabled:opacity-50"
+                aria-label="Fechar"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="px-5 py-4 space-y-3">
+              <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-900">
+                <p className="font-bold flex items-center gap-1.5">
+                  <AlertTriangle className="w-3.5 h-3.5" />
+                  {IMPORT_HISTORY_LABELS[undoTarget.source_type] || undoTarget.source_type}
+                </p>
+                <p className="mt-1 text-amber-800">
+                  Período: <span className="font-semibold">{periodoHistorico(undoTarget)}</span>
+                  {undoTarget.file_name ? (
+                    <>
+                      {' '}
+                      · Arquivo: <span className="font-semibold">{undoTarget.file_name}</span>
+                    </>
+                  ) : null}
+                </p>
+                {undoTarget.status === 'error' ? (
+                  <p className="mt-1 text-amber-700">
+                    Este registro é só um erro no histórico — nenhum dado de sucesso será apagado.
+                  </p>
+                ) : (
+                  <p className="mt-1 text-amber-700">
+                    Serão apagados os dados gravados por essa importação na competência acima (Prev × Real,
+                    apurações e tabelas relacionadas).
+                  </p>
+                )}
+              </div>
+
+              <label className="block">
+                <span className="text-xs font-semibold text-slate-700">
+                  Digite <span className="font-mono text-red-700">DESFAZER</span> para confirmar
+                </span>
+                <input
+                  type="text"
+                  value={undoConfirmText}
+                  onChange={(e) => setUndoConfirmText(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      void confirmUndoImport();
+                    }
+                  }}
+                  disabled={undoLoading}
+                  autoFocus
+                  placeholder="DESFAZER"
+                  className="mt-1.5 w-full px-3 py-2 rounded-xl border border-slate-200 bg-slate-50 text-sm font-mono text-slate-800 focus:outline-none focus:ring-2 focus:ring-red-200 focus:border-red-300 disabled:opacity-60"
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+              </label>
+
+              {undoError && (
+                <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+                  {undoError}
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-slate-100 bg-slate-50/80 rounded-b-2xl">
+              <button
+                type="button"
+                onClick={closeUndoModal}
+                disabled={undoLoading}
+                className="px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => void confirmUndoImport()}
+                disabled={undoLoading || undoConfirmText.trim() !== 'DESFAZER'}
+                className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-red-600 text-xs font-bold text-white hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                {undoLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Undo2 className="w-3.5 h-3.5" />}
+                Confirmar desfazer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

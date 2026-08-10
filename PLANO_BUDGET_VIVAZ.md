@@ -23,6 +23,7 @@ Aterrado na stack atual: **React 19 + Vite + Express (`src/app.ts`) + Supabase (
 - Hover (`ValueTrace`) lista **cada linha somada com valor** + total (`rdsDetalhes` em `GET /api/dashboard/indicators`).
 - Mapeamento em `src/app.ts` (`DASHBOARD_RDS_GROUPS`).
 - Correção de crash tela branca: referência órfã `rdsTrace` em [Dashboard.tsx](src/pages/Dashboard.tsx) → `buildRdsCardTrace`.
+- Perfil **Diretoria** não usa esse resumo RDS: abre o consolidado 4.9 ([DashboardDiretoria.tsx](src/pages/DashboardDiretoria.tsx) via [App.tsx](src/App.tsx)).
 
 ### DRE Gerencial — Realizado via RDS + rollups ✅/🟡
 - Realizado alimentado pelo RDS (`DRE_RDS_MAPPINGS` + `GET /api/dre/realizado-rds`).
@@ -43,10 +44,23 @@ Aterrado na stack atual: **React 19 + Vite + Express (`src/app.ts`) + Supabase (
 - N:N colaboradores ↔ funções: `colaborador_funcoes` ([sql/20_colaborador_funcoes.sql](sql/20_colaborador_funcoes.sql), aplicada no Supabase).
 - Na tabela de colaboradores: `SearchableSelect` de função → define automaticamente o **setor/ccusto** da função; suporte a várias funções (principal + chips).
 
+### Lançamentos — DANFE e Mensalidades ✅
+- **DANFE:** [Invoices.tsx](src/pages/Invoices.tsx) com `mode="danfe"` — título/navegação “DANFE” (separado de Notas de Serviço).
+- **Mensalidades:** Lançamentos → Mensalidades (`mensalidades`) — contratos/mensalidades (ver 4.8). *Antes estava sob Compras; movido para Lançamentos.*
+
+### Perfil Diretoria + Investimentos ✅
+- Role `diretoria` ([sql/24_role_diretoria.sql](sql/24_role_diretoria.sql)): login abre dashboard consolidado; menu com Dashboard, DRE, Indicadores, Setores, Mensalidades, Investimentos.
+- Sessão **Investimentos** (4.7): previsto / lançado / realizado / saldo / % / estouro.
+- Dashboard Diretoria (4.9): KPIs Indicadores, alertas de contratos **e** investimentos, uso/consumo, atalhos setoriais.
+
 ### Supabase
 - Projeto conectado: **Epyguest** (`tgghyxgbculkolhyscmm`, org EpyGest Vivaz Cataratas).
 - `rds_snapshots` ativa (competências 2026 importadas).
-- Painéis setoriais: migration [sql/22_paineis_setoriais.sql](sql/22_paineis_setoriais.sql) aplicada.
+- Migrations aplicadas nesta entrega da Fase 4:
+  - [sql/22_paineis_setoriais.sql](sql/22_paineis_setoriais.sql)
+  - [sql/23_contratos.sql](sql/23_contratos.sql)
+  - [sql/24_role_diretoria.sql](sql/24_role_diretoria.sql)
+  - [sql/25_investimentos.sql](sql/25_investimentos.sql)
 
 ---
 
@@ -102,7 +116,7 @@ Aterrado na stack atual: **React 19 + Vite + Express (`src/app.ts`) + Supabase (
 **Pendente:** no Prev Real, evoluir para multi-seleção com acumulado estilo Shift+faixa (hoje o clique isola um mês, como no DRE “modo simples”).
 
 ## 2.2 Destaque de **estouro** em vermelho ✅ (DRE + Indicadores + painéis setoriais)
-**Feito:** DRE e Indicadores com favorabilidade na Diferença e fundo vermelho em despesa estourada. Painéis setoriais (Fase 4) também destacam estouro (realizado > previsto) nas tabelas e no relatório semanal da Controladoria.
+**Feito:** DRE e Indicadores com favorabilidade na Diferença e fundo vermelho em despesa estourada. Painéis setoriais (Fase 4) também destacam estouro (realizado > previsto) nas tabelas e no relatório semanal da Controladoria. Investimentos destacam estouro (lançado/realizado > previsto).
 **Pendente:** replicar destaque no PrevReal por setor (depende da natureza por CRD).
 
 ## 2.3 Revisar a linha/coluna de **"Ajustes"** 🟡
@@ -138,14 +152,17 @@ Aterrado na stack atual: **React 19 + Vite + Express (`src/app.ts`) + Supabase (
 # FASE 4 — Painéis setoriais
 > Padrão comum a todos: cada painel é uma página + rotas `/api/paineis/:key`; reutilizam orçado/realizado (Fase 1) e indicadores. Sempre com **previsto × realizado**, **%** e destaque de estouro.
 
-### Entrega 4.1–4.6 ✅
+### Entrega 4.1–4.9 ✅ (estrutura completa da Fase 4)
 | Item | Detalhe |
 |---|---|
-| Menu | Grupo **Setores** no [Sidebar.tsx](src/components/Sidebar.tsx) com 6 subsessões |
-| Frontend | [PainelSetorial.tsx](src/pages/PainelSetorial.tsx) + config [paineisSetoriais.ts](src/lib/paineisSetoriais.ts); rotas em [App.tsx](src/App.tsx) |
-| Backend | `GET /api/paineis/:key`, `PUT .../observacao`, CRUDs A&B quebras/sobras, nutri ações, controladoria semanal (`src/app.ts`) |
-| Banco | [sql/22_paineis_setoriais.sql](sql/22_paineis_setoriais.sql) — `painel_observacoes`, `painel_ab_quebras`, `painel_ab_sobras`, `painel_nutri_acoes`, `painel_controladoria_semanal` (**aplicada no Supabase**) |
-| Dados | Previsto ← `crd_monthly_values`; Realizado ← `crd_realizado` (fica completo com Fase 1.1) |
+| Menu Setores | Grupo **Setores** no [Sidebar.tsx](src/components/Sidebar.tsx) com 6 subsessões (4.1–4.6) |
+| Menu Lançamentos | **Mensalidades** (`mensalidades`) — contratos (4.8) |
+| Menu próprio | **Investimentos** (`investimentos`) — 4.7 |
+| Perfil | Role **`diretoria`** — dashboard consolidado (4.9) |
+| Frontend | [PainelSetorial.tsx](src/pages/PainelSetorial.tsx) + [paineisSetoriais.ts](src/lib/paineisSetoriais.ts); [Mensalidades.tsx](src/pages/Mensalidades.tsx); [Investimentos.tsx](src/pages/Investimentos.tsx); [DashboardDiretoria.tsx](src/pages/DashboardDiretoria.tsx) |
+| Backend | `/api/paineis/*`, `/api/contratos`, `/api/investimentos`, `/api/dashboard/diretoria` (`src/app.ts`) |
+| Banco | sql/22…25 aplicados no Supabase (painéis, contratos, role diretoria, investimentos) |
+| Dados painéis | Previsto ← `crd_monthly_values`; Realizado ← `crd_realizado` (**volume completo depende da Fase 1.1**) |
 
 ## 4.1 Painel Gerência Operacional ✅
 - Blocos Manutenção / Gás / Energia (match por CRD), KPIs do período, ocupação (Síntase), custo energia/RN, filtro de meses, observações do gestor por (painel, ano, mês).
@@ -166,21 +183,28 @@ Aterrado na stack atual: **React 19 + Vite + Express (`src/app.ts`) + Supabase (
 - Lançamentos semanais de uso/consumo (previsto, realizado, setor responsável, estouro em vermelho), contador de estouros, observações do mês.
 - **Pendente menor:** rotina formal de importação/conferência automática a partir do Consumo Interno (hoje o lançamento semanal é manual na tela).
 
-## 4.7 Painel de Investimentos ❌
-- **Banco:** tabela `investimentos` (nome, valor previsto, valor lançado, valor realizado, setor/CRD, status, observações; timestamps).
-- **Cálculos:** saldo a realizar = previsto − realizado; % executado = realizado ÷ previsto.
-- **Painel responde:** quanto já foi lançado/realizado, quanto falta, se está dentro do orçamento, setor/CRD vinculado.
+## 4.7 Painel de Investimentos ✅
+- **Menu:** sessão **Investimentos** (`investimentos`) — item próprio na sidebar.
+- **Banco:** tabela `investimentos` ([sql/25_investimentos.sql](sql/25_investimentos.sql), aplicada no Supabase) — nome, valor previsto/lançado/realizado, status, setor, CRD, responsável, observações.
+- **Cálculos (API):** saldo a realizar = previsto − realizado; % executado = realizado ÷ previsto; flag de estouro se lançado ou realizado > previsto.
+- **API:** `GET/POST /api/investimentos`, `PATCH/DELETE /api/investimentos/:id`.
+- **UI:** [Investimentos.tsx](src/pages/Investimentos.tsx) — CRUD, filtros, KPIs e destaque de estouros.
+- **Diretoria:** alertas de estouro no dashboard consolidado + atalho.
 - **Critério:** execução dos investimentos acompanhada; diferença previsto/lançado/realizado clara.
 
-## 4.8 Painel de Contratos e Mensalidades ❌
-- **Banco:** tabela `contratos` (fornecedor, valor, status, ativo, assinado, setor, CRD, vencimento, periodicidade, responsável, observações).
-- **Funcional:** lançamento manual; lista por setor (no painel do gestor); relatório de vencimentos; **alertas** para contratos próximos do vencimento; separar ativos/vencidos/pendentes de assinatura/encerrados.
-- **Critério:** financeiro lança e acompanha; gestores veem contratos do seu setor; vencimentos claros.
+## 4.8 Painel de Contratos e Mensalidades ✅
+- **Menu:** Lançamentos → **Mensalidades** (`mensalidades`).
+- **Banco:** tabela `contratos` ([sql/23_contratos.sql](sql/23_contratos.sql), aplicada no Supabase) — fornecedor, valor, status, ativo, assinado, setor, CRD, vencimento, periodicidade, responsável, observações.
+- **API:** `GET/POST /api/contratos`, `PATCH/DELETE /api/contratos/:id`.
+- **UI:** [Mensalidades.tsx](src/pages/Mensalidades.tsx) — lançamento manual, filtros por status/setor, alertas de vencimento (30 dias), separação ativos/vencidos/pendentes de assinatura/encerrados, KPIs.
+- **Critério:** financeiro lança e acompanha; vencimentos e alertas visíveis.
 
-## 4.9 Dashboard da Diretoria (consolidado) 🟡
-- **Estado atual:** [Dashboard](src/pages/Dashboard.tsx) com Resumo Executivo RDS (4 cards + detalhe + gráfico realizado mensal + hover com linhas). Ainda **não** consolida EBITDA/RL/alertas de contratos/investimentos.
-- **Consolidar:** faturamento, EBITDA, margem EBITDA, resultado líquido e % sobre faturamento; previsto×realizado consolidado; principais estouros; comparativos mensal/acumulado/ano a ano; indicadores por setor; **alertas** de contratos/mensalidades/investimentos; resumo de uso e consumo; atalhos para os painéis setoriais.
-- **Critério:** diretoria tem visão geral em uma tela, com números consolidados e alertas; detalhe continua nos painéis setoriais.
+## 4.9 Dashboard da Diretoria (consolidado) ✅
+- **Perfil:** role `diretoria` ([sql/24_role_diretoria.sql](sql/24_role_diretoria.sql)) — no login / restauração de sessão abre o **Dashboard consolidado**.
+- **API:** `GET /api/dashboard/diretoria?month=&year=` — KPIs de Indicadores (faturamento, EBITDA, margem, RL e %), previsto×realizado, comparativos mensal/acumulado/ano a ano, indicadores por setor (YTD), alertas de **contratos** e **investimentos**, resumo de uso e consumo, principais estouros, atalhos.
+- **UI:** [DashboardDiretoria.tsx](src/pages/DashboardDiretoria.tsx) — renderizado em [App.tsx](src/App.tsx) quando `user.role === 'diretoria'` (aba `dashboard`).
+- **Menu (leitura):** Dashboard, DRE, Indicadores, Setores (painéis), Lançamentos → Mensalidades, Investimentos.
+- **Critério:** diretoria tem visão geral em uma tela, com números consolidados e alertas; detalhe continua nos painéis setoriais / sessões específicas.
 
 ---
 
@@ -213,13 +237,14 @@ Aterrado na stack atual: **React 19 + Vite + Express (`src/app.ts`) + Supabase (
 # Checklist final de validação (do documento)
 - [x] Previsto × realizado por mês (DRE / Indicadores / Prev Real / painéis — volume depende da Fase 1.1)
 - [x] Previsto × realizado acumulado (filtro de meses DRE / Indicadores / Prev Real Mensal)
-- [x] Linhas estouradas em vermelho (DRE / Indicadores / painéis setoriais)
-- [ ] Todos os painéis com percentuais (parcial: SPA e KPIs; falta padronizar 100%)
+- [x] Linhas estouradas em vermelho (DRE / Indicadores / painéis setoriais / investimentos / controladoria)
+- [ ] Todos os painéis com percentuais (parcial: SPA, KPIs e investimentos; falta padronizar 100% nos demais)
 - [x] Comparativo ano a ano (Indicadores)
 - [ ] Dados de 2019 corrigidos
 - [x] Painel histórico com EBITDA e resultado líquido em %
 - [x] Painéis setoriais criados (4.1–4.6: menu **Setores**)
-- [ ] Contratos/mensalidades por setor e CRD
+- [x] Contratos/mensalidades por setor e CRD (Lançamentos → Mensalidades)
 - [x] Controladoria: uso e consumo semanal (tela + CRUD; importação automática pendente)
-- [ ] Investimentos: previsto/lançado/realizado/saldo
+- [x] Dashboard da Diretoria consolidado (role `diretoria`)
+- [x] Investimentos: previsto/lançado/realizado/saldo (menu **Investimentos**)
 - [ ] Aquamania com budget próprio

@@ -14,7 +14,7 @@ import { useSearch } from '../context/SearchContext';
 import { matchesSearch } from '../lib/search';
 import { useToast } from '../context/ToastContext';
 
-type UserRole = 'admin' | 'finance' | 'controle' | 'manager' | 'viewer';
+type UserRole = 'admin' | 'finance' | 'controle' | 'manager' | 'viewer' | 'diretoria';
 
 type UserRow = {
   id: number | string;
@@ -47,6 +47,7 @@ const roleLabel: Record<UserRole, string> = {
   controle: 'Controle',
   manager: 'Gestor',
   viewer: 'Visualizador',
+  diretoria: 'Diretoria',
 };
 
 const roleBadgeClass: Record<UserRole, string> = {
@@ -55,6 +56,7 @@ const roleBadgeClass: Record<UserRole, string> = {
   controle: 'bg-amber-50 text-amber-800 border-amber-100',
   manager: 'bg-violet-50 text-violet-800 border-violet-100',
   viewer: 'bg-slate-50 text-slate-600 border-slate-200',
+  diretoria: 'bg-cyan-50 text-cyan-800 border-cyan-100',
 };
 
 const initialsFromName = (name: string) => {

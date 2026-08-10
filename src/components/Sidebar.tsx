@@ -29,6 +29,8 @@ import {
   TrendingUp,
   Boxes,
   Building2,
+  CalendarClock,
+  Landmark,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { PLANILHAS_RESULTADOS, APURACAO_RECEITA_ITENS, BASE_ORCAMENTO_ITENS, isBaseOrcamentoTab, isRelCrdTab, isRelReqTab, isConsumoInternoTab, isRdsTab, isApuracaoReceitaTab as checkApuracaoReceitaTab, isApuracaoResultadosTab as checkApuracaoResultadosTab } from '../lib/planilhas';
@@ -56,17 +58,19 @@ const lancamentosMenuItems = [
   { id: 'requisicoes', label: 'Requisições', icon: Archive, roles: ['admin', 'finance', 'controle', 'manager'] },
   { id: 'notas', label: 'Notas de Serviço', icon: Receipt, roles: ['admin', 'finance', 'controle', 'manager'] },
   { id: 'danfe', label: 'DANFE', icon: FileText, roles: ['admin', 'finance', 'controle', 'manager'] },
+  { id: 'mensalidades', label: 'Mensalidades', icon: CalendarClock, roles: ['admin', 'finance', 'controle', 'manager', 'diretoria'] },
 ];
 
 const menuItems = [
-  { id: 'dashboard', label: 'Dashboard Geral', icon: LayoutDashboard, roles: ['admin', 'controle', 'manager', 'viewer'] },
+  { id: 'dashboard', label: 'Dashboard Geral', icon: LayoutDashboard, roles: ['admin', 'controle', 'manager', 'viewer', 'diretoria'] },
   { id: 'analise', label: 'Análise Financeira', icon: BarChart3, roles: ['admin', 'controle', 'manager'] },
-  { id: 'dre', label: 'DRE Gerencial', icon: FileSpreadsheet, roles: ['admin', 'controle'] },
+  { id: 'dre', label: 'DRE Gerencial', icon: FileSpreadsheet, roles: ['admin', 'controle', 'diretoria'] },
   { id: 'planejamento', label: 'Planejamento', icon: Target, roles: ['admin', 'controle', 'manager'] },
   { id: 'importacao', label: 'Importação', icon: PlusCircle, roles: ['admin', 'controle'] },
   { id: 'cadastros', label: 'Cadastros', icon: Database, roles: ['admin', 'controle'] },
   { id: 'prev-real', label: 'Prev x Real Diario', icon: BarChart3, roles: ['admin', 'controle', 'manager'] },
-  { id: 'indicadores', label: 'Indicadores (Números)', icon: TrendingUp, roles: ['admin', 'controle', 'manager'] },
+  { id: 'indicadores', label: 'Indicadores (Números)', icon: TrendingUp, roles: ['admin', 'controle', 'manager', 'diretoria'] },
+  { id: 'investimentos', label: 'Investimentos', icon: Landmark, roles: ['admin', 'controle', 'manager', 'finance', 'diretoria'] },
   { id: 'usuarios', label: 'Usuários', icon: Users, roles: ['admin'] },
   { id: 'configuracoes', label: 'Configurações', icon: Settings, roles: ['admin'] },
 ];

@@ -33,7 +33,12 @@ export const CadastrosPage: React.FC = () => {
   const [newColaboradorForm, setNewColaboradorForm] = useState({
     nome: '',
     funcao_id: '',
+    sector_id: '',
   });
+  const [newSectorForm, setNewSectorForm] = useState({ name: '', budget_limit: '' });
+  const [editingSectorId, setEditingSectorId] = useState<number | null>(null);
+  const [editSectorForm, setEditSectorForm] = useState({ name: '', budget_limit: '' });
+  const [savingSector, setSavingSector] = useState(false);
   const [newName, setNewName] = useState('');
   const [newKey, setNewKey] = useState('');
   const [newCrdForm, setNewCrdForm] = useState({
@@ -144,6 +149,16 @@ export const CadastrosPage: React.FC = () => {
           keywords: `${c.name} ${c.sector_name || ''}`,
         })),
     [cargos]
+  );
+
+  const sectorOptions = useMemo(
+    () =>
+      sectors.map((s: any) => ({
+        value: String(s.id),
+        label: String(s.name || ''),
+        keywords: String(s.name || ''),
+      })),
+    [sectors]
   );
   const filteredRequisitions = useMemo(
     () =>
@@ -393,6 +408,108 @@ export const CadastrosPage: React.FC = () => {
     refreshCargos();
   };
 
+  const createSector = async () => {
+    const name = newSectorForm.name.trim();
+    if (!name) {
+      alert('Informe o nome do setor / centro de custo.');
+      return;
+    }
+    setSavingSector(true);
+    try {
+      const res = await fetch('/api/sectors', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name,
+          budget_limit: Number(newSectorForm.budget_limit) || 0,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        alert(data.error || 'Erro ao cadastrar setor.');
+        return;
+      }
+      setNewSectorForm({ name: '', budget_limit: '' });
+      await refreshSectors();
+      if (data?.id) {
+        setNewCargoForm((p) => ({ ...p, sector_id: String(data.id) }));
+        setNewColaboradorForm((p) => ({ ...p, sector_id: String(data.id) }));
+      }
+    } finally {
+      setSavingSector(false);
+    }
+  };
+
+  const startEditSector = (sector: any) => {
+    setEditingSectorId(Number(sector.id));
+    setEditSectorForm({
+      name: String(sector.name || ''),
+      budget_limit: String(sector.budget_limit ?? ''),
+    });
+  };
+
+  const cancelEditSector = () => {
+    setEditingSectorId(null);
+    setEditSectorForm({ name: '', budget_limit: '' });
+  };
+
+  const saveSector = async (sector: any) => {
+    const name = editSectorForm.name.trim();
+    if (!name) {
+      alert('Informe o nome do setor / centro de custo.');
+      return;
+    }
+    setSavingSector(true);
+    try {
+      const res = await fetch(`/api/sectors/${sector.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name,
+          budget_limit: Number(editSectorForm.budget_limit) || 0,
+          previous_name: sector.name,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        alert(data.error || 'Erro ao atualizar setor.');
+        return;
+      }
+      cancelEditSector();
+      refreshSectors();
+      refreshCargos();
+      refreshColaboradores();
+    } finally {
+      setSavingSector(false);
+    }
+  };
+
+  const deleteSector = async (sector: any) => {
+    if (!window.confirm(`Excluir o setor "${sector.name}"?`)) return;
+    const res = await fetch(`/api/sectors/${sector.id}`, { method: 'DELETE' });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      alert(data.error || 'Erro ao excluir setor.');
+      return;
+    }
+    refreshSectors();
+    refreshCargos();
+  };
+
+  const setColaboradorSector = async (colaborador: any, sectorId: string) => {
+    const res = await fetch(`/api/colaboradores/${colaborador.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sector_id: sectorId || null }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      alert(data.error || 'Erro ao atualizar setor / ccusto.');
+      return;
+    }
+    refreshColaboradores();
+  };
+
   const toggleCargoActive = async (cargo: any) => {
     const res = await fetch(`/api/cargos/${cargo.id}`, {
       method: 'PATCH',
@@ -430,6 +547,7 @@ export const CadastrosPage: React.FC = () => {
       body: JSON.stringify({
         nome,
         funcao_id: newColaboradorForm.funcao_id ? Number(newColaboradorForm.funcao_id) : null,
+        sector_id: newColaboradorForm.sector_id ? Number(newColaboradorForm.sector_id) : null,
       }),
     });
     const data = await res.json().catch(() => ({}));
@@ -437,7 +555,7 @@ export const CadastrosPage: React.FC = () => {
       alert(data.error || 'Erro ao cadastrar colaborador.');
       return;
     }
-    setNewColaboradorForm({ nome: '', funcao_id: '' });
+    setNewColaboradorForm({ nome: '', funcao_id: '', sector_id: '' });
     refreshColaboradores();
   };
 
@@ -822,9 +940,38 @@ export const CadastrosPage: React.FC = () => {
       {activeTab === 'setores' && (
         <div className="space-y-4">
           <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-            <div className="px-4 py-3 border-b border-slate-50">
-              <h3 className="text-sm font-bold text-slate-800">Setores / Centros de Custo</h3>
-              <p className="text-xs text-slate-500">Estrutura organizacional usada no orçamento e na atribuição de funções.</p>
+            <div className="p-4 border-b border-slate-50 flex flex-wrap items-end justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-bold text-slate-800">Setores / Centros de Custo</h3>
+                <p className="text-xs text-slate-500">
+                  Cadastre e edite a estrutura organizacional usada no orçamento, funções e colaboradores.
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <input
+                  value={newSectorForm.name}
+                  onChange={(e) => setNewSectorForm((p) => ({ ...p, name: e.target.value }))}
+                  placeholder="Nome do setor / ccusto"
+                  className="w-56 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+                />
+                <input
+                  type="number"
+                  step="0.01"
+                  value={newSectorForm.budget_limit}
+                  onChange={(e) => setNewSectorForm((p) => ({ ...p, budget_limit: e.target.value }))}
+                  placeholder="Limite orçamento"
+                  className="w-40 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+                />
+                <button
+                  type="button"
+                  onClick={createSector}
+                  disabled={savingSector}
+                  className="inline-flex items-center gap-2 px-4 py-2 bg-[#004D40] text-white font-bold rounded-xl hover:bg-[#003d33] transition-colors disabled:opacity-60"
+                >
+                  <Plus className="w-4 h-4" />
+                  Cadastrar setor
+                </button>
+              </div>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse">
@@ -833,34 +980,96 @@ export const CadastrosPage: React.FC = () => {
                     <th className="px-6 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Nome</th>
                     <th className="px-6 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Limite de Orçamento</th>
                     <th className="px-6 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-right">Cargos</th>
+                    <th className="px-6 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-right">Ações</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50">
                   {filteredSectors.length === 0 && (
                     <tr>
-                      <td colSpan={3} className="px-6 py-8 text-center text-sm text-slate-400">
+                      <td colSpan={4} className="px-6 py-8 text-center text-sm text-slate-400">
                         Nenhum setor cadastrado.
                       </td>
                     </tr>
                   )}
-                  {filteredSectors.map((sector) => (
-                    <tr key={sector.id} className="hover:bg-slate-50/50 transition-colors">
-                      <td className="px-6 py-3">
-                        <span className="text-sm font-medium text-slate-700">{sector.name}</span>
-                      </td>
-                      <td className="px-6 py-3">
-                        <ValueTrace
-                          className="text-sm font-bold text-slate-900"
-                          displayValue={formatCurrency(sector.budget_limit)}
-                          source={`Setor ${sector.name}`}
-                          calculation="Campo budget_limit na tabela sectors"
-                        />
-                      </td>
-                      <td className="px-6 py-3 text-right text-xs text-slate-500">
-                        {cargos.filter((c) => Number(c.sector_id) === Number(sector.id) && c.active).length} ativos
-                      </td>
-                    </tr>
-                  ))}
+                  {filteredSectors.map((sector) => {
+                    const isEditing = editingSectorId === Number(sector.id);
+                    return (
+                      <tr key={sector.id} className="hover:bg-slate-50/50 transition-colors group">
+                        <td className="px-6 py-3">
+                          {isEditing ? (
+                            <input
+                              value={editSectorForm.name}
+                              onChange={(e) => setEditSectorForm((p) => ({ ...p, name: e.target.value }))}
+                              className="w-full max-w-xs px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+                            />
+                          ) : (
+                            <span className="text-sm font-medium text-slate-700">{sector.name}</span>
+                          )}
+                        </td>
+                        <td className="px-6 py-3">
+                          {isEditing ? (
+                            <input
+                              type="number"
+                              step="0.01"
+                              value={editSectorForm.budget_limit}
+                              onChange={(e) => setEditSectorForm((p) => ({ ...p, budget_limit: e.target.value }))}
+                              className="w-40 px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+                            />
+                          ) : (
+                            <ValueTrace
+                              className="text-sm font-bold text-slate-900"
+                              displayValue={formatCurrency(sector.budget_limit)}
+                              source={`Setor ${sector.name}`}
+                              calculation="Campo budget_limit na tabela sectors"
+                            />
+                          )}
+                        </td>
+                        <td className="px-6 py-3 text-right text-xs text-slate-500">
+                          {cargos.filter((c) => Number(c.sector_id) === Number(sector.id) && c.active).length} ativos
+                        </td>
+                        <td className="px-6 py-3 text-right">
+                          {isEditing ? (
+                            <div className="inline-flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => saveSector(sector)}
+                                disabled={savingSector}
+                                className="px-3 py-1.5 text-xs font-bold text-white bg-[#004D40] rounded-lg disabled:opacity-60"
+                              >
+                                Salvar
+                              </button>
+                              <button
+                                type="button"
+                                onClick={cancelEditSector}
+                                className="px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-lg"
+                              >
+                                Cancelar
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="inline-flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                              <button
+                                type="button"
+                                onClick={() => startEditSector(sector)}
+                                className="p-2 text-slate-400 hover:text-[#004D40] hover:bg-emerald-50 rounded-lg"
+                                title="Editar setor"
+                              >
+                                <Edit2 className="w-4 h-4" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => deleteSector(sector)}
+                                className="p-2 text-red-400 hover:bg-red-50 rounded-lg"
+                                title="Excluir setor"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -971,7 +1180,7 @@ export const CadastrosPage: React.FC = () => {
                 Colaboradores
               </h3>
               <p className="text-xs text-slate-500">
-                Vincule funções (cargos) ao colaborador. A função principal define automaticamente o setor / centro de custo.
+                Vincule funções e o setor / centro de custo. A função principal pode sugerir o setor; você também pode cadastrar e alterar o setor diretamente.
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
@@ -981,21 +1190,34 @@ export const CadastrosPage: React.FC = () => {
                 placeholder="Nome"
                 className="w-56 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
               />
-              <div className="w-72">
+              <div className="w-64">
                 <SearchableSelect
                   value={newColaboradorForm.funcao_id}
-                  onChange={(value) => setNewColaboradorForm((p) => ({ ...p, funcao_id: value }))}
+                  onChange={(value) => {
+                    const cargo = cargos.find((c) => String(c.id) === value);
+                    setNewColaboradorForm((p) => ({
+                      ...p,
+                      funcao_id: value,
+                      sector_id:
+                        cargo?.sector_id != null
+                          ? String(cargo.sector_id)
+                          : p.sector_id,
+                    }));
+                  }}
                   options={funcaoOptions}
-                  placeholder="Função (define o setor)"
+                  placeholder="Função (opcional)"
                   emptyMessage="Cadastre funções na aba Setores"
                 />
               </div>
-              <span className="text-xs text-slate-400 min-w-[8rem]">
-                {(() => {
-                  const cargo = cargos.find((c) => String(c.id) === newColaboradorForm.funcao_id);
-                  return cargo?.sector_name ? `Setor: ${cargo.sector_name}` : 'Setor: —';
-                })()}
-              </span>
+              <div className="w-56">
+                <SearchableSelect
+                  value={newColaboradorForm.sector_id}
+                  onChange={(value) => setNewColaboradorForm((p) => ({ ...p, sector_id: value }))}
+                  options={sectorOptions}
+                  placeholder="Setor / Ccusto"
+                  emptyMessage="Cadastre setores na aba Setores"
+                />
+              </div>
               <button
                 onClick={createColaborador}
                 className="inline-flex items-center gap-2 px-4 py-2 bg-[#004D40] text-white font-bold rounded-xl hover:bg-[#003d33] transition-colors"
@@ -1027,11 +1249,22 @@ export const CadastrosPage: React.FC = () => {
                 {filteredColaboradores.map((colaborador) => {
                   const funcoes = Array.isArray(colaborador.funcoes) ? colaborador.funcoes : [];
                   const primaryId = colaborador.funcao_id != null ? String(colaborador.funcao_id) : '';
-                  const sectorLabel =
+                  const sectorLabel = String(
                     colaborador.sector_name ||
-                    colaborador.ccusto_descricao ||
-                    funcoes.find((f: any) => f.is_primary)?.sector_name ||
-                    '—';
+                      colaborador.ccusto_descricao ||
+                      funcoes.find((f: any) => f.is_primary)?.sector_name ||
+                      ''
+                  ).trim();
+                  const matchedSector = sectors.find(
+                    (s: any) =>
+                      String(s.name || '').trim().toLowerCase() === sectorLabel.toLowerCase()
+                  );
+                  const sectorValue =
+                    matchedSector != null
+                      ? String(matchedSector.id)
+                      : colaborador.sector_id != null
+                        ? String(colaborador.sector_id)
+                        : '';
                   return (
                   <tr key={colaborador.id} className="hover:bg-slate-50/50 transition-colors group">
                     <td className="px-6 py-3 text-sm font-medium text-slate-800">{colaborador.nome}</td>
@@ -1096,7 +1329,15 @@ export const CadastrosPage: React.FC = () => {
                         )}
                       </div>
                     </td>
-                    <td className="px-6 py-3 text-sm text-slate-600">{sectorLabel}</td>
+                    <td className="px-6 py-3 min-w-[200px]">
+                      <SearchableSelect
+                        value={sectorValue}
+                        onChange={(value) => setColaboradorSector(colaborador, value)}
+                        options={sectorOptions}
+                        placeholder="Selecionar setor / ccusto"
+                        emptyMessage="Cadastre setores na aba Setores"
+                      />
+                    </td>
                     <td className="px-6 py-3">
                       <span
                         className={cn(
