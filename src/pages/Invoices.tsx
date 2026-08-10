@@ -609,6 +609,7 @@ export const Invoices: React.FC = () => {
       perfilLabel = userRole === 'manager' ? 'Gestor' : 'Solicitante';
     }
 
+    
     return {
       perfilLabel,
       pendentesParaVoce,
