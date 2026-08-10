@@ -61,6 +61,28 @@ const RESULTADO_FOOTER_IDS = [
 
 const LIQUIDO_LABEL = '(=) Resultado Líquido';
 
+// Natureza por seção de topo do DRE. Linhas de despesa "estouram" quando o
+// realizado ultrapassa o previsto (real > prev). Receitas/resultados são o
+// contrário (quanto maior, melhor). Filhas herdam a natureza do grupo de topo.
+const DESPESA_SECTIONS = new Set<string>([
+  'l71-impostos-s-faturamento',
+  'l79-cmv',
+  'l83-despesas-totais',
+  'l311-impostos-s-resultado',
+  'l319-obras-e-investimentos',
+]);
+type DreKind = 'despesa' | 'receita';
+const kindOfTop = (id: string): DreKind => (DESPESA_SECTIONS.has(id) ? 'despesa' : 'receita');
+// Classe de cor da Diferença conforme a natureza (vermelho = desfavorável).
+const difClass = (kind: DreKind, dif: number | null): string => {
+  if (dif == null || dif === 0) return dif === 0 ? 'text-slate-500' : 'text-slate-400';
+  const bad = kind === 'despesa' ? dif > 0 : dif < 0;
+  return bad ? 'text-red-600' : 'text-emerald-600';
+};
+// Estouro = linha de despesa cujo realizado ultrapassa o previsto.
+const isEstouro = (kind: DreKind, cell: MonthCell): boolean =>
+  kind === 'despesa' && cell.real != null && cell.prev != null && cell.real > cell.prev;
+
 /** Mapeamentos RDS → linhas do DRE (mesma regra do backend /api/dre/realizado-rds). */
 const DRE_RDS_MAPPINGS = [
   {
@@ -176,10 +198,11 @@ export const DREPage: React.FC = () => {
   const [editingCell, setEditingCell] = useState<EditingCell | null>(null);
   const [editingValue, setEditingValue] = useState('');
   const [savingCell, setSavingCell] = useState(false);
-  /** Índices 0–11 dos meses visíveis. Vazio = todos. */
+  /** Índices 0–11 dos meses visíveis. Vazio = todos. Multi-seleção = período acumulado. */
   const [selectedMonths, setSelectedMonths] = useState<number[]>(() =>
     Array.from({ length: 12 }, (_, i) => i)
   );
+  const [lastClicked, setLastClicked] = useState<number | null>(null);
   // Análises AV/AH (opcionais, como na versão anterior do DRE); preferência fica salva no navegador.
   const [showAV, setShowAV] = useState(() => {
     try { return localStorage.getItem('dre:show_av') === '1'; } catch { return false; }
@@ -209,12 +232,20 @@ export const DREPage: React.FC = () => {
 
   const allMonthsSelected = visibleMonths.length === 12;
 
-  /** Clique: mostra apenas o mês selecionado. Use "Mostrar todos" para voltar. */
-  const selectMonth = (monthIndex: number) => {
-    setSelectedMonths([monthIndex]);
+  /** Clique: alterna o mês (acumula). Shift+clique: seleciona a faixa até o último clicado. */
+  const clickMonth = (monthIndex: number, shift: boolean) => {
+    if (shift && lastClicked != null) {
+      const [a, b] = [Math.min(lastClicked, monthIndex), Math.max(lastClicked, monthIndex)];
+      setSelectedMonths(Array.from({ length: b - a + 1 }, (_, k) => a + k));
+    } else {
+      setSelectedMonths((prev) =>
+        prev.includes(monthIndex) ? prev.filter((x) => x !== monthIndex) : [...prev, monthIndex].sort((x, y) => x - y)
+      );
+    }
+    setLastClicked(monthIndex);
   };
 
-  const selectAllMonths = () => setSelectedMonths(Array.from({ length: 12 }, (_, i) => i));
+  const selectAllMonths = () => { setSelectedMonths(Array.from({ length: 12 }, (_, i) => i)); setLastClicked(null); };
 
   const loadEdits = async () => {
     try {
@@ -663,10 +694,11 @@ export const DREPage: React.FC = () => {
     );
   };
 
-  const renderRow = (row: DRERow): React.ReactNode => {
+  const renderRow = (row: DRERow, kind: DreKind = 'receita'): React.ReactNode => {
     const hasChildren = Boolean(row.children?.length);
     const isExpanded = expanded[row.id];
     const total = totalOf(row);
+    const rowEstouro = isEstouro(kind, total); // despesa estourada no período
 
     return (
       <React.Fragment key={row.id}>
@@ -674,10 +706,14 @@ export const DREPage: React.FC = () => {
           className={cn(
             'transition-colors',
             row.isTotal ? 'bg-slate-100/80 font-bold' : 'hover:bg-slate-50',
-            row.isHeader ? 'font-semibold text-slate-800' : 'text-slate-600'
+            row.isHeader ? 'font-semibold text-slate-800' : 'text-slate-600',
+            rowEstouro && !row.isTotal && 'bg-red-50/70'
           )}
         >
-          <td className="sticky left-0 z-20 bg-white border-r border-slate-200 min-w-[320px] max-w-[320px] px-4 py-2.5">
+          <td className={cn(
+            'sticky left-0 z-20 border-r border-slate-200 px-4 py-2.5 min-w-[320px] max-w-[320px]',
+            rowEstouro ? 'bg-red-50 border-l-2 border-l-red-400' : 'bg-white'
+          )}>
             <div className="flex items-center gap-2" style={{ paddingLeft: `${row.level * 16}px` }}>
               {hasChildren ? (
                 <button onClick={() => toggleExpand(row.id)} className="rounded p-0.5 hover:bg-slate-100">
@@ -715,12 +751,9 @@ export const DREPage: React.FC = () => {
                 <td className="min-w-[120px] px-2 py-1.5 text-right">
                   {renderEditableCell(row, monthIndex, 'real')}
                 </td>
-                <td className={cn('min-w-[120px] px-3 py-1.5 text-right', !showAV && !showAH && 'border-r border-slate-200')}>
+                <td className={cn('min-w-[120px] px-3 py-1.5 text-right', isEstouro(kind, cell) && 'bg-red-50', !showAV && !showAH && 'border-r border-slate-200')}>
                   <ValueTrace
-                    className={cn(
-                      'text-xs tabular-nums font-semibold',
-                      cell.dif == null ? 'text-slate-400' : cell.dif < 0 ? 'text-red-600' : cell.dif > 0 ? 'text-emerald-600' : 'text-slate-500'
-                    )}
+                    className={cn('text-xs tabular-nums font-semibold', difClass(kind, cell.dif))}
                     displayValue={cell.dif == null ? '—' : formatCurrency(cell.dif)}
                     meta={valueTrace.dre.diferenca(row.label, mes)}
                   />
@@ -777,12 +810,9 @@ export const DREPage: React.FC = () => {
               meta={valueTrace.dre.total(row.label, 'Realizado')}
             />
           </td>
-          <td className={cn('min-w-[120px] px-3 py-1.5 text-right bg-slate-50/60', !showAV && !showAH && 'border-r border-slate-200')}>
+          <td className={cn('min-w-[120px] px-3 py-1.5 text-right', rowEstouro ? 'bg-red-50' : 'bg-slate-50/60', !showAV && !showAH && 'border-r border-slate-200')}>
             <ValueTrace
-              className={cn(
-                'text-xs tabular-nums font-semibold',
-                total.dif == null ? 'text-slate-400' : total.dif < 0 ? 'text-red-600' : total.dif > 0 ? 'text-emerald-600' : 'text-slate-500'
-              )}
+              className={cn('text-xs tabular-nums font-semibold', difClass(kind, total.dif))}
               displayValue={total.dif == null ? '—' : formatCurrency(total.dif)}
               meta={valueTrace.dre.total(row.label, 'Diferença')}
             />
@@ -822,7 +852,7 @@ export const DREPage: React.FC = () => {
             );
           })()}
         </tr>
-        {hasChildren && isExpanded && row.children?.map((child) => renderRow(child))}
+        {hasChildren && isExpanded && row.children?.map((child) => renderRow(child, kind))}
       </React.Fragment>
     );
   };
@@ -900,8 +930,8 @@ export const DREPage: React.FC = () => {
               <button
                 key={mes}
                 type="button"
-                onClick={() => selectMonth(monthIndex)}
-                title="Clique para ver só este mês · Use Mostrar todos para voltar"
+                onClick={(e) => clickMonth(monthIndex, e.shiftKey)}
+                title="Clique para incluir/excluir · Shift+clique para faixa (ex.: Jan→Abr) · Mostrar todos para o ano"
                 className={cn(
                   'px-2.5 py-1.5 rounded-lg text-xs font-bold transition-colors border',
                   active
@@ -956,7 +986,7 @@ export const DREPage: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {filteredDreRows.map((row) => renderRow(row))}
+              {filteredDreRows.map((row) => renderRow(row, kindOfTop(row.id)))}
               {showResultadoLiquido && (() => {
                 const total = resultadoLiquidoTotal();
                 // Resultado Líquido é linha de resultado: AV = ÷ Receita Bruta; AH = |Dif| ÷ |Previsto|.

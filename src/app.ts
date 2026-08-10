@@ -7943,6 +7943,7 @@ export function createApp() {
       margem_ebitda: faturamento > 0 ? ebitda / faturamento : 0,
       resultado_antes_impostos,
       resultado_liquido,
+      rl_sobre_faturamento: faturamento > 0 ? resultado_liquido / faturamento : 0,
       repasses: n(inp.map_repasse) + n(inp.cafe_repasse),
     };
   };
@@ -8094,6 +8095,30 @@ export function createApp() {
       return res.status(500).json({ error: "Não foi possível salvar o parâmetro." });
     }
     res.json({ success: true, year: Number(year), uhs: uhsNum });
+  });
+
+  // GET /api/indicadores/comparativo?anos=2024,2025,2026 -> total anual por ano (realizado e meta)
+  app.get("/api/indicadores/comparativo", async (req, res) => {
+    const anos = String((req.query as any).anos || "")
+      .split(",")
+      .map((s) => Number(s.trim()))
+      .filter((y) => Number.isFinite(y) && y > 2000 && y < 2100);
+    if (!anos.length) return res.status(400).json({ error: "Informe ?anos=YYYY,YYYY" });
+    const realizado: Record<string, any> = {};
+    const meta: Record<string, any> = {};
+    const uhsByYear: Record<string, number> = {};
+    for (const y of anos) {
+      const { data, error } = await supabase.from("indicadores_mensais").select("*").eq("year", y);
+      if (error) {
+        console.error("Erro no comparativo de indicadores:", error);
+        return res.status(500).json({ error: "Erro ao carregar comparativo." });
+      }
+      const uhs = await getIndicadorUhs(y);
+      uhsByYear[y] = uhs;
+      realizado[y] = buildIndicadorEscopo(data ?? [], "realizado", y, uhs).total;
+      meta[y] = buildIndicadorEscopo(data ?? [], "meta", y, uhs).total;
+    }
+    res.json({ anos, uhs: uhsByYear, realizado, meta });
   });
 
   app.get("/api/orcamento", async (req, res) => {

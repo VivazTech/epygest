@@ -5,7 +5,8 @@ import { cn, formatCurrency } from '../lib/utils';
 // ---------------------------------------------------------------------------
 // Indicadores Gerenciais (Números Vivaz) — Realizado x Metas por (ano, mês)
 // Layout espelhado no DRE Gerencial: tabela larga (w-full) com 1ª coluna e
-// cabeçalho fixos, e filtro de meses (clique num mês mostra só ele).
+// cabeçalho fixos, filtro de meses com período acumulado (multi-seleção) e
+// destaque de estouro. Inclui aba de Comparativo Anual.
 // Modelo "inputs + cálculo no sistema": guardamos os inputs; o backend calcula
 // ocupação, diária média, RevPAR, faturamento, EBITDA, resultado etc.
 // ---------------------------------------------------------------------------
@@ -13,7 +14,7 @@ import { cn, formatCurrency } from '../lib/utils';
 const MESES = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
 
 type Escopo = 'realizado' | 'meta';
-type ViewMode = 'comparativo' | 'realizado' | 'meta';
+type ViewMode = 'comparativo' | 'anual' | 'realizado' | 'meta';
 
 type MonthData = {
   month: number;
@@ -36,19 +37,22 @@ type Fmt = 'money' | 'pct' | 'int';
 const fmtVal = (fmt: Fmt, v: number) => (fmt === 'money' ? formatCurrency(v || 0) : fmt === 'pct' ? fmtPct(v || 0) : fmtInt(v || 0));
 
 // Indicadores exibidos no comparativo (Previsto x Realizado)
-const KEY_INDICATORS: { key: string; label: string; fmt: Fmt; src?: 'input' }[] = [
-  { key: 'rn', label: 'RN (Room-nights)', fmt: 'int', src: 'input' },
-  { key: 'ocupacao', label: 'Ocupação', fmt: 'pct' },
-  { key: 'diaria_media', label: 'Diária Média', fmt: 'money' },
-  { key: 'revpar', label: 'RevPAR', fmt: 'money' },
-  { key: 'receita_hospedagem', label: 'Receita Hospedagem', fmt: 'money', src: 'input' },
-  { key: 'total_pdvs', label: 'Receita A&B', fmt: 'money' },
-  { key: 'total_outras', label: 'Outras Receitas', fmt: 'money' },
-  { key: 'faturamento', label: 'Faturamento', fmt: 'money' },
-  { key: 'despesas_op', label: 'Despesas Operac.', fmt: 'money' },
-  { key: 'ebitda', label: 'EBITDA', fmt: 'money' },
-  { key: 'margem_ebitda', label: 'Margem EBITDA', fmt: 'pct' },
-  { key: 'resultado_liquido', label: 'Resultado Líquido', fmt: 'money' },
+// dir: 'up' = quanto maior melhor (receita/resultado) · 'down' = quanto menor melhor (despesa → estoura se real > prev)
+type Indicator = { key: string; label: string; fmt: Fmt; src?: 'input'; dir: 'up' | 'down' };
+const KEY_INDICATORS: Indicator[] = [
+  { key: 'rn', label: 'RN (Room-nights)', fmt: 'int', src: 'input', dir: 'up' },
+  { key: 'ocupacao', label: 'Ocupação', fmt: 'pct', dir: 'up' },
+  { key: 'diaria_media', label: 'Diária Média', fmt: 'money', dir: 'up' },
+  { key: 'revpar', label: 'RevPAR', fmt: 'money', dir: 'up' },
+  { key: 'receita_hospedagem', label: 'Receita Hospedagem', fmt: 'money', src: 'input', dir: 'up' },
+  { key: 'total_pdvs', label: 'Receita A&B', fmt: 'money', dir: 'up' },
+  { key: 'total_outras', label: 'Outras Receitas', fmt: 'money', dir: 'up' },
+  { key: 'faturamento', label: 'Faturamento', fmt: 'money', dir: 'up' },
+  { key: 'despesas_op', label: 'Despesas Operac.', fmt: 'money', dir: 'down' },
+  { key: 'ebitda', label: 'EBITDA', fmt: 'money', dir: 'up' },
+  { key: 'margem_ebitda', label: 'Margem EBITDA', fmt: 'pct', dir: 'up' },
+  { key: 'resultado_liquido', label: 'Resultado Líquido', fmt: 'money', dir: 'up' },
+  { key: 'rl_sobre_faturamento', label: 'Result. Líq. ÷ Faturamento', fmt: 'pct', dir: 'up' },
 ];
 
 // Campos de entrada editáveis, agrupados
@@ -74,7 +78,7 @@ const readVal = (m: MonthData | undefined, key: string, src?: 'input') => {
 };
 
 // Agrega uma lista de meses num "mês sintético" com os indicadores corretos.
-// Aditivos são somados; razões (ocupação, diária média, RevPAR, margem) são
+// Aditivos são somados; razões (ocupação, diária média, RevPAR, margens) são
 // recalculadas a partir dos componentes somados.
 const aggregate = (months: MonthData[]): MonthData => {
   const sum = (f: (m: MonthData) => number) => months.reduce((s, m) => s + f(m), 0);
@@ -83,6 +87,7 @@ const aggregate = (months: MonthData[]): MonthData => {
   const receita = sum((m) => readVal(m, 'receita_hospedagem', 'input'));
   const faturamento = sum((m) => Number(m.faturamento) || 0);
   const ebitda = sum((m) => Number(m.ebitda) || 0);
+  const resultado_liquido = sum((m) => Number(m.resultado_liquido) || 0);
   return {
     month: 0,
     inputs: { rn, receita_hospedagem: receita },
@@ -96,8 +101,24 @@ const aggregate = (months: MonthData[]): MonthData => {
     despesas_op: sum((m) => Number(m.despesas_op) || 0),
     ebitda,
     margem_ebitda: faturamento > 0 ? ebitda / faturamento : 0,
-    resultado_liquido: sum((m) => Number(m.resultado_liquido) || 0),
+    resultado_liquido,
+    rl_sobre_faturamento: faturamento > 0 ? resultado_liquido / faturamento : 0,
   };
+};
+
+// Favorabilidade da diferença (Realizado − Previsto) conforme a direção do indicador.
+const favor = (dir: 'up' | 'down', dif: number): 'good' | 'bad' | 'zero' => {
+  if (!dif) return 'zero';
+  const good = dir === 'up' ? dif > 0 : dif < 0;
+  return good ? 'good' : 'bad';
+};
+const favorClass = (f: 'good' | 'bad' | 'zero') =>
+  f === 'bad' ? 'text-red-600' : f === 'good' ? 'text-emerald-600' : 'text-slate-400';
+
+type ComparativoAnual = {
+  anos: number[];
+  realizado: Record<string, MonthData>;
+  meta: Record<string, MonthData>;
 };
 
 export const IndicadoresPage: React.FC = () => {
@@ -110,12 +131,19 @@ export const IndicadoresPage: React.FC = () => {
   const [userRole, setUserRole] = useState<string>('viewer');
   const [uhsDraft, setUhsDraft] = useState<string>('172');
 
-  // Filtro de meses (índices 0–11). Vazio = todos.
+  // Filtro de meses (índices 0–11). Vazio = todos. Multi-seleção = período acumulado.
   const [selectedMonths, setSelectedMonths] = useState<number[]>(() => Array.from({ length: 12 }, (_, i) => i));
+  const [lastClicked, setLastClicked] = useState<number | null>(null);
 
   // edição de células (edit grid)
   const [edits, setEdits] = useState<Record<string, string>>({});
   const [savingKey, setSavingKey] = useState<string | null>(null);
+
+  // comparativo anual
+  const [compAnos, setCompAnos] = useState<number[]>([]);
+  const [compBase, setCompBase] = useState<Escopo>('realizado');
+  const [comp, setComp] = useState<ComparativoAnual | null>(null);
+  const [compLoading, setCompLoading] = useState(false);
 
   const canEdit = userRole === 'admin' || userRole === 'controle' || userRole === 'finance';
 
@@ -125,8 +153,17 @@ export const IndicadoresPage: React.FC = () => {
     return months.length ? months : MESES.map((_, i) => i);
   }, [selectedMonths]);
   const allMonthsSelected = visibleMonths.length === 12;
-  const selectMonth = (monthIndex: number) => setSelectedMonths([monthIndex]);
-  const selectAllMonths = () => setSelectedMonths(Array.from({ length: 12 }, (_, i) => i));
+  const selectAllMonths = () => { setSelectedMonths(Array.from({ length: 12 }, (_, i) => i)); setLastClicked(null); };
+  // Clique: alterna o mês (acumula). Shift+clique: seleciona a faixa até o último clicado.
+  const clickMonth = (i: number, shift: boolean) => {
+    if (shift && lastClicked != null) {
+      const [a, b] = [Math.min(lastClicked, i), Math.max(lastClicked, i)];
+      setSelectedMonths(Array.from({ length: b - a + 1 }, (_, k) => a + k));
+    } else {
+      setSelectedMonths((prev) => (prev.includes(i) ? prev.filter((x) => x !== i) : [...prev, i].sort((x, y) => x - y)));
+    }
+    setLastClicked(i);
+  };
 
   const loadYears = async () => {
     try {
@@ -135,6 +172,7 @@ export const IndicadoresPage: React.FC = () => {
       const merged = Array.from(new Set([...ys, currentYear])).sort((a, b) => a - b);
       setYears(merged);
       if (!merged.includes(year) && merged.length) setYear(merged[merged.length - 1]);
+      if (!compAnos.length) setCompAnos(merged.slice(-3)); // default: últimos 3 anos
     } catch { /* ignore */ }
   };
 
@@ -152,6 +190,19 @@ export const IndicadoresPage: React.FC = () => {
     }
   };
 
+  const loadComparativo = async (anos = compAnos) => {
+    if (!anos.length) { setComp(null); return; }
+    setCompLoading(true);
+    try {
+      const res = await fetch(`/api/indicadores/comparativo?anos=${anos.join(',')}`);
+      const json = await res.json();
+      if (!res.ok) { alert(json.error || 'Erro ao carregar comparativo.'); return; }
+      setComp(json);
+    } finally {
+      setCompLoading(false);
+    }
+  };
+
   useEffect(() => {
     try {
       const raw = localStorage.getItem('user');
@@ -162,9 +213,21 @@ export const IndicadoresPage: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Carrega comparativo quando entrar na aba ou mudar a seleção de anos.
+  useEffect(() => {
+    if (view === 'anual' && compAnos.length) loadComparativo(compAnos);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, compAnos]);
+
   const escopoData = (esc: Escopo): EscopoData | undefined => (esc === 'realizado' ? data?.realizado : data?.meta);
 
-  // ---- Comparativo ----
+  // Ano tem metas? (para sinalizar "sem meta" — ex.: 2018)
+  const hasMeta = useMemo(
+    () => !!data && data.meta.months.some((m) => (Number(m.inputs?.rn) || 0) !== 0 || (Number(m.faturamento) || 0) !== 0),
+    [data]
+  );
+
+  // ---- Comparativo Prev x Real ----
   const comparativoRows = useMemo(() => {
     if (!data) return [];
     const totalReal = aggregate(visibleMonths.map((i) => data.realizado.months[i]));
@@ -229,7 +292,7 @@ export const IndicadoresPage: React.FC = () => {
     await loadData(y);
   };
 
-  // ---- Card de filtro de meses (igual ao DRE) ----
+  // ---- Card de filtro de meses (período acumulado) ----
   const renderMonthFilter = () => (
     <div className="rounded-2xl border border-slate-200 bg-white shadow-sm px-4 py-3 space-y-2">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -237,7 +300,7 @@ export const IndicadoresPage: React.FC = () => {
           Filtrar meses
           {!allMonthsSelected && (
             <span className="ml-2 normal-case tracking-normal text-slate-500 font-semibold">
-              · {visibleMonths.length} selecionado{visibleMonths.length === 1 ? '' : 's'}
+              · período: {visibleMonths.map((i) => MESES[i].slice(0, 3)).join(', ')}
             </span>
           )}
         </p>
@@ -254,8 +317,8 @@ export const IndicadoresPage: React.FC = () => {
             <button
               key={mes}
               type="button"
-              onClick={() => selectMonth(monthIndex)}
-              title="Clique para ver só este mês · Use Mostrar todos para voltar"
+              onClick={(e) => clickMonth(monthIndex, e.shiftKey)}
+              title="Clique para incluir/excluir · Shift+clique para faixa · Mostrar todos para o ano"
               className={cn(
                 'px-2.5 py-1.5 rounded-lg text-xs font-bold transition-colors border',
                 active
@@ -268,10 +331,13 @@ export const IndicadoresPage: React.FC = () => {
           );
         })}
       </div>
+      <p className="text-[11px] text-slate-400">
+        Selecione um ou mais meses para o acumulado do período. <b>Shift+clique</b> seleciona uma faixa (ex.: Jan→Abr).
+      </p>
     </div>
   );
 
-  // ---- Comparativo (layout DRE) ----
+  // ---- Comparativo Prev x Real (layout DRE) ----
   const renderComparativo = () => (
     <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
       <div className="overflow-x-auto overflow-y-visible">
@@ -287,7 +353,7 @@ export const IndicadoresPage: React.FC = () => {
                 </th>
               ))}
               <th colSpan={3} className="border-r border-slate-200 px-3 py-2 text-center text-[11px] font-bold uppercase tracking-wider text-slate-700 bg-slate-200/70">
-                {allMonthsSelected ? `Total ${data?.year ?? ''}` : `Total (${visibleMonths.length} mês${visibleMonths.length === 1 ? '' : 'es'})`}
+                {allMonthsSelected ? `Total ${data?.year ?? ''}` : `Acumulado (${visibleMonths.length} mês${visibleMonths.length === 1 ? '' : 'es'})`}
               </th>
             </tr>
             <tr className="bg-slate-50 border-b border-slate-200">
@@ -301,38 +367,149 @@ export const IndicadoresPage: React.FC = () => {
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {comparativoRows.map(({ ind, months, totalPrev, totalReal, totalDif }) => (
-              <tr key={ind.key} className="hover:bg-slate-50 text-slate-600">
-                <td className="sticky left-0 z-20 bg-white border-r border-slate-200 min-w-[240px] max-w-[240px] px-4 py-2.5">
-                  <span className="text-sm font-semibold text-slate-700">{ind.label}</span>
-                </td>
-                {months.map((c) => (
-                  <React.Fragment key={c.monthIndex}>
-                    <td className="min-w-[110px] border-r border-slate-100 px-3 py-1.5 text-right text-xs tabular-nums text-slate-600">
-                      {fmtVal(ind.fmt, c.prev)}
-                    </td>
-                    <td className="min-w-[110px] border-r border-slate-100 px-3 py-1.5 text-right text-xs tabular-nums font-medium text-slate-800">
-                      {fmtVal(ind.fmt, c.real)}
-                    </td>
-                    <td className={cn('min-w-[110px] border-r border-slate-200 px-3 py-1.5 text-right text-xs tabular-nums font-semibold',
-                      c.dif < 0 ? 'text-red-600' : c.dif > 0 ? 'text-emerald-600' : 'text-slate-400')}>
-                      {c.prev === 0 && c.real === 0 ? '—' : fmtVal(ind.fmt, c.dif)}
-                    </td>
-                  </React.Fragment>
-                ))}
-                <td className="min-w-[110px] px-3 py-1.5 text-right text-xs tabular-nums text-slate-600 bg-slate-50/60">{fmtVal(ind.fmt, totalPrev)}</td>
-                <td className="min-w-[110px] px-3 py-1.5 text-right text-xs tabular-nums font-bold text-slate-900 bg-slate-50/60">{fmtVal(ind.fmt, totalReal)}</td>
-                <td className={cn('min-w-[110px] px-3 py-1.5 text-right text-xs tabular-nums font-bold bg-slate-50/60',
-                  totalDif < 0 ? 'text-red-600' : totalDif > 0 ? 'text-emerald-600' : 'text-slate-400')}>
-                  {fmtVal(ind.fmt, totalDif)}
-                </td>
-              </tr>
-            ))}
+            {comparativoRows.map(({ ind, months, totalPrev, totalReal, totalDif }) => {
+              const totalF = favor(ind.dir, totalDif);
+              return (
+                <tr key={ind.key} className="hover:bg-slate-50 text-slate-600">
+                  <td className="sticky left-0 z-20 bg-white border-r border-slate-200 min-w-[240px] max-w-[240px] px-4 py-2.5">
+                    <span className="text-sm font-semibold text-slate-700">{ind.label}</span>
+                  </td>
+                  {months.map((c) => {
+                    const f = hasMeta ? favor(ind.dir, c.dif) : 'zero';
+                    const estouro = hasMeta && ind.dir === 'down' && c.real > c.prev && c.prev !== 0; // despesa acima do previsto
+                    return (
+                      <React.Fragment key={c.monthIndex}>
+                        <td className="min-w-[110px] border-r border-slate-100 px-3 py-1.5 text-right text-xs tabular-nums text-slate-500">
+                          {hasMeta ? fmtVal(ind.fmt, c.prev) : <span className="text-slate-300">—</span>}
+                        </td>
+                        <td className={cn('min-w-[110px] border-r border-slate-100 px-3 py-1.5 text-right text-xs tabular-nums font-medium',
+                          estouro ? 'bg-red-50 text-red-700 font-bold' : 'text-slate-800')}>
+                          {fmtVal(ind.fmt, c.real)}
+                        </td>
+                        <td className={cn('min-w-[110px] border-r border-slate-200 px-3 py-1.5 text-right text-xs tabular-nums font-semibold',
+                          estouro && 'bg-red-50', favorClass(f))}>
+                          {hasMeta ? fmtVal(ind.fmt, c.dif) : <span className="text-slate-300">—</span>}
+                        </td>
+                      </React.Fragment>
+                    );
+                  })}
+                  <td className="min-w-[110px] px-3 py-1.5 text-right text-xs tabular-nums text-slate-600 bg-slate-50/60">
+                    {hasMeta ? fmtVal(ind.fmt, totalPrev) : <span className="text-slate-300">—</span>}
+                  </td>
+                  <td className="min-w-[110px] px-3 py-1.5 text-right text-xs tabular-nums font-bold text-slate-900 bg-slate-50/60">{fmtVal(ind.fmt, totalReal)}</td>
+                  <td className={cn('min-w-[110px] px-3 py-1.5 text-right text-xs tabular-nums font-bold bg-slate-50/60', favorClass(hasMeta ? totalF : 'zero'))}>
+                    {hasMeta ? fmtVal(ind.fmt, totalDif) : <span className="text-slate-300">—</span>}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
+      {!hasMeta && data && (
+        <div className="px-5 py-2.5 border-t border-slate-100 bg-amber-50/60 text-[11px] text-amber-700 font-medium">
+          {data.year} não possui metas cadastradas — as colunas de Previsto e Diferença aparecem como “—”.
+        </div>
+      )}
     </div>
   );
+
+  // ---- Comparativo Anual ----
+  const renderComparativoAnual = () => {
+    const base = compBase === 'realizado' ? comp?.realizado : comp?.meta;
+    const anos = comp?.anos ?? [];
+    return (
+      <div className="space-y-4">
+        <div className="rounded-2xl border border-slate-200 bg-white shadow-sm px-4 py-3 space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Anos no comparativo</p>
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Base</span>
+              {(['realizado', 'meta'] as Escopo[]).map((b) => (
+                <button
+                  key={b}
+                  type="button"
+                  onClick={() => setCompBase(b)}
+                  className={cn('px-2.5 py-1 rounded-lg text-xs font-bold transition-colors border',
+                    compBase === b ? 'bg-[#004D40] text-white border-[#004D40]' : 'bg-white text-slate-400 border-slate-200 hover:text-slate-600')}
+                >
+                  {b === 'realizado' ? 'Realizado' : 'Meta'}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {years.map((y) => {
+              const active = compAnos.includes(y);
+              return (
+                <button
+                  key={y}
+                  type="button"
+                  onClick={() => setCompAnos((prev) => (prev.includes(y) ? prev.filter((x) => x !== y) : [...prev, y].sort((a, b) => a - b)))}
+                  className={cn('px-3 py-1.5 rounded-lg text-xs font-bold transition-colors border',
+                    active ? 'bg-[#004D40] text-white border-[#004D40] shadow-sm' : 'bg-white text-slate-400 border-slate-200 hover:border-slate-300 hover:text-slate-600')}
+                >
+                  {y}
+                </button>
+              );
+            })}
+          </div>
+          <p className="text-[11px] text-slate-400">Comparação ano a ano (total anual). A variação % é calculada entre cada ano e o ano imediatamente anterior selecionado.</p>
+        </div>
+
+        <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+          <div className="overflow-x-auto overflow-y-visible">
+            <table className="w-full border-collapse text-left">
+              <thead className="sticky top-0 z-30">
+                <tr className="bg-slate-100 border-b border-slate-200">
+                  <th className="sticky left-0 z-30 min-w-[240px] max-w-[240px] border-r border-slate-200 bg-slate-100 px-4 py-3 text-[11px] font-bold uppercase tracking-wider text-slate-600">
+                    Indicador ({compBase === 'realizado' ? 'Realizado' : 'Meta'})
+                  </th>
+                  {anos.map((y, i) => (
+                    <React.Fragment key={y}>
+                      {i > 0 && <th className="min-w-[80px] border-r border-slate-100 px-2 py-3 text-right text-[10px] font-bold uppercase tracking-wide text-slate-400">Δ%</th>}
+                      <th className="min-w-[120px] border-r border-slate-200 px-3 py-3 text-right text-[11px] font-bold uppercase tracking-wider text-slate-600">{y}</th>
+                    </React.Fragment>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {compLoading ? (
+                  <tr><td colSpan={anos.length * 2} className="px-4 py-6 text-center text-sm text-slate-400">Carregando…</td></tr>
+                ) : anos.length === 0 ? (
+                  <tr><td className="px-4 py-6 text-center text-sm text-slate-400">Selecione ao menos um ano.</td></tr>
+                ) : (
+                  KEY_INDICATORS.map((ind) => (
+                    <tr key={ind.key} className="hover:bg-slate-50 text-slate-600">
+                      <td className="sticky left-0 z-20 bg-white border-r border-slate-200 min-w-[240px] max-w-[240px] px-4 py-2 text-sm font-semibold text-slate-700">{ind.label}</td>
+                      {anos.map((y, i) => {
+                        const val = readVal(base?.[y], ind.key, ind.src);
+                        const prevVal = i > 0 ? readVal(base?.[anos[i - 1]], ind.key, ind.src) : 0;
+                        const varc = i > 0 && prevVal !== 0 ? val / prevVal - 1 : null;
+                        const f = varc == null ? 'zero' : favor(ind.dir, varc);
+                        return (
+                          <React.Fragment key={y}>
+                            {i > 0 && (
+                              <td className={cn('min-w-[80px] border-r border-slate-100 px-2 py-2 text-right text-xs tabular-nums font-semibold', favorClass(f))}>
+                                {varc == null ? '—' : `${varc > 0 ? '+' : ''}${fmtPct(varc)}`}
+                              </td>
+                            )}
+                            <td className="min-w-[120px] border-r border-slate-200 px-3 py-2 text-right text-xs tabular-nums font-medium text-slate-800">
+                              {fmtVal(ind.fmt, val)}
+                            </td>
+                          </React.Fragment>
+                        );
+                      })}
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   // ---- Grid de edição (inputs x meses) — layout DRE ----
   const renderEditGrid = (esc: Escopo) => {
@@ -468,7 +645,7 @@ export const IndicadoresPage: React.FC = () => {
           )}
         </div>
         <button
-          onClick={() => loadData()}
+          onClick={() => { loadData(); if (view === 'anual') loadComparativo(); }}
           disabled={loading}
           className="ml-auto inline-flex items-center gap-2 px-4 py-2 bg-[#004D40] text-white text-sm font-bold rounded-xl hover:bg-[#003d33] disabled:opacity-60"
         >
@@ -478,7 +655,7 @@ export const IndicadoresPage: React.FC = () => {
 
       {/* Abas de visualização */}
       <div className="flex flex-wrap gap-2">
-        {([['comparativo', 'Previsto x Realizado'], ['realizado', 'Editar Realizado'], ['meta', 'Editar Metas']] as [ViewMode, string][]).map(([v, label]) => (
+        {([['comparativo', 'Previsto x Realizado'], ['anual', 'Comparativo Anual'], ['realizado', 'Editar Realizado'], ['meta', 'Editar Metas']] as [ViewMode, string][]).map(([v, label]) => (
           <button
             key={v}
             onClick={() => setView(v)}
@@ -492,10 +669,11 @@ export const IndicadoresPage: React.FC = () => {
         ))}
       </div>
 
-      {/* Filtro de meses (igual ao DRE) */}
-      {renderMonthFilter()}
+      {/* Filtro de meses — não se aplica ao comparativo anual */}
+      {view !== 'anual' && renderMonthFilter()}
 
       {view === 'comparativo' && renderComparativo()}
+      {view === 'anual' && renderComparativoAnual()}
       {view === 'realizado' && renderEditGrid('realizado')}
       {view === 'meta' && renderEditGrid('meta')}
     </div>
