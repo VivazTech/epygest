@@ -150,9 +150,20 @@ const DRE_RDS_MAPPINGS = [
   },
 ] as const;
 
-/** Pais cujo Realizado é a soma de filhos (após RDS/edições). */
+/** Pais cujo Realizado é a soma explícita destes filhos (senão, soma todos os children da árvore). */
 const DRE_RDS_ROLLUPS: Record<string, readonly string[]> = {
   'l53-receita-de-diarias': ['l54-diaria', 'l55-cafe-da-manha', 'l56-map-e-fap'],
+  'l57-receita-de-a-b': [
+    'l58-frigobar',
+    'l59-room-service',
+    'l60-bar-gaia',
+    'l61-rest-allegro',
+    'l62-rest-terraza',
+    'l63-eventos-banquete',
+    'l64-pizzaria',
+  ],
+  'l65-outras-receitas': ['l66-estacionamento', 'l67-outras', 'l68-aluguel-eventos', 'l69-spa'],
+  'l52-receita-bruta': ['l53-receita-de-diarias', 'l57-receita-de-a-b', 'l65-outras-receitas'],
 };
 
 const emptyRdsByRow = (): Record<string, Array<number | null>> =>
@@ -375,6 +386,12 @@ export const DREPage: React.FC = () => {
   };
 
   // Valor efetivo da célula: edição manual > rollup de filhos > RDS mapeado > planilha.
+  const rollupChildIds = (row: DRERow): string[] | null => {
+    if (DRE_RDS_ROLLUPS[row.id]) return [...DRE_RDS_ROLLUPS[row.id]];
+    if (row.children?.length) return row.children.map((c) => c.id);
+    return null;
+  };
+
   const effective = (row: DRERow, monthIndex: number): MonthCell => {
     const base = row.values[monthIndex];
     const prevEdit = edits[editKey(row.row, monthIndex + 1, 'prev')];
@@ -387,8 +404,8 @@ export const DREPage: React.FC = () => {
       return { prev, real, dif };
     }
 
-    const childIds = DRE_RDS_ROLLUPS[row.id];
-    if (childIds) {
+    const childIds = rollupChildIds(row);
+    if (childIds?.length) {
       let sum = 0;
       let any = false;
       for (const childId of childIds) {
@@ -420,14 +437,23 @@ export const DREPage: React.FC = () => {
   const isRdsDerivedReal = (row: DRERow, monthIndex: number): boolean => {
     if (edits[editKey(row.row, monthIndex + 1, 'real')]) return false;
     if (rdsByRowId[row.id]?.[monthIndex] != null) return true;
-    const childIds = DRE_RDS_ROLLUPS[row.id];
-    if (!childIds) return false;
+    const childIds = rollupChildIds(row);
+    if (!childIds?.length) return false;
     // Pai com rollup: destaca se algum filho tem Realizado (RDS ou edição).
     return childIds.some((childId) => {
       const child = findDreRow(dreRows, childId);
       if (!child) return false;
       return effective(child, monthIndex).real != null;
     });
+  };
+
+  const rollupPartsLabel = (row: DRERow): string => {
+    const childIds = rollupChildIds(row);
+    if (!childIds?.length) return 'filhos';
+    const names = childIds
+      .map((id) => findDreRow(dreRows, id)?.label)
+      .filter(Boolean) as string[];
+    return names.length ? names.join(' + ') : 'filhos';
   };
 
   const totalOf = (row: DRERow, monthIndexes: number[] = visibleMonths): MonthCell => {
@@ -649,7 +675,7 @@ export const DREPage: React.FC = () => {
     const isRollup =
       field === 'real' &&
       !edit &&
-      Boolean(DRE_RDS_ROLLUPS[row.id]) &&
+      Boolean(rollupChildIds(row)?.length) &&
       fromRds;
     const meta = edit
       ? valueTrace.dre.edited(
@@ -661,7 +687,7 @@ export const DREPage: React.FC = () => {
           base == null ? '—' : formatCurrency(base)
         )
       : isRollup
-        ? valueTrace.dre.rdsRollup(row.label, mes, 'Diária + Café da manhã + MAP e FAP')
+        ? valueTrace.dre.rdsRollup(row.label, mes, rollupPartsLabel(row))
         : fromRds
           ? valueTrace.dre.rdsMapped(
               row.label,

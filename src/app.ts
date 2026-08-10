@@ -7636,6 +7636,513 @@ export function createApp() {
     res.json(data ?? []);
   });
 
+  // ====================================================
+  // PAINÉIS SETORIAIS (Fase 4.1–4.6)
+  // ====================================================
+  const PAINEL_DEFS: Record<
+    string,
+    {
+      sectorNames: string[];
+      groups: Record<string, { label: string; keywords: string[] }>;
+    }
+  > = {
+    operacional: {
+      sectorNames: ["Operacional"],
+      groups: {
+        manutencao: { label: "Manutenção", keywords: ["MANUTEN"] },
+        gas: { label: "Gás", keywords: ["GAS", "GÁS"] },
+        energia: { label: "Energia elétrica", keywords: ["ENERGIA"] },
+        outros: { label: "Outros (setor)", keywords: [] },
+      },
+    },
+    ab: {
+      sectorNames: ["A&B"],
+      groups: {
+        pizzaria: { label: "Pizzaria", keywords: ["PIZZARIA"] },
+        frigobar: { label: "Frigobar", keywords: ["FRIGOBAR"] },
+        cafe: { label: "Café da manhã", keywords: ["CAFE", "CAFÉ"] },
+        comissao: { label: "Comissão A&B", keywords: ["COMISSAO", "COMISSÃO"] },
+        outros: { label: "Outros A&B", keywords: [] },
+      },
+    },
+    spa: {
+      sectorNames: [],
+      groups: {
+        spa: { label: "SPA", keywords: ["SPA"] },
+        outros: { label: "Outros", keywords: [] },
+      },
+    },
+    hospedagem: {
+      sectorNames: ["Hospedagem"],
+      groups: {
+        lavanderia: { label: "Lavanderia", keywords: ["LAVANDER"] },
+        receita: { label: "Receita / Diárias", keywords: ["HOSPEDAGEM", "DIARIA", "DIÁRIA"] },
+        outros: { label: "Outros (hospedagem)", keywords: [] },
+      },
+    },
+    controladoria: {
+      sectorNames: ["Controle"],
+      groups: {
+        controle: { label: "Controle", keywords: [] },
+      },
+    },
+    nutricionista: {
+      sectorNames: [],
+      groups: {},
+    },
+  };
+
+  const normalizePainelText = (value: unknown) =>
+    String(value ?? "")
+      .trim()
+      .toUpperCase()
+      .normalize("NFD")
+      .replace(/\p{Diacritic}/gu, "");
+
+  const matchesKeywords = (haystack: string, keywords: string[]) => {
+    if (!keywords.length) return false;
+    const h = normalizePainelText(haystack);
+    return keywords.some((k) => h.includes(normalizePainelText(k)));
+  };
+
+  const buildEmptyMonths = () =>
+    Array.from({ length: 12 }, (_, i) => ({
+      month: i + 1,
+      previsto: 0,
+      realizado: 0,
+      diferenca: 0,
+      estouro: false,
+    }));
+
+  app.get("/api/paineis/:key", async (req, res) => {
+    const key = String(req.params.key || "").toLowerCase();
+    const def = PAINEL_DEFS[key];
+    if (!def) return res.status(404).json({ error: "Painel inválido." });
+
+    const year = Number((req.query as any).year) || new Date().getFullYear();
+    const month = Number((req.query as any).month) || new Date().getMonth() + 1;
+
+    try {
+      // Extras específicos
+      if (key === "nutricionista") {
+        const { data: acoes } = await supabase
+          .from("painel_nutri_acoes")
+          .select("*")
+          .eq("active", true)
+          .order("prazo", { ascending: true, nullsFirst: false });
+        return res.json({
+          painel: key,
+          year,
+          sector_names: [],
+          occupancy_percent: null,
+          rn_anual: null,
+          groups: [],
+          totals: { previsto: 0, realizado: 0, diferenca: 0, estouro: false },
+          observacao: null,
+          extras: { acoes: acoes ?? [] },
+        });
+      }
+
+      if (key === "controladoria") {
+        const { data: semanal } = await supabase
+          .from("painel_controladoria_semanal")
+          .select("*")
+          .order("semana_inicio", { ascending: false })
+          .limit(100);
+        const rows = semanal ?? [];
+        const estourados_count = rows.filter(
+          (r: any) => Number(r.realizado) > Number(r.previsto) && Number(r.previsto) > 0
+        ).length;
+        const { data: obs } = await supabase
+          .from("painel_observacoes")
+          .select("texto, user_name, updated_at")
+          .eq("painel_key", key)
+          .eq("year", year)
+          .eq("month", month)
+          .maybeSingle();
+        return res.json({
+          painel: key,
+          year,
+          sector_names: def.sectorNames,
+          occupancy_percent: null,
+          rn_anual: null,
+          groups: [],
+          totals: { previsto: 0, realizado: 0, diferenca: 0, estouro: false },
+          observacao: obs || null,
+          extras: { semanal: rows, estourados_count },
+        });
+      }
+
+      const { data: sectors } = await supabase.from("sectors").select("id, name");
+      const sectorIds = new Set<number>();
+      const sectorNamesFound: string[] = [];
+      for (const s of sectors ?? []) {
+        const name = String((s as any).name || "");
+        if (def.sectorNames.some((n) => normalizePainelText(n) === normalizePainelText(name))) {
+          sectorIds.add(Number((s as any).id));
+          sectorNamesFound.push(name);
+        }
+      }
+
+      let crdQuery = supabase
+        .from("crds")
+        .select("id, code, name, sector_id, sectors(name)")
+        .eq("active", true);
+      // SPA: filtra por keyword no nome; demais: por setor quando houver
+      const { data: allCrds, error: crdError } = await crdQuery;
+      if (crdError) return res.status(500).json({ error: crdError.message });
+
+      let crds = (allCrds ?? []) as any[];
+      if (sectorIds.size) {
+        crds = crds.filter((c) => sectorIds.has(Number(c.sector_id)));
+      } else if (key === "spa") {
+        crds = crds.filter((c) => matchesKeywords(`${c.code} ${c.name}`, ["SPA"]));
+      }
+
+      const crdIds = crds.map((c) => Number(c.id)).filter((id) => Number.isFinite(id));
+      const { rows: monthlyRows } = await fetchMonthlyValuesByYear(year);
+
+      const previstoByCrdMonth = new Map<string, number>();
+      for (const row of monthlyRows ?? []) {
+        const crdId = Number((row as any).crd_id);
+        const m = Number((row as any).month);
+        if (!crdIds.includes(crdId) || m < 1 || m > 12) continue;
+        previstoByCrdMonth.set(`${crdId}|${m}`, Number((row as any).value) || 0);
+      }
+
+      const { data: realizadoRows } = crdIds.length
+        ? await supabase
+            .from("crd_realizado")
+            .select("crd_id, month, amount")
+            .eq("year", year)
+            .in("crd_id", crdIds)
+        : { data: [] as any[] };
+
+      const realizadoByCrdMonth = new Map<string, number>();
+      for (const row of realizadoRows ?? []) {
+        const crdId = Number((row as any).crd_id);
+        const m = Number((row as any).month);
+        const amount = Number((row as any).amount) || 0;
+        const k = `${crdId}|${m}`;
+        realizadoByCrdMonth.set(k, (realizadoByCrdMonth.get(k) || 0) + amount);
+      }
+
+      const groupKeys = Object.keys(def.groups);
+      const assigned = new Set<number>();
+      const groups: any[] = [];
+
+      for (const gKey of groupKeys) {
+        const gDef = def.groups[gKey];
+        const groupCrds =
+          gKey === "outros" || gKey === "controle"
+            ? crds.filter((c) => !assigned.has(Number(c.id)))
+            : crds.filter((c) => {
+                const hit = matchesKeywords(`${c.code} ${c.name}`, gDef.keywords);
+                if (hit) assigned.add(Number(c.id));
+                return hit;
+              });
+
+        if (!groupCrds.length && gKey !== "outros" && gKey !== "controle") continue;
+        if (gKey === "outros" && !groupCrds.length) continue;
+
+        const months = buildEmptyMonths();
+        const rows = groupCrds.map((c) => {
+          const rowMonths = buildEmptyMonths();
+          for (let i = 0; i < 12; i++) {
+            const k = `${c.id}|${i + 1}`;
+            const previsto = previstoByCrdMonth.get(k) || 0;
+            const realizado = realizadoByCrdMonth.get(k) || 0;
+            rowMonths[i] = {
+              month: i + 1,
+              previsto,
+              realizado,
+              diferenca: realizado - previsto,
+              estouro: realizado > previsto && previsto > 0,
+            };
+            months[i].previsto += previsto;
+            months[i].realizado += realizado;
+          }
+          for (let i = 0; i < 12; i++) {
+            months[i].diferenca = months[i].realizado - months[i].previsto;
+            months[i].estouro = months[i].realizado > months[i].previsto && months[i].previsto > 0;
+          }
+          const total_previsto = rowMonths.reduce((s, m) => s + m.previsto, 0);
+          const total_realizado = rowMonths.reduce((s, m) => s + m.realizado, 0);
+          return {
+            id: c.id,
+            code: c.code,
+            name: c.name,
+            months: rowMonths,
+            total_previsto,
+            total_realizado,
+          };
+        });
+
+        const total_previsto = months.reduce((s, m) => s + m.previsto, 0);
+        const total_realizado = months.reduce((s, m) => s + m.realizado, 0);
+        groups.push({
+          key: gKey,
+          label: gDef.label,
+          months,
+          total_previsto,
+          total_realizado,
+          total_diferenca: total_realizado - total_previsto,
+          estouro: total_realizado > total_previsto && total_previsto > 0,
+          rows,
+        });
+      }
+
+      const totalsPrev = groups.reduce((s, g) => s + g.total_previsto, 0);
+      const totalsReal = groups.reduce((s, g) => s + g.total_realizado, 0);
+
+      let occupancy_percent: number | null = null;
+      const { data: occ } = await supabase
+        .from("sintase_occupancy")
+        .select("occupancy_percent")
+        .eq("year", year)
+        .limit(1);
+      if (occ?.length) occupancy_percent = Number((occ[0] as any).occupancy_percent) || null;
+
+      let rn_anual: number | null = null;
+      const { data: indRows } = await supabase
+        .from("indicadores_mensais")
+        .select("month, rn")
+        .eq("year", year)
+        .eq("escopo", "realizado");
+      if (indRows?.length) {
+        rn_anual = indRows.reduce((s: number, r: any) => s + (Number(r.rn) || 0), 0);
+      }
+
+      const extras: Record<string, any> = {};
+
+      if (key === "operacional") {
+        const energia = groups.find((g) => g.key === "energia");
+        const energiaReal = energia?.total_realizado || 0;
+        extras.energia_por_rn = rn_anual && rn_anual > 0 ? energiaReal / rn_anual : null;
+      }
+
+      if (key === "spa") {
+        const receita = groups.reduce((s, g) => s + g.total_realizado, 0);
+        // Sem classificação fina de custo vs receita: usa previsto como proxy de custos quando houver
+        const custos = groups.reduce((s, g) => s + g.total_previsto, 0);
+        const resultado = receita - custos;
+        extras.receita_periodo = receita;
+        extras.custos_periodo = custos;
+        extras.pct_resultado_receita = receita > 0 ? (resultado / receita) * 100 : null;
+      }
+
+      if (key === "hospedagem") {
+        const lav = groups.find((g) => g.key === "lavanderia");
+        extras.lavanderia = lav
+          ? {
+              previsto: lav.total_previsto,
+              realizado: lav.total_realizado,
+              diferenca: lav.total_diferenca,
+              estouro: lav.estouro,
+            }
+          : null;
+      }
+
+      if (key === "ab") {
+        const { data: quebras } = await supabase
+          .from("painel_ab_quebras")
+          .select("*")
+          .eq("year", year)
+          .eq("month", month)
+          .order("id", { ascending: false });
+        const { data: sobras } = await supabase
+          .from("painel_ab_sobras")
+          .select("*")
+          .eq("year", year)
+          .eq("month", month)
+          .order("id", { ascending: false });
+        extras.quebras = quebras ?? [];
+        extras.sobras = sobras ?? [];
+        const mini: Record<string, any> = {};
+        for (const dep of ["pizzaria", "frigobar", "cafe"]) {
+          const g = groups.find((x) => x.key === dep);
+          mini[dep] = g
+            ? { previsto: g.total_previsto, realizado: g.total_realizado, diferenca: g.total_diferenca }
+            : { previsto: 0, realizado: 0, diferenca: 0 };
+        }
+        extras.mini_dres = mini;
+      }
+
+      const { data: obs } = await supabase
+        .from("painel_observacoes")
+        .select("texto, user_name, updated_at")
+        .eq("painel_key", key)
+        .eq("year", year)
+        .eq("month", month)
+        .maybeSingle();
+
+      res.json({
+        painel: key,
+        year,
+        sector_names: sectorNamesFound,
+        occupancy_percent,
+        rn_anual,
+        groups,
+        totals: {
+          previsto: totalsPrev,
+          realizado: totalsReal,
+          diferenca: totalsReal - totalsPrev,
+          estouro: totalsReal > totalsPrev && totalsPrev > 0,
+        },
+        observacao: obs || null,
+        extras,
+      });
+    } catch (e: any) {
+      console.error("Erro painel setorial:", e);
+      res.status(500).json({ error: e?.message || "Erro ao carregar painel." });
+    }
+  });
+
+  app.put("/api/paineis/:key/observacao", requireRole("admin", "controle", "manager"), async (req, res) => {
+    const key = String(req.params.key || "").toLowerCase();
+    if (!PAINEL_DEFS[key]) return res.status(404).json({ error: "Painel inválido." });
+    const year = Number(req.body?.year);
+    const month = Number(req.body?.month);
+    const texto = String(req.body?.texto ?? "");
+    if (!Number.isFinite(year) || month < 1 || month > 12) {
+      return res.status(400).json({ error: "year e month são obrigatórios." });
+    }
+    const user = (req as any).user;
+    const { error } = await supabase.from("painel_observacoes").upsert(
+      {
+        painel_key: key,
+        year,
+        month,
+        texto,
+        user_id: user?.id ?? null,
+        user_name: user?.name || user?.email || null,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "painel_key,year,month" }
+    );
+    if (error) {
+      console.error(error);
+      return res.status(500).json({ error: "Não foi possível salvar a observação." });
+    }
+    res.json({ success: true });
+  });
+
+  app.post("/api/paineis/ab/quebras", requireRole("admin", "controle", "manager"), async (req, res) => {
+    const year = Number(req.body?.year);
+    const month = Number(req.body?.month);
+    const item = String(req.body?.item ?? "").trim();
+    if (!item || !Number.isFinite(year) || month < 1 || month > 12) {
+      return res.status(400).json({ error: "item, year e month são obrigatórios." });
+    }
+    const { data, error } = await supabase
+      .from("painel_ab_quebras")
+      .insert({
+        year,
+        month,
+        item,
+        quantidade: Number(req.body?.quantidade) || 0,
+        custo: Number(req.body?.custo) || 0,
+        observacao: String(req.body?.observacao ?? "") || null,
+      })
+      .select("id")
+      .single();
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ id: data.id });
+  });
+
+  app.delete("/api/paineis/ab/quebras/:id", requireRole("admin", "controle", "manager"), async (req, res) => {
+    const id = Number(req.params.id);
+    const { error } = await supabase.from("painel_ab_quebras").delete().eq("id", id);
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ success: true });
+  });
+
+  app.post("/api/paineis/ab/sobras", requireRole("admin", "controle", "manager"), async (req, res) => {
+    const year = Number(req.body?.year);
+    const month = Number(req.body?.month);
+    const local = String(req.body?.local ?? "").trim();
+    if (!local || !Number.isFinite(year) || month < 1 || month > 12) {
+      return res.status(400).json({ error: "local, year e month são obrigatórios." });
+    }
+    const { data, error } = await supabase
+      .from("painel_ab_sobras")
+      .insert({
+        year,
+        month,
+        local,
+        custo: Number(req.body?.custo) || 0,
+        observacao: String(req.body?.observacao ?? "") || null,
+      })
+      .select("id")
+      .single();
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ id: data.id });
+  });
+
+  app.delete("/api/paineis/ab/sobras/:id", requireRole("admin", "controle", "manager"), async (req, res) => {
+    const id = Number(req.params.id);
+    const { error } = await supabase.from("painel_ab_sobras").delete().eq("id", id);
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ success: true });
+  });
+
+  app.post("/api/paineis/nutricionista/acoes", requireRole("admin", "controle", "manager"), async (req, res) => {
+    const titulo = String(req.body?.titulo ?? "").trim();
+    if (!titulo) return res.status(400).json({ error: "titulo é obrigatório." });
+    const { data, error } = await supabase
+      .from("painel_nutri_acoes")
+      .insert({
+        titulo,
+        responsavel: String(req.body?.responsavel ?? "").trim() || null,
+        prazo: req.body?.prazo || null,
+        status: String(req.body?.status ?? "pendente"),
+        custo_previsto: Number(req.body?.custo_previsto) || 0,
+        custo_realizado: Number(req.body?.custo_realizado) || 0,
+        observacoes: String(req.body?.observacoes ?? "") || null,
+      })
+      .select("id")
+      .single();
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ id: data.id });
+  });
+
+  app.delete("/api/paineis/nutricionista/acoes/:id", requireRole("admin", "controle", "manager"), async (req, res) => {
+    const id = Number(req.params.id);
+    const { error } = await supabase
+      .from("painel_nutri_acoes")
+      .update({ active: false, updated_at: new Date().toISOString() })
+      .eq("id", id);
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ success: true });
+  });
+
+  app.post("/api/paineis/controladoria/semanal", requireRole("admin", "controle"), async (req, res) => {
+    const item = String(req.body?.item ?? "").trim();
+    const semana_inicio = String(req.body?.semana_inicio ?? "").trim();
+    if (!item || !semana_inicio) return res.status(400).json({ error: "item e semana_inicio são obrigatórios." });
+    const { data, error } = await supabase
+      .from("painel_controladoria_semanal")
+      .insert({
+        semana_inicio,
+        item,
+        previsto: Number(req.body?.previsto) || 0,
+        realizado: Number(req.body?.realizado) || 0,
+        setor_responsavel: String(req.body?.setor_responsavel ?? "").trim() || null,
+        observacoes: String(req.body?.observacoes ?? "") || null,
+      })
+      .select("id")
+      .single();
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ id: data.id });
+  });
+
+  app.delete("/api/paineis/controladoria/semanal/:id", requireRole("admin", "controle"), async (req, res) => {
+    const id = Number(req.params.id);
+    const { error } = await supabase.from("painel_controladoria_semanal").delete().eq("id", id);
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ success: true });
+  });
+
   app.get("/api/prev-real", async (req, res) => {
     const { year, crd, mode } = req.query as { year?: string; crd?: string; mode?: string };
     const selectedYear = Number(year) || new Date().getFullYear();

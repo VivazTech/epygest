@@ -28,9 +28,11 @@ import {
   FileCheck,
   TrendingUp,
   Boxes,
+  Building2,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { PLANILHAS_RESULTADOS, APURACAO_RECEITA_ITENS, BASE_ORCAMENTO_ITENS, isBaseOrcamentoTab, isRelCrdTab, isRelReqTab, isConsumoInternoTab, isRdsTab, isApuracaoReceitaTab as checkApuracaoReceitaTab, isApuracaoResultadosTab as checkApuracaoResultadosTab } from '../lib/planilhas';
+import { PAINEIS_SETORIAIS, isPainelSetorialTab } from '../lib/paineisSetoriais';
 import logoIcon from '../../logoicon2.svg';
 
 const FOLHA_MESES = [
@@ -98,6 +100,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const showCompras = comprasRoles.includes(user?.role);
   const comprasIds = ['compras-ordem'];
   const [comprasExpanded, setComprasExpanded] = React.useState(comprasIds.includes(activeTab));
+  const painelMenu = PAINEIS_SETORIAIS.filter((p) => p.roles.includes(user?.role));
+  const showPaineis = painelMenu.length > 0;
+  const painelTabIds = painelMenu.map((p) => p.tabId);
+  const [paineisExpanded, setPaineisExpanded] = React.useState(isPainelSetorialTab(activeTab));
   const [constructionExpanded, setConstructionExpanded] = React.useState(
     constructionMenu.some((item) => item.id === activeTab)
   );
@@ -124,6 +130,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   React.useEffect(() => {
     if (comprasIds.includes(activeTab)) setComprasExpanded(true);
+    if (isPainelSetorialTab(activeTab)) setPaineisExpanded(true);
     if (constructionMenu.some((item) => item.id === activeTab)) {
       setConstructionExpanded(true);
     }
@@ -298,6 +305,51 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 <span className="font-medium text-xs truncate text-left">Ordem de Compra</span>
               </button>
             )}
+          </div>
+        )}
+
+        {showPaineis && (
+          <div className="space-y-1">
+            <button
+              onClick={() => setPaineisExpanded((prev) => !prev)}
+              className={cn(
+                "w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group",
+                painelTabIds.includes(activeTab)
+                  ? "text-white bg-white/10"
+                  : "text-white/80 hover:bg-white/5 hover:text-white"
+              )}
+            >
+              <Building2 className="w-5 h-5 min-w-5 min-h-5 shrink-0 transition-transform duration-200 group-hover:scale-110" />
+              <span className={cn("font-medium text-sm flex-1 text-left", collapsed && "hidden")}>
+                Setores
+              </span>
+              <ChevronDown
+                className={cn(
+                  "w-4 h-4 transition-transform duration-200",
+                  paineisExpanded && "rotate-180",
+                  collapsed && "hidden"
+                )}
+              />
+            </button>
+            {!collapsed && paineisExpanded && painelMenu.map((item) => (
+              <button
+                key={item.tabId}
+                onClick={() => setActiveTab(item.tabId)}
+                className={cn(
+                  "w-full flex items-center gap-3 pl-11 pr-4 py-2 rounded-xl transition-all duration-200 group",
+                  activeTab === item.tabId
+                    ? "bg-emerald-500 text-white shadow-lg shadow-emerald-900/20"
+                    : "text-white/70 hover:bg-white/5 hover:text-white"
+                )}
+                title={item.label}
+              >
+                <Layers className={cn(
+                  "w-4 h-4 min-w-4 min-h-4 shrink-0 transition-transform duration-200",
+                  activeTab === item.tabId ? "scale-110" : "group-hover:scale-110"
+                )} />
+                <span className="font-medium text-xs truncate text-left">{item.shortLabel}</span>
+              </button>
+            ))}
           </div>
         )}
 
