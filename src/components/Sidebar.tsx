@@ -31,6 +31,7 @@ import {
   Building2,
   CalendarClock,
   Landmark,
+  BookOpen,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { PLANILHAS_RESULTADOS, APURACAO_RECEITA_ITENS, BASE_ORCAMENTO_ITENS, isBaseOrcamentoTab, isRelCrdTab, isRelReqTab, isConsumoInternoTab, isRdsTab, isApuracaoReceitaTab as checkApuracaoReceitaTab, isApuracaoResultadosTab as checkApuracaoResultadosTab } from '../lib/planilhas';
@@ -168,6 +169,25 @@ export const Sidebar: React.FC<SidebarProps> = ({
     }
   }, [activeTab, constructionMenu, lancamentosGroupIds, isApuracaoResultadosTab, isApuracaoReceitaTab, isBaseOrcamentoActive, isRelCrdActive, isRelReqActive, isConsumoActive, isRdsActive]);
 
+  React.useEffect(() => {
+    const expandAll = () => {
+      setConstructionExpanded(true);
+      setLancamentosExpanded(true);
+      setComprasExpanded(true);
+      setPaineisExpanded(true);
+      setBaseOrcamentoExpanded(true);
+      setPlanilhasExpanded(true);
+      setReceitaExpanded(true);
+      setRelCrdExpanded(true);
+      setRelReqExpanded(true);
+      setConsumoExpanded(true);
+      setRdsExpanded(true);
+      setFolhaExpanded(true);
+    };
+    window.addEventListener('vivaz-tutorial-expand', expandAll);
+    return () => window.removeEventListener('vivaz-tutorial-expand', expandAll);
+  }, []);
+
   return (
     <div className={cn(
       "bg-[#004D40] text-white h-screen flex flex-col fixed left-0 top-0 z-50 transition-all duration-200",
@@ -183,11 +203,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
       </div>
 
-      <nav className="flex-1 py-6 px-3 space-y-1 overflow-y-auto no-scrollbar">
+      <nav data-tour="sidebar-nav" className="flex-1 py-6 px-3 space-y-1 overflow-y-auto no-scrollbar">
         {constructionMenu.length > 0 && (
           <div className="space-y-1">
             <button
               onClick={() => setConstructionExpanded((prev) => !prev)}
+              data-tour="group-em-construcao"
               className={cn(
                 "w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group text-white/80 hover:bg-white/5 hover:text-white"
               )}
@@ -208,6 +229,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             {!collapsed && constructionExpanded && constructionMenu.map((item) => (
               <button
                 key={item.id}
+                data-tour={`nav-${item.id}`}
                 onClick={() => setActiveTab(item.id)}
                 className={cn(
                   "w-full flex items-center gap-3 pl-11 pr-4 py-2.5 rounded-xl transition-all duration-200 group",
@@ -230,6 +252,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <div className="space-y-1">
             <button
               onClick={() => setLancamentosExpanded((prev) => !prev)}
+              data-tour="group-lancamentos"
               className={cn(
                 "w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group",
                 lancamentosGroupIds.includes(activeTab)
@@ -253,6 +276,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             {!collapsed && lancamentosExpanded && lancamentosMenu.map((item) => (
               <button
                 key={item.id}
+                data-tour={`nav-${item.id}`}
                 onClick={() => setActiveTab(item.id)}
                 className={cn(
                   "w-full flex items-center gap-3 pl-11 pr-4 py-2 rounded-xl transition-all duration-200 group",
@@ -276,6 +300,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <div className="space-y-1">
             <button
               onClick={() => setComprasExpanded((prev) => !prev)}
+              data-tour="group-compras"
               className={cn(
                 "w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group",
                 comprasIds.includes(activeTab)
@@ -298,6 +323,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             {!collapsed && comprasExpanded && (
               <button
                 onClick={() => setActiveTab('compras-ordem')}
+                data-tour="nav-compras-ordem"
                 className={cn(
                   "w-full flex items-center gap-3 pl-11 pr-4 py-2 rounded-xl transition-all duration-200 group",
                   activeTab === 'compras-ordem'
@@ -316,6 +342,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <div className="space-y-1">
             <button
               onClick={() => setPaineisExpanded((prev) => !prev)}
+              data-tour="group-setores"
               className={cn(
                 "w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group",
                 painelTabIds.includes(activeTab)
@@ -338,6 +365,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             {!collapsed && paineisExpanded && painelMenu.map((item) => (
               <button
                 key={item.tabId}
+                data-tour={`nav-${item.tabId}`}
                 onClick={() => setActiveTab(item.tabId)}
                 className={cn(
                   "w-full flex items-center gap-3 pl-11 pr-4 py-2 rounded-xl transition-all duration-200 group",
@@ -360,6 +388,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         {primaryMenu.map((item) => (
           <button
             key={item.id}
+            data-tour={`nav-${item.id}`}
             onClick={() => setActiveTab(item.id)}
             className={cn(
               "w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group",
@@ -380,6 +409,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <div className="space-y-1">
             <button
               onClick={() => setBaseOrcamentoExpanded((prev) => !prev)}
+              data-tour="group-base-orcamento"
               className={cn(
                 "w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group",
                 isBaseOrcamentoActive
@@ -405,6 +435,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             ).map((item) => (
               <button
                 key={item.tabId}
+                data-tour={`nav-${item.tabId}`}
                 onClick={() => setActiveTab(item.tabId)}
                 className={cn(
                   "w-full flex items-center gap-3 pl-11 pr-4 py-2 rounded-xl transition-all duration-200 group",
@@ -428,6 +459,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <div className="space-y-1">
             <button
               onClick={() => setPlanilhasExpanded((prev) => !prev)}
+              data-tour="group-resultados"
               className={cn(
                 "w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group",
                 isApuracaoResultadosTab
@@ -455,6 +487,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   return (
                     <button
                       key={tabId}
+                      data-tour={`nav-${tabId}`}
                       onClick={() => setActiveTab(tabId)}
                       className={cn(
                         "w-full flex items-center gap-3 pl-11 pr-4 py-2 rounded-xl transition-all duration-200 group",
@@ -499,6 +532,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   <>
                     <button
                       onClick={() => setActiveTab('rel-crd')}
+                      data-tour="nav-rel-crd"
                       className={cn(
                         "w-full flex items-center gap-3 pl-14 pr-4 py-2 rounded-xl transition-all duration-200 group",
                         activeTab === 'rel-crd'
@@ -564,6 +598,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   <>
                     <button
                       onClick={() => setActiveTab('rel-req')}
+                      data-tour="nav-rel-req"
                       className={cn(
                         "w-full flex items-center gap-3 pl-14 pr-4 py-2 rounded-xl transition-all duration-200 group",
                         activeTab === 'rel-req'
@@ -629,6 +664,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   <>
                     <button
                       onClick={() => setActiveTab('rel-consumo')}
+                      data-tour="nav-rel-consumo"
                       className={cn(
                         "w-full flex items-center gap-3 pl-14 pr-4 py-2 rounded-xl transition-all duration-200 group",
                         activeTab === 'rel-consumo'
@@ -676,6 +712,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <div className="space-y-1">
             <button
               onClick={() => setReceitaExpanded((prev) => !prev)}
+              data-tour="group-receita"
               className={cn(
                 "w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group",
                 isApuracaoReceitaTab
@@ -703,6 +740,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   return (
                     <button
                       key={tabId}
+                      data-tour={`nav-${tabId}`}
                       onClick={() => setActiveTab(tabId)}
                       className={cn(
                         "w-full flex items-center gap-3 pl-11 pr-4 py-2 rounded-xl transition-all duration-200 group",
@@ -747,6 +785,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   <>
                     <button
                       onClick={() => setActiveTab('rel-rds')}
+                      data-tour="nav-rel-rds"
                       className={cn(
                         "w-full flex items-center gap-3 pl-14 pr-4 py-2 rounded-xl transition-all duration-200 group",
                         activeTab === 'rel-rds'
@@ -794,6 +833,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <div className="space-y-1">
             <button
               onClick={() => setFolhaExpanded((prev) => !prev)}
+              data-tour="group-folha"
               className={cn(
                 "w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group",
                 activeTab.startsWith('folha-') || activeTab === 'folha-apuracao'
@@ -817,6 +857,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             {!collapsed && folhaExpanded && (
               <button
                 onClick={() => setActiveTab('folha-apuracao')}
+                data-tour="nav-folha-apuracao"
                 className={cn(
                   "w-full flex items-center gap-3 pl-11 pr-4 py-2 rounded-xl transition-all duration-200 group",
                   activeTab === 'folha-apuracao'
@@ -862,6 +903,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         {adminMenu.map((item) => (
           <button
             key={item.id}
+            data-tour={`nav-${item.id}`}
             onClick={() => setActiveTab(item.id)}
             className={cn(
               "w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group",
@@ -877,6 +919,24 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <span className={cn("font-medium text-sm", collapsed && "hidden")}>{item.label}</span>
           </button>
         ))}
+
+        <button
+          type="button"
+          data-tour="nav-tutorial"
+          onClick={() => setActiveTab('tutorial')}
+          className={cn(
+            "w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group",
+            activeTab === 'tutorial'
+              ? "bg-emerald-500 text-white shadow-lg shadow-emerald-900/20"
+              : "text-white/80 hover:bg-white/5 hover:text-white"
+          )}
+        >
+          <BookOpen className={cn(
+            "w-5 h-5 min-w-5 min-h-5 shrink-0 transition-transform duration-200",
+            activeTab === 'tutorial' ? "scale-110" : "group-hover:scale-110"
+          )} />
+          <span className={cn("font-medium text-sm", collapsed && "hidden")}>Tutorial guiado</span>
+        </button>
       </nav>
 
       <div className="p-4 border-t border-white/10 space-y-4">

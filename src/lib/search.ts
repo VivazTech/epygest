@@ -50,6 +50,7 @@ export function getSearchPlaceholder(activeTab: string): string {
     mensalidades: 'Buscar fornecedor, setor ou contrato...',
     'compras-mensalidades': 'Buscar fornecedor, setor ou contrato...',
     investimentos: 'Buscar investimento, setor ou CRD...',
+    tutorial: 'Buscar aba ou seção do tutorial...',
   };
 
   return map[activeTab] ?? 'Buscar...';

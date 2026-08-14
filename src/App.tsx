@@ -37,6 +37,8 @@ import { SearchProvider, useSearch } from './context/SearchContext';
 import { ToastProvider } from './context/ToastContext';
 import { SearchBar } from './components/SearchBar';
 import { getSearchPlaceholder } from './lib/search';
+import { TutorialPage as Tutorial } from './pages/Tutorial';
+import { TutorialProvider } from './context/TutorialContext';
 
 const PLANILHAS_ROLES = ['admin', 'finance', 'controle'] as const;
 
@@ -254,6 +256,7 @@ export default function App() {
       case 'supabase-teste': return <SupabaseTeste />;
       case 'usuarios': return <Usuarios />;
       case 'configuracoes': return <Configuracoes />;
+      case 'tutorial': return <Tutorial />;
       case 'compras-ordem': return <ComprasPage />;
       case 'mensalidades':
       case 'compras-mensalidades': // compatibilidade com atalho antigo
@@ -402,8 +405,18 @@ function AppShell({
     setQuery('');
   }, [activeTab, setQuery]);
 
+  const prepareSidebar = React.useCallback(() => {
+    if (sidebarCollapsed) onToggleCollapsed();
+    window.dispatchEvent(new Event('vivaz-tutorial-expand'));
+  }, [sidebarCollapsed, onToggleCollapsed]);
+
   return (
     <ToastProvider>
+      <TutorialProvider
+        userRole={user?.role}
+        setActiveTab={setActiveTab}
+        prepareSidebar={prepareSidebar}
+      >
       <div className="min-h-screen bg-[#F8FAFC] font-sans text-slate-900">
           <Sidebar
             activeTab={activeTab}
@@ -465,6 +478,8 @@ function AppShell({
                 ? 'Prev x Real Diario'
                 : isPainelSetorialTab(activeTab)
                 ? `Setores / ${getPainelByTab(activeTab)?.label ?? ''}`
+                : activeTab === 'tutorial'
+                ? 'Tutorial guiado'
                 : activeTab.replace('-', ' ')}
             </span>
           </div>
@@ -474,6 +489,7 @@ function AppShell({
             onChange={setQuery}
             placeholder={getSearchPlaceholder(activeTab)}
             className="flex-1 max-w-xl mx-auto hidden md:block"
+            dataTour="header-search"
           />
 
           <div className="flex items-center gap-4 shrink-0">
@@ -495,11 +511,15 @@ function AppShell({
           />
         </div>
 
-        <div className={activeTab === 'notas' || activeTab === 'danfe' || activeTab === 'comandas' || activeTab === 'lancamentos-manuais' || activeTab === 'requisicoes' || activeTab === 'mensalidades' || activeTab === 'compras-mensalidades' || activeTab === 'cadastros' || activeTab === 'sintase' || activeTab === 'prev-real' || activeTab === 'indicadores' || activeTab === 'dre' || activeTab === 'rel-crd' || activeTab.startsWith('rel-crd-') || activeTab === 'rel-req' || activeTab.startsWith('rel-req-') || activeTab === 'rel-consumo' || activeTab.startsWith('rel-consumo-') || activeTab === 'rel-rds' || activeTab.startsWith('rel-rds-') || activeTab.startsWith('planilha-') || activeTab.startsWith('folha-') || activeTab === 'compras-ordem' || activeTab === 'investimentos' || isPainelSetorialTab(activeTab) ? 'p-8 pt-4 md:pt-8 w-full max-w-none' : 'p-8 pt-4 md:pt-8 max-w-7xl mx-auto'}>
+        <div
+          data-tour="page-content"
+          className={activeTab === 'notas' || activeTab === 'danfe' || activeTab === 'comandas' || activeTab === 'lancamentos-manuais' || activeTab === 'requisicoes' || activeTab === 'mensalidades' || activeTab === 'compras-mensalidades' || activeTab === 'cadastros' || activeTab === 'sintase' || activeTab === 'prev-real' || activeTab === 'indicadores' || activeTab === 'dre' || activeTab === 'rel-crd' || activeTab.startsWith('rel-crd-') || activeTab === 'rel-req' || activeTab.startsWith('rel-req-') || activeTab === 'rel-consumo' || activeTab.startsWith('rel-consumo-') || activeTab === 'rel-rds' || activeTab.startsWith('rel-rds-') || activeTab.startsWith('planilha-') || activeTab.startsWith('folha-') || activeTab === 'compras-ordem' || activeTab === 'investimentos' || activeTab === 'tutorial' || isPainelSetorialTab(activeTab) ? 'p-8 pt-4 md:pt-8 w-full max-w-none' : 'p-8 pt-4 md:pt-8 max-w-7xl mx-auto'}
+        >
           {renderContent()}
         </div>
       </main>
         </div>
+      </TutorialProvider>
       </ToastProvider>
   );
 }
