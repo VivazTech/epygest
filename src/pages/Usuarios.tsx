@@ -8,6 +8,7 @@ import {
   Building2,
   Loader2,
   Search,
+  UserPlus,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useSearch } from '../context/SearchContext';
@@ -77,6 +78,7 @@ export const UsuariosPage: React.FC = () => {
   const [roleFilter, setRoleFilter] = useState<UserRole | 'all'>('all');
   const [sectorFilter, setSectorFilter] = useState('all');
   const [editingUser, setEditingUser] = useState<UserRow | null>(null);
+  const [creating, setCreating] = useState(false);
   const [editForm, setEditForm] = useState<EditForm | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
@@ -138,7 +140,23 @@ export const UsuariosPage: React.FC = () => {
     });
   }, [users, searchQuery, roleFilter, sectorFilter]);
 
+  const emptyForm = (): EditForm => ({
+    name: '',
+    email: '',
+    role: 'viewer',
+    sector_ids: [],
+    password: '',
+  });
+
+  const openCreate = () => {
+    setCreating(true);
+    setEditingUser(null);
+    setSaveError('');
+    setEditForm(emptyForm());
+  };
+
   const openEdit = (user: UserRow) => {
+    setCreating(false);
     setEditingUser(user);
     setSaveError('');
     setEditForm({
@@ -150,8 +168,9 @@ export const UsuariosPage: React.FC = () => {
     });
   };
 
-  const closeEdit = () => {
+  const closeModal = () => {
     if (saving) return;
+    setCreating(false);
     setEditingUser(null);
     setEditForm(null);
     setSaveError('');
@@ -165,6 +184,41 @@ export const UsuariosPage: React.FC = () => {
         : [...prev.sector_ids, sectorId];
       return { ...prev, sector_ids: next };
     });
+  };
+
+  const saveCreate = async () => {
+    if (!editForm) return;
+    if (!editForm.name.trim() || !editForm.email.trim() || !editForm.password) {
+      setSaveError('Preencha nome, e-mail e senha.');
+      return;
+    }
+
+    setSaving(true);
+    setSaveError('');
+    try {
+      const res = await fetch('/api/users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: editForm.name.trim(),
+          email: editForm.email.trim(),
+          password: editForm.password,
+          role: editForm.role,
+          sector_ids: editForm.sector_ids.map(Number).filter((id) => Number.isFinite(id)),
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setSaveError(data.error || 'Erro ao criar usuário.');
+        return;
+      }
+      showSuccess('Usuário criado com sucesso.');
+      setCreating(false);
+      setEditForm(null);
+      await loadAll();
+    } finally {
+      setSaving(false);
+    }
   };
 
   const saveEdit = async () => {
@@ -202,6 +256,8 @@ export const UsuariosPage: React.FC = () => {
     }
   };
 
+  const showModal = Boolean(editForm && (creating || editingUser));
+
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
@@ -211,9 +267,19 @@ export const UsuariosPage: React.FC = () => {
             Cadastre e edite perfis, setores e acessos do sistema.
           </p>
         </div>
-        <p className="text-xs font-bold uppercase tracking-widest text-slate-400">
-          {stats.total} {stats.total === 1 ? 'usuário' : 'usuários'}
-        </p>
+        <div className="flex items-center gap-3">
+          <p className="text-xs font-bold uppercase tracking-widest text-slate-400">
+            {stats.total} {stats.total === 1 ? 'usuário' : 'usuários'}
+          </p>
+          <button
+            type="button"
+            onClick={openCreate}
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#004D40] text-white text-sm font-bold hover:bg-[#003d33] transition-colors"
+          >
+            <UserPlus className="w-4 h-4" />
+            Novo usuário
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -360,17 +426,23 @@ export const UsuariosPage: React.FC = () => {
         </div>
       )}
 
-      {editingUser && editForm && (
+      {showModal && editForm && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-white w-full max-w-lg rounded-3xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
             <div className="p-6 border-b border-slate-100 flex justify-between items-center">
               <div>
-                <h3 className="text-xl font-bold text-slate-900">Editar usuário</h3>
-                <p className="text-xs text-slate-500 mt-1">{editingUser.email}</p>
+                <h3 className="text-xl font-bold text-slate-900">
+                  {creating ? 'Novo usuário' : 'Editar usuário'}
+                </h3>
+                <p className="text-xs text-slate-500 mt-1">
+                  {creating
+                    ? 'Preencha os dados para criar o acesso.'
+                    : editingUser?.email}
+                </p>
               </div>
               <button
                 type="button"
-                onClick={closeEdit}
+                onClick={closeModal}
                 disabled={saving}
                 className="text-slate-400 hover:text-slate-600 transition-colors disabled:opacity-50"
               >
@@ -381,7 +453,8 @@ export const UsuariosPage: React.FC = () => {
             <form
               onSubmit={(e) => {
                 e.preventDefault();
-                saveEdit();
+                if (creating) void saveCreate();
+                else void saveEdit();
               }}
               className="p-6 space-y-4"
             >
@@ -390,6 +463,8 @@ export const UsuariosPage: React.FC = () => {
                 <input
                   value={editForm.name}
                   onChange={(e) => setEditForm((p) => (p ? { ...p, name: e.target.value } : p))}
+                  required
+                  autoFocus={creating}
                   className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none transition-all"
                 />
               </div>
@@ -400,6 +475,7 @@ export const UsuariosPage: React.FC = () => {
                   type="email"
                   value={editForm.email}
                   onChange={(e) => setEditForm((p) => (p ? { ...p, email: e.target.value } : p))}
+                  required
                   className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none transition-all"
                 />
               </div>
@@ -447,15 +523,21 @@ export const UsuariosPage: React.FC = () => {
 
               <div className="space-y-1.5">
                 <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">
-                  Nova senha (opcional)
+                  {creating ? 'Senha' : 'Nova senha (opcional)'}
                 </label>
                 <input
                   type="password"
                   value={editForm.password}
                   onChange={(e) => setEditForm((p) => (p ? { ...p, password: e.target.value } : p))}
-                  placeholder="Deixe em branco para manter"
+                  required={creating}
+                  placeholder={creating ? 'Mínimo 10 caracteres, com letras e números' : 'Deixe em branco para manter'}
                   className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none transition-all"
                 />
+                {creating && (
+                  <p className="text-[11px] text-slate-400">
+                    A senha precisa ter pelo menos 10 caracteres, com letras e números.
+                  </p>
+                )}
               </div>
 
               {saveError && (
@@ -467,7 +549,7 @@ export const UsuariosPage: React.FC = () => {
               <div className="flex items-center justify-end gap-3 pt-2">
                 <button
                   type="button"
-                  onClick={closeEdit}
+                  onClick={closeModal}
                   disabled={saving}
                   className="px-4 py-2.5 rounded-xl text-sm font-bold text-slate-600 hover:bg-slate-100 transition-colors disabled:opacity-50"
                 >
@@ -478,8 +560,14 @@ export const UsuariosPage: React.FC = () => {
                   disabled={saving}
                   className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#004D40] text-white text-sm font-bold hover:bg-[#003d33] transition-colors disabled:opacity-60"
                 >
-                  {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                  Salvar
+                  {saving ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : creating ? (
+                    <UserPlus className="w-4 h-4" />
+                  ) : (
+                    <Save className="w-4 h-4" />
+                  )}
+                  {creating ? 'Criar usuário' : 'Salvar'}
                 </button>
               </div>
             </form>
