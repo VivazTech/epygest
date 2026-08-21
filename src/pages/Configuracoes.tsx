@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Settings2, Save, RotateCcw, Monitor, Bell, ShieldCheck, MapPin, Plus, Trash2 } from 'lucide-react';
+import { Settings2, Save, RotateCcw, Monitor, Bell, ShieldCheck, MapPin, Plus, Trash2, MessageCircle } from 'lucide-react';
 import { useSearch } from '../context/SearchContext';
 import { matchesSearch } from '../lib/search';
 
@@ -11,6 +11,8 @@ type SettingsState = {
   compactTables: boolean;
   autoExpandFilteredCrd: boolean;
   emailNotifications: boolean;
+  whatsappNotifications: boolean;
+  whatsappNumber: string;
   requireApprovalForPayments: boolean;
 };
 
@@ -31,6 +33,8 @@ const defaultSettings: SettingsState = {
   compactTables: false,
   autoExpandFilteredCrd: true,
   emailNotifications: true,
+  whatsappNotifications: false,
+  whatsappNumber: '',
   requireApprovalForPayments: true,
 };
 
@@ -267,7 +271,7 @@ export const ConfiguracoesPage: React.FC = () => {
         </section>
         )}
 
-        {showSection('Notificações', 'Receber alertas por e-mail') && (
+        {showSection('Notificações', 'Receber alertas por e-mail', 'WhatsApp', 'integração') && (
         <section className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5 space-y-4">
           <div className="flex items-center gap-2">
             <Bell className="w-4 h-4 text-slate-500" />
@@ -281,6 +285,52 @@ export const ConfiguracoesPage: React.FC = () => {
               onChange={(e) => setSettings((prev) => ({ ...prev, emailNotifications: e.target.checked }))}
             />
           </label>
+
+          <div className="rounded-xl bg-slate-50 border border-slate-200 p-3 space-y-3">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-start gap-2.5 min-w-0">
+                <div className="w-9 h-9 rounded-xl bg-emerald-50 border border-emerald-100 flex items-center justify-center shrink-0">
+                  <MessageCircle className="w-4 h-4 text-emerald-700" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-slate-800">Integração com WhatsApp</p>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Configure o número para alertas. A conexão com a API será liberada em breve.
+                  </p>
+                </div>
+              </div>
+              <input
+                type="checkbox"
+                checked={settings.whatsappNotifications}
+                onChange={(e) =>
+                  setSettings((prev) => ({ ...prev, whatsappNotifications: e.target.checked }))
+                }
+                className="mt-1"
+                aria-label="Ativar integração WhatsApp"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                Número do WhatsApp
+              </label>
+              <input
+                type="tel"
+                inputMode="tel"
+                placeholder="Ex.: 55 45 99999-0000"
+                value={settings.whatsappNumber}
+                disabled={!settings.whatsappNotifications}
+                onChange={(e) =>
+                  setSettings((prev) => ({ ...prev, whatsappNumber: e.target.value }))
+                }
+                className="w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-sm text-slate-700 outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 disabled:opacity-50 disabled:bg-slate-100"
+              />
+            </div>
+
+            <p className="text-[11px] text-amber-700/80 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
+              Campo visual por enquanto — o envio automático via API será integrado depois.
+            </p>
+          </div>
         </section>
         )}
 
