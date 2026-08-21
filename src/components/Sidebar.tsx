@@ -32,10 +32,12 @@ import {
   CalendarClock,
   Landmark,
   BookOpen,
+  Lightbulb,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { PLANILHAS_RESULTADOS, APURACAO_RECEITA_ITENS, BASE_ORCAMENTO_ITENS, isBaseOrcamentoTab, isRelCrdTab, isRelReqTab, isConsumoInternoTab, isRdsTab, isApuracaoReceitaTab as checkApuracaoReceitaTab, isApuracaoResultadosTab as checkApuracaoResultadosTab } from '../lib/planilhas';
 import { PAINEIS_SETORIAIS, isPainelSetorialTab } from '../lib/paineisSetoriais';
+import { hasPermission, type RolePermissionRow } from '../lib/permissionCatalog';
 import logoIcon from '../../logoicon2.svg';
 
 const FOLHA_MESES = [
@@ -73,6 +75,7 @@ const menuItems = [
   { id: 'indicadores', label: 'Indicadores (Números)', icon: TrendingUp, roles: ['admin', 'controle', 'manager', 'diretoria'] },
   { id: 'investimentos', label: 'Investimentos', icon: Landmark, roles: ['admin', 'controle', 'manager', 'finance', 'diretoria'] },
   { id: 'usuarios', label: 'Usuários', icon: Users, roles: ['admin'] },
+  { id: 'sugestoes', label: 'Sugestões', icon: Lightbulb, roles: ['admin'] },
   { id: 'configuracoes', label: 'Configurações', icon: Settings, roles: ['admin'] },
 ];
 
@@ -84,31 +87,45 @@ export const Sidebar: React.FC<SidebarProps> = ({
   collapsed,
   onToggleCollapsed
 }) => {
+  const permissions = (user?.permissions || null) as RolePermissionRow[] | null;
+  const role = String(user?.role || '');
+  const canView = (resourceKey: string, fallbackRoles?: string[]) => {
+    if (role === 'admin') return true;
+    if (permissions?.length) return hasPermission(permissions, resourceKey, 'view', role);
+    if (fallbackRoles?.length) return fallbackRoles.includes(role);
+    return false;
+  };
+
   const constructionGroupIds = ['dashboard', 'analise', 'planejamento'];
   const lancamentosGroupIds = lancamentosMenuItems.map((item) => item.id);
-  const adminGroupIds = ['usuarios', 'configuracoes'];
-  const planilhasRoles = ['admin', 'controle'];
-  const baseOrcamentoRoles = ['admin', 'controle', 'manager'];
-  const filteredMenu = menuItems.filter(item => item.roles.includes(user?.role));
-  const lancamentosMenu = lancamentosMenuItems.filter((item) => item.roles.includes(user?.role));
+  const adminGroupIds = ['usuarios', 'sugestoes', 'configuracoes'];
+  const filteredMenu = menuItems.filter((item) => canView(item.id, item.roles));
+  const lancamentosMenu = lancamentosMenuItems.filter((item) => canView(item.id, item.roles));
   const constructionMenu = filteredMenu.filter((item) => constructionGroupIds.includes(item.id));
   const primaryMenu = filteredMenu.filter(
     (item) => !constructionGroupIds.includes(item.id) && !adminGroupIds.includes(item.id)
   );
   const adminMenu = filteredMenu.filter((item) => adminGroupIds.includes(item.id));
-  const showPlanilhas = planilhasRoles.includes(user?.role);
-  const showBaseOrcamento = baseOrcamentoRoles.includes(user?.role);
+  const showPlanilhas = canView('apuracao-resultados', ['admin', 'controle']);
+  const showBaseOrcamento = canView('base-orcamento', ['admin', 'controle', 'manager']);
   const showLancamentos = lancamentosMenu.length > 0;
-  const folhaRoles = ['admin', 'controle'];
-  const showFolha = folhaRoles.includes(user?.role);
-  const comprasRoles = ['admin', 'controle', 'manager'];
-  const showCompras = comprasRoles.includes(user?.role);
+  const showFolha = canView('folha', ['admin', 'controle']);
+  const showCompras = canView('compras-ordem', ['admin', 'controle', 'manager']);
   const comprasIds = ['compras-ordem'];
   const [comprasExpanded, setComprasExpanded] = React.useState(comprasIds.includes(activeTab));
-  const painelMenu = PAINEIS_SETORIAIS.filter((p) => p.roles.includes(user?.role));
+  const painelMenu = PAINEIS_SETORIAIS.filter((p) => canView(p.tabId, p.roles));
   const showPaineis = painelMenu.length > 0;
   const painelTabIds = painelMenu.map((p) => p.tabId);
   const [paineisExpanded, setPaineisExpanded] = React.useState(isPainelSetorialTab(activeTab));
+  const showApuracaoReceita = canView('apuracao-receita', ['admin', 'controle']);
+  const showTutorial = canView('tutorial', [
+    'admin',
+    'finance',
+    'controle',
+    'manager',
+    'viewer',
+    'diretoria',
+  ]);
   const [constructionExpanded, setConstructionExpanded] = React.useState(
     constructionMenu.some((item) => item.id === activeTab)
   );
@@ -708,7 +725,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
         )}
 
-        {showPlanilhas && (
+        {showApuracaoReceita && (
           <div className="space-y-1">
             <button
               onClick={() => setReceitaExpanded((prev) => !prev)}
@@ -920,6 +937,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </button>
         ))}
 
+        {showTutorial && (
         <button
           type="button"
           data-tour="nav-tutorial"
@@ -937,6 +955,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           )} />
           <span className={cn("font-medium text-sm", collapsed && "hidden")}>Tutorial guiado</span>
         </button>
+        )}
       </nav>
 
       <div className="p-4 border-t border-white/10 space-y-4">
@@ -946,11 +965,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
           <div className={cn("flex-1 min-w-0", collapsed && "hidden")}>
             <p className="text-sm font-semibold truncate">{user?.name}</p>
-            <p className="text-[10px] text-white/75 uppercase font-bold tracking-tighter">
-              {user?.role === 'admin' ? 'Administrador' : 
-               user?.role === 'finance' ? 'Financeiro' : 
+            <p className="text-[10px] text-white/75 uppercase font-bold tracking-tighter truncate">
+              {user?.role === 'admin' ? 'Administrador' :
+               user?.role === 'finance' ? 'Financeiro' :
                user?.role === 'controle' ? 'Controle' :
-               user?.role === 'manager' ? 'Gestor' : 'Visualizador'}
+               user?.role === 'manager' ? 'Gestor' :
+               user?.role === 'viewer' ? 'Visualizador' :
+               user?.role === 'diretoria' ? 'Diretoria' :
+               String(user?.role || '')}
             </p>
           </div>
         </div>

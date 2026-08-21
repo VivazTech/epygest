@@ -2,8 +2,10 @@ import type { NextFunction, Request, Response } from "express";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 
-export type UserRole = "admin" | "finance" | "controle" | "manager" | "viewer" | "diretoria";
+/** Role é o slug em `app_roles` (sistema ou customizado). */
+export type UserRole = string;
 
+/** Roles de sistema legados (fallback quando a API de roles ainda não carregou). */
 export const USER_ROLES: UserRole[] = [
   "admin",
   "finance",

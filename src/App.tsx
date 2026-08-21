@@ -20,6 +20,7 @@ import { PrevRealPage as PrevReal } from './pages/PrevReal';
 import { IndicadoresPage as Indicadores } from './pages/Indicadores';
 import { ConfiguracoesPage as Configuracoes } from './pages/Configuracoes';
 import { UsuariosPage as Usuarios } from './pages/Usuarios';
+import { SugestoesPage as Sugestoes } from './pages/Sugestoes';
 import { PlanilhasPage } from './pages/Planilhas';
 import { PLANILHAS, APURACAO_RECEITA_ITENS, BASE_ORCAMENTO_ITENS, isApuracaoReceitaPlanilha, isBaseOrcamentoTab } from './lib/planilhas';
 import { FolhaPagamentoPage, MESES_FOLHA } from './pages/FolhaPagamento';
@@ -39,8 +40,9 @@ import { SearchBar } from './components/SearchBar';
 import { getSearchPlaceholder } from './lib/search';
 import { TutorialPage as Tutorial } from './pages/Tutorial';
 import { TutorialProvider } from './context/TutorialContext';
-
-const PLANILHAS_ROLES = ['admin', 'finance', 'controle'] as const;
+import { hasPermission } from './lib/permissionCatalog';
+import { SuggestionFab } from './components/SuggestionFab';
+import { getPageLabel } from './lib/pageLabels';
 
 export default function App() {
   const isSupabaseTestRoute = window.location.pathname === '/teste-supabase';
@@ -83,13 +85,20 @@ export default function App() {
     };
   }, []);
 
-  const canAccessPlanilhas = PLANILHAS_ROLES.includes(user?.role);
+  const canAccessTab = (tabId: string) =>
+    hasPermission(user?.permissions, tabId, 'view', user?.role);
 
   useEffect(() => {
-    if (user && activeTab.startsWith('planilha-') && !canAccessPlanilhas) {
-      setActiveTab('dashboard');
+    if (!user || !activeTab) return;
+    // Não redireciona enquanto permissions ainda não vieram (login legado em cache)
+    if (!user.permissions && user.role !== 'admin') return;
+    if (!canAccessTab(activeTab)) {
+      // Escolhe a primeira tela visível razoável
+      const fallbacks = ['dashboard', 'notas', 'lancamentos-manuais', 'dre', 'tutorial'];
+      const next = fallbacks.find((id) => canAccessTab(id)) || 'dashboard';
+      if (next !== activeTab) setActiveTab(next);
     }
-  }, [user, activeTab, canAccessPlanilhas]);
+  }, [user, activeTab]);
 
   const handleLogout = async () => {
     try {
@@ -151,7 +160,7 @@ export default function App() {
 
   const renderContent = () => {
     if (activeTab.startsWith('planilha-')) {
-      if (!canAccessPlanilhas) return <Dashboard />;
+      if (!canAccessTab(activeTab)) return <Dashboard />;
       const indice = Number(activeTab.slice('planilha-'.length));
       return (
         <PlanilhasPage
@@ -166,16 +175,17 @@ export default function App() {
     }
 
     if (activeTab === 'folha-apuracao') {
+      if (!canAccessTab('folha')) return <Dashboard />;
       return <FolhaApuracaoPage />;
     }
 
     if (activeTab === 'rel-crd') {
-      if (!canAccessPlanilhas) return <Dashboard />;
+      if (!canAccessTab(activeTab)) return <Dashboard />;
       return <RelatorioCrdPage onSelectMonth={(m) => setActiveTab(`rel-crd-${m}`)} />;
     }
 
     if (activeTab.startsWith('rel-crd-')) {
-      if (!canAccessPlanilhas) return <Dashboard />;
+      if (!canAccessTab(activeTab)) return <Dashboard />;
       const mes = Number(activeTab.slice('rel-crd-'.length));
       if (mes >= 1 && mes <= 12) {
         return <RelatorioCrdMesPage key={mes} month={mes} />;
@@ -183,12 +193,12 @@ export default function App() {
     }
 
     if (activeTab === 'rel-req') {
-      if (!canAccessPlanilhas) return <Dashboard />;
+      if (!canAccessTab(activeTab)) return <Dashboard />;
       return <RelatorioRequisicoesPage onSelectMonth={(m) => setActiveTab(`rel-req-${m}`)} />;
     }
 
     if (activeTab.startsWith('rel-req-')) {
-      if (!canAccessPlanilhas) return <Dashboard />;
+      if (!canAccessTab(activeTab)) return <Dashboard />;
       const mes = Number(activeTab.slice('rel-req-'.length));
       if (mes >= 1 && mes <= 12) {
         return <RelatorioRequisicoesMesPage key={mes} month={mes} />;
@@ -196,12 +206,12 @@ export default function App() {
     }
 
     if (activeTab === 'rel-consumo') {
-      if (!canAccessPlanilhas) return <Dashboard />;
+      if (!canAccessTab(activeTab)) return <Dashboard />;
       return <ConsumoInternoPage onSelectMonth={(m) => setActiveTab(`rel-consumo-${m}`)} />;
     }
 
     if (activeTab.startsWith('rel-consumo-')) {
-      if (!canAccessPlanilhas) return <Dashboard />;
+      if (!canAccessTab(activeTab)) return <Dashboard />;
       const mes = Number(activeTab.slice('rel-consumo-'.length));
       if (mes >= 1 && mes <= 12) {
         return <ConsumoInternoMesPage key={mes} month={mes} />;
@@ -209,12 +219,12 @@ export default function App() {
     }
 
     if (activeTab === 'rel-rds') {
-      if (!canAccessPlanilhas) return <Dashboard />;
+      if (!canAccessTab(activeTab)) return <Dashboard />;
       return <RelatorioRdsPage onSelectMonth={(m) => setActiveTab(`rel-rds-${m}`)} />;
     }
 
     if (activeTab.startsWith('rel-rds-')) {
-      if (!canAccessPlanilhas) return <Dashboard />;
+      if (!canAccessTab(activeTab)) return <Dashboard />;
       const mes = Number(activeTab.slice('rel-rds-'.length));
       if (mes >= 1 && mes <= 12) {
         return <RelatorioRdsMesPage key={mes} month={mes} />;
@@ -222,6 +232,7 @@ export default function App() {
     }
 
     if (activeTab.startsWith('folha-')) {
+      if (!canAccessTab('folha')) return <Dashboard />;
       const mes = Number(activeTab.slice('folha-'.length));
       if (mes >= 1 && mes <= 12) {
         return <FolhaPagamentoPage key={mes} month={mes} />;
@@ -255,6 +266,7 @@ export default function App() {
       case 'indicadores': return <Indicadores />;
       case 'supabase-teste': return <SupabaseTeste />;
       case 'usuarios': return <Usuarios />;
+      case 'sugestoes': return <Sugestoes />;
       case 'configuracoes': return <Configuracoes />;
       case 'tutorial': return <Tutorial />;
       case 'compras-ordem': return <ComprasPage />;
@@ -480,6 +492,8 @@ function AppShell({
                 ? `Setores / ${getPainelByTab(activeTab)?.label ?? ''}`
                 : activeTab === 'tutorial'
                 ? 'Tutorial guiado'
+                : activeTab === 'sugestoes'
+                ? 'Sugestões'
                 : activeTab.replace('-', ' ')}
             </span>
           </div>
@@ -513,11 +527,12 @@ function AppShell({
 
         <div
           data-tour="page-content"
-          className={activeTab === 'notas' || activeTab === 'danfe' || activeTab === 'comandas' || activeTab === 'lancamentos-manuais' || activeTab === 'requisicoes' || activeTab === 'mensalidades' || activeTab === 'compras-mensalidades' || activeTab === 'cadastros' || activeTab === 'sintase' || activeTab === 'prev-real' || activeTab === 'indicadores' || activeTab === 'dre' || activeTab === 'rel-crd' || activeTab.startsWith('rel-crd-') || activeTab === 'rel-req' || activeTab.startsWith('rel-req-') || activeTab === 'rel-consumo' || activeTab.startsWith('rel-consumo-') || activeTab === 'rel-rds' || activeTab.startsWith('rel-rds-') || activeTab.startsWith('planilha-') || activeTab.startsWith('folha-') || activeTab === 'compras-ordem' || activeTab === 'investimentos' || activeTab === 'tutorial' || isPainelSetorialTab(activeTab) ? 'p-8 pt-4 md:pt-8 w-full max-w-none' : 'p-8 pt-4 md:pt-8 max-w-7xl mx-auto'}
+          className={activeTab === 'notas' || activeTab === 'danfe' || activeTab === 'comandas' || activeTab === 'lancamentos-manuais' || activeTab === 'requisicoes' || activeTab === 'mensalidades' || activeTab === 'compras-mensalidades' || activeTab === 'cadastros' || activeTab === 'sintase' || activeTab === 'prev-real' || activeTab === 'indicadores' || activeTab === 'dre' || activeTab === 'rel-crd' || activeTab.startsWith('rel-crd-') || activeTab === 'rel-req' || activeTab.startsWith('rel-req-') || activeTab === 'rel-consumo' || activeTab.startsWith('rel-consumo-') || activeTab === 'rel-rds' || activeTab.startsWith('rel-rds-') || activeTab.startsWith('planilha-') || activeTab.startsWith('folha-') || activeTab === 'compras-ordem' || activeTab === 'investimentos' || activeTab === 'tutorial' || activeTab === 'sugestoes' || isPainelSetorialTab(activeTab) ? 'p-8 pt-4 md:pt-8 w-full max-w-none' : 'p-8 pt-4 md:pt-8 max-w-7xl mx-auto'}
         >
           {renderContent()}
         </div>
       </main>
+        <SuggestionFab activeTab={activeTab} />
         </div>
       </TutorialProvider>
       </ToastProvider>

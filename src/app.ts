@@ -20,6 +20,14 @@ import {
   requireAuth,
   requireRole,
 } from "./lib/auth.js";
+import {
+  PERMISSION_RESOURCES,
+  PERMISSION_RESOURCE_KEYS,
+  buildDefaultPermissionRows,
+  slugifyRole,
+  SYSTEM_ROLES,
+  type RolePermissionRow,
+} from "./lib/permissionCatalog.js";
 import { logImportHistory } from "./lib/importHistory.js";
 import {
   classificarLancamentosImportacao,
@@ -447,6 +455,42 @@ export function createApp() {
   app.use("/uploads", express.static(uploadDir));
 
   // Helper para montar os setores do usuário (usado em login e /me).
+  const loadRolePermissions = async (roleSlug: string): Promise<RolePermissionRow[]> => {
+    if (!roleSlug) return [];
+    if (roleSlug === "admin") {
+      return buildDefaultPermissionRows("admin");
+    }
+    const { data, error } = await supabase
+      .from("role_permissions")
+      .select("resource_key, can_view, can_create, can_edit, can_delete")
+      .eq("role_slug", roleSlug);
+    if (error) {
+      console.error("Erro ao carregar permissões do perfil:", error);
+      return buildDefaultPermissionRows(roleSlug);
+    }
+    if (!data?.length) return buildDefaultPermissionRows(roleSlug);
+    return data.map((row: any) => ({
+      resource_key: String(row.resource_key),
+      can_view: Boolean(row.can_view),
+      can_create: Boolean(row.can_create),
+      can_edit: Boolean(row.can_edit),
+      can_delete: Boolean(row.can_delete),
+    }));
+  };
+
+  const roleExists = async (roleSlug: string): Promise<boolean> => {
+    const { data, error } = await supabase
+      .from("app_roles")
+      .select("slug")
+      .eq("slug", roleSlug)
+      .maybeSingle();
+    if (error) {
+      console.error("Erro ao validar role:", error);
+      return SYSTEM_ROLES.some((r) => r.slug === roleSlug);
+    }
+    return Boolean(data?.slug);
+  };
+
   const buildUserSession = async (user: any) => {
     const { data: userSectorLinks } = await supabase
       .from("user_sectors")
@@ -471,7 +515,13 @@ export function createApp() {
 
     const sectorNames = (sectorRows ?? []).map((row: any) => String(row.name || ""));
     const { password: _pwd, ...userWithoutPassword } = user;
-    return { ...userWithoutPassword, sector_ids: fallbackSectorIds, sector_names: sectorNames };
+    const permissions = await loadRolePermissions(String(user.role || ""));
+    return {
+      ...userWithoutPassword,
+      sector_ids: fallbackSectorIds,
+      sector_names: sectorNames,
+      permissions,
+    };
   };
 
   // ====================================================
@@ -681,7 +731,7 @@ export function createApp() {
       name?: string;
       email?: string;
       password?: string;
-      role?: "admin" | "finance" | "controle" | "manager" | "viewer" | "diretoria";
+      role?: string;
       sector_id?: number | null;
       sector_ids?: number[];
     };
@@ -690,7 +740,7 @@ export function createApp() {
       return res.status(400).json({ error: "name, email, password e role são obrigatórios" });
     }
 
-    if (!["admin", "finance", "controle", "manager", "viewer", "diretoria"].includes(role)) {
+    if (!(await roleExists(String(role)))) {
       return res.status(400).json({ error: "role inválido" });
     }
 
@@ -765,7 +815,7 @@ export function createApp() {
       name?: string;
       email?: string;
       password?: string;
-      role?: "admin" | "finance" | "controle" | "manager" | "viewer" | "diretoria";
+      role?: string;
       sector_id?: number | null;
       sector_ids?: number[];
     };
@@ -773,7 +823,7 @@ export function createApp() {
     if (!name || !email || !role) {
       return res.status(400).json({ error: "name, email e role são obrigatórios" });
     }
-    if (!["admin", "finance", "controle", "manager", "viewer", "diretoria"].includes(role)) {
+    if (!(await roleExists(String(role)))) {
       return res.status(400).json({ error: "role inválido" });
     }
 
@@ -869,6 +919,288 @@ export function createApp() {
       return res.status(400).json({ error: "Não foi possível excluir o usuário." });
     }
     res.json({ success: true });
+  });
+
+  // ====================================================
+  // SUGESTÕES DOS USUÁRIOS
+  // ====================================================
+  app.post("/api/suggestions", async (req, res) => {
+    const message = String(req.body?.message || "").trim();
+    const page_tab = String(req.body?.page_tab || "").trim().slice(0, 120) || null;
+    const page_label = String(req.body?.page_label || "").trim().slice(0, 240) || null;
+
+    if (message.length < 5) {
+      return res.status(400).json({ error: "Escreva uma sugestão com pelo menos algumas palavras." });
+    }
+    if (message.length > 4000) {
+      return res.status(400).json({ error: "A sugestão deve ter no máximo 4000 caracteres." });
+    }
+
+    const userId = req.user?.id;
+    const { data: userRow } = userId
+      ? await supabase.from("users").select("id, name, email, role").eq("id", userId).maybeSingle()
+      : { data: null };
+
+    const { data, error } = await supabase
+      .from("user_suggestions")
+      .insert({
+        user_id: userRow?.id ?? null,
+        user_name: userRow?.name || req.user?.name || null,
+        user_email: userRow?.email || req.user?.email || null,
+        user_role: userRow?.role || req.user?.role || null,
+        message,
+        page_tab,
+        page_label,
+      })
+      .select("id, created_at")
+      .single();
+
+    if (error) {
+      console.error("Erro ao salvar sugestão:", error);
+      return res.status(500).json({
+        error: "Não foi possível salvar a sugestão. Verifique a migration sql/28_user_suggestions.sql.",
+      });
+    }
+
+    res.status(201).json({ id: data.id, created_at: data.created_at });
+  });
+
+  app.get("/api/suggestions", requireRole("admin"), async (_req, res) => {
+    const { data, error } = await supabase
+      .from("user_suggestions")
+      .select("id, user_id, user_name, user_email, user_role, message, page_tab, page_label, created_at")
+      .order("created_at", { ascending: false })
+      .limit(500);
+
+    if (error) {
+      console.error("Erro ao listar sugestões:", error);
+      return res.status(500).json({
+        error: "Não foi possível carregar as sugestões. Verifique a migration sql/28_user_suggestions.sql.",
+      });
+    }
+    res.json(data ?? []);
+  });
+
+  // ====================================================
+  // ROLES / PERMISSÕES
+  // ====================================================
+  app.get("/api/permissions/catalog", requireRole("admin"), (_req, res) => {
+    res.json(PERMISSION_RESOURCES);
+  });
+
+  app.get("/api/roles", requireRole("admin"), async (_req, res) => {
+    const { data, error } = await supabase
+      .from("app_roles")
+      .select("slug, label, description, is_system, sort_order, created_at, updated_at")
+      .order("sort_order", { ascending: true })
+      .order("label", { ascending: true });
+
+    if (error) {
+      console.error("Erro ao listar roles:", error);
+      return res.status(500).json({
+        error: "Não foi possível carregar os níveis. Rode a migration sql/27_role_permissions.sql.",
+        roles: SYSTEM_ROLES.map((r) => ({ ...r, is_system: true })),
+      });
+    }
+    res.json(data ?? []);
+  });
+
+  app.post("/api/roles", requireRole("admin"), async (req, res) => {
+    const label = String(req.body?.label || "").trim();
+    const description = String(req.body?.description || "").trim();
+    let slug = String(req.body?.slug || "").trim().toLowerCase();
+    if (!label) return res.status(400).json({ error: "Informe o nome do nível." });
+    if (!slug) slug = slugifyRole(label);
+    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)) {
+      return res.status(400).json({ error: "Slug inválido. Use letras minúsculas, números e hífen." });
+    }
+    if (slug === "admin") {
+      return res.status(400).json({ error: "Não é permitido criar outro nível admin." });
+    }
+
+    const { data: existing } = await supabase.from("app_roles").select("slug").eq("slug", slug).maybeSingle();
+    if (existing) return res.status(409).json({ error: "Já existe um nível com este identificador." });
+
+    const { data: maxSort } = await supabase
+      .from("app_roles")
+      .select("sort_order")
+      .order("sort_order", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    const sort_order = Number(maxSort?.sort_order || 100) + 10;
+    const { data, error } = await supabase
+      .from("app_roles")
+      .insert({
+        slug,
+        label,
+        description: description || null,
+        is_system: false,
+        sort_order,
+      })
+      .select("slug, label, description, is_system, sort_order")
+      .single();
+
+    if (error) {
+      console.error("Erro ao criar role:", error);
+      return res.status(400).json({ error: "Não foi possível criar o nível." });
+    }
+
+    const defaults = buildDefaultPermissionRows("viewer").map((row) => ({
+      role_slug: slug,
+      ...row,
+    }));
+    const { error: permError } = await supabase.from("role_permissions").upsert(defaults, {
+      onConflict: "role_slug,resource_key",
+    });
+    if (permError) {
+      console.error("Erro ao seedar permissões do novo nível:", permError);
+    }
+
+    res.status(201).json(data);
+  });
+
+  app.patch("/api/roles/:slug", requireRole("admin"), async (req, res) => {
+    const slug = String(req.params.slug || "");
+    const label = req.body?.label != null ? String(req.body.label).trim() : undefined;
+    const description = req.body?.description != null ? String(req.body.description).trim() : undefined;
+
+    if (!slug) return res.status(400).json({ error: "slug obrigatório" });
+    const payload: Record<string, unknown> = { updated_at: new Date().toISOString() };
+    if (label !== undefined) {
+      if (label.length < 2) return res.status(400).json({ error: "Nome inválido." });
+      payload.label = label;
+    }
+    if (description !== undefined) payload.description = description || null;
+
+    const { data, error } = await supabase
+      .from("app_roles")
+      .update(payload)
+      .eq("slug", slug)
+      .select("slug, label, description, is_system, sort_order")
+      .single();
+
+    if (error) {
+      console.error("Erro ao atualizar role:", error);
+      return res.status(400).json({ error: "Não foi possível atualizar o nível." });
+    }
+    res.json(data);
+  });
+
+  app.delete("/api/roles/:slug", requireRole("admin"), async (req, res) => {
+    const slug = String(req.params.slug || "");
+    if (!slug) return res.status(400).json({ error: "slug obrigatório" });
+
+    const { data: role } = await supabase
+      .from("app_roles")
+      .select("slug, is_system")
+      .eq("slug", slug)
+      .maybeSingle();
+    if (!role) return res.status(404).json({ error: "Nível não encontrado." });
+    if (role.is_system) return res.status(400).json({ error: "Níveis de sistema não podem ser excluídos." });
+
+    const { count, error: countError } = await supabase
+      .from("users")
+      .select("id", { head: true, count: "exact" })
+      .eq("role", slug);
+    if (countError) {
+      console.error("Erro ao contar usuários do nível:", countError);
+      return res.status(500).json({ error: "Não foi possível verificar usuários do nível." });
+    }
+    if ((count ?? 0) > 0) {
+      return res.status(400).json({
+        error: `Há ${count} usuário(s) com este nível. Reatribua-os antes de excluir.`,
+      });
+    }
+
+    const { error } = await supabase.from("app_roles").delete().eq("slug", slug);
+    if (error) {
+      console.error("Erro ao excluir role:", error);
+      return res.status(400).json({ error: "Não foi possível excluir o nível." });
+    }
+    res.json({ success: true });
+  });
+
+  app.get("/api/roles/:slug/permissions", requireRole("admin"), async (req, res) => {
+    const slug = String(req.params.slug || "");
+    if (!slug) return res.status(400).json({ error: "slug obrigatório" });
+    if (!(await roleExists(slug))) return res.status(404).json({ error: "Nível não encontrado." });
+
+    const rows = await loadRolePermissions(slug);
+    // Completa com recursos faltantes (desmarcados)
+    const byKey = new Map(rows.map((r) => [r.resource_key, r]));
+    const full = PERMISSION_RESOURCE_KEYS.map((key) => {
+      const existing = byKey.get(key);
+      if (existing) return existing;
+      return {
+        resource_key: key,
+        can_view: false,
+        can_create: false,
+        can_edit: false,
+        can_delete: false,
+      };
+    });
+    res.json(full);
+  });
+
+  app.put("/api/roles/:slug/permissions", requireRole("admin"), async (req, res) => {
+    const slug = String(req.params.slug || "");
+    if (!slug) return res.status(400).json({ error: "slug obrigatório" });
+    if (!(await roleExists(slug))) return res.status(404).json({ error: "Nível não encontrado." });
+    if (slug === "admin") {
+      return res.status(400).json({
+        error: "O nível Administrador sempre tem acesso total; a matriz não é editável.",
+      });
+    }
+
+    const incoming = Array.isArray(req.body?.permissions) ? req.body.permissions : null;
+    if (!incoming) return res.status(400).json({ error: "Envie permissions[]" });
+
+    const allowed = new Set(PERMISSION_RESOURCE_KEYS);
+    const rows = incoming
+      .map((row: any) => {
+        const resource_key = String(row?.resource_key || "");
+        if (!allowed.has(resource_key)) return null;
+        const can_view = Boolean(row?.can_view);
+        return {
+          role_slug: slug,
+          resource_key,
+          can_view,
+          can_create: can_view && Boolean(row?.can_create),
+          can_edit: can_view && Boolean(row?.can_edit),
+          can_delete: can_view && Boolean(row?.can_delete),
+        };
+      })
+      .filter(Boolean) as Array<{
+      role_slug: string;
+      resource_key: string;
+      can_view: boolean;
+      can_create: boolean;
+      can_edit: boolean;
+      can_delete: boolean;
+    }>;
+
+    // Remove permissões antigas e grava o snapshot atual
+    const { error: delError } = await supabase.from("role_permissions").delete().eq("role_slug", slug);
+    if (delError) {
+      console.error("Erro ao limpar permissões:", delError);
+      return res.status(500).json({ error: "Não foi possível salvar as permissões." });
+    }
+
+    if (rows.length) {
+      const { error } = await supabase.from("role_permissions").insert(rows);
+      if (error) {
+        console.error("Erro ao salvar permissões:", error);
+        return res.status(500).json({ error: "Não foi possível salvar as permissões." });
+      }
+    }
+
+    await supabase
+      .from("app_roles")
+      .update({ updated_at: new Date().toISOString() })
+      .eq("slug", slug);
+
+    res.json({ success: true, count: rows.length });
   });
 
   // ====================================================
