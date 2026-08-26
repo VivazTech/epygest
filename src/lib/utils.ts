@@ -5,11 +5,56 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-export const formatCurrency = (value: number) => {
+export const formatCurrency = (value: number, currency = 'BRL') => {
+  const code = (currency || 'BRL').toUpperCase();
+  try {
+    return new Intl.NumberFormat('pt-BR', {
+      style: 'currency',
+      currency: code,
+    }).format(value);
+  } catch {
+    return `${code} ${new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value)}`;
+  }
+};
+
+export type CurrencyMeta = {
+  code: string;
+  symbol: string;
+  fractionDigits: number;
+};
+
+export const getCurrencyMeta = (currency = 'BRL'): CurrencyMeta => {
+  const code = String(currency || 'BRL').trim().toUpperCase() || 'BRL';
+  try {
+    const formatter = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: code });
+    const parts = formatter.formatToParts(0);
+    const symbol = (parts.find((part) => part.type === 'currency')?.value || code).trim();
+    const fractionDigits = formatter.resolvedOptions().maximumFractionDigits ?? 2;
+    return { code, symbol, fractionDigits };
+  } catch {
+    return { code, symbol: code, fractionDigits: 2 };
+  }
+};
+
+export const formatCurrencyInput = (value: string | number, currency = 'BRL') => {
+  if (value === '' || value == null) return '';
+  const num = typeof value === 'number' ? value : Number(String(value).replace(',', '.'));
+  if (!Number.isFinite(num)) return '';
+  const { fractionDigits } = getCurrencyMeta(currency);
   return new Intl.NumberFormat('pt-BR', {
-    style: 'currency',
-    currency: 'BRL',
-  }).format(value);
+    minimumFractionDigits: fractionDigits,
+    maximumFractionDigits: fractionDigits,
+  }).format(num);
+};
+
+/** Converte a digitação da máscara (somente dígitos) no valor numérico. */
+export const parseCurrencyInputDigits = (raw: string, currency = 'BRL') => {
+  const { fractionDigits } = getCurrencyMeta(currency);
+  const digits = String(raw ?? '').replace(/\D/g, '');
+  if (!digits) return '';
+  const amount = Number(digits) / 10 ** fractionDigits;
+  if (!Number.isFinite(amount)) return '';
+  return String(amount);
 };
 
 export const formatPercent = (value: number) => {

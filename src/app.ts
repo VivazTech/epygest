@@ -47,6 +47,7 @@ import {
   STORAGE_BUCKET,
   STORAGE_PREFIXES,
   normalizeStorageObjectPath,
+  collectBoletoPaths,
   type StorageDocumentField,
 } from "./lib/storagePath.js";
 
@@ -968,7 +969,7 @@ export function createApp() {
   app.get("/api/suggestions", requireRole("admin"), async (_req, res) => {
     const { data, error } = await supabase
       .from("user_suggestions")
-      .select("id, user_id, user_name, user_email, user_role, message, page_tab, page_label, created_at")
+      .select("id, user_id, user_name, user_email, user_role, message, page_tab, page_label, created_at, done, done_at")
       .order("created_at", { ascending: false })
       .limit(500);
 
@@ -979,6 +980,30 @@ export function createApp() {
       });
     }
     res.json(data ?? []);
+  });
+
+  app.patch("/api/suggestions/:id", requireRole("admin"), async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id) || id <= 0) {
+      return res.status(400).json({ error: "Sugestão inválida." });
+    }
+    const done = Boolean(req.body?.done);
+    const { data, error } = await supabase
+      .from("user_suggestions")
+      .update({
+        done,
+        done_at: done ? new Date().toISOString() : null,
+      })
+      .eq("id", id)
+      .select("id, done, done_at")
+      .maybeSingle();
+
+    if (error) {
+      console.error("Erro ao atualizar sugestão:", error);
+      return res.status(500).json({ error: "Não foi possível atualizar a sugestão." });
+    }
+    if (!data) return res.status(404).json({ error: "Sugestão não encontrada." });
+    res.json(data);
   });
 
   // ====================================================
@@ -1976,7 +2001,7 @@ export function createApp() {
   });
 
   app.post("/api/manual-entries", async (req, res) => {
-    const { sector_id, crd_id, description, amount, date, issue_date } = req.body;
+    const { sector_id, crd_id, description, amount, date, issue_date, file_path, file_name } = req.body;
     if (!sector_id || amount == null || !date || !issue_date) {
       return res.status(400).json({ error: "sector_id, amount, issue_date e date são obrigatórios" });
     }
@@ -2005,6 +2030,19 @@ export function createApp() {
       resolvedCrdId = Number(crd.id);
     }
 
+    let resolvedFilePath: string | null = null;
+    let resolvedFileName: string | null = null;
+    const rawFilePath = String(file_path || "").trim();
+    if (rawFilePath) {
+      const objectPath = normalizeStorageObjectPath(rawFilePath);
+      if (!objectPath || !objectPath.startsWith("manual-entries/")) {
+        return res.status(400).json({ error: "Arquivo inválido" });
+      }
+      resolvedFilePath = objectPath;
+      const originalName = String(file_name || "").trim().slice(0, 255);
+      resolvedFileName = originalName || null;
+    }
+
     const { data, error } = await supabase
       .from("manual_entries")
       .insert({
@@ -2016,6 +2054,8 @@ export function createApp() {
         issue_date,
         date,
         status: "open",
+        file_path: resolvedFilePath,
+        file_name: resolvedFileName,
       })
       .select("id")
       .single();
@@ -2082,6 +2122,83 @@ export function createApp() {
       return res.status(500).json({ error: "Erro interno ao processar a solicitação." });
     }
     res.json({ success: true });
+  });
+
+  const MANUAL_ENTRY_ALLOWED_MIMES = new Set([
+    "application/pdf",
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.ms-excel",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/msword",
+  ]);
+
+  const manualEntryExtFromFile = (file: Express.Multer.File) => {
+    const fromName = path.extname(file.originalname || "").replace(".", "").toLowerCase();
+    if (fromName) return fromName;
+    const mime = String(file.mimetype || "");
+    if (mime === "application/pdf") return "pdf";
+    if (mime === "image/jpeg") return "jpg";
+    if (mime === "image/png") return "png";
+    if (mime === "image/webp") return "webp";
+    if (mime.includes("spreadsheet") || mime === "application/vnd.ms-excel") return "xlsx";
+    if (mime.includes("wordprocessing") || mime === "application/msword") return "docx";
+    return "bin";
+  };
+
+  app.post("/api/manual-entries/file", upload.single("file"), async (req, res) => {
+    if (!req.file) return res.status(400).json({ error: "Arquivo não enviado" });
+    const mime = String(req.file.mimetype || "");
+    const ext = path.extname(req.file.originalname || "").toLowerCase();
+    const allowedExt = [".pdf", ".jpg", ".jpeg", ".png", ".webp", ".xls", ".xlsx", ".doc", ".docx"];
+    if (!MANUAL_ENTRY_ALLOWED_MIMES.has(mime) && !allowedExt.includes(ext)) {
+      if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+      return res.status(400).json({ error: "Formato inválido. Envie PDF, imagem, Excel ou Word." });
+    }
+
+    try {
+      const fileBuffer = fs.readFileSync(req.file.path);
+      const storagePath = await uploadDocument(
+        fileBuffer,
+        "manual-entries",
+        manualEntryExtFromFile(req.file),
+        mime || "application/octet-stream"
+      );
+      res.json({
+        file_path: storagePath,
+        file_name: String(req.file.originalname || "").slice(0, 255),
+      });
+    } catch (error) {
+      console.error("Erro ao salvar anexo do lançamento manual:", error);
+      res.status(500).json({ error: "Não foi possível salvar o arquivo." });
+    } finally {
+      if (req.file?.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+    }
+  });
+
+  app.get("/api/manual-entries/:id/document-url", async (req, res) => {
+    const { data, error } = await supabase
+      .from("manual_entries")
+      .select("id, file_path")
+      .eq("id", Number(req.params.id))
+      .maybeSingle();
+
+    if (error) {
+      console.error(error);
+      return res.status(500).json({ error: "Erro ao buscar o anexo." });
+    }
+    if (!data) return res.status(404).json({ error: "Lançamento não encontrado" });
+    const rawPath = String((data as { file_path?: string }).file_path || "");
+    if (!rawPath) return res.status(404).json({ error: "Documento não anexado" });
+
+    const result = await createSignedDocumentUrl(rawPath);
+    if (!("url" in result)) {
+      const status = result.error === "Caminho inválido" ? 400 : 404;
+      return res.status(status).json({ error: result.error });
+    }
+    res.json({ url: result.url });
   });
 
   // Exclusão definitiva de lançamento manual (apenas admin)
@@ -2414,6 +2531,7 @@ export function createApp() {
         ...i,
         sector_name: i.sectors?.name ?? null,
         user_name: i.users?.name ?? null,
+        boleto_paths: collectBoletoPaths(i),
         sectors: undefined,
         users: undefined,
       }))
@@ -2476,7 +2594,7 @@ export function createApp() {
 
   const invoiceReportCsvHeader = [
     "id", "invoice_number", "provider_name", "sector_name", "user_name", "amount",
-    "issue_date", "due_date", "payment_method", "pix_key", "flow_stage",
+    "issue_date", "due_date", "payment_method", "currency", "pix_key", "flow_stage",
     "status", "natureza", "file_url", "boleto_file_url", "payment_receipt_url", "created_at",
   ];
 
@@ -2758,9 +2876,11 @@ export function createApp() {
       return res.status(400).json({ error: "Campo inválido" });
     }
 
+    const selectFields =
+      field === "boleto_file_path" ? "boleto_file_path, boleto_file_paths" : field;
     const { data, error } = await supabase
       .from("invoices")
-      .select(field)
+      .select(selectFields)
       .eq("id", Number(req.params.id))
       .maybeSingle();
 
@@ -2770,7 +2890,13 @@ export function createApp() {
     }
     if (!data) return res.status(404).json({ error: "Nota não encontrada" });
 
-    const rawPath = String((data as Record<string, unknown>)[field] || "");
+    let rawPath = String((data as Record<string, unknown>)[field] || "");
+    if (field === "boleto_file_path") {
+      const paths = collectBoletoPaths(data as { boleto_file_path?: string; boleto_file_paths?: unknown });
+      const index = Number((req.query as { index?: string }).index);
+      const i = Number.isFinite(index) && index >= 0 ? index : 0;
+      rawPath = paths[i] || paths[0] || "";
+    }
     if (!rawPath) return res.status(404).json({ error: "Documento não anexado" });
 
     const result = await createSignedDocumentUrl(rawPath);
@@ -2785,9 +2911,14 @@ export function createApp() {
   app.post("/api/invoices", async (req, res) => {
     const {
       invoice_number, provider_name, amount, issue_date, due_date,
-      sector_id, file_path, boleto_file_path, natureza,
-      crd, payment_method, pix_key,
+      sector_id, file_path, boleto_file_path, boleto_file_paths, natureza,
+      crd, payment_method, pix_key, currency,
     } = req.body;
+
+    const boletoPaths = collectBoletoPaths({
+      boleto_file_path,
+      boleto_file_paths,
+    });
 
     const launchedByUserId = req.user?.id ?? null;
 
@@ -2798,11 +2929,13 @@ export function createApp() {
         sector_id,
         user_id: launchedByUserId,
         file_path: file_path || null,
-        boleto_file_path: boleto_file_path || null,
+        boleto_file_path: boletoPaths[0] || null,
+        boleto_file_paths: boletoPaths,
         natureza: natureza || "O",
         crd: crd || null,
         payment_method: payment_method || null,
         pix_key: pix_key || null,
+        currency: String(currency || "BRL").trim().toUpperCase() || "BRL",
         status: "received",
         flow_stage: "control_pending",
       })
@@ -2965,6 +3098,35 @@ export function createApp() {
       .select("id")
       .single();
     if (error) return res.status(400).json({ error: "Não foi possível cadastrar (key duplicada?)" });
+    res.json({ id: data.id });
+  });
+
+  // ====================================================
+  // CURRENCIES
+  // ====================================================
+  app.get("/api/currencies", async (_req, res) => {
+    const { data, error } = await supabase
+      .from("currencies")
+      .select("*")
+      .order("active", { ascending: false })
+      .order("key");
+    if (error) { console.error(error); return res.status(500).json({ error: "Erro interno ao processar a solicitação." }); }
+    res.json(data);
+  });
+
+  app.post("/api/currencies", async (req, res) => {
+    const { key, name, active } = req.body;
+    if (!key || !name) return res.status(400).json({ error: "código e nome são obrigatórios" });
+    const normalizedKey = String(key).trim().toUpperCase();
+    if (!/^[A-Z]{3,8}$/.test(normalizedKey)) {
+      return res.status(400).json({ error: "Use o código ISO da moeda (ex: BRL, USD)" });
+    }
+    const { data, error } = await supabase
+      .from("currencies")
+      .insert({ key: normalizedKey, name: String(name).trim(), active: active !== false })
+      .select("id")
+      .single();
+    if (error) return res.status(400).json({ error: "Não foi possível cadastrar (código duplicado?)" });
     res.json({ id: data.id });
   });
 

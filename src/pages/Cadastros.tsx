@@ -11,7 +11,8 @@ import {
   ChevronDown,
   Upload,
   FolderOpen,
-  UserRound
+  UserRound,
+  Coins
 } from 'lucide-react';
 import { cn, formatCurrency } from '../lib/utils';
 import { ValueTrace } from '../components/ValueTrace';
@@ -25,6 +26,7 @@ export const CadastrosPage: React.FC = () => {
   const [categories, setCategories] = useState<any[]>([]);
   const [sectors, setSectors] = useState<any[]>([]);
   const [paymentMethods, setPaymentMethods] = useState<any[]>([]);
+  const [currencies, setCurrencies] = useState<any[]>([]);
   const [crds, setCrds] = useState<any[]>([]);
   const [requisitions, setRequisitions] = useState<any[]>([]);
   const [cargos, setCargos] = useState<any[]>([]);
@@ -117,6 +119,10 @@ export const CadastrosPage: React.FC = () => {
     () => paymentMethods.filter((pm) => matchesSearch(query, pm.name, pm.key)),
     [paymentMethods, query]
   );
+  const filteredCurrencies = useMemo(
+    () => currencies.filter((c) => matchesSearch(query, c.name, c.key)),
+    [currencies, query]
+  );
   const filteredCargos = useMemo(
     () =>
       cargos.filter((c) =>
@@ -185,6 +191,7 @@ export const CadastrosPage: React.FC = () => {
     refreshCargos();
     refreshColaboradores();
     fetch('/api/payment-methods').then(res => res.json()).then(data => setPaymentMethods(data));
+    fetch('/api/currencies').then(res => res.json()).then(data => setCurrencies(Array.isArray(data) ? data : []));
     refreshCrds();
     fetch('/api/requisitions').then(res => res.json()).then(data => setRequisitions(data));
   }, []);
@@ -195,6 +202,7 @@ export const CadastrosPage: React.FC = () => {
     { id: 'colaboradores', label: 'Colaboradores', icon: UserRound },
     { id: 'contas', label: 'Contas Gerenciais', icon: Database },
     { id: 'formas-pagamento', label: 'Formas de Pagamento', icon: Database },
+    { id: 'moedas', label: 'Moedas', icon: Coins },
     { id: 'crd', label: 'CRD', icon: Database },
     { id: 'requisicoes', label: 'Requisições Internas', icon: Database },
   ];
@@ -218,6 +226,22 @@ export const CadastrosPage: React.FC = () => {
       setNewKey('');
       setNewName('');
       fetch('/api/payment-methods').then(res => res.json()).then(data => setPaymentMethods(data));
+      return;
+    }
+    if (activeTab === 'moedas') {
+      const res = await fetch('/api/currencies', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: newKey.trim(), name: newName.trim(), active: true })
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        alert(data.error || 'Erro ao cadastrar');
+        return;
+      }
+      setNewKey('');
+      setNewName('');
+      fetch('/api/currencies').then(res => res.json()).then(data => setCurrencies(Array.isArray(data) ? data : []));
       return;
     }
     if (activeTab === 'crd') {
@@ -649,7 +673,7 @@ export const CadastrosPage: React.FC = () => {
         </button>
       </div>
 
-      <div className="flex items-center gap-2 p-1 bg-slate-100 w-fit rounded-2xl">
+      <div className="flex flex-wrap items-center gap-2 p-1 bg-slate-100 w-fit rounded-2xl">
         {tabs.map(tab => (
           <button
             key={tab.id}
@@ -1400,6 +1424,28 @@ export const CadastrosPage: React.FC = () => {
               </button>
             </div>
           )}
+          {activeTab === 'moedas' && (
+            <div className="flex items-center gap-2 ml-auto">
+              <input
+                value={newKey}
+                onChange={(e) => setNewKey(e.target.value.toUpperCase())}
+                placeholder="código (ex: USD)"
+                className="w-40 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm uppercase"
+              />
+              <input
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                placeholder="Nome (ex: Dólar)"
+                className="w-56 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+              />
+              <button
+                onClick={createCadastro}
+                className="px-4 py-2 bg-[#004D40] text-white font-bold rounded-xl hover:bg-[#003d33] transition-colors"
+              >
+                Adicionar
+              </button>
+            </div>
+          )}
           {activeTab === 'requisicoes' && (
             <div className="flex flex-wrap items-center gap-2 ml-4">
               <select
@@ -1497,6 +1543,27 @@ export const CadastrosPage: React.FC = () => {
                       pm.active ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-600"
                     )}>
                       {pm.active ? 'Ativo' : 'Inativo'}
+                    </span>
+                  </td>
+                  <td className="px-6 py-4 text-right">
+                    <span className="text-xs text-slate-400">Em breve: editar/desativar</span>
+                  </td>
+                </tr>
+              ))}
+              {activeTab === 'moedas' && filteredCurrencies.map((currency) => (
+                <tr key={currency.id} className="hover:bg-slate-50/50 transition-colors group">
+                  <td className="px-6 py-4">
+                    <span className="text-sm font-medium text-slate-700">{currency.name}</span>
+                    <span className="ml-2 text-[10px] font-bold px-2 py-1 rounded-lg uppercase tracking-wider bg-slate-100 text-slate-500">
+                      {currency.key}
+                    </span>
+                  </td>
+                  <td className="px-6 py-4">
+                    <span className={cn(
+                      "text-[10px] font-bold px-2 py-1 rounded-lg uppercase tracking-wider",
+                      currency.active ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-600"
+                    )}>
+                      {currency.active ? 'Ativo' : 'Inativo'}
                     </span>
                   </td>
                   <td className="px-6 py-4 text-right">

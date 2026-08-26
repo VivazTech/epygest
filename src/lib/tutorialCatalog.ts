@@ -93,7 +93,7 @@ export const TUTORIAL_GROUPS: TutorialGroup[] = [
         tab: 'lancamentos-manuais',
         label: 'Lançamentos Manuais',
         summary: 'Lançamentos avulsos vinculados a setor e CRD.',
-        tour: 'Lançamentos Manuais servem para valores que não vieram de nota nem de requisição. Informe setor, CRD, valor e data — eles entram no realizado do mês.',
+        tour: 'Lançamentos Manuais servem para valores que não vieram de nota nem de requisição. Informe setor, CRD, valor, data e, se quiser, um arquivo de comprovante — eles entram no realizado do mês.',
         roles: LANC,
       },
       {
@@ -231,7 +231,7 @@ export const TUTORIAL_GROUPS: TutorialGroup[] = [
         tab: 'cadastros',
         label: 'Cadastros',
         summary: 'Setores, CRDs, cargos e colaboradores.',
-        tour: 'Cadastros é a base mestre: setores, CRDs (contas), cargos e colaboradores. Sem isso, notas e orçamento não encontram destino.',
+        tour: 'Cadastros é a base mestre: setores, CRDs (contas), cargos, colaboradores, formas de pagamento e moedas. Sem isso, notas e orçamento não encontram destino.',
         roles: CONTROLE,
       },
       {

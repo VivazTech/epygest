@@ -97,6 +97,14 @@ db.exec(`
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
+  CREATE TABLE IF NOT EXISTS currencies (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    key TEXT UNIQUE NOT NULL,
+    name TEXT NOT NULL,
+    active BOOLEAN DEFAULT 1,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
   CREATE TABLE IF NOT EXISTS crds (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     code TEXT NOT NULL,
@@ -176,6 +184,7 @@ if (!hasColumn('paid_by_sector')) db.exec(`ALTER TABLE invoices ADD COLUMN paid_
 if (!hasColumn('payment_receipt_path')) db.exec(`ALTER TABLE invoices ADD COLUMN payment_receipt_path TEXT`);
 if (!hasColumn('flow_stage')) db.exec(`ALTER TABLE invoices ADD COLUMN flow_stage TEXT DEFAULT 'control_pending'`);
 if (!hasColumn('boleto_file_path')) db.exec(`ALTER TABLE invoices ADD COLUMN boleto_file_path TEXT`);
+if (!hasColumn('boleto_file_paths')) db.exec(`ALTER TABLE invoices ADD COLUMN boleto_file_paths TEXT DEFAULT '[]'`);
 if (!hasColumn('crd')) db.exec(`ALTER TABLE invoices ADD COLUMN crd TEXT`);
 if (!hasColumn('payment_method')) db.exec(`ALTER TABLE invoices ADD COLUMN payment_method TEXT`);
 if (!hasColumn('pix_key')) db.exec(`ALTER TABLE invoices ADD COLUMN pix_key TEXT`);
@@ -183,6 +192,12 @@ if (!hasColumn('cancelled_at')) db.exec(`ALTER TABLE invoices ADD COLUMN cancell
 if (!hasColumn('cancelled_by_sector')) db.exec(`ALTER TABLE invoices ADD COLUMN cancelled_by_sector TEXT`);
 if (!hasColumn('cancel_reason')) db.exec(`ALTER TABLE invoices ADD COLUMN cancel_reason TEXT`);
 if (!hasColumn('natureza')) db.exec(`ALTER TABLE invoices ADD COLUMN natureza TEXT DEFAULT 'O'`);
+if (!hasColumn('currency')) db.exec(`ALTER TABLE invoices ADD COLUMN currency TEXT DEFAULT 'BRL'`);
+
+const manualEntriesInfo = db.prepare(`PRAGMA table_info(manual_entries)`).all() as Array<{ name: string }>;
+const manualEntryHasColumn = (name: string) => manualEntriesInfo.some((column) => column.name === name);
+if (!manualEntryHasColumn('file_path')) db.exec(`ALTER TABLE manual_entries ADD COLUMN file_path TEXT`);
+if (!manualEntryHasColumn('file_name')) db.exec(`ALTER TABLE manual_entries ADD COLUMN file_name TEXT`);
 
 const crdTableInfo = db.prepare(`PRAGMA table_info(crds)`).all() as Array<{ name: string }>;
 const crdHasColumn = (name: string) => crdTableInfo.some((column) => column.name === name);
@@ -196,6 +211,16 @@ if (paymentMethodCount.count === 0) {
   insertPaymentMethod.run('boleto', 'Boleto', 1);
   insertPaymentMethod.run('cartao_credito', 'Cartão de crédito', 1);
   insertPaymentMethod.run('dinheiro', 'Efetivo', 1);
+}
+
+const currencyCount = db.prepare('SELECT COUNT(*) as count FROM currencies').get() as { count: number };
+if (currencyCount.count === 0) {
+  const insertCurrency = db.prepare('INSERT INTO currencies (key, name, active) VALUES (?, ?, ?)');
+  insertCurrency.run('BRL', 'Real (BRL)', 1);
+  insertCurrency.run('USD', 'Dólar (USD)', 1);
+  insertCurrency.run('EUR', 'Euro (EUR)', 1);
+  insertCurrency.run('ARS', 'Peso argentino (ARS)', 1);
+  insertCurrency.run('PYG', 'Guarani (PYG)', 1);
 }
 
 const crdCount = db.prepare('SELECT COUNT(*) as count FROM crds').get() as { count: number };

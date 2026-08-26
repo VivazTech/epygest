@@ -44,10 +44,31 @@ import { hasPermission } from './lib/permissionCatalog';
 import { SuggestionFab } from './components/SuggestionFab';
 import { getPageLabel } from './lib/pageLabels';
 
+const ACTIVE_TAB_KEY = 'app:activeTab';
+
+const readStoredTab = () => {
+  try {
+    const saved = String(localStorage.getItem(ACTIVE_TAB_KEY) || '').trim();
+    return saved;
+  } catch {
+    return '';
+  }
+};
+
+const writeStoredTab = (tab: string) => {
+  try {
+    if (tab) localStorage.setItem(ACTIVE_TAB_KEY, tab);
+  } catch {
+    // ignore quota / private mode
+  }
+};
+
+const defaultTabForRole = (role?: string) => (role === 'finance' ? 'notas' : 'dashboard');
+
 export default function App() {
   const isSupabaseTestRoute = window.location.pathname === '/teste-supabase';
   const [user, setUser] = useState<any | null>(null);
-  const [activeTab, setActiveTab] = useState('dashboard');
+  const [activeTab, setActiveTab] = useState(() => readStoredTab() || 'dashboard');
   const [planilhaCell, setPlanilhaCell] = useState<string | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [loginForm, setLoginForm] = useState({ email: '', password: '' });
@@ -68,8 +89,8 @@ export default function App() {
         if (!cancelled && data?.id && data?.role) {
           setUser(data);
           localStorage.setItem('user', JSON.stringify(data)); // cache só para a UI
-          if (data.role === 'finance') setActiveTab('notas');
-          else if (data.role === 'diretoria') setActiveTab('dashboard');
+          const saved = readStoredTab();
+          setActiveTab(saved || defaultTabForRole(data.role));
         }
       } catch {
         if (!cancelled) {
@@ -99,6 +120,10 @@ export default function App() {
       if (next !== activeTab) setActiveTab(next);
     }
   }, [user, activeTab]);
+
+  useEffect(() => {
+    if (activeTab) writeStoredTab(activeTab);
+  }, [activeTab]);
 
   const handleLogout = async () => {
     try {
@@ -137,8 +162,8 @@ export default function App() {
       }
       setUser(data);
       localStorage.setItem('user', JSON.stringify(data));
-      if (data.role === 'finance') setActiveTab('notas');
-      else setActiveTab('dashboard');
+      const saved = readStoredTab();
+      setActiveTab(saved || defaultTabForRole(data.role));
       setLoginForm({ email: '', password: '' });
     } finally {
       setLoginLoading(false);

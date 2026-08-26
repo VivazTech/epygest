@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Plus, Archive, XCircle, Trash2, BadgeCheck, RotateCcw } from 'lucide-react';
+import { Plus, Archive, XCircle, Trash2, BadgeCheck, RotateCcw, Upload, FileCheck, Paperclip } from 'lucide-react';
 import { cn, formatCurrency } from '../lib/utils';
 import { ValueTrace } from '../components/ValueTrace';
 import { valueTrace } from '../lib/valueTraceMeta';
@@ -7,6 +7,7 @@ import { useSearch } from '../context/SearchContext';
 import { useToast } from '../context/ToastContext';
 import { matchesSearch } from '../lib/search';
 import { isSharedCrdCode } from '../lib/sharedCrds';
+import { isDirectDocumentUrl } from '../lib/storagePath';
 
 export const LancamentosManuaisPage: React.FC = () => {
   const { query } = useSearch();
@@ -24,7 +25,10 @@ export const LancamentosManuaisPage: React.FC = () => {
     date: '',
     amount: '',
     description: '',
+    file_path: '',
+    file_name: '',
   });
+  const [uploadingFile, setUploadingFile] = useState(false);
 
   const loadData = async () => {
     try {
@@ -128,6 +132,8 @@ export const LancamentosManuaisPage: React.FC = () => {
         date: form.date,
         amount: parseFloat(form.amount),
         description: form.description || null,
+        file_path: form.file_path || null,
+        file_name: form.file_name || null,
       }),
     });
 
@@ -138,8 +144,44 @@ export const LancamentosManuaisPage: React.FC = () => {
     }
 
     showSuccess('Lançamento manual criado. Aguardando aprovação do Controle.');
-    setForm({ sector_id: '', crd_id: '', issue_date: '', date: '', amount: '', description: '' });
+    setForm({ sector_id: '', crd_id: '', issue_date: '', date: '', amount: '', description: '', file_path: '', file_name: '' });
     loadData();
+  };
+
+  const handleFileUpload = async (file: File) => {
+    setUploadingFile(true);
+    try {
+      const payload = new FormData();
+      payload.append('file', file);
+      const res = await fetch('/api/manual-entries/file', { method: 'POST', body: payload });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Não foi possível enviar o arquivo.');
+      setForm((p) => ({
+        ...p,
+        file_path: data.file_path || '',
+        file_name: data.file_name || file.name,
+      }));
+    } catch (error: any) {
+      alert(error.message || 'Não foi possível enviar o arquivo.');
+    } finally {
+      setUploadingFile(false);
+    }
+  };
+
+  const openEntryDocument = async (entry: any) => {
+    const storedPath = String(entry?.file_path || '');
+    if (storedPath && isDirectDocumentUrl(storedPath)) {
+      window.open(storedPath, '_blank', 'noopener');
+      return;
+    }
+    try {
+      const res = await fetch(`/api/manual-entries/${entry.id}/document-url`);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data?.url) throw new Error(data?.error || 'Arquivo indisponível');
+      window.open(data.url, '_blank', 'noopener');
+    } catch (error: any) {
+      alert(error.message || 'Não foi possível abrir o documento.');
+    }
   };
 
   const updateStatus = async (id: number, status: 'open' | 'approved' | 'posted' | 'cancelled') => {
@@ -192,6 +234,7 @@ export const LancamentosManuaisPage: React.FC = () => {
           entry.crd_code,
           entry.crd_name,
           entry.description,
+          entry.file_name,
           entry.user_name,
           entry.issue_date,
           entry.date,
@@ -330,9 +373,46 @@ export const LancamentosManuaisPage: React.FC = () => {
             className="px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm self-end"
           />
 
+          <label
+            className={cn(
+              'md:col-span-5 flex items-center justify-center gap-2 w-full px-4 py-3 border border-dashed rounded-xl text-sm cursor-pointer transition-colors self-end',
+              uploadingFile
+                ? 'bg-slate-50 border-slate-300 text-slate-600'
+                : form.file_path
+                  ? 'bg-sky-50 border-sky-300 text-sky-800 hover:bg-sky-100'
+                  : 'bg-slate-50 border-slate-300 text-slate-600 hover:bg-slate-100'
+            )}
+            title={form.file_name || undefined}
+          >
+            {form.file_path && !uploadingFile ? (
+              <FileCheck className="w-4 h-4 shrink-0 text-sky-600" />
+            ) : (
+              <Upload className="w-4 h-4 shrink-0" />
+            )}
+            <span className="truncate">
+              {uploadingFile
+                ? 'Enviando arquivo...'
+                : form.file_name
+                  ? form.file_name
+                  : 'Anexar arquivo (PDF, imagem, Excel ou Word)'}
+            </span>
+            <input
+              type="file"
+              accept=".pdf,.jpg,.jpeg,.png,.webp,.xls,.xlsx,.doc,.docx,application/pdf,image/*"
+              className="hidden"
+              disabled={uploadingFile}
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) handleFileUpload(file);
+                e.target.value = '';
+              }}
+            />
+          </label>
+
           <button
             type="submit"
-            className="flex items-center justify-center gap-2 bg-[#004D40] text-white px-4 py-2.5 rounded-xl shadow-lg shadow-emerald-900/10 hover:bg-[#003d33] transition-colors self-end"
+            disabled={uploadingFile}
+            className="flex items-center justify-center gap-2 bg-[#004D40] text-white px-4 py-2.5 rounded-xl shadow-lg shadow-emerald-900/10 hover:bg-[#003d33] transition-colors self-end disabled:opacity-60 disabled:pointer-events-none"
           >
             <Plus className="w-4 h-4" />
             <span className="font-bold text-sm">Lançar</span>
@@ -348,6 +428,7 @@ export const LancamentosManuaisPage: React.FC = () => {
               <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Emissão</th>
               <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Lançamento</th>
               <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Descrição</th>
+              <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Anexo</th>
               <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Valor</th>
               <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Status</th>
               <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-right">Ações</th>
@@ -356,7 +437,7 @@ export const LancamentosManuaisPage: React.FC = () => {
           <tbody className="divide-y divide-slate-50">
             {filteredEntries.length === 0 && (
               <tr>
-                <td colSpan={7} className="px-6 py-10 text-center text-sm text-slate-400">
+                <td colSpan={8} className="px-6 py-10 text-center text-sm text-slate-400">
                   Nenhum lançamento manual encontrado.
                 </td>
               </tr>
@@ -379,6 +460,21 @@ export const LancamentosManuaisPage: React.FC = () => {
                   <td className="px-6 py-4 text-sm text-slate-600">{entry.issue_date || '—'}</td>
                   <td className="px-6 py-4 text-sm text-slate-600">{entry.date}</td>
                   <td className="px-6 py-4 text-sm text-slate-600">{entry.description || '—'}</td>
+                  <td className="px-6 py-4">
+                    {entry.file_path ? (
+                      <button
+                        type="button"
+                        onClick={() => openEntryDocument(entry)}
+                        className="inline-flex items-center gap-1.5 text-xs font-medium text-blue-700 bg-blue-50 px-2 py-1 rounded-lg hover:bg-blue-100 transition-colors"
+                        title={entry.file_name || 'Abrir anexo'}
+                      >
+                        <Paperclip className="w-3.5 h-3.5" />
+                        <span className="max-w-[140px] truncate">{entry.file_name || 'Abrir'}</span>
+                      </button>
+                    ) : (
+                      <span className="text-xs text-slate-400">—</span>
+                    )}
+                  </td>
                   <td className="px-6 py-4">
                     <ValueTrace
                       className="text-sm font-bold text-slate-900"

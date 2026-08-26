@@ -1,5 +1,5 @@
 export const STORAGE_BUCKET = "invoice-files";
-export const STORAGE_PREFIXES = ["invoices", "receipts", "boletos"] as const;
+export const STORAGE_PREFIXES = ["invoices", "receipts", "boletos", "manual-entries"] as const;
 
 export type StorageDocumentField = "file_path" | "boleto_file_path" | "payment_receipt_path";
 
@@ -42,4 +42,27 @@ export function normalizeStorageObjectPath(raw: string | null | undefined): stri
 /** URL HTTP que pode ser aberta diretamente (não é object path do Supabase). */
 export function isDirectDocumentUrl(path: string): boolean {
   return /^https?:\/\//i.test(path) && !/\/storage\/v1\/object\//i.test(path);
+}
+
+export function collectBoletoPaths(invoice: {
+  boleto_file_path?: string | null;
+  boleto_file_paths?: unknown;
+}): string[] {
+  const extra = invoice.boleto_file_paths;
+  let fromJson: string[] = [];
+  if (Array.isArray(extra)) {
+    fromJson = extra.map((p) => String(p ?? "").trim()).filter(Boolean);
+  } else if (typeof extra === "string" && extra.trim()) {
+    try {
+      const parsed = JSON.parse(extra);
+      if (Array.isArray(parsed)) {
+        fromJson = parsed.map((p) => String(p ?? "").trim()).filter(Boolean);
+      }
+    } catch {
+      // ignora JSON inválido
+    }
+  }
+  if (fromJson.length) return fromJson;
+  const first = String(invoice.boleto_file_path ?? "").trim();
+  return first ? [first] : [];
 }

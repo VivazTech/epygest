@@ -10,16 +10,17 @@ import {
   Upload,
   BadgeCheck,
   XCircle,
-  Trash2
+  Trash2,
+  FileCheck
 } from 'lucide-react';
-import { cn, formatCurrency, formatDate } from '../lib/utils';
+import { cn, formatCurrency, formatCurrencyInput, formatDate, getCurrencyMeta, parseCurrencyInputDigits } from '../lib/utils';
 import { ValueTrace } from '../components/ValueTrace';
 import { SearchableSelect } from '../components/SearchableSelect';
 import { valueTrace } from '../lib/valueTraceMeta';
 import { useSearch } from '../context/SearchContext';
 import { useToast } from '../context/ToastContext';
 import { matchesSearch } from '../lib/search';
-import { isDirectDocumentUrl, type StorageDocumentField } from '../lib/storagePath';
+import { isDirectDocumentUrl, collectBoletoPaths, type StorageDocumentField } from '../lib/storagePath';
 
 export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'servico' }) => {
   const { query } = useSearch();
@@ -51,6 +52,7 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
   const [customDateFrom, setCustomDateFrom] = useState(initialDateFrom);
   const [customDateTo, setCustomDateTo] = useState(initialDateTo);
   const [paymentMethods, setPaymentMethods] = useState<any[]>([]);
+  const [currencies, setCurrencies] = useState<any[]>([]);
   const [crdOptions, setCrdOptions] = useState<any[]>([]);
   const [actingSector, setActingSector] = useState<'requester' | 'controle' | 'financeiro'>('requester');
   const [requesterSectorId, setRequesterSectorId] = useState<string>('');
@@ -63,7 +65,9 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
   const [receiptFile, setReceiptFile] = useState<File | null>(null);
   const [uploadingReceipt, setUploadingReceipt] = useState(false);
   const [extractingPdf, setExtractingPdf] = useState(false);
-  const [uploadingBoleto, setUploadingBoleto] = useState(false);
+  const [invoicePdfName, setInvoicePdfName] = useState('');
+  const [boletos, setBoletos] = useState<Array<{ path: string; name: string }>>([{ path: '', name: '' }]);
+  const [uploadingBoletoIndex, setUploadingBoletoIndex] = useState<number | null>(null);
   const [semBoleto, setSemBoleto] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
   const [exportingReport, setExportingReport] = useState<'csv' | 'pdf' | null>(null);
@@ -84,7 +88,8 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
     natureza: 'O',
     crd: '',
     payment_method: '',
-    pix_key: ''
+    pix_key: '',
+    currency: 'BRL',
   });
 
   useEffect(() => {
@@ -101,6 +106,7 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
 
   useEffect(() => {
     fetch('/api/payment-methods').then(res => res.json()).then(setPaymentMethods);
+    fetch('/api/currencies').then(res => res.json()).then((data) => setCurrencies(Array.isArray(data) ? data : []));
     fetch('/api/crds').then(res => res.json()).then(setCrdOptions);
   }, []);
 
@@ -220,10 +226,13 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
         file_path: data.file_path || prev.file_path,
       }));
 
+      setInvoicePdfName(file.name);
+
       if (data.warning) {
         alert(`${data.warning}${data.parse_error ? `\nDetalhe técnico: ${data.parse_error}` : ''}`);
       }
     } catch (error: any) {
+      setInvoicePdfName('');
       alert(error.message || 'Não foi possível processar o PDF.');
     } finally {
       setExtractingPdf(false);
@@ -233,6 +242,9 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
   const closeInvoiceModal = () => {
     setShowModal(false);
     setSemBoleto(false);
+    setInvoicePdfName('');
+    setBoletos([{ path: '', name: '' }]);
+    setUploadingBoletoIndex(null);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -243,6 +255,10 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
     }
     if (!formData.payment_method) {
       alert('Selecione a forma de pagamento.');
+      return;
+    }
+    if (!formData.currency) {
+      alert('Selecione a moeda.');
       return;
     }
     if (formData.payment_method === 'pix' && !formData.pix_key) {
@@ -258,6 +274,7 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
       alert(`A data de vencimento deve estar na competência selecionada (${String(selectedMonth).padStart(2, '0')}/${selectedYear}).`);
       return;
     }
+    const boletoPaths = semBoleto ? [] : boletos.map((b) => b.path).filter(Boolean);
     const response = await fetch('/api/invoices', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -265,12 +282,14 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
         ...formData,
         amount: parseFloat(formData.amount),
         sector_id: parseInt(formData.sector_id),
+        boleto_file_path: boletoPaths[0] || '',
+        boleto_file_paths: boletoPaths,
       })
     });
     if (response.ok) {
       showSuccess('Nota fiscal lançada com sucesso.');
       closeInvoiceModal();
-      setFormData({ invoice_number: '', provider_name: '', amount: '', issue_date: '', due_date: '', sector_id: '', file_path: '', boleto_file_path: '', natureza: 'O', crd: '', payment_method: '', pix_key: '' });
+      setFormData({ invoice_number: '', provider_name: '', amount: '', issue_date: '', due_date: '', sector_id: '', file_path: '', boleto_file_path: '', natureza: 'O', crd: '', payment_method: '', pix_key: '', currency: 'BRL' });
       fetchInvoices();
       fetchSectors();
     } else {
@@ -279,8 +298,8 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
     }
   };
 
-  const handleBoletoUpload = async (file: File) => {
-    setUploadingBoleto(true);
+  const handleBoletoUpload = async (file: File, index: number) => {
+    setUploadingBoletoIndex(index);
     try {
       const payload = new FormData();
       payload.append('boleto_file', file);
@@ -290,16 +309,31 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'Falha ao enviar boleto');
+      const path = String(data.file_path || '');
+      setBoletos((prev) =>
+        prev.map((slot, i) => (i === index ? { path, name: file.name } : slot))
+      );
       setFormData((prev) => ({
         ...prev,
-        boleto_file_path: data.file_path || prev.boleto_file_path
+        boleto_file_path: index === 0 ? path || prev.boleto_file_path : prev.boleto_file_path,
       }));
       showSuccess('Boleto anexado com sucesso.');
     } catch (error: any) {
       alert(error.message || 'Não foi possível enviar o boleto.');
     } finally {
-      setUploadingBoleto(false);
+      setUploadingBoletoIndex(null);
     }
+  };
+
+  const addBoletoSlot = () => {
+    setBoletos((prev) => [...prev, { path: '', name: '' }]);
+  };
+
+  const removeBoletoSlot = (index: number) => {
+    setBoletos((prev) => {
+      if (prev.length === 1) return [{ path: '', name: '' }];
+      return prev.filter((_, i) => i !== index);
+    });
   };
 
   const flowSuccessMessages: Record<
@@ -386,14 +420,19 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
   const openInvoiceDocument = async (
     invoiceId: number,
     field: StorageDocumentField,
-    storedPath?: string | null
+    storedPath?: string | null,
+    boletoIndex?: number
   ) => {
     if (storedPath && isDirectDocumentUrl(storedPath)) {
       window.open(storedPath, '_blank', 'noopener');
       return;
     }
     try {
-      const res = await fetch(`/api/invoices/${invoiceId}/document-url?field=${field}`);
+      const params = new URLSearchParams({ field });
+      if (field === 'boleto_file_path' && boletoIndex != null) {
+        params.set('index', String(boletoIndex));
+      }
+      const res = await fetch(`/api/invoices/${invoiceId}/document-url?${params.toString()}`);
       const data = await res.json();
       if (!res.ok || !data?.url) throw new Error(data?.error || 'Arquivo indisponível');
       window.open(data.url, '_blank', 'noopener');
@@ -534,6 +573,10 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
         })),
     [crdOptions]
   );
+  const currencyMeta = useMemo(
+    () => getCurrencyMeta(formData.currency || 'BRL'),
+    [formData.currency]
+  );
   const visibleSectorOptions = useMemo(
     () => sectors.filter((sector) => canSeeSectorValues(sector.id)),
     [sectors, allowedSectorIds, requesterSectorId, userRole]
@@ -565,6 +608,7 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
           invoice.user_name,
           invoice.crd,
           invoice.payment_method,
+          invoice.currency,
           invoice.status,
           invoice.flow_stage,
           invoice.amount
@@ -1033,7 +1077,7 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
                     {canSeeSectorValues(invoice.sector_id) ? (
                       <ValueTrace
                         className="text-sm font-bold text-slate-900"
-                        displayValue={formatCurrency(invoice.amount)}
+                        displayValue={formatCurrency(invoice.amount, invoice.currency || 'BRL')}
                         meta={valueTrace.invoices.amount(String(invoice.invoice_number), invoice.provider_name)}
                       />
                     ) : (
@@ -1071,6 +1115,15 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
                       ) : (
                         <span className="text-xs text-slate-400">NF --</span>
                       )}
+                      {collectBoletoPaths(invoice).map((path, boletoIndex, all) => (
+                        <button
+                          key={`${invoice.id}-boleto-${boletoIndex}`}
+                          onClick={() => openInvoiceDocument(invoice.id, 'boleto_file_path', path, boletoIndex)}
+                          className="text-xs font-medium text-sky-700 bg-sky-50 px-2 py-1 rounded-lg hover:bg-sky-100 transition-colors"
+                        >
+                          {all.length > 1 ? `Boleto ${boletoIndex + 1}` : 'Boleto'}
+                        </button>
+                      ))}
                       {invoice.payment_receipt_path ? (
                         <button
                           onClick={() => openInvoiceDocument(invoice.id, 'payment_receipt_path', invoice.payment_receipt_path)}
@@ -1184,9 +1237,27 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
               <div className="p-6 space-y-4 overflow-y-auto flex-1 min-h-0">
               <div className="space-y-1.5">
                 <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">PDF da Nota Fiscal</label>
-                <label className="flex items-center justify-center gap-2 w-full px-4 py-3 bg-slate-50 border border-dashed border-slate-300 rounded-xl text-sm text-slate-600 cursor-pointer hover:bg-slate-100 transition-colors">
-                  <Upload className="w-4 h-4" />
-                  <span>{extractingPdf ? 'Lendo PDF...' : 'Selecionar PDF e preencher automaticamente'}</span>
+                <label
+                  className={cn(
+                    'flex items-center justify-center gap-2 w-full px-4 py-3 border border-dashed rounded-xl text-sm cursor-pointer transition-colors',
+                    extractingPdf
+                      ? 'bg-slate-50 border-slate-300 text-slate-600'
+                      : formData.file_path
+                        ? 'bg-sky-50 border-sky-300 text-sky-800 hover:bg-sky-100'
+                        : 'bg-slate-50 border-slate-300 text-slate-600 hover:bg-slate-100'
+                  )}
+                  title={invoicePdfName || undefined}
+                >
+                  {formData.file_path && !extractingPdf ? (
+                    <FileCheck className="w-4 h-4 shrink-0 text-sky-600" />
+                  ) : (
+                    <Upload className="w-4 h-4 shrink-0" />
+                  )}
+                  <span className="truncate">
+                    {extractingPdf
+                      ? 'Lendo PDF...'
+                      : invoicePdfName || 'Selecionar PDF e preencher automaticamente'}
+                  </span>
                   <input
                     type="file"
                     accept="application/pdf"
@@ -1194,55 +1265,108 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
                     onChange={(e) => {
                       const file = e.target.files?.[0];
                       if (file) handlePdfUpload(file);
+                      e.target.value = '';
                     }}
                   />
                 </label>
-                {formData.file_path && (
-                  <p className="text-[11px] text-emerald-700 font-medium">PDF processado com sucesso.</p>
-                )}
               </div>
 
               <div className="space-y-1.5">
-                <div className="flex items-center justify-between gap-2">
-                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Boleto (PDF)</label>
-                  <label className="inline-flex items-center gap-2 text-xs font-medium text-slate-600 cursor-pointer select-none">
-                    <input
-                      type="checkbox"
-                      checked={semBoleto}
-                      onChange={(e) => {
-                        const checked = e.target.checked;
-                        setSemBoleto(checked);
-                        if (checked) {
-                          setFormData((prev) => ({ ...prev, boleto_file_path: '' }));
-                        }
-                      }}
-                      className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
-                    />
-                    Sem boleto
-                  </label>
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Boleto (PDF)</label>
+                <div className="space-y-2">
+                  {boletos.map((boleto, index) => {
+                    const uploading = uploadingBoletoIndex === index;
+                    const attached = Boolean(boleto.path);
+                    const isFirst = index === 0;
+                    return (
+                      <div key={index} className="flex items-center gap-2">
+                        <label
+                          className={cn(
+                            'flex items-center justify-center gap-2 min-w-0 flex-1 px-3 py-2.5 border border-dashed rounded-xl text-sm cursor-pointer transition-colors',
+                            semBoleto && isFirst
+                              ? 'bg-slate-50 border-slate-200 text-slate-400 pointer-events-none'
+                              : uploading
+                                ? 'bg-slate-50 border-slate-300 text-slate-600'
+                                : attached
+                                  ? 'bg-sky-50 border-sky-300 text-sky-800 hover:bg-sky-100'
+                                  : 'bg-slate-50 border-slate-300 text-slate-600 hover:bg-slate-100'
+                          )}
+                          title={boleto.name || undefined}
+                        >
+                          {attached && !uploading && !semBoleto ? (
+                            <FileCheck className="w-4 h-4 shrink-0 text-sky-600" />
+                          ) : (
+                            <Upload className="w-4 h-4 shrink-0" />
+                          )}
+                          <span className="truncate">
+                            {semBoleto && isFirst
+                              ? 'Sem boleto'
+                              : uploading
+                                ? 'Enviando boleto...'
+                                : boleto.name
+                                  ? boleto.name
+                                  : boletos.length > 1
+                                    ? `Boleto ${index + 1} em PDF`
+                                    : 'Importar boleto'}
+                          </span>
+                          <input
+                            type="file"
+                            accept="application/pdf"
+                            className="hidden"
+                            disabled={semBoleto}
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (file) handleBoletoUpload(file, index);
+                              e.target.value = '';
+                            }}
+                          />
+                        </label>
+                        {isFirst && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const next = !semBoleto;
+                                setSemBoleto(next);
+                                if (next) {
+                                  setBoletos([{ path: '', name: '' }]);
+                                  setFormData((prev) => ({ ...prev, boleto_file_path: '' }));
+                                }
+                              }}
+                              className={cn(
+                                'shrink-0 whitespace-nowrap px-2.5 py-2.5 rounded-xl border text-[11px] font-bold transition-colors',
+                                semBoleto
+                                  ? 'border-emerald-300 bg-emerald-50 text-emerald-800'
+                                  : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                              )}
+                            >
+                              Sem boleto
+                            </button>
+                            <button
+                              type="button"
+                              onClick={addBoletoSlot}
+                              disabled={semBoleto}
+                              className="shrink-0 whitespace-nowrap inline-flex items-center gap-1 px-2.5 py-2.5 rounded-xl border border-sky-200 bg-sky-50 text-[11px] font-bold text-sky-800 hover:bg-sky-100 transition-colors disabled:opacity-40 disabled:pointer-events-none"
+                            >
+                              <Plus className="w-3.5 h-3.5" />
+                              Adicionar boleto
+                            </button>
+                          </>
+                        )}
+                        {!semBoleto && (boletos.length > 1 || (attached && !isFirst)) && (
+                          <button
+                            type="button"
+                            onClick={() => removeBoletoSlot(index)}
+                            className="shrink-0 p-2 rounded-xl text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+                            title="Remover boleto"
+                          >
+                            <Plus className="w-4 h-4 rotate-45" />
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
-                {semBoleto ? (
-                  <p className="text-[11px] text-slate-500">Pagamento sem boleto anexo (ex.: Pix, cartão ou dinheiro).</p>
-                ) : (
-                  <>
-                    <label className="flex items-center justify-center gap-2 w-full px-4 py-3 bg-slate-50 border border-dashed border-slate-300 rounded-xl text-sm text-slate-600 cursor-pointer hover:bg-slate-100 transition-colors">
-                      <Upload className="w-4 h-4" />
-                      <span>{uploadingBoleto ? 'Enviando boleto...' : 'Selecionar boleto em PDF (opcional)'}</span>
-                      <input
-                        type="file"
-                        accept="application/pdf"
-                        className="hidden"
-                        onChange={(e) => {
-                          const file = e.target.files?.[0];
-                          if (file) handleBoletoUpload(file);
-                        }}
-                      />
-                    </label>
-                    {formData.boleto_file_path && (
-                      <p className="text-[11px] text-emerald-700 font-medium">Boleto anexado com sucesso.</p>
-                    )}
-                  </>
-                )}
               </div>
 
               <div className="space-y-1.5">
@@ -1284,19 +1408,35 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
                 </div>
               </div>
 
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Forma de pagamento</label>
-                <select
-                  required
-                  value={formData.payment_method}
-                  onChange={(e) => setFormData({ ...formData, payment_method: e.target.value, pix_key: e.target.value === 'pix' ? formData.pix_key : '' })}
-                  className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
-                >
-                  <option value="">Selecione</option>
-                  {paymentMethods.filter((pm) => pm.active).map((pm) => (
-                    <option key={pm.id} value={pm.key}>{pm.name}</option>
-                  ))}
-                </select>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Forma de pagamento</label>
+                  <select
+                    required
+                    value={formData.payment_method}
+                    onChange={(e) => setFormData({ ...formData, payment_method: e.target.value, pix_key: e.target.value === 'pix' ? formData.pix_key : '' })}
+                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+                  >
+                    <option value="">Selecione</option>
+                    {paymentMethods.filter((pm) => pm.active).map((pm) => (
+                      <option key={pm.id} value={pm.key}>{pm.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Moeda</label>
+                  <select
+                    required
+                    value={formData.currency}
+                    onChange={(e) => setFormData({ ...formData, currency: e.target.value })}
+                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+                  >
+                    <option value="">Selecione</option>
+                    {currencies.filter((c) => c.active).map((c) => (
+                      <option key={c.id} value={c.key}>{c.key} — {c.name}</option>
+                    ))}
+                  </select>
+                </div>
               </div>
 
               {formData.payment_method === 'pix' && (
@@ -1323,15 +1463,26 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
                   />
                 </div>
                 <div className="space-y-1.5">
-                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Valor (R$)</label>
-                  <input 
-                    required
-                    type="number"
-                    step="0.01"
-                    value={formData.amount}
-                    onChange={e => setFormData({...formData, amount: e.target.value})}
-                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
-                  />
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+                    Valor ({currencyMeta.symbol})
+                  </label>
+                  <div className="flex">
+                    <span className="shrink-0 inline-flex items-center px-3 rounded-l-xl border border-r-0 border-slate-200 bg-slate-100 text-sm font-bold text-slate-600">
+                      {currencyMeta.symbol}
+                    </span>
+                    <input
+                      required
+                      type="text"
+                      inputMode="decimal"
+                      value={formatCurrencyInput(formData.amount, formData.currency)}
+                      onChange={(e) => setFormData({
+                        ...formData,
+                        amount: parseCurrencyInputDigits(e.target.value, formData.currency),
+                      })}
+                      placeholder={formatCurrencyInput(0, formData.currency)}
+                      className="w-full min-w-0 px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-r-xl text-sm focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+                    />
+                  </div>
                 </div>
               </div>
 
