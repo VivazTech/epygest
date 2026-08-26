@@ -929,12 +929,25 @@ export function createApp() {
     const message = String(req.body?.message || "").trim();
     const page_tab = String(req.body?.page_tab || "").trim().slice(0, 120) || null;
     const page_label = String(req.body?.page_label || "").trim().slice(0, 240) || null;
+    const rawImagePath = String(req.body?.image_path || "").trim();
+    const rawImageName = String(req.body?.image_name || "").trim().slice(0, 255);
 
     if (message.length < 5) {
       return res.status(400).json({ error: "Escreva uma sugestão com pelo menos algumas palavras." });
     }
     if (message.length > 4000) {
       return res.status(400).json({ error: "A sugestão deve ter no máximo 4000 caracteres." });
+    }
+
+    let imagePath: string | null = null;
+    let imageName: string | null = null;
+    if (rawImagePath) {
+      const objectPath = normalizeStorageObjectPath(rawImagePath);
+      if (!objectPath || !objectPath.startsWith("suggestions/")) {
+        return res.status(400).json({ error: "Imagem inválida." });
+      }
+      imagePath = objectPath;
+      imageName = rawImageName || null;
     }
 
     const userId = req.user?.id;
@@ -952,6 +965,8 @@ export function createApp() {
         message,
         page_tab,
         page_label,
+        image_path: imagePath,
+        image_name: imageName,
       })
       .select("id, created_at")
       .single();
@@ -969,7 +984,7 @@ export function createApp() {
   app.get("/api/suggestions", requireRole("admin"), async (_req, res) => {
     const { data, error } = await supabase
       .from("user_suggestions")
-      .select("id, user_id, user_name, user_email, user_role, message, page_tab, page_label, created_at, done, done_at")
+      .select("id, user_id, user_name, user_email, user_role, message, page_tab, page_label, created_at, done, done_at, image_path, image_name")
       .order("created_at", { ascending: false })
       .limit(500);
 
@@ -1004,6 +1019,64 @@ export function createApp() {
     }
     if (!data) return res.status(404).json({ error: "Sugestão não encontrada." });
     res.json(data);
+  });
+
+  app.post("/api/suggestions/image", upload.single("image"), async (req, res) => {
+    if (!req.file) return res.status(400).json({ error: "Imagem não enviada" });
+    const mime = String(req.file.mimetype || "");
+    const ext = path.extname(req.file.originalname || "").toLowerCase();
+    const allowedMimes = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
+    const allowedExt = [".jpg", ".jpeg", ".png", ".webp", ".gif"];
+    if (!allowedMimes.has(mime) && !allowedExt.includes(ext)) {
+      if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+      return res.status(400).json({ error: "Formato inválido. Envie PNG, JPG, WEBP ou GIF." });
+    }
+
+    const safeExt =
+      ext.replace(".", "") ||
+      (mime === "image/jpeg" ? "jpg" : mime === "image/png" ? "png" : mime === "image/webp" ? "webp" : mime === "image/gif" ? "gif" : "png");
+
+    try {
+      const fileBuffer = fs.readFileSync(req.file.path);
+      const storagePath = await uploadDocument(
+        fileBuffer,
+        "suggestions",
+        safeExt,
+        mime || "image/png"
+      );
+      res.json({
+        image_path: storagePath,
+        image_name: String(req.file.originalname || "print.png").slice(0, 255),
+      });
+    } catch (error) {
+      console.error("Erro ao salvar imagem da sugestão:", error);
+      res.status(500).json({ error: "Não foi possível salvar a imagem." });
+    } finally {
+      if (req.file?.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+    }
+  });
+
+  app.get("/api/suggestions/:id/image-url", requireRole("admin"), async (req, res) => {
+    const { data, error } = await supabase
+      .from("user_suggestions")
+      .select("id, image_path")
+      .eq("id", Number(req.params.id))
+      .maybeSingle();
+
+    if (error) {
+      console.error(error);
+      return res.status(500).json({ error: "Erro ao buscar a imagem." });
+    }
+    if (!data) return res.status(404).json({ error: "Sugestão não encontrada" });
+    const rawPath = String((data as { image_path?: string }).image_path || "");
+    if (!rawPath) return res.status(404).json({ error: "Imagem não anexada" });
+
+    const result = await createSignedDocumentUrl(rawPath);
+    if (!("url" in result)) {
+      const status = result.error === "Caminho inválido" ? 400 : 404;
+      return res.status(status).json({ error: result.error });
+    }
+    res.json({ url: result.url });
   });
 
   // ====================================================

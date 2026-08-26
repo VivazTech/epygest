@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { Lightbulb, Loader2, Send, X } from 'lucide-react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { ImagePlus, Lightbulb, Loader2, Send, X } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { getPageLabel } from '../lib/pageLabels';
 import { useToast } from '../context/ToastContext';
@@ -14,15 +14,73 @@ export const SuggestionFab: React.FC<SuggestionFabProps> = ({ activeTab }) => {
   const [message, setMessage] = useState('');
   const [sending, setSending] = useState(false);
   const [error, setError] = useState('');
+  const [imagePath, setImagePath] = useState('');
+  const [imageName, setImageName] = useState('');
+  const [imagePreview, setImagePreview] = useState('');
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const [dragging, setDragging] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const clearImage = useCallback(() => {
+    setImagePreview((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return '';
+    });
+    setImagePath('');
+    setImageName('');
+  }, []);
+
+  const closeModal = () => {
+    if (sending || uploadingImage) return;
+    setOpen(false);
+    setError('');
+  };
+
+  const uploadImage = useCallback(async (file: File) => {
+    if (!file.type.startsWith('image/')) {
+      setError('Cole ou importe apenas imagens (PNG, JPG, WEBP ou GIF).');
+      return;
+    }
+    setUploadingImage(true);
+    setError('');
+    try {
+      const payload = new FormData();
+      payload.append('image', file);
+      const res = await fetch('/api/suggestions/image', { method: 'POST', body: payload });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Não foi possível enviar a imagem.');
+      setImagePreview((prev) => {
+        if (prev) URL.revokeObjectURL(prev);
+        return URL.createObjectURL(file);
+      });
+      setImagePath(data.image_path || '');
+      setImageName(data.image_name || file.name || 'print.png');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Não foi possível enviar a imagem.');
+    } finally {
+      setUploadingImage(false);
+    }
+  }, []);
 
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false);
+      if (e.key === 'Escape') closeModal();
+    };
+    const onPaste = (e: ClipboardEvent) => {
+      const item = Array.from(e.clipboardData?.items || []).find((entry) => entry.type.startsWith('image/'));
+      const file = item?.getAsFile();
+      if (!file) return;
+      e.preventDefault();
+      void uploadImage(file);
     };
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [open]);
+    window.addEventListener('paste', onPaste);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('paste', onPaste);
+    };
+  }, [open, sending, uploadingImage, uploadImage]);
 
   const pageLabel = getPageLabel(activeTab);
 
@@ -47,6 +105,8 @@ export const SuggestionFab: React.FC<SuggestionFabProps> = ({ activeTab }) => {
           message: text,
           page_tab: activeTab,
           page_label: pageLabel,
+          image_path: imagePath || null,
+          image_name: imageName || null,
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -55,6 +115,7 @@ export const SuggestionFab: React.FC<SuggestionFabProps> = ({ activeTab }) => {
         return;
       }
       setMessage('');
+      clearImage();
       setOpen(false);
       showSuccess('Sugestão enviada. Obrigado!');
     } catch {
@@ -87,7 +148,7 @@ export const SuggestionFab: React.FC<SuggestionFabProps> = ({ activeTab }) => {
         <div className="fixed inset-0 z-[95] flex items-end sm:items-center justify-center sm:justify-end p-4 sm:p-6 bg-slate-900/25 backdrop-blur-[2px]">
           <div
             className="absolute inset-0"
-            onClick={() => !sending && setOpen(false)}
+            onClick={closeModal}
             aria-hidden
           />
           <div
@@ -116,7 +177,7 @@ export const SuggestionFab: React.FC<SuggestionFabProps> = ({ activeTab }) => {
               </div>
               <button
                 type="button"
-                onClick={() => !sending && setOpen(false)}
+                onClick={closeModal}
                 className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-amber-50"
                 aria-label="Fechar"
               >
@@ -129,7 +190,7 @@ export const SuggestionFab: React.FC<SuggestionFabProps> = ({ activeTab }) => {
                 value={message}
                 onChange={(e) => setMessage(e.target.value)}
                 placeholder="Escreva aqui sua ideia, dúvida ou melhoria..."
-                rows={8}
+                rows={6}
                 autoFocus
                 disabled={sending}
                 className={cn(
@@ -138,6 +199,90 @@ export const SuggestionFab: React.FC<SuggestionFabProps> = ({ activeTab }) => {
                   'disabled:opacity-60'
                 )}
               />
+
+              <div
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  setDragging(true);
+                }}
+                onDragLeave={() => setDragging(false)}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setDragging(false);
+                  const file = e.dataTransfer.files?.[0];
+                  if (file) void uploadImage(file);
+                }}
+                className={cn(
+                  'mt-2 rounded-xl border border-dashed p-3 transition-colors',
+                  dragging
+                    ? 'border-amber-400 bg-amber-50'
+                    : imagePreview
+                      ? 'border-amber-200 bg-[#fff9e8]/80'
+                      : 'border-amber-200/80 bg-white/40'
+                )}
+              >
+                {imagePreview ? (
+                  <div className="flex items-start gap-3">
+                    <img
+                      src={imagePreview}
+                      alt={imageName || 'Print anexado'}
+                      className="w-20 h-20 object-cover rounded-lg border border-amber-100 shrink-0"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-bold text-slate-700 truncate">{imageName || 'Print'}</p>
+                      <p className="text-[11px] text-slate-500 mt-0.5">Cole outro print para substituir.</p>
+                      <div className="flex items-center gap-2 mt-2">
+                        <button
+                          type="button"
+                          disabled={uploadingImage || sending}
+                          onClick={() => fileInputRef.current?.click()}
+                          className="text-[11px] font-bold text-[#004D40] hover:underline"
+                        >
+                          Trocar arquivo
+                        </button>
+                        <button
+                          type="button"
+                          disabled={uploadingImage || sending}
+                          onClick={clearImage}
+                          className="text-[11px] font-bold text-red-600 hover:underline"
+                        >
+                          Remover
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={uploadingImage || sending}
+                    onClick={() => fileInputRef.current?.click()}
+                    className="w-full flex items-center justify-center gap-2 text-xs text-slate-600 py-1"
+                  >
+                    {uploadingImage ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <ImagePlus className="w-4 h-4 text-amber-700" />
+                    )}
+                    <span>
+                      {uploadingImage
+                        ? 'Enviando imagem...'
+                        : 'Cole um print (Ctrl+V) ou importe uma imagem'}
+                    </span>
+                  </button>
+                )}
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp,image/gif"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) void uploadImage(file);
+                    e.target.value = '';
+                  }}
+                />
+              </div>
+
               {error && (
                 <p className="mt-2 text-xs text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
                   {error}
@@ -149,7 +294,7 @@ export const SuggestionFab: React.FC<SuggestionFabProps> = ({ activeTab }) => {
               <p className="text-[11px] text-slate-400 tabular-nums">{message.trim().length}/4000</p>
               <button
                 type="button"
-                disabled={sending}
+                disabled={sending || uploadingImage}
                 onClick={() => void submit()}
                 className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#004D40] text-white text-sm font-bold hover:bg-[#003d33] disabled:opacity-60"
               >

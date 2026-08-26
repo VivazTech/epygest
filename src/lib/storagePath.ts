@@ -1,5 +1,5 @@
 export const STORAGE_BUCKET = "invoice-files";
-export const STORAGE_PREFIXES = ["invoices", "receipts", "boletos", "manual-entries"] as const;
+export const STORAGE_PREFIXES = ["invoices", "receipts", "boletos", "manual-entries", "suggestions"] as const;
 
 export type StorageDocumentField = "file_path" | "boleto_file_path" | "payment_receipt_path";
 

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Check, ChevronDown, ChevronRight, Lightbulb, Loader2, RotateCcw, Search, User } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight, Image as ImageIcon, Lightbulb, Loader2, RotateCcw, Search, User } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useSearch } from '../context/SearchContext';
 import { matchesSearch } from '../lib/search';
@@ -16,6 +16,8 @@ type SuggestionRow = {
   created_at: string;
   done?: boolean;
   done_at?: string | null;
+  image_path?: string | null;
+  image_name?: string | null;
 };
 
 const formatWhen = (iso: string) => {
@@ -33,10 +35,11 @@ const SuggestionTable: React.FC<{
   expandedId: number | null;
   onToggleExpand: (id: number) => void;
   onMarkDone: (id: number, done: boolean) => void;
+  onOpenImage: (row: SuggestionRow) => void;
   updatingId: number | null;
   showDoneAction: boolean;
   emptyLabel: string;
-}> = ({ rows, expandedId, onToggleExpand, onMarkDone, updatingId, showDoneAction, emptyLabel }) => {
+}> = ({ rows, expandedId, onToggleExpand, onMarkDone, onOpenImage, updatingId, showDoneAction, emptyLabel }) => {
   if (rows.length === 0) {
     return (
       <div className="px-5 py-10 text-center">
@@ -94,6 +97,17 @@ const SuggestionTable: React.FC<{
                       className="mt-1.5 text-xs font-bold text-[#004D40] hover:underline"
                     >
                       {expanded ? 'Ver menos' : 'Ver mais'}
+                    </button>
+                  )}
+                  {row.image_path && (
+                    <button
+                      type="button"
+                      onClick={() => onOpenImage(row)}
+                      className="mt-2 inline-flex items-center gap-1.5 text-xs font-bold text-blue-700 bg-blue-50 px-2 py-1 rounded-lg hover:bg-blue-100"
+                      title={row.image_name || 'Abrir print'}
+                    >
+                      <ImageIcon className="w-3.5 h-3.5" />
+                      {row.image_name || 'Ver print'}
                     </button>
                   )}
                 </td>
@@ -192,7 +206,8 @@ export const SugestoesPage: React.FC = () => {
         row.user_role,
         row.message,
         row.page_label,
-        row.page_tab
+        row.page_tab,
+        row.image_name
       )
     );
   }, [rows, searchQuery]);
@@ -224,6 +239,17 @@ export const SugestoesPage: React.FC = () => {
 
   const toggleExpand = (id: number) => {
     setExpandedId((current) => (current === id ? null : id));
+  };
+
+  const openImage = async (row: SuggestionRow) => {
+    try {
+      const res = await fetch(`/api/suggestions/${row.id}/image-url`);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data?.url) throw new Error(data?.error || 'Imagem indisponível');
+      window.open(data.url, '_blank', 'noopener');
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Não foi possível abrir a imagem.');
+    }
   };
 
   return (
@@ -289,6 +315,7 @@ export const SugestoesPage: React.FC = () => {
                 expandedId={expandedId}
                 onToggleExpand={toggleExpand}
                 onMarkDone={markDone}
+                onOpenImage={openImage}
                 updatingId={updatingId}
                 showDoneAction
                 emptyLabel="Nenhuma sugestão em aberto."
@@ -324,6 +351,7 @@ export const SugestoesPage: React.FC = () => {
                   expandedId={expandedId}
                   onToggleExpand={toggleExpand}
                   onMarkDone={markDone}
+                onOpenImage={openImage}
                   updatingId={updatingId}
                   showDoneAction={false}
                   emptyLabel="Nenhuma sugestão marcada como feita."
