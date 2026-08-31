@@ -6421,6 +6421,124 @@ export function createApp() {
   });
 
   // ====================================================
+  // APURAÇÃO DE C.M.V. (Custo de Mercadoria Vendida) — Apuração de Resultados › CMV
+  // Réplica da planilha "Apuração do CMV": persiste apenas os valores digitados
+  // (receitas e requisições do fechamento do mês). Os indicadores derivados são
+  // calculados no front (src/lib/cmv.ts).
+  // ====================================================
+  const CMV_NUMERIC_FIELDS = [
+    "venda_direta_total",
+    "venda_direta_bebidas",
+    "cafe_manha_pensao",
+    "cafe_manha_chds",
+    "almoco_jantar_pensao",
+    "almoco_jantar_chds",
+    "almoco_jantar_antec",
+    "ci_total",
+    "ci_bebidas",
+    "requisicoes_total",
+    "requisicoes_bebidas",
+    "refeitorio",
+    "outros",
+    "aquamania",
+    "limite_pct",
+  ] as const;
+
+  const cmvTableMissing = (error: any) =>
+    String(error?.message || "").toLowerCase().includes("cmv_apuracao") ||
+    error?.code === "42P01";
+
+  // Todas as competências do ano (usado no Resumo e no Sintético).
+  app.get("/api/cmv/ano", requireRole("admin", "finance", "controle", "manager"), async (req, res) => {
+    const year = Number((req.query as { year?: string }).year) || new Date().getFullYear();
+    const { data, error } = await supabase
+      .from("cmv_apuracao")
+      .select("*")
+      .eq("year", year);
+    if (error) {
+      console.error(error);
+      if (cmvTableMissing(error)) {
+        return res.status(500).json({
+          error: "Tabela de CMV ausente. Execute sql/36_cmv_apuracao.sql no Supabase.",
+        });
+      }
+      return res.status(500).json({ error: "Não foi possível carregar o CMV." });
+    }
+    const byMonth = new Map<number, any>();
+    for (const row of data ?? []) byMonth.set(Number((row as any).month), row);
+    const months = Array.from({ length: 12 }, (_, idx) => {
+      const month = idx + 1;
+      const row = byMonth.get(month) || null;
+      return { month, importado: Boolean(row), row };
+    });
+    res.json({ year, months });
+  });
+
+  // Uma competência (mês) específica.
+  app.get("/api/cmv", requireRole("admin", "finance", "controle", "manager"), async (req, res) => {
+    const year = Number((req.query as { year?: string }).year) || new Date().getFullYear();
+    const month = Number((req.query as { month?: string }).month);
+    if (!month || month < 1 || month > 12) {
+      return res.status(400).json({ error: "Informe o mês (1-12)." });
+    }
+    const { data, error } = await supabase
+      .from("cmv_apuracao")
+      .select("*")
+      .eq("year", year)
+      .eq("month", month)
+      .maybeSingle();
+    if (error) {
+      console.error(error);
+      if (cmvTableMissing(error)) {
+        return res.status(500).json({
+          error: "Tabela de CMV ausente. Execute sql/36_cmv_apuracao.sql no Supabase.",
+        });
+      }
+      return res.status(500).json({ error: "Não foi possível carregar o CMV." });
+    }
+    res.json({ year, month, importado: Boolean(data), row: data ?? null });
+  });
+
+  // Salva (upsert) os valores digitados de uma competência.
+  app.post("/api/cmv", requireRole("admin", "finance", "controle"), async (req, res) => {
+    const body = req.body as Record<string, any>;
+    const year = Number(body?.year);
+    const month = Number(body?.month);
+    if (!Number.isFinite(year) || year < 2000)
+      return res.status(400).json({ error: "year inválido" });
+    if (!Number.isFinite(month) || month < 1 || month > 12)
+      return res.status(400).json({ error: "month deve estar entre 1 e 12" });
+
+    const num = (v: any) => {
+      if (v == null || v === "") return 0;
+      const n = Number(String(v).replace(",", "."));
+      return Number.isFinite(n) ? n : 0;
+    };
+
+    const record: Record<string, any> = { year, month };
+    for (const field of CMV_NUMERIC_FIELDS) record[field] = num(body?.[field]);
+    if (!Number.isFinite(record.limite_pct) || record.limite_pct <= 0) record.limite_pct = 0.29;
+    record.updated_at = new Date().toISOString();
+    record.updated_by = (req as any).user?.name ?? (req as any).user?.email ?? null;
+
+    const { data, error } = await supabase
+      .from("cmv_apuracao")
+      .upsert(record, { onConflict: "year,month" })
+      .select("*")
+      .single();
+    if (error) {
+      console.error(error);
+      if (cmvTableMissing(error)) {
+        return res.status(500).json({
+          error: "Tabela de CMV ausente. Execute sql/36_cmv_apuracao.sql no Supabase.",
+        });
+      }
+      return res.status(500).json({ error: "Não foi possível salvar o CMV." });
+    }
+    res.json({ ok: true, row: data });
+  });
+
+  // ====================================================
   // IMPORTAÇÃO: EXTRATO MENSAL (folha de pagamento, .xls BIFF do Desbravador)
   // Estes .xls quebram o leitor do SheetJS (formato de número inválido + substream
   // que ele não emite), então fazemos um walker BIFF8 próprio resolvendo o SST.

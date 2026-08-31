@@ -61,6 +61,9 @@ export const isRelReqTab = (tab: string) =>
 export const isConsumoInternoTab = (tab: string) =>
   tab === 'rel-consumo' || /^rel-consumo-\d+$/.test(tab);
 
+export const isCmvTab = (tab: string) =>
+  tab === 'cmv' || /^cmv-\d+$/.test(tab);
+
 export const isRdsTab = (tab: string) =>
   tab === 'rel-rds' || /^rel-rds-\d+$/.test(tab);
 
@@ -72,6 +75,7 @@ export const isApuracaoResultadosTab = (tab: string) =>
   isRelCrdTab(tab) ||
   isRelReqTab(tab) ||
   isConsumoInternoTab(tab) ||
+  isCmvTab(tab) ||
   (tab.startsWith('planilha-') &&
     !isApuracaoReceitaPlanilha(Number(tab.slice('planilha-'.length))) &&
     !isBaseOrcamentoPlanilha(Number(tab.slice('planilha-'.length))));

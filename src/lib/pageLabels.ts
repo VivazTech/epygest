@@ -32,6 +32,7 @@ const STATIC_LABELS: Record<string, string> = {
   usuarios: 'Usuários',
   configuracoes: 'Configurações',
   sugestoes: 'Sugestões',
+  uml: 'UML do Sistema',
   comandas: 'Comandas',
   'lancamentos-manuais': 'Lançamentos Manuais',
   requisicoes: 'Requisições',
@@ -45,6 +46,7 @@ const STATIC_LABELS: Record<string, string> = {
   'rel-crd': 'Apuração de Resultados / Relatorio de CRD / Resumo',
   'rel-req': 'Apuração de Resultados / Requisição Sintética / Resumo',
   'rel-consumo': 'Apuração de Resultados / Consumo interno / Resumo',
+  cmv: 'Apuração de Resultados / CMV / Resumo',
   'rel-rds': 'Apuração de Receita / Relatório Diário de Situação / Resumo',
 };
 
@@ -67,6 +69,10 @@ export const getPageLabel = (activeTab: string): string => {
   if (activeTab.startsWith('rel-consumo-')) {
     const mes = Number(activeTab.slice('rel-consumo-'.length));
     return `Apuração de Resultados / Consumo interno / ${MESES[mes] || activeTab}`;
+  }
+  if (activeTab.startsWith('cmv-')) {
+    const mes = Number(activeTab.slice('cmv-'.length));
+    return `Apuração de Resultados / CMV / ${MESES[mes] || activeTab}`;
   }
   if (activeTab.startsWith('rel-rds-')) {
     const mes = Number(activeTab.slice('rel-rds-'.length));

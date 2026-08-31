@@ -33,9 +33,11 @@ import {
   BookOpen,
   Lightbulb,
   ShieldCheck,
+  Percent,
+  Network,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
-import { PLANILHAS_RESULTADOS, APURACAO_RECEITA_ITENS, BASE_ORCAMENTO_ITENS, isBaseOrcamentoTab, isRelCrdTab, isRelReqTab, isConsumoInternoTab, isRdsTab, isApuracaoReceitaTab as checkApuracaoReceitaTab, isApuracaoResultadosTab as checkApuracaoResultadosTab } from '../lib/planilhas';
+import { PLANILHAS_RESULTADOS, APURACAO_RECEITA_ITENS, BASE_ORCAMENTO_ITENS, isBaseOrcamentoTab, isRelCrdTab, isRelReqTab, isConsumoInternoTab, isCmvTab, isRdsTab, isApuracaoReceitaTab as checkApuracaoReceitaTab, isApuracaoResultadosTab as checkApuracaoResultadosTab } from '../lib/planilhas';
 import { hasPermission, type RolePermissionRow } from '../lib/permissionCatalog';
 import logoIcon from '../../logoicon2.svg';
 
@@ -76,6 +78,7 @@ const menuItems = [
   { id: 'usuarios', label: 'Usuários', icon: Users, roles: ['admin'] },
   { id: 'sugestoes', label: 'Sugestões', icon: Lightbulb, roles: ['admin'] },
   { id: 'configuracoes', label: 'Configurações', icon: Settings, roles: ['admin'] },
+  { id: 'uml', label: 'UML do Sistema', icon: Network, roles: ['admin'] },
 ];
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -97,7 +100,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   const constructionGroupIds = ['dashboard', 'analise', 'planejamento'];
   const lancamentosGroupIds = lancamentosMenuItems.map((item) => item.id);
-  const adminGroupIds = ['usuarios', 'sugestoes', 'configuracoes'];
+  const adminGroupIds = ['usuarios', 'sugestoes', 'configuracoes', 'uml'];
   const filteredMenu = menuItems.filter((item) => canView(item.id, item.roles));
   const lancamentosMenu = lancamentosMenuItems.filter((item) => canView(item.id, item.roles));
   const constructionMenu = filteredMenu.filter((item) => constructionGroupIds.includes(item.id));
@@ -134,6 +137,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const isRelCrdActive = isRelCrdTab(activeTab);
   const isRelReqActive = isRelReqTab(activeTab);
   const isConsumoActive = isConsumoInternoTab(activeTab);
+  const isCmvActive = isCmvTab(activeTab);
   const isRdsActive = isRdsTab(activeTab);
   const [planilhasExpanded, setPlanilhasExpanded] = React.useState(isApuracaoResultadosTab);
   const [receitaExpanded, setReceitaExpanded] = React.useState(isApuracaoReceitaTab);
@@ -141,63 +145,58 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [relCrdExpanded, setRelCrdExpanded] = React.useState(isRelCrdActive);
   const [relReqExpanded, setRelReqExpanded] = React.useState(isRelReqActive);
   const [consumoExpanded, setConsumoExpanded] = React.useState(isConsumoActive);
+  const [cmvExpanded, setCmvExpanded] = React.useState(isCmvActive);
   const [rdsExpanded, setRdsExpanded] = React.useState(isRdsActive);
   const [folhaExpanded, setFolhaExpanded] = React.useState(
     activeTab.startsWith('folha-') || activeTab === 'folha-apuracao'
   );
 
-  React.useEffect(() => {
-    if (comprasIds.includes(activeTab)) setComprasExpanded(true);
-    if (constructionMenu.some((item) => item.id === activeTab)) {
-      setConstructionExpanded(true);
-    }
-    if (lancamentosGroupIds.includes(activeTab)) {
-      setLancamentosExpanded(true);
-    }
-    if (isApuracaoResultadosTab) {
-      setPlanilhasExpanded(true);
-    }
-    if (isApuracaoReceitaTab) {
-      setReceitaExpanded(true);
-    }
-    if (isBaseOrcamentoActive) {
-      setBaseOrcamentoExpanded(true);
-    }
-    if (isRelCrdActive) {
-      setRelCrdExpanded(true);
-    }
-    if (isRelReqActive) {
-      setRelReqExpanded(true);
-    }
-    if (isConsumoActive) {
-      setConsumoExpanded(true);
-    }
-    if (isRdsActive) {
-      setRdsExpanded(true);
-      setReceitaExpanded(true);
-    }
-    if (activeTab.startsWith('folha-') || activeTab === 'folha-apuracao') {
-      setFolhaExpanded(true);
-    }
-  }, [activeTab, constructionMenu, lancamentosGroupIds, isApuracaoResultadosTab, isApuracaoReceitaTab, isBaseOrcamentoActive, isRelCrdActive, isRelReqActive, isConsumoActive, isRdsActive]);
+  type ExpandSetter = React.Dispatch<React.SetStateAction<boolean>>;
+  const menuExpandSetters = React.useMemo<ExpandSetter[]>(
+    () => [
+      setComprasExpanded,
+      setConstructionExpanded,
+      setLancamentosExpanded,
+      setPlanilhasExpanded,
+      setReceitaExpanded,
+      setBaseOrcamentoExpanded,
+      setRelCrdExpanded,
+      setRelReqExpanded,
+      setConsumoExpanded,
+      setCmvExpanded,
+      setRdsExpanded,
+      setFolhaExpanded,
+    ],
+    []
+  );
 
   React.useEffect(() => {
-    const expandAll = () => {
-      setConstructionExpanded(true);
-      setLancamentosExpanded(true);
-      setComprasExpanded(true);
-      setBaseOrcamentoExpanded(true);
-      setPlanilhasExpanded(true);
-      setReceitaExpanded(true);
-      setRelCrdExpanded(true);
-      setRelReqExpanded(true);
-      setConsumoExpanded(true);
-      setRdsExpanded(true);
-      setFolhaExpanded(true);
-    };
+    const isFolhaTab = activeTab.startsWith('folha-') || activeTab === 'folha-apuracao';
+    const expandRules: Array<[boolean, ExpandSetter[]]> = [
+      [comprasIds.includes(activeTab), [setComprasExpanded]],
+      [constructionMenu.some((item) => item.id === activeTab), [setConstructionExpanded]],
+      [lancamentosGroupIds.includes(activeTab), [setLancamentosExpanded]],
+      [isApuracaoResultadosTab, [setPlanilhasExpanded]],
+      [isApuracaoReceitaTab, [setReceitaExpanded]],
+      [isBaseOrcamentoActive, [setBaseOrcamentoExpanded]],
+      [isRelCrdActive, [setRelCrdExpanded]],
+      [isRelReqActive, [setRelReqExpanded]],
+      [isConsumoActive, [setConsumoExpanded]],
+      [isCmvActive, [setCmvExpanded]],
+      [isRdsActive, [setRdsExpanded, setReceitaExpanded]],
+      [isFolhaTab, [setFolhaExpanded]],
+    ];
+
+    expandRules.forEach(([shouldExpand, setters]) => {
+      if (shouldExpand) setters.forEach((set) => set(true));
+    });
+  }, [activeTab, constructionMenu, lancamentosGroupIds, isApuracaoResultadosTab, isApuracaoReceitaTab, isBaseOrcamentoActive, isRelCrdActive, isRelReqActive, isConsumoActive, isCmvActive, isRdsActive]);
+
+  React.useEffect(() => {
+    const expandAll = () => menuExpandSetters.forEach((set) => set(true));
     window.addEventListener('vivaz-tutorial-expand', expandAll);
     return () => window.removeEventListener('vivaz-tutorial-expand', expandAll);
-  }, []);
+  }, [menuExpandSetters]);
 
   return (
     <div className={cn(
@@ -663,6 +662,72 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     </button>
                     {REL_CRD_MESES.map((mes, idx) => {
                       const tabId = `rel-consumo-${idx + 1}`;
+                      return (
+                        <button
+                          key={tabId}
+                          onClick={() => setActiveTab(tabId)}
+                          className={cn(
+                            "w-full flex items-center gap-3 pl-14 pr-4 py-1.5 rounded-xl transition-all duration-200 group",
+                            activeTab === tabId
+                              ? "bg-emerald-500 text-white shadow-lg shadow-emerald-900/20"
+                              : "text-white/60 hover:bg-white/5 hover:text-white"
+                          )}
+                        >
+                          <CalendarDays className={cn(
+                            "w-3.5 h-3.5 min-w-3.5 min-h-3.5 shrink-0",
+                            activeTab === tabId ? "scale-110" : "group-hover:scale-110"
+                          )} />
+                          <span className="font-medium text-[11px] truncate text-left">
+                            {String(idx + 1).padStart(2, '0')} · {mes}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </>
+                )}
+
+                <button
+                  onClick={() => setCmvExpanded((prev) => !prev)}
+                  className={cn(
+                    "w-full flex items-center gap-3 pl-11 pr-4 py-2 rounded-xl transition-all duration-200 group",
+                    isCmvActive
+                      ? "text-white bg-white/10"
+                      : "text-white/70 hover:bg-white/5 hover:text-white"
+                  )}
+                >
+                  <Percent className={cn(
+                    "w-4 h-4 min-w-4 min-h-4 shrink-0 transition-transform duration-200",
+                    isCmvActive ? "scale-110" : "group-hover:scale-110"
+                  )} />
+                  <span className="font-medium text-xs truncate text-left flex-1">CMV</span>
+                  <ChevronDown
+                    className={cn(
+                      "w-3.5 h-3.5 transition-transform duration-200",
+                      cmvExpanded && "rotate-180"
+                    )}
+                  />
+                </button>
+
+                {cmvExpanded && (
+                  <>
+                    <button
+                      onClick={() => setActiveTab('cmv')}
+                      data-tour="nav-cmv"
+                      className={cn(
+                        "w-full flex items-center gap-3 pl-14 pr-4 py-2 rounded-xl transition-all duration-200 group",
+                        activeTab === 'cmv'
+                          ? "bg-emerald-500 text-white shadow-lg shadow-emerald-900/20"
+                          : "text-white/70 hover:bg-white/5 hover:text-white"
+                      )}
+                    >
+                      <Calculator className={cn(
+                        "w-3.5 h-3.5 min-w-3.5 min-h-3.5 shrink-0",
+                        activeTab === 'cmv' ? "scale-110" : "group-hover:scale-110"
+                      )} />
+                      <span className="font-medium text-xs truncate text-left">Resumo</span>
+                    </button>
+                    {REL_CRD_MESES.map((mes, idx) => {
+                      const tabId = `cmv-${idx + 1}`;
                       return (
                         <button
                           key={tabId}

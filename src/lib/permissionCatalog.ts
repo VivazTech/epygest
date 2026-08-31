@@ -55,7 +55,7 @@ export const PERMISSION_RESOURCES: PermissionResource[] = [
     label: 'Apuração de Resultados',
     group: 'Módulos',
     actions: ['view'],
-    description: 'Inclui Rel. CRD, Rel. Requisições, Consumo Interno e planilhas do módulo.',
+    description: 'Inclui Rel. CRD, Rel. Requisições, Consumo Interno, CMV e planilhas do módulo.',
   },
   {
     key: 'apuracao-receita',
@@ -77,6 +77,13 @@ export const PERMISSION_RESOURCES: PermissionResource[] = [
     actions: ['view', 'edit'],
   },
   { key: 'tutorial', label: 'Tutorial', group: 'Ajuda', actions: ['view'] },
+  {
+    key: 'uml',
+    label: 'UML do Sistema',
+    group: 'Administração',
+    actions: ['view'],
+    description: 'Documentação técnica (arquitetura, dados, fluxos e API). Somente admin.',
+  },
 ];
 
 export const PERMISSION_RESOURCE_KEYS = PERMISSION_RESOURCES.map((r) => r.key);
@@ -96,10 +103,9 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, Partial<Record<string, Per
     tutorial: ['view'],
   },
   controle: Object.fromEntries(
-    PERMISSION_RESOURCES.filter((r) => r.key !== 'usuarios' && r.key !== 'configuracoes').map((r) => [
-      r.key,
-      r.actions,
-    ])
+    PERMISSION_RESOURCES.filter(
+      (r) => r.key !== 'usuarios' && r.key !== 'configuracoes' && r.key !== 'uml'
+    ).map((r) => [r.key, r.actions])
   ),
   manager: {
     dashboard: ['view'],
@@ -201,7 +207,13 @@ export const resolvePermissionResourceKey = (tabId: string): string => {
   if (!tabId) return tabId;
   if (PERMISSION_RESOURCE_KEYS.includes(tabId)) return tabId;
   if (tabId.startsWith('folha-')) return 'folha';
-  if (tabId.startsWith('rel-crd') || tabId.startsWith('rel-req') || tabId.startsWith('rel-consumo')) {
+  if (
+    tabId.startsWith('rel-crd') ||
+    tabId.startsWith('rel-req') ||
+    tabId.startsWith('rel-consumo') ||
+    tabId === 'cmv' ||
+    tabId.startsWith('cmv-')
+  ) {
     return 'apuracao-resultados';
   }
   if (tabId.startsWith('rel-rds')) return 'apuracao-receita';

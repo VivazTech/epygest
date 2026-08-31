@@ -28,6 +28,9 @@ import { FolhaApuracaoPage } from './pages/FolhaApuracao';
 import { RelatorioCrdPage, RelatorioCrdMesPage, MESES_REL_CRD } from './pages/RelatorioCrd';
 import { RelatorioRequisicoesPage, RelatorioRequisicoesMesPage, MESES_REL_REQ } from './pages/RelatorioRequisicoes';
 import { ConsumoInternoPage, ConsumoInternoMesPage, MESES_CONSUMO } from './pages/ConsumoInterno';
+import { CmvPage, CmvMesPage } from './pages/Cmv';
+import { MESES_CMV } from './lib/cmv';
+import { UmlPage } from './pages/Uml';
 import { RelatorioRdsPage, RelatorioRdsMesPage, MESES_RDS } from './pages/RelatorioRds';
 import { ComprasPage } from './pages/Compras';
 import { MensalidadesPage } from './pages/Mensalidades';
@@ -244,6 +247,19 @@ export default function App() {
       }
     }
 
+    if (activeTab === 'cmv') {
+      if (!canAccessTab(activeTab)) return <Dashboard />;
+      return <CmvPage onSelectMonth={(m) => setActiveTab(`cmv-${m}`)} />;
+    }
+
+    if (activeTab.startsWith('cmv-')) {
+      if (!canAccessTab(activeTab)) return <Dashboard />;
+      const mes = Number(activeTab.slice('cmv-'.length));
+      if (mes >= 1 && mes <= 12) {
+        return <CmvMesPage key={mes} month={mes} />;
+      }
+    }
+
     if (activeTab === 'rel-rds') {
       if (!canAccessTab(activeTab)) return <Dashboard />;
       return <RelatorioRdsPage onSelectMonth={(m) => setActiveTab(`rel-rds-${m}`)} />;
@@ -293,6 +309,7 @@ export default function App() {
       case 'indicadores': return <Indicadores />;
       case 'supabase-teste': return <SupabaseTeste />;
       case 'usuarios': return <Usuarios />;
+      case 'uml': return canAccessTab('uml') ? <UmlPage /> : <Dashboard />;
       case 'sugestoes': return <Sugestoes />;
       case 'configuracoes': return <Configuracoes />;
       case 'tutorial': return <Tutorial />;
@@ -486,6 +503,10 @@ function AppShell({
                 ? 'Apuração de Resultados / Consumo interno / Resumo'
                 : activeTab.startsWith('rel-consumo-')
                 ? `Apuração de Resultados / Consumo interno / ${MESES_CONSUMO[Number(activeTab.slice('rel-consumo-'.length))] ?? ''}`
+                : activeTab === 'cmv'
+                ? 'Apuração de Resultados / CMV / Resumo'
+                : activeTab.startsWith('cmv-')
+                ? `Apuração de Resultados / CMV / ${MESES_CMV[Number(activeTab.slice('cmv-'.length))] ?? ''}`
                 : activeTab === 'rel-rds'
                 ? 'Apuração de Receita / Relatório Diário de Situação / Resumo'
                 : activeTab.startsWith('rel-rds-')
@@ -523,6 +544,8 @@ function AppShell({
                 ? 'Tutorial guiado'
                 : activeTab === 'sugestoes'
                 ? 'Sugestões'
+                : activeTab === 'uml'
+                ? 'UML do Sistema'
                 : activeTab.replace('-', ' ')}
             </span>
           </div>
