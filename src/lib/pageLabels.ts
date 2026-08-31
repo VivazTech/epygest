@@ -1,6 +1,6 @@
 /** Rótulos amigáveis das abas para sugestões e breadcrumbs. */
 
-import { BASE_ORCAMENTO_ITENS } from './planilhas';
+import { BASE_ORCAMENTO_ITENS, isBaseOrcamentoTab } from './planilhas';
 import { getPainelByTab, isPainelSetorialTab } from './paineisSetoriais';
 
 const MESES = [
@@ -38,6 +38,7 @@ const STATIC_LABELS: Record<string, string> = {
   notas: 'Notas de Serviço',
   danfe: 'DANFE',
   mensalidades: 'Mensalidades',
+  aprovacoes: 'Aprovações',
   'compras-ordem': 'Compras / Ordem de Compra',
   'folha-apuracao': 'Apuração da Folha',
   tutorial: 'Tutorial guiado',

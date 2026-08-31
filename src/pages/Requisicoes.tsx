@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Plus, Archive, XCircle } from 'lucide-react';
+import { Plus, Archive, XCircle, BadgeCheck, RotateCcw } from 'lucide-react';
 import { cn, formatCurrency } from '../lib/utils';
+import { confirmCancel } from '../lib/confirmAction';
 import { ValueTrace } from '../components/ValueTrace';
 import { valueTrace } from '../lib/valueTraceMeta';
 import { useSearch } from '../context/SearchContext';
@@ -13,6 +14,7 @@ export const RequisicoesPage: React.FC = () => {
   const [crds, setCrds] = useState<any[]>([]);
   const [userRole, setUserRole] = useState<string>('viewer');
   const [allowedSectorIds, setAllowedSectorIds] = useState<string[]>([]);
+  const [actingSector, setActingSector] = useState<'requester' | 'controle' | 'financeiro'>('requester');
   const [form, setForm] = useState({
     crd_id: '',
     date: '',
@@ -32,6 +34,9 @@ export const RequisicoesPage: React.FC = () => {
         if (!res.ok) return;
         const user = await res.json();
         setUserRole(String(user?.role || 'viewer'));
+        const role = String(user?.role || 'viewer');
+        if (role === 'finance') setActingSector('financeiro');
+        else if (role === 'controle') setActingSector('controle');
         const ids = Array.from(
           new Set<string>(
             (Array.isArray(user?.sector_ids) ? user.sector_ids : [user?.sector_id])
@@ -51,6 +56,20 @@ export const RequisicoesPage: React.FC = () => {
 
   const hasGlobalSectorView =
     userRole === 'admin' || userRole === 'finance' || userRole === 'controle';
+
+  const canSwitchActingProfile = userRole === 'admin';
+  const canApproveControl = actingSector === 'controle' && (userRole === 'controle' || userRole === 'admin');
+  const canPayFinance = actingSector === 'financeiro' && (userRole === 'finance' || userRole === 'admin');
+  const canCancelAsRequester =
+    actingSector === 'requester' &&
+    (userRole === 'manager' || userRole === 'admin');
+
+  const statusLabel = (status: string) => {
+    if (status === 'approved') return { label: 'Aprovado Controle', classes: 'bg-blue-100 text-blue-700' };
+    if (status === 'posted') return { label: 'Pago', classes: 'bg-emerald-100 text-emerald-700' };
+    if (status === 'cancelled') return { label: 'Cancelado', classes: 'bg-slate-200 text-slate-700' };
+    return { label: 'Aguardando Controle', classes: 'bg-orange-100 text-orange-700' };
+  };
 
   const visibleCrds = useMemo(() => {
     const active = crds.filter((c) => c.active !== false);
@@ -100,12 +119,18 @@ export const RequisicoesPage: React.FC = () => {
     loadData();
   };
 
-  const updateStatus = async (id: number, status: 'posted' | 'cancelled') => {
-    await fetch(`/api/requisitions/${id}/status`, {
+  const updateStatus = async (id: number, status: 'open' | 'approved' | 'posted' | 'cancelled') => {
+    if (status === 'cancelled' && !confirmCancel('esta requisição')) return;
+    const res = await fetch(`/api/requisitions/${id}/status`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status })
     });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      alert(data.error || 'Não foi possível atualizar a requisição.');
+      return;
+    }
     loadData();
   };
 
@@ -128,11 +153,24 @@ export const RequisicoesPage: React.FC = () => {
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
-      <div>
-        <h2 className="text-2xl font-bold text-slate-900">Requisições Internas</h2>
-        <p className="text-slate-500 text-sm">
-          Registre compras internas por CRD para compor o orçamento do CRD na competência da requisição.
-        </p>
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <h2 className="text-2xl font-bold text-slate-900">Requisições Internas</h2>
+          <p className="text-slate-500 text-sm">
+            Registre compras internas por CRD para compor o orçamento do CRD na competência da requisição.
+          </p>
+        </div>
+        {canSwitchActingProfile && (
+          <select
+            value={actingSector}
+            onChange={(e) => setActingSector(e.target.value as 'requester' | 'controle' | 'financeiro')}
+            className="px-3 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-semibold text-slate-700 shadow-sm self-start"
+          >
+            <option value="requester">Visão solicitante</option>
+            <option value="controle">Atuar como Controle</option>
+            <option value="financeiro">Atuar como Financeiro</option>
+          </select>
+        )}
       </div>
 
       <form onSubmit={createRequisition} className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5 grid grid-cols-1 md:grid-cols-5 gap-3">
@@ -192,22 +230,26 @@ export const RequisicoesPage: React.FC = () => {
           <thead>
             <tr className="bg-slate-50/50">
               <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">CRD</th>
+              <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Fornecedor</th>
               <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Data</th>
-              <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Descrição</th>
+              <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Vencimento</th>
               <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Valor</th>
               <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Status</th>
               <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-right">Ações</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-50">
-            {filteredRequisitions.map((r) => (
+            {filteredRequisitions.map((r) => {
+              const meta = statusLabel(r.status);
+              return (
               <tr key={r.id} className="hover:bg-slate-50/50 transition-colors">
                 <td className="px-6 py-4 text-sm font-medium text-slate-700">
                   {(r.crd_code || 'CRD')} - {r.crd_name || 'Sem descrição'}
                   <span className="block text-xs font-normal text-slate-500">{r.sector_name || 'Sem setor'}</span>
                 </td>
-                <td className="px-6 py-4 text-sm text-slate-600">{r.date}</td>
                 <td className="px-6 py-4 text-sm text-slate-600">{r.description || '—'}</td>
+                <td className="px-6 py-4 text-sm text-slate-600">{r.date}</td>
+                <td className="px-6 py-4 text-sm text-slate-400">—</td>
                 <td className="px-6 py-4">
                   <ValueTrace
                     className="text-sm font-bold text-slate-900"
@@ -218,37 +260,62 @@ export const RequisicoesPage: React.FC = () => {
                 <td className="px-6 py-4">
                   <span className={cn(
                     "text-[10px] font-bold px-2 py-1 rounded-lg uppercase tracking-wider",
-                    r.status === 'open' ? "bg-orange-100 text-orange-700" :
-                    r.status === 'posted' ? "bg-emerald-100 text-emerald-700" :
-                    "bg-slate-200 text-slate-700"
+                    meta.classes
                   )}>
-                    {r.status === 'open' ? 'Aberta' : r.status === 'posted' ? 'Baixada' : 'Cancelada'}
+                    {meta.label}
                   </span>
                 </td>
                 <td className="px-6 py-4">
                   <div className="flex justify-end gap-2">
-                    {r.status === 'open' && (
+                    {canApproveControl && r.status === 'open' && (
                       <>
                         <button
-                          onClick={() => updateStatus(r.id, 'posted')}
-                          className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"
-                          title="Baixar requisição"
+                          onClick={() => updateStatus(r.id, 'approved')}
+                          className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                          title="Aprovar no Controle"
                         >
-                          <Archive className="w-4 h-4" />
+                          <BadgeCheck className="w-4 h-4" />
                         </button>
                         <button
                           onClick={() => updateStatus(r.id, 'cancelled')}
-                          className="p-2 text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
-                          title="Cancelar requisição"
+                          className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                          title="Reprovar"
                         >
                           <XCircle className="w-4 h-4" />
                         </button>
                       </>
                     )}
+                    {canApproveControl && r.status === 'approved' && (
+                      <button
+                        onClick={() => updateStatus(r.id, 'open')}
+                        className="p-2 text-amber-600 hover:bg-amber-50 rounded-lg transition-colors"
+                        title="Desaprovar"
+                      >
+                        <RotateCcw className="w-4 h-4" />
+                      </button>
+                    )}
+                    {canPayFinance && r.status === 'approved' && (
+                      <button
+                        onClick={() => updateStatus(r.id, 'posted')}
+                        className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"
+                        title="Registrar pagamento"
+                      >
+                        <Archive className="w-4 h-4" />
+                      </button>
+                    )}
+                    {canCancelAsRequester && (r.status === 'open' || r.status === 'approved') && (
+                      <button
+                        onClick={() => updateStatus(r.id, 'cancelled')}
+                        className="p-2 text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+                        title="Cancelar requisição"
+                      >
+                        <XCircle className="w-4 h-4" />
+                      </button>
+                    )}
                   </div>
                 </td>
               </tr>
-            ))}
+            );})}
           </tbody>
         </table>
       </div>

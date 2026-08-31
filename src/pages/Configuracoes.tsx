@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Settings2, Save, RotateCcw, Monitor, Bell, ShieldCheck, MapPin, Plus, Trash2, MessageCircle } from 'lucide-react';
 import { useSearch } from '../context/SearchContext';
 import { matchesSearch } from '../lib/search';
+import { confirmDelete } from '../lib/confirmAction';
 
 type SettingsState = {
   companyName: string;
@@ -108,7 +109,7 @@ export const ConfiguracoesPage: React.FC = () => {
   };
 
   const removePdvLocal = async (id: number) => {
-    if (!window.confirm('Remover este local PDV?')) return;
+    if (!confirmDelete('este local PDV')) return;
     setPdvError(null);
     const res = await fetch(`/api/pdv-locais/${id}`, { method: 'DELETE' });
     if (!res.ok) {

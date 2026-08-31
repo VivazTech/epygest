@@ -28,15 +28,14 @@ import {
   FileCheck,
   TrendingUp,
   Boxes,
-  Building2,
   CalendarClock,
   Landmark,
   BookOpen,
   Lightbulb,
+  ShieldCheck,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { PLANILHAS_RESULTADOS, APURACAO_RECEITA_ITENS, BASE_ORCAMENTO_ITENS, isBaseOrcamentoTab, isRelCrdTab, isRelReqTab, isConsumoInternoTab, isRdsTab, isApuracaoReceitaTab as checkApuracaoReceitaTab, isApuracaoResultadosTab as checkApuracaoResultadosTab } from '../lib/planilhas';
-import { PAINEIS_SETORIAIS, isPainelSetorialTab } from '../lib/paineisSetoriais';
 import { hasPermission, type RolePermissionRow } from '../lib/permissionCatalog';
 import logoIcon from '../../logoicon2.svg';
 
@@ -109,14 +108,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const showPlanilhas = canView('apuracao-resultados', ['admin', 'controle']);
   const showBaseOrcamento = canView('base-orcamento', ['admin', 'controle', 'manager']);
   const showLancamentos = lancamentosMenu.length > 0;
+  const showAprovacoes = canView('aprovacoes', ['admin', 'finance', 'controle']);
   const showFolha = canView('folha', ['admin', 'controle']);
   const showCompras = canView('compras-ordem', ['admin', 'controle', 'manager']);
   const comprasIds = ['compras-ordem'];
   const [comprasExpanded, setComprasExpanded] = React.useState(comprasIds.includes(activeTab));
-  const painelMenu = PAINEIS_SETORIAIS.filter((p) => canView(p.tabId, p.roles));
-  const showPaineis = painelMenu.length > 0;
-  const painelTabIds = painelMenu.map((p) => p.tabId);
-  const [paineisExpanded, setPaineisExpanded] = React.useState(isPainelSetorialTab(activeTab));
   const showApuracaoReceita = canView('apuracao-receita', ['admin', 'controle']);
   const showTutorial = canView('tutorial', [
     'admin',
@@ -152,7 +148,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   React.useEffect(() => {
     if (comprasIds.includes(activeTab)) setComprasExpanded(true);
-    if (isPainelSetorialTab(activeTab)) setPaineisExpanded(true);
     if (constructionMenu.some((item) => item.id === activeTab)) {
       setConstructionExpanded(true);
     }
@@ -191,7 +186,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
       setConstructionExpanded(true);
       setLancamentosExpanded(true);
       setComprasExpanded(true);
-      setPaineisExpanded(true);
       setBaseOrcamentoExpanded(true);
       setPlanilhasExpanded(true);
       setReceitaExpanded(true);
@@ -313,6 +307,25 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
         )}
 
+        {showAprovacoes && (
+          <button
+            onClick={() => setActiveTab('aprovacoes')}
+            data-tour="nav-aprovacoes"
+            className={cn(
+              "w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group",
+              activeTab === 'aprovacoes'
+                ? "bg-emerald-500 text-white shadow-lg shadow-emerald-900/20"
+                : "text-white/80 hover:bg-white/5 hover:text-white"
+            )}
+          >
+            <ShieldCheck className={cn(
+              "w-5 h-5 min-w-5 min-h-5 shrink-0 transition-transform duration-200",
+              activeTab === 'aprovacoes' ? "scale-110" : "group-hover:scale-110"
+            )} />
+            <span className={cn("font-medium text-sm", collapsed && "hidden")}>Aprovações</span>
+          </button>
+        )}
+
         {showCompras && (
           <div className="space-y-1">
             <button
@@ -352,53 +365,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 <span className="font-medium text-xs truncate text-left">Ordem de Compra</span>
               </button>
             )}
-          </div>
-        )}
-
-        {showPaineis && (
-          <div className="space-y-1">
-            <button
-              onClick={() => setPaineisExpanded((prev) => !prev)}
-              data-tour="group-setores"
-              className={cn(
-                "w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group",
-                painelTabIds.includes(activeTab)
-                  ? "text-white bg-white/10"
-                  : "text-white/80 hover:bg-white/5 hover:text-white"
-              )}
-            >
-              <Building2 className="w-5 h-5 min-w-5 min-h-5 shrink-0 transition-transform duration-200 group-hover:scale-110" />
-              <span className={cn("font-medium text-sm flex-1 text-left", collapsed && "hidden")}>
-                Setores
-              </span>
-              <ChevronDown
-                className={cn(
-                  "w-4 h-4 transition-transform duration-200",
-                  paineisExpanded && "rotate-180",
-                  collapsed && "hidden"
-                )}
-              />
-            </button>
-            {!collapsed && paineisExpanded && painelMenu.map((item) => (
-              <button
-                key={item.tabId}
-                data-tour={`nav-${item.tabId}`}
-                onClick={() => setActiveTab(item.tabId)}
-                className={cn(
-                  "w-full flex items-center gap-3 pl-11 pr-4 py-2 rounded-xl transition-all duration-200 group",
-                  activeTab === item.tabId
-                    ? "bg-emerald-500 text-white shadow-lg shadow-emerald-900/20"
-                    : "text-white/70 hover:bg-white/5 hover:text-white"
-                )}
-                title={item.label}
-              >
-                <Layers className={cn(
-                  "w-4 h-4 min-w-4 min-h-4 shrink-0 transition-transform duration-200",
-                  activeTab === item.tabId ? "scale-110" : "group-hover:scale-110"
-                )} />
-                <span className="font-medium text-xs truncate text-left">{item.shortLabel}</span>
-              </button>
-            ))}
           </div>
         )}
 

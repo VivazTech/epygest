@@ -21,6 +21,7 @@ import { useSearch } from '../context/SearchContext';
 import { useToast } from '../context/ToastContext';
 import { matchesSearch } from '../lib/search';
 import { isDirectDocumentUrl, collectBoletoPaths, type StorageDocumentField } from '../lib/storagePath';
+import { confirmCancel, confirmDelete } from '../lib/confirmAction';
 
 export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'servico' }) => {
   const { query } = useSearch();
@@ -70,6 +71,8 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
   const [uploadingBoletoIndex, setUploadingBoletoIndex] = useState<number | null>(null);
   const [semBoleto, setSemBoleto] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
+  const [showCompetencyWarning, setShowCompetencyWarning] = useState(false);
+  const [submittingInvoice, setSubmittingInvoice] = useState(false);
   const [exportingReport, setExportingReport] = useState<'csv' | 'pdf' | null>(null);
   const [reportFilters, setReportFilters] = useState({
     from: '',
@@ -247,6 +250,59 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
     setUploadingBoletoIndex(null);
   };
 
+  const isDueDateInSelectedCompetency = () => {
+    const [dueYear, dueMonth] = formData.due_date.split('-');
+    return (
+      String(Number(dueMonth)) === String(Number(selectedMonth)) &&
+      String(Number(dueYear)) === String(Number(selectedYear))
+    );
+  };
+
+  const submitInvoice = async () => {
+    const boletoPaths = semBoleto ? [] : boletos.map((b) => b.path).filter(Boolean);
+    setSubmittingInvoice(true);
+    try {
+      const response = await fetch('/api/invoices', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...formData,
+          amount: parseFloat(formData.amount),
+          sector_id: parseInt(formData.sector_id),
+          boleto_file_path: boletoPaths[0] || '',
+          boleto_file_paths: boletoPaths,
+        }),
+      });
+      if (response.ok) {
+        showSuccess('Nota fiscal lançada com sucesso.');
+        setShowCompetencyWarning(false);
+        closeInvoiceModal();
+        setFormData({
+          invoice_number: '',
+          provider_name: '',
+          amount: '',
+          issue_date: '',
+          due_date: '',
+          sector_id: '',
+          file_path: '',
+          boleto_file_path: '',
+          natureza: 'O',
+          crd: '',
+          payment_method: '',
+          pix_key: '',
+          currency: 'BRL',
+        });
+        fetchInvoices();
+        fetchSectors();
+      } else {
+        const data = await response.json().catch(() => ({}));
+        alert(data.error || 'Não foi possível lançar a nota fiscal.');
+      }
+    } finally {
+      setSubmittingInvoice(false);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.file_path) {
@@ -269,33 +325,11 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
       alert('Informe a data de vencimento.');
       return;
     }
-    const [dueYear, dueMonth] = formData.due_date.split('-');
-    if (String(Number(dueMonth)) !== String(Number(selectedMonth)) || String(Number(dueYear)) !== String(Number(selectedYear))) {
-      alert(`A data de vencimento deve estar na competência selecionada (${String(selectedMonth).padStart(2, '0')}/${selectedYear}).`);
+    if (!isDueDateInSelectedCompetency()) {
+      setShowCompetencyWarning(true);
       return;
     }
-    const boletoPaths = semBoleto ? [] : boletos.map((b) => b.path).filter(Boolean);
-    const response = await fetch('/api/invoices', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        ...formData,
-        amount: parseFloat(formData.amount),
-        sector_id: parseInt(formData.sector_id),
-        boleto_file_path: boletoPaths[0] || '',
-        boleto_file_paths: boletoPaths,
-      })
-    });
-    if (response.ok) {
-      showSuccess('Nota fiscal lançada com sucesso.');
-      closeInvoiceModal();
-      setFormData({ invoice_number: '', provider_name: '', amount: '', issue_date: '', due_date: '', sector_id: '', file_path: '', boleto_file_path: '', natureza: 'O', crd: '', payment_method: '', pix_key: '', currency: 'BRL' });
-      fetchInvoices();
-      fetchSectors();
-    } else {
-      const data = await response.json().catch(() => ({}));
-      alert(data.error || 'Não foi possível lançar a nota fiscal.');
-    }
+    await submitInvoice();
   };
 
   const handleBoletoUpload = async (file: File, index: number) => {
@@ -330,6 +364,8 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
   };
 
   const removeBoletoSlot = (index: number) => {
+    const slot = boletos[index];
+    if (slot?.path && !confirmDelete('este boleto anexado')) return;
     setBoletos((prev) => {
       if (prev.length === 1) return [{ path: '', name: '' }];
       return prev.filter((_, i) => i !== index);
@@ -376,6 +412,7 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
 
   const approveByControl = (id: number) => runFlowAction(id, 'approve_control');
   const rejectByControl = async (id: number) => {
+    if (!confirmCancel('esta nota (reprovação pelo Controle)')) return;
     const reason = window.prompt('Motivo da reprovação pelo Controle (opcional):');
     if (reason === null) return;
     await runFlowAction(id, 'reject_control', undefined, reason || 'Reprovada pelo Controle');
@@ -385,6 +422,7 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
     await runFlowAction(id, 'disapprove_control');
   };
   const cancelRequest = async (id: number) => {
+    if (!confirmCancel('esta solicitação de nota')) return;
     const reason = window.prompt('Motivo do cancelamento (opcional):') || '';
     await runFlowAction(id, 'cancel_request', undefined, reason);
   };
@@ -397,7 +435,7 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
     const label = invoice.invoice_number
       ? `nota ${invoice.invoice_number}`
       : `nota #${invoice.id}`;
-    if (!window.confirm(`Deseja realmente excluir a ${label}? Esta ação não pode ser desfeita.`)) return;
+    if (!confirmDelete(label)) return;
 
     const res = await fetch(`/api/invoices/${invoice.id}`, { method: 'DELETE' });
     const data = await res.json().catch(() => ({}));
@@ -1038,7 +1076,8 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-slate-50/50">
-                <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Nota / Fornecedor</th>
+                <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Nota</th>
+                <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Fornecedor</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Setor</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Lançado por</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Valor</th>
@@ -1058,9 +1097,11 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
                       </div>
                       <div>
                         <p className="text-sm font-bold text-slate-900">#{invoice.invoice_number}</p>
-                        <p className="text-xs text-slate-500">{invoice.provider_name}</p>
                       </div>
                     </div>
+                  </td>
+                  <td className="px-6 py-4">
+                    <p className="text-sm font-medium text-slate-700">{invoice.provider_name || '—'}</p>
                   </td>
                   <td className="px-6 py-4">
                     <span className="text-xs font-medium text-slate-600 bg-slate-100 px-2 py-1 rounded-lg">
@@ -1536,6 +1577,55 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {showCompetencyWarning && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="p-6 border-b border-slate-100 flex justify-between items-center">
+              <h3 className="text-xl font-bold text-slate-900">Atenção</h3>
+              <button
+                onClick={() => setShowCompetencyWarning(false)}
+                className="text-slate-400 hover:text-slate-600 transition-colors"
+              >
+                <Plus className="w-6 h-6 rotate-45" />
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div className="flex gap-3 items-start">
+                <AlertCircle className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
+                <p className="text-sm text-slate-600 leading-relaxed">
+                  A data de vencimento informada (
+                  <span className="font-semibold text-slate-800">
+                    {formatDate(formData.due_date)}
+                  </span>
+                  ) está fora da competência selecionada (
+                  <span className="font-semibold text-slate-800">
+                    {String(selectedMonth).padStart(2, '0')}/{selectedYear}
+                  </span>
+                  ). O lançamento pode não aparecer na listagem atual. Deseja continuar mesmo assim?
+                </p>
+              </div>
+              <div className="pt-2 flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => setShowCompetencyWarning(false)}
+                  className="flex-1 px-4 py-3 bg-slate-100 text-slate-600 font-bold rounded-xl hover:bg-slate-200 transition-colors"
+                >
+                  Voltar
+                </button>
+                <button
+                  type="button"
+                  disabled={submittingInvoice}
+                  onClick={() => submitInvoice()}
+                  className="flex-1 px-4 py-3 bg-[#004D40] text-white font-bold rounded-xl hover:bg-[#003d33] shadow-lg shadow-emerald-900/10 transition-colors disabled:opacity-70"
+                >
+                  {submittingInvoice ? 'Lançando...' : 'Continuar'}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

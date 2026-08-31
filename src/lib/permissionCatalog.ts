@@ -39,6 +39,7 @@ export const PERMISSION_RESOURCES: PermissionResource[] = [
   { key: 'notas', label: 'Notas de Serviço', group: 'Lançamentos', actions: ['view', 'create', 'edit'] },
   { key: 'danfe', label: 'DANFE', group: 'Lançamentos', actions: ['view', 'create', 'edit'] },
   { key: 'mensalidades', label: 'Mensalidades', group: 'Lançamentos', actions: ['view', 'create', 'edit'] },
+  { key: 'aprovacoes', label: 'Aprovações', group: 'Lançamentos', actions: ['view', 'edit'] },
 
   { key: 'compras-ordem', label: 'Ordem de Compra', group: 'Compras', actions: ['view', 'create', 'edit'] },
 
@@ -85,6 +86,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, Partial<Record<string, Per
   admin: Object.fromEntries(PERMISSION_RESOURCES.map((r) => [r.key, r.actions])),
   finance: {
     investimentos: ['view'],
+    aprovacoes: ['view', 'edit'],
     comandas: ['view', 'create', 'edit'],
     'lancamentos-manuais': ['view', 'create', 'edit'],
     requisicoes: ['view', 'create', 'edit'],

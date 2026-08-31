@@ -31,6 +31,7 @@ import { ConsumoInternoPage, ConsumoInternoMesPage, MESES_CONSUMO } from './page
 import { RelatorioRdsPage, RelatorioRdsMesPage, MESES_RDS } from './pages/RelatorioRds';
 import { ComprasPage } from './pages/Compras';
 import { MensalidadesPage } from './pages/Mensalidades';
+import { AprovacoesPage } from './pages/Aprovacoes';
 import { InvestimentosPage } from './pages/Investimentos';
 import { PainelSetorial } from './pages/PainelSetorial';
 import { getPainelByTab, isPainelSetorialTab } from './lib/paineisSetoriais';
@@ -284,6 +285,7 @@ export default function App() {
       case 'requisicoes': return <Requisicoes />;
       case 'lancamentos-manuais': return <LancamentosManuais />;
       case 'comandas': return <Comandas />;
+      case 'aprovacoes': return <AprovacoesPage />;
       case 'importacao': return <Importacao />;
       case 'cadastros': return <Cadastros />;
       case 'sintase': return <Sintase />;
@@ -498,6 +500,8 @@ function AppShell({
                 ? 'Apuração da Folha / Apuração'
                 : activeTab.startsWith('folha-')
                 ? `Apuração da Folha / ${MESES_FOLHA[Number(activeTab.slice('folha-'.length))] ?? ''}`
+                : activeTab === 'aprovacoes'
+                ? 'Aprovações'
                 : ['comandas', 'lancamentos-manuais', 'requisicoes', 'notas', 'danfe', 'mensalidades', 'compras-mensalidades'].includes(activeTab)
                 ? `Lançamentos / ${
                     activeTab === 'comandas' ? 'Comandas'
@@ -552,7 +556,7 @@ function AppShell({
 
         <div
           data-tour="page-content"
-          className={activeTab === 'notas' || activeTab === 'danfe' || activeTab === 'comandas' || activeTab === 'lancamentos-manuais' || activeTab === 'requisicoes' || activeTab === 'mensalidades' || activeTab === 'compras-mensalidades' || activeTab === 'cadastros' || activeTab === 'sintase' || activeTab === 'prev-real' || activeTab === 'indicadores' || activeTab === 'dre' || activeTab === 'rel-crd' || activeTab.startsWith('rel-crd-') || activeTab === 'rel-req' || activeTab.startsWith('rel-req-') || activeTab === 'rel-consumo' || activeTab.startsWith('rel-consumo-') || activeTab === 'rel-rds' || activeTab.startsWith('rel-rds-') || activeTab.startsWith('planilha-') || activeTab.startsWith('folha-') || activeTab === 'compras-ordem' || activeTab === 'investimentos' || activeTab === 'tutorial' || activeTab === 'sugestoes' || isPainelSetorialTab(activeTab) ? 'p-8 pt-4 md:pt-8 w-full max-w-none' : 'p-8 pt-4 md:pt-8 max-w-7xl mx-auto'}
+          className={activeTab === 'notas' || activeTab === 'danfe' || activeTab === 'comandas' || activeTab === 'lancamentos-manuais' || activeTab === 'requisicoes' || activeTab === 'mensalidades' || activeTab === 'aprovacoes' || activeTab === 'compras-mensalidades' || activeTab === 'cadastros' || activeTab === 'sintase' || activeTab === 'prev-real' || activeTab === 'indicadores' || activeTab === 'dre' || activeTab === 'rel-crd' || activeTab.startsWith('rel-crd-') || activeTab === 'rel-req' || activeTab.startsWith('rel-req-') || activeTab === 'rel-consumo' || activeTab.startsWith('rel-consumo-') || activeTab === 'rel-rds' || activeTab.startsWith('rel-rds-') || activeTab.startsWith('planilha-') || activeTab.startsWith('folha-') || activeTab === 'compras-ordem' || activeTab === 'investimentos' || activeTab === 'tutorial' || activeTab === 'sugestoes' || isPainelSetorialTab(activeTab) ? 'p-8 pt-4 md:pt-8 w-full max-w-none' : 'p-8 pt-4 md:pt-8 max-w-7xl mx-auto'}
         >
           {renderContent()}
         </div>

@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, CalendarClock, Plus, RefreshCcw, Trash2, Pencil, X } from 'lucide-react';
+import { AlertTriangle, CalendarClock, Plus, RefreshCcw, Trash2, Pencil, X, Banknote } from 'lucide-react';
 import { cn, formatCurrency } from '../lib/utils';
+import { confirmDelete } from '../lib/confirmAction';
 import { SearchableSelect } from '../components/SearchableSelect';
 import { useSearch } from '../context/SearchContext';
 import { matchesSearch } from '../lib/search';
@@ -56,7 +57,23 @@ const EMPTY_FORM = {
   observacoes: '',
 };
 
-const ALERT_DAYS = 30;
+type ContratoLancamento = {
+  id: number;
+  contrato_id: number;
+  competencia: string;
+  valor: number;
+  status: string;
+  fornecedor: string | null;
+  sector_name: string | null;
+  vencimento: string | null;
+};
+
+const FLOW_STATUS_LABELS: Record<string, { label: string; classes: string }> = {
+  open: { label: 'Aguardando Controle', classes: 'bg-orange-100 text-orange-700' },
+  approved: { label: 'Aprovado Controle', classes: 'bg-blue-100 text-blue-700' },
+  posted: { label: 'Pago', classes: 'bg-emerald-100 text-emerald-700' },
+  cancelled: { label: 'Cancelado', classes: 'bg-slate-200 text-slate-700' },
+};
 
 export const MensalidadesPage: React.FC = () => {
   const { query } = useSearch();
@@ -71,18 +88,24 @@ export const MensalidadesPage: React.FC = () => {
   const [formOpen, setFormOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useState(EMPTY_FORM);
+  const [lancamentos, setLancamentos] = useState<ContratoLancamento[]>([]);
+  const [solicitandoId, setSolicitandoId] = useState<number | null>(null);
+
+  const ALERT_DAYS = 30;
 
   const load = async () => {
     setLoading(true);
     try {
-      const [cRes, sRes, crdRes] = await Promise.all([
+      const [cRes, sRes, crdRes, lRes] = await Promise.all([
         fetch('/api/contratos'),
         fetch('/api/sectors'),
         fetch('/api/crds'),
+        fetch('/api/contrato-lancamentos'),
       ]);
       const cJson = await cRes.json();
       const sJson = await sRes.json();
       const crdJson = await crdRes.json();
+      const lJson = await lRes.json().catch(() => []);
       if (!cRes.ok) {
         alert(cJson.error || 'Erro ao carregar contratos');
         setRows([]);
@@ -105,6 +128,7 @@ export const MensalidadesPage: React.FC = () => {
             sector_id: c.sector_id != null ? Number(c.sector_id) : null,
           }))
       );
+      setLancamentos(Array.isArray(lJson) ? lJson : []);
     } finally {
       setLoading(false);
     }
@@ -228,8 +252,51 @@ export const MensalidadesPage: React.FC = () => {
     }
   };
 
+  const lancamentoByContrato = useMemo(() => {
+    const map = new Map<number, ContratoLancamento>();
+    for (const l of lancamentos) {
+      const existing = map.get(l.contrato_id);
+      if (!existing || l.id > existing.id) map.set(l.contrato_id, l);
+    }
+    return map;
+  }, [lancamentos]);
+
+  const solicitarPagamento = async (row: Contrato) => {
+    if (row.status === 'encerrado' || !row.ativo) {
+      alert('Contrato inativo ou encerrado.');
+      return;
+    }
+    const pending = lancamentoByContrato.get(row.id);
+    if (pending && (pending.status === 'open' || pending.status === 'approved')) {
+      alert('Já existe um pagamento pendente para este contrato.');
+      return;
+    }
+    if (!window.confirm(`Solicitar pagamento de ${formatCurrency(Number(row.valor) || 0)} para ${row.fornecedor}?`)) {
+      return;
+    }
+    setSolicitandoId(row.id);
+    try {
+      const res = await fetch(`/api/contratos/${row.id}/lancamentos`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          competencia: row.vencimento || new Date().toISOString().slice(0, 10),
+          valor: row.valor,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        alert(data.error || 'Não foi possível solicitar o pagamento.');
+        return;
+      }
+      load();
+    } finally {
+      setSolicitandoId(null);
+    }
+  };
+
   const remove = async (row: Contrato) => {
-    if (!window.confirm(`Remover o contrato de "${row.fornecedor}"?`)) return;
+    if (!confirmDelete(`o contrato de "${row.fornecedor}"`)) return;
     const res = await fetch(`/api/contratos/${row.id}`, { method: 'DELETE' });
     const json = await res.json().catch(() => ({}));
     if (!res.ok) {
@@ -328,6 +395,7 @@ export const MensalidadesPage: React.FC = () => {
                 <th className="px-4 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Periodicidade</th>
                 <th className="px-4 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Vencimento</th>
                 <th className="px-4 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Status</th>
+                <th className="px-4 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Pagamento</th>
                 <th className="px-4 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Responsável</th>
                 <th className="px-4 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-right">Ações</th>
               </tr>
@@ -335,12 +403,12 @@ export const MensalidadesPage: React.FC = () => {
             <tbody className="divide-y divide-slate-50">
               {loading && (
                 <tr>
-                  <td colSpan={9} className="px-4 py-10 text-center text-sm text-slate-400">Carregando...</td>
+                  <td colSpan={10} className="px-4 py-10 text-center text-sm text-slate-400">Carregando...</td>
                 </tr>
               )}
               {!loading && filtered.length === 0 && (
                 <tr>
-                  <td colSpan={9} className="px-4 py-10 text-center text-sm text-slate-400">
+                  <td colSpan={10} className="px-4 py-10 text-center text-sm text-slate-400">
                     Nenhum contrato encontrado.
                   </td>
                 </tr>
@@ -391,9 +459,32 @@ export const MensalidadesPage: React.FC = () => {
                   <td className="px-4 py-3">
                     <StatusBadge status={row.status} />
                   </td>
+                  <td className="px-4 py-3">
+                    {(() => {
+                      const lanc = lancamentoByContrato.get(row.id);
+                      if (!lanc) return <span className="text-xs text-slate-400">—</span>;
+                      const meta = FLOW_STATUS_LABELS[lanc.status] || { label: lanc.status, classes: 'bg-slate-100 text-slate-700' };
+                      return (
+                        <span className={cn('text-[10px] font-bold px-2 py-1 rounded-lg uppercase tracking-wider', meta.classes)}>
+                          {meta.label}
+                        </span>
+                      );
+                    })()}
+                  </td>
                   <td className="px-4 py-3 text-sm text-slate-600">{row.responsavel || '—'}</td>
                   <td className="px-4 py-3 text-right">
                     <div className="inline-flex items-center gap-1">
+                      {row.status !== 'encerrado' && row.ativo && (
+                        <button
+                          type="button"
+                          onClick={() => solicitarPagamento(row)}
+                          disabled={solicitandoId === row.id}
+                          className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-lg disabled:opacity-50"
+                          title="Solicitar pagamento"
+                        >
+                          <Banknote className="w-4 h-4" />
+                        </button>
+                      )}
                       <button type="button" onClick={() => openEdit(row)} className="p-2 text-slate-400 hover:text-[#004D40] hover:bg-emerald-50 rounded-lg" title="Editar">
                         <Pencil className="w-4 h-4" />
                       </button>
@@ -408,6 +499,44 @@ export const MensalidadesPage: React.FC = () => {
           </table>
         </div>
       </div>
+
+      {lancamentos.length > 0 && (
+        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+          <div className="px-4 py-3 border-b border-slate-50">
+            <h3 className="text-sm font-bold text-slate-900">Lançamentos de pagamento</h3>
+            <p className="text-xs text-slate-500 mt-0.5">Solicitações enviadas para aprovação do Controle e pagamento do Financeiro.</p>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse min-w-[800px]">
+              <thead>
+                <tr className="bg-slate-50/50">
+                  <th className="px-4 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Fornecedor</th>
+                  <th className="px-4 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Competência</th>
+                  <th className="px-4 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-right">Valor</th>
+                  <th className="px-4 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-50">
+                {lancamentos.map((l) => {
+                  const meta = FLOW_STATUS_LABELS[l.status] || { label: l.status, classes: 'bg-slate-100 text-slate-700' };
+                  return (
+                    <tr key={l.id} className="hover:bg-slate-50/60">
+                      <td className="px-4 py-3 text-sm text-slate-800">{l.fornecedor || '—'}</td>
+                      <td className="px-4 py-3 text-sm text-slate-600">{l.competencia}</td>
+                      <td className="px-4 py-3 text-sm text-right font-semibold tabular-nums">{formatCurrency(l.valor)}</td>
+                      <td className="px-4 py-3">
+                        <span className={cn('text-[10px] font-bold px-2 py-1 rounded-lg uppercase tracking-wider', meta.classes)}>
+                          {meta.label}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {formOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">

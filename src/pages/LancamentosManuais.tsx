@@ -8,6 +8,7 @@ import { useToast } from '../context/ToastContext';
 import { matchesSearch } from '../lib/search';
 import { isSharedCrdCode } from '../lib/sharedCrds';
 import { isDirectDocumentUrl } from '../lib/storagePath';
+import { confirmCancel, confirmDelete } from '../lib/confirmAction';
 
 export const LancamentosManuaisPage: React.FC = () => {
   const { query } = useSearch();
@@ -185,6 +186,7 @@ export const LancamentosManuaisPage: React.FC = () => {
   };
 
   const updateStatus = async (id: number, status: 'open' | 'approved' | 'posted' | 'cancelled') => {
+    if (status === 'cancelled' && !confirmCancel('este lançamento manual')) return;
     const res = await fetch(`/api/manual-entries/${id}/status`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
@@ -213,7 +215,7 @@ export const LancamentosManuaisPage: React.FC = () => {
     const label = entry.description
       ? `"${entry.description}"`
       : `lançamento #${entry.id}`;
-    if (!window.confirm(`Deseja realmente excluir o ${label}? Esta ação não pode ser desfeita.`)) return;
+    if (!confirmDelete(label)) return;
 
     const res = await fetch(`/api/manual-entries/${entry.id}`, { method: 'DELETE' });
     const data = await res.json().catch(() => ({}));
@@ -425,9 +427,10 @@ export const LancamentosManuaisPage: React.FC = () => {
           <thead>
             <tr className="bg-slate-50/50">
               <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Setor / CRD</th>
+              <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Fornecedor</th>
               <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Emissão</th>
               <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Lançamento</th>
-              <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Descrição</th>
+              <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Vencimento</th>
               <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Anexo</th>
               <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Valor</th>
               <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Status</th>
@@ -437,7 +440,7 @@ export const LancamentosManuaisPage: React.FC = () => {
           <tbody className="divide-y divide-slate-50">
             {filteredEntries.length === 0 && (
               <tr>
-                <td colSpan={8} className="px-6 py-10 text-center text-sm text-slate-400">
+                <td colSpan={9} className="px-6 py-10 text-center text-sm text-slate-400">
                   Nenhum lançamento manual encontrado.
                 </td>
               </tr>
@@ -457,9 +460,10 @@ export const LancamentosManuaisPage: React.FC = () => {
                       <span className="block text-[10px] font-normal text-slate-400 mt-0.5">por {entry.user_name}</span>
                     ) : null}
                   </td>
+                  <td className="px-6 py-4 text-sm text-slate-600">{entry.description || '—'}</td>
                   <td className="px-6 py-4 text-sm text-slate-600">{entry.issue_date || '—'}</td>
                   <td className="px-6 py-4 text-sm text-slate-600">{entry.date}</td>
-                  <td className="px-6 py-4 text-sm text-slate-600">{entry.description || '—'}</td>
+                  <td className="px-6 py-4 text-sm text-slate-400">—</td>
                   <td className="px-6 py-4">
                     {entry.file_path ? (
                       <button

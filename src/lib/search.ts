@@ -48,6 +48,7 @@ export function getSearchPlaceholder(activeTab: string): string {
     usuarios: 'Buscar nome, e-mail ou setor...',
     configuracoes: 'Buscar configuração ou local PDV...',
     mensalidades: 'Buscar fornecedor, setor ou contrato...',
+    aprovacoes: 'Buscar lançamento, setor, fornecedor ou tipo...',
     'compras-mensalidades': 'Buscar fornecedor, setor ou contrato...',
     investimentos: 'Buscar investimento, setor ou CRD...',
     tutorial: 'Buscar aba ou seção do tutorial...',

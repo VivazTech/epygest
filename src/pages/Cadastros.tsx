@@ -19,6 +19,7 @@ import { ValueTrace } from '../components/ValueTrace';
 import { SearchableSelect } from '../components/SearchableSelect';
 import { useSearch } from '../context/SearchContext';
 import { matchesSearch } from '../lib/search';
+import { confirmCancel, confirmDelete } from '../lib/confirmAction';
 
 export const CadastrosPage: React.FC = () => {
   const { query } = useSearch();
@@ -314,6 +315,7 @@ export const CadastrosPage: React.FC = () => {
   };
 
   const updateReqStatus = async (id: number, status: 'open' | 'cancelled' | 'posted') => {
+    if (status === 'cancelled' && !confirmCancel('esta requisição')) return;
     await fetch(`/api/requisitions/${id}/status`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
@@ -509,7 +511,7 @@ export const CadastrosPage: React.FC = () => {
   };
 
   const deleteSector = async (sector: any) => {
-    if (!window.confirm(`Excluir o setor "${sector.name}"?`)) return;
+    if (!confirmDelete(`o setor "${sector.name}"`)) return;
     const res = await fetch(`/api/sectors/${sector.id}`, { method: 'DELETE' });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
@@ -549,7 +551,7 @@ export const CadastrosPage: React.FC = () => {
   };
 
   const deleteCargo = async (cargo: any) => {
-    if (!window.confirm(`Remover o cargo "${cargo.name}"?`)) return;
+    if (!confirmDelete(`o cargo "${cargo.name}"`)) return;
     const res = await fetch(`/api/cargos/${cargo.id}`, { method: 'DELETE' });
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
@@ -622,7 +624,9 @@ export const CadastrosPage: React.FC = () => {
     refreshColaboradores();
   };
 
-  const removeColaboradorFuncao = async (colaborador: any, cargoId: number) => {
+  const removeColaboradorFuncao = async (colaborador: any, cargoId: number, cargoName?: string) => {
+    const label = cargoName ? `a função "${cargoName}"` : 'esta função';
+    if (!confirmDelete(label)) return;
     const res = await fetch(`/api/colaboradores/${colaborador.id}/funcoes/${cargoId}`, {
       method: 'DELETE',
     });
@@ -649,7 +653,7 @@ export const CadastrosPage: React.FC = () => {
   };
 
   const deleteColaborador = async (colaborador: any) => {
-    if (!window.confirm(`Remover o colaborador "${colaborador.nome}"?`)) return;
+    if (!confirmDelete(`o colaborador "${colaborador.nome}"`)) return;
     const res = await fetch(`/api/colaboradores/${colaborador.id}`, { method: 'DELETE' });
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
@@ -1325,12 +1329,12 @@ export const CadastrosPage: React.FC = () => {
                                   className="ml-0.5 text-slate-400 hover:text-red-500"
                                   onClick={(e) => {
                                     e.stopPropagation();
-                                    removeColaboradorFuncao(colaborador, f.id);
+                                    removeColaboradorFuncao(colaborador, f.id, f.name);
                                   }}
                                   onKeyDown={(e) => {
                                     if (e.key === 'Enter' || e.key === ' ') {
                                       e.stopPropagation();
-                                      removeColaboradorFuncao(colaborador, f.id);
+                                      removeColaboradorFuncao(colaborador, f.id, f.name);
                                     }
                                   }}
                                 >

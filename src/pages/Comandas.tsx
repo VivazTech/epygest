@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Plus, Trash2, Archive, XCircle } from 'lucide-react';
+import { Plus, Trash2, Archive, XCircle, BadgeCheck, RotateCcw } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { confirmCancel } from '../lib/confirmAction';
 import { useSearch } from '../context/SearchContext';
 import { matchesSearch } from '../lib/search';
 
@@ -20,6 +21,8 @@ export const ComandasPage: React.FC = () => {
   const [pdvLocais, setPdvLocais] = useState<Array<{ id: number; name: string }>>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [userRole, setUserRole] = useState('viewer');
+  const [actingSector, setActingSector] = useState<'requester' | 'controle' | 'financeiro'>('requester');
   const [form, setForm] = useState({
     consumer_name: '',
     consumed_at: '',
@@ -61,8 +64,36 @@ export const ComandasPage: React.FC = () => {
   };
 
   useEffect(() => {
+    const loadUser = async () => {
+      try {
+        const res = await fetch('/api/auth/me');
+        if (!res.ok) return;
+        const user = await res.json();
+        const role = String(user?.role || 'viewer');
+        setUserRole(role);
+        if (role === 'finance') setActingSector('financeiro');
+        else if (role === 'controle') setActingSector('controle');
+      } catch {
+        // ignore
+      }
+    };
+    loadUser();
     loadData();
   }, []);
+
+  const canSwitchActingProfile = userRole === 'admin';
+  const canApproveControl = actingSector === 'controle' && (userRole === 'controle' || userRole === 'admin');
+  const canPayFinance = actingSector === 'financeiro' && (userRole === 'finance' || userRole === 'admin');
+  const canCancelAsRequester =
+    actingSector === 'requester' &&
+    (userRole === 'manager' || userRole === 'admin');
+
+  const statusLabel = (status: string) => {
+    if (status === 'approved') return { label: 'Aprovado Controle', classes: 'bg-blue-100 text-blue-700' };
+    if (status === 'posted') return { label: 'Pago', classes: 'bg-emerald-100 text-emerald-700' };
+    if (status === 'cancelled') return { label: 'Cancelado', classes: 'bg-slate-200 text-slate-700' };
+    return { label: 'Aguardando Controle', classes: 'bg-orange-100 text-orange-700' };
+  };
 
   const addItem = () => {
     setForm((prev) => ({ ...prev, items: [...prev.items, emptyItem()] }));
@@ -147,12 +178,18 @@ export const ComandasPage: React.FC = () => {
     }
   };
 
-  const updateStatus = async (id: number, status: 'posted' | 'cancelled') => {
-    await fetch(`/api/comandas/${id}/status`, {
+  const updateStatus = async (id: number, status: 'open' | 'approved' | 'posted' | 'cancelled') => {
+    if (status === 'cancelled' && !confirmCancel('esta comanda')) return;
+    const res = await fetch(`/api/comandas/${id}/status`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status }),
     });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      alert(data.error || 'Não foi possível atualizar a comanda.');
+      return;
+    }
     loadData();
   };
 
@@ -175,11 +212,24 @@ export const ComandasPage: React.FC = () => {
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
-      <div>
-        <h2 className="text-2xl font-bold text-slate-900">Lançamento de Comanda</h2>
-        <p className="text-slate-500 text-sm">
-          Registre manualmente o consumo informando consumidor, data, local e itens consumidos.
-        </p>
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <h2 className="text-2xl font-bold text-slate-900">Lançamento de Comanda</h2>
+          <p className="text-slate-500 text-sm">
+            Registre manualmente o consumo informando consumidor, data, local e itens consumidos.
+          </p>
+        </div>
+        {canSwitchActingProfile && (
+          <select
+            value={actingSector}
+            onChange={(e) => setActingSector(e.target.value as 'requester' | 'controle' | 'financeiro')}
+            className="px-3 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-semibold text-slate-700 shadow-sm self-start"
+          >
+            <option value="requester">Visão solicitante</option>
+            <option value="controle">Atuar como Controle</option>
+            <option value="financeiro">Atuar como Financeiro</option>
+          </select>
+        )}
       </div>
 
       {loadError && (
@@ -332,7 +382,9 @@ export const ComandasPage: React.FC = () => {
           <thead>
             <tr className="bg-slate-50/50">
               <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Consumidor</th>
+              <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Fornecedor</th>
               <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Data / Local</th>
+              <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Vencimento</th>
               <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Itens</th>
               <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Status</th>
               <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-right">Ações</th>
@@ -341,12 +393,14 @@ export const ComandasPage: React.FC = () => {
           <tbody className="divide-y divide-slate-50">
             {filteredComandas.length === 0 && (
               <tr>
-                <td colSpan={5} className="px-6 py-10 text-center text-sm text-slate-400">
+                <td colSpan={7} className="px-6 py-10 text-center text-sm text-slate-400">
                   Nenhuma comanda registrada.
                 </td>
               </tr>
             )}
-            {filteredComandas.map((comanda) => (
+            {filteredComandas.map((comanda) => {
+              const meta = statusLabel(comanda.status);
+              return (
               <tr key={comanda.id} className="hover:bg-slate-50/50 transition-colors align-top">
                 <td className="px-6 py-4 text-sm font-medium text-slate-800">
                   {comanda.consumer_name}
@@ -356,10 +410,12 @@ export const ComandasPage: React.FC = () => {
                     </span>
                   ) : null}
                 </td>
+                <td className="px-6 py-4 text-sm text-slate-400">—</td>
                 <td className="px-6 py-4 text-sm text-slate-600">
                   <span className="font-medium text-slate-700">{comanda.consumed_at}</span>
                   <span className="block text-xs text-slate-500 mt-0.5">{comanda.location}</span>
                 </td>
+                <td className="px-6 py-4 text-sm text-slate-400">—</td>
                 <td className="px-6 py-4 text-sm text-slate-600">
                   <ul className="space-y-1">
                     {(comanda.items ?? []).map((item: any) => (
@@ -374,40 +430,63 @@ export const ComandasPage: React.FC = () => {
                   <span
                     className={cn(
                       'text-[10px] font-bold px-2 py-1 rounded-lg uppercase tracking-wider',
-                      comanda.status === 'open'
-                        ? 'bg-orange-100 text-orange-700'
-                        : comanda.status === 'posted'
-                          ? 'bg-emerald-100 text-emerald-700'
-                          : 'bg-slate-200 text-slate-700'
+                      meta.classes
                     )}
                   >
-                    {comanda.status === 'open' ? 'Aberta' : comanda.status === 'posted' ? 'Baixada' : 'Cancelada'}
+                    {meta.label}
                   </span>
                 </td>
                 <td className="px-6 py-4">
                   <div className="flex justify-end gap-2">
-                    {comanda.status === 'open' && (
+                    {canApproveControl && comanda.status === 'open' && (
                       <>
                         <button
-                          onClick={() => updateStatus(comanda.id, 'posted')}
-                          className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"
-                          title="Baixar comanda"
+                          onClick={() => updateStatus(comanda.id, 'approved')}
+                          className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                          title="Aprovar no Controle"
                         >
-                          <Archive className="w-4 h-4" />
+                          <BadgeCheck className="w-4 h-4" />
                         </button>
                         <button
                           onClick={() => updateStatus(comanda.id, 'cancelled')}
-                          className="p-2 text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
-                          title="Cancelar comanda"
+                          className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                          title="Reprovar"
                         >
                           <XCircle className="w-4 h-4" />
                         </button>
                       </>
                     )}
+                    {canApproveControl && comanda.status === 'approved' && (
+                      <button
+                        onClick={() => updateStatus(comanda.id, 'open')}
+                        className="p-2 text-amber-600 hover:bg-amber-50 rounded-lg transition-colors"
+                        title="Desaprovar"
+                      >
+                        <RotateCcw className="w-4 h-4" />
+                      </button>
+                    )}
+                    {canPayFinance && comanda.status === 'approved' && (
+                      <button
+                        onClick={() => updateStatus(comanda.id, 'posted')}
+                        className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"
+                        title="Registrar pagamento"
+                      >
+                        <Archive className="w-4 h-4" />
+                      </button>
+                    )}
+                    {canCancelAsRequester && (comanda.status === 'open' || comanda.status === 'approved') && (
+                      <button
+                        onClick={() => updateStatus(comanda.id, 'cancelled')}
+                        className="p-2 text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+                        title="Cancelar comanda"
+                      >
+                        <XCircle className="w-4 h-4" />
+                      </button>
+                    )}
                   </div>
                 </td>
               </tr>
-            ))}
+            );})}
           </tbody>
         </table>
       </div>

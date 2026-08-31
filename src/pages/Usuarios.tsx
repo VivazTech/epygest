@@ -17,6 +17,7 @@ import { cn } from '../lib/utils';
 import { useSearch } from '../context/SearchContext';
 import { matchesSearch } from '../lib/search';
 import { useToast } from '../context/ToastContext';
+import { confirmDelete } from '../lib/confirmAction';
 import {
   PERMISSION_RESOURCES,
   type PermissionAction,
@@ -453,7 +454,7 @@ export const UsuariosPage: React.FC = () => {
   };
 
   const deleteRole = async (slug: string) => {
-    if (!window.confirm(`Excluir o nível "${roleLabel(slug)}"?`)) return;
+    if (!confirmDelete(`o nível "${roleLabel(slug)}"`)) return;
     setRoleActionBusy(true);
     setPermError('');
     try {

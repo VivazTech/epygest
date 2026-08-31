@@ -1763,13 +1763,13 @@ export function createApp() {
       supabase
         .from("requisitions")
         .select("sector_id, amount")
-        .eq("status", "open")
+        .in("status", ["open", "approved"])
         .gte("date", yearDateFrom)
         .lte("date", yearDateTo),
       supabase
         .from("manual_entries")
         .select("sector_id, amount")
-        .in("status", ["open", "approved"])
+        .eq("status", "open")
         .gte("date", yearDateFrom)
         .lte("date", yearDateTo),
     ]);
@@ -1816,7 +1816,7 @@ export function createApp() {
             .from("requisitions")
             .select("amount")
             .eq("sector_id", sector.id)
-            .eq("status", "open")
+            .in("status", ["open", "approved"])
             .gte("date", dateFrom)
             .lte("date", dateTo),
           supabase
@@ -2018,11 +2018,32 @@ export function createApp() {
   app.patch("/api/requisitions/:id/status", async (req, res) => {
     const { id } = req.params;
     const { status } = req.body;
-    if (!["open", "cancelled", "posted"].includes(status))
+    if (!["open", "approved", "cancelled", "posted"].includes(status)) {
       return res.status(400).json({ error: "Status inválido" });
+    }
+
+    const { data: existing, error: fetchError } = await supabase
+      .from("requisitions")
+      .select("id, sector_id, status")
+      .eq("id", id)
+      .single();
+    if (fetchError || !existing) {
+      return res.status(404).json({ error: "Requisição não encontrada" });
+    }
+
+    const access = await assertSectorAccessForUser(req, Number(existing.sector_id));
+    if (!access.ok) return res.status(access.status).json({ error: access.error });
+
+    const role = String(req.user?.role || "");
+    const current = String((existing as any).status || "open");
+    const validation = validateLaunchFlowStatus(role, current, status);
+    if (validation.ok === false) return res.status(validation.status).json({ error: validation.error });
 
     const { error } = await supabase.from("requisitions").update({ status }).eq("id", id);
-    if (error) { console.error(error); return res.status(500).json({ error: "Erro interno ao processar a solicitação." }); }
+    if (error) {
+      console.error(error);
+      return res.status(500).json({ error: "Erro interno ao processar a solicitação." });
+    }
     res.json({ success: true });
   });
 
@@ -2046,6 +2067,38 @@ export function createApp() {
       }
     }
     return { ok: true as const };
+  };
+
+  const validateLaunchFlowStatus = (
+    role: string,
+    current: string,
+    next: string
+  ): { ok: true } | { ok: false; status: number; error: string } => {
+    const isAdmin = role === "admin";
+    const isControle = role === "controle" || isAdmin;
+    const isFinance = role === "finance" || isAdmin;
+
+    if (next === "approved") {
+      if (!isControle) return { ok: false, status: 403, error: "Apenas Controle (ou admin) pode aprovar." };
+      if (current !== "open") return { ok: false, status: 400, error: "Só é possível aprovar lançamentos em aberto." };
+    } else if (next === "posted") {
+      if (!isFinance) return { ok: false, status: 403, error: "Apenas Financeiro (ou admin) pode baixar/pagar." };
+      if (current !== "approved") {
+        return { ok: false, status: 400, error: "O lançamento precisa ser aprovado pelo Controle antes do pagamento." };
+      }
+    } else if (next === "cancelled") {
+      if (current === "posted") return { ok: false, status: 400, error: "Não é possível cancelar um lançamento já baixado." };
+      if (!["open", "approved"].includes(current)) {
+        return { ok: false, status: 400, error: "Este lançamento já está cancelado." };
+      }
+      if (!(isControle || isAdmin || role === "manager")) {
+        if (role === "finance") return { ok: false, status: 403, error: "Financeiro não cancela lançamentos." };
+      }
+    } else if (next === "open") {
+      if (!isControle) return { ok: false, status: 403, error: "Apenas Controle (ou admin) pode devolver o lançamento." };
+      if (current !== "approved") return { ok: false, status: 400, error: "Só é possível devolver lançamentos aprovados." };
+    }
+    return { ok: true };
   };
 
   app.get("/api/manual-entries", async (_req, res) => {
@@ -2294,6 +2347,338 @@ export function createApp() {
       return res.status(500).json({ error: "Não foi possível excluir o lançamento." });
     }
     res.json({ success: true });
+  });
+
+  // ====================================================
+  // APROVAÇÕES (visão unificada — Controle / Financeiro)
+  // ====================================================
+  const inferInvoiceDocType = (invoice: { invoice_number?: unknown }) => {
+    const digits = String(invoice.invoice_number ?? "").replace(/\D/g, "");
+    return digits.length === 44 ? "danfe" : "nota";
+  };
+
+  const isPendingApprovalItem = (item: {
+    type: string;
+    status: string;
+    flow_stage?: string | null;
+    alerta_vencimento?: boolean;
+    assinado?: boolean;
+  }) => {
+    if (item.type === "manual") return item.status === "open" || item.status === "approved";
+    if (item.type === "nota" || item.type === "danfe") {
+      const flow = item.flow_stage || "control_pending";
+      return flow !== "paid" && flow !== "cancelled" && item.status !== "paid";
+    }
+    if (item.type === "comanda" || item.type === "requisicao") {
+      return item.status === "open" || item.status === "approved";
+    }
+    if (item.type === "mensalidade") {
+      return item.status === "open" || item.status === "approved";
+    }
+    return false;
+  };
+
+  app.get("/api/aprovacoes", requireRole("admin", "controle", "finance"), async (req, res) => {
+    const q = req.query as {
+      type?: string;
+      sector_id?: string;
+      from?: string;
+      to?: string;
+      status?: string;
+    };
+    const typeFilter = String(q.type || "all");
+    const sectorFilter = q.sector_id != null && q.sector_id !== "" ? Number(q.sector_id) : null;
+    const fromDate = q.from ? String(q.from).slice(0, 10) : "";
+    const toDate = q.to ? String(q.to).slice(0, 10) : "";
+    const statusFilter = String(q.status || "all");
+
+    const includeType = (t: string) => typeFilter === "all" || typeFilter === t;
+    const inDateRange = (dateStr: string | null | undefined) => {
+      if (!fromDate && !toDate) return true;
+      const d = String(dateStr || "").slice(0, 10);
+      if (!d) return !fromDate && !toDate;
+      if (fromDate && d < fromDate) return false;
+      if (toDate && d > toDate) return false;
+      return true;
+    };
+    const matchesSector = (sectorId: number | null | undefined, type: string) => {
+      if (sectorFilter == null || !Number.isFinite(sectorFilter)) return true;
+      if (type === "comanda") return false;
+      return Number(sectorId) === sectorFilter;
+    };
+    const matchesStatus = (item: {
+      type: string;
+      status: string;
+      flow_stage?: string | null;
+      alerta_vencimento?: boolean;
+      assinado?: boolean;
+    }) => {
+      if (statusFilter === "all") return true;
+      if (statusFilter === "pending") return isPendingApprovalItem(item);
+      if (statusFilter === "done") {
+        if (item.type === "manual") return item.status === "posted";
+        if (item.type === "nota" || item.type === "danfe") {
+          const flow = item.flow_stage || "";
+          return flow === "paid" || item.status === "paid";
+        }
+        if (item.type === "comanda" || item.type === "requisicao") return item.status === "posted";
+        if (item.type === "mensalidade") return item.status === "posted";
+        return false;
+      }
+      if (statusFilter === "cancelled") {
+        if (item.type === "manual") return item.status === "cancelled";
+        if (item.type === "nota" || item.type === "danfe") {
+          return (item.flow_stage || "") === "cancelled";
+        }
+        if (item.type === "comanda" || item.type === "requisicao") return item.status === "cancelled";
+        if (item.type === "mensalidade") return item.status === "cancelled";
+      }
+      return true;
+    };
+
+    try {
+      const [
+        manualRes,
+        reqRes,
+        invoiceRes,
+        comandaRes,
+        contratoRes,
+      ] = await Promise.all([
+        includeType("manual")
+          ? supabase
+              .from("manual_entries")
+              .select("*, sectors(name), crds(id, code, name), users(id, name)")
+              .order("date", { ascending: false })
+          : Promise.resolve({ data: [], error: null }),
+        includeType("requisicao")
+          ? supabase
+              .from("requisitions")
+              .select("*, sectors(name), crds(id, code, name, sector_id, sectors(name))")
+              .order("date", { ascending: false })
+          : Promise.resolve({ data: [], error: null }),
+        includeType("nota") || includeType("danfe")
+          ? supabase
+              .from("invoices")
+              .select("*, sectors(name), users(id, name)")
+              .order("due_date", { ascending: false })
+          : Promise.resolve({ data: [], error: null }),
+        includeType("comanda")
+          ? supabase
+              .from("comandas")
+              .select("*, users(id, name)")
+              .order("consumed_at", { ascending: false })
+          : Promise.resolve({ data: [], error: null }),
+        includeType("mensalidade")
+          ? supabase
+              .from("contrato_lancamentos")
+              .select("*, contratos(fornecedor, sector_id, vencimento, periodicidade, responsavel, sectors(name), crds(id, code, name)), users(id, name)")
+              .order("competencia", { ascending: false })
+          : Promise.resolve({ data: [], error: null }),
+      ]);
+
+      for (const result of [manualRes, reqRes, invoiceRes, comandaRes, contratoRes]) {
+        if (result.error) {
+          console.error(result.error);
+          return res.status(500).json({ error: "Erro ao carregar lançamentos para aprovação." });
+        }
+      }
+
+      const items: any[] = [];
+
+      for (const row of manualRes.data ?? []) {
+        const item = {
+          key: `manual-${row.id}`,
+          type: "manual",
+          source_id: Number(row.id),
+          sector_id: row.sector_id != null ? Number(row.sector_id) : null,
+          sector_name: row.sectors?.name ?? null,
+          crd_code: row.crds?.code ?? null,
+          crd_name: row.crds?.name ?? null,
+          title: row.description || `Lançamento #${row.id}`,
+          subtitle: row.users?.name ?? null,
+          description: row.description ?? null,
+          reference_date: String(row.date || row.issue_date || "").slice(0, 10),
+          issue_date: row.issue_date ? String(row.issue_date).slice(0, 10) : null,
+          amount: Number(row.amount) || 0,
+          status: String(row.status || "open"),
+          flow_stage: null,
+          user_name: row.users?.name ?? null,
+          file_path: row.file_path ?? null,
+          file_name: row.file_name ?? null,
+          fornecedor: row.description ? String(row.description) : null,
+          vencimento: null,
+        };
+        if (!matchesSector(item.sector_id, item.type)) continue;
+        if (!inDateRange(item.reference_date)) continue;
+        if (!matchesStatus(item)) continue;
+        items.push(item);
+      }
+
+      for (const row of reqRes.data ?? []) {
+        const item = {
+          key: `requisicao-${row.id}`,
+          type: "requisicao",
+          source_id: Number(row.id),
+          sector_id: row.sector_id != null ? Number(row.sector_id) : Number(row.crds?.sector_id) || null,
+          sector_name: row.crds?.sectors?.name ?? row.sectors?.name ?? null,
+          crd_code: row.crds?.code ?? null,
+          crd_name: row.crds?.name ?? null,
+          title: row.description || `Requisição #${row.id}`,
+          subtitle: null,
+          description: row.description ?? null,
+          reference_date: String(row.date || "").slice(0, 10),
+          issue_date: null,
+          amount: Number(row.amount) || 0,
+          status: String(row.status || "open"),
+          flow_stage: null,
+          user_name: null,
+          file_path: null,
+          file_name: null,
+          fornecedor: row.description ? String(row.description) : null,
+          vencimento: null,
+        };
+        if (!matchesSector(item.sector_id, item.type)) continue;
+        if (!inDateRange(item.reference_date)) continue;
+        if (!matchesStatus(item)) continue;
+        items.push(item);
+      }
+
+      for (const row of invoiceRes.data ?? []) {
+        const docType = inferInvoiceDocType(row);
+        if (!includeType(docType)) continue;
+        const item = {
+          key: `${docType}-${row.id}`,
+          type: docType,
+          source_id: Number(row.id),
+          sector_id: row.sector_id != null ? Number(row.sector_id) : null,
+          sector_name: row.sectors?.name ?? null,
+          crd_code: row.crd ?? null,
+          crd_name: null,
+          title: row.provider_name || `Nota #${row.id}`,
+          subtitle: row.invoice_number ? `Nº ${row.invoice_number}` : null,
+          description: row.provider_name ?? null,
+          reference_date: String(row.due_date || row.issue_date || "").slice(0, 10),
+          issue_date: row.issue_date ? String(row.issue_date).slice(0, 10) : null,
+          amount: Number(row.amount) || 0,
+          status: String(row.status || "control_pending"),
+          flow_stage: String(row.flow_stage || "control_pending"),
+          user_name: row.users?.name ?? null,
+          file_path: row.file_path ?? null,
+          file_name: null,
+          fornecedor: row.provider_name ? String(row.provider_name) : null,
+          vencimento: row.due_date ? String(row.due_date).slice(0, 10) : null,
+        };
+        if (!matchesSector(item.sector_id, item.type)) continue;
+        if (!inDateRange(item.reference_date)) continue;
+        if (!matchesStatus(item)) continue;
+        items.push(item);
+      }
+
+      if (includeType("comanda")) {
+        const comandaIds = (comandaRes.data ?? [])
+          .map((r: any) => Number(r.id))
+          .filter((id: number) => Number.isFinite(id));
+        let comandaItems: any[] = [];
+        if (comandaIds.length > 0) {
+          const { data: itemRows } = await supabase
+            .from("comanda_items")
+            .select("*")
+            .in("comanda_id", comandaIds);
+          comandaItems = itemRows ?? [];
+        }
+        const itemsByComanda = new Map<number, any[]>();
+        for (const ci of comandaItems) {
+          const cid = Number(ci.comanda_id);
+          const list = itemsByComanda.get(cid) ?? [];
+          list.push(ci);
+          itemsByComanda.set(cid, list);
+        }
+
+        for (const row of comandaRes.data ?? []) {
+          const comandaItemRows = itemsByComanda.get(Number(row.id)) ?? [];
+          const itemsSummary = comandaItemRows
+            .map((i) => `${i.description} (${i.quantity})`)
+            .join(", ");
+          const item = {
+            key: `comanda-${row.id}`,
+            type: "comanda",
+            source_id: Number(row.id),
+            sector_id: null,
+            sector_name: row.location ?? null,
+            crd_code: null,
+            crd_name: null,
+            title: row.consumer_name || `Comanda #${row.id}`,
+            subtitle: row.location ?? null,
+            description: itemsSummary || null,
+            reference_date: String(row.consumed_at || row.created_at || "").slice(0, 10),
+            issue_date: null,
+            amount: null,
+            status: String(row.status || "open"),
+            flow_stage: null,
+            user_name: row.users?.name ?? null,
+            file_path: null,
+            file_name: null,
+            items_count: comandaItemRows.length,
+            fornecedor: null,
+            vencimento: null,
+          };
+          if (!matchesSector(item.sector_id, item.type)) continue;
+          if (!inDateRange(item.reference_date)) continue;
+          if (!matchesStatus(item)) continue;
+          items.push(item);
+        }
+      }
+
+      for (const row of contratoRes.data ?? []) {
+        const contrato = row.contratos;
+        const crd = contrato?.crds;
+        const vencimento = contrato?.vencimento ? String(contrato.vencimento).slice(0, 10) : null;
+        const item = {
+          key: `mensalidade-${row.id}`,
+          type: "mensalidade",
+          source_id: Number(row.id),
+          sector_id: contrato?.sector_id != null ? Number(contrato.sector_id) : null,
+          sector_name: contrato?.sectors?.name ?? null,
+          crd_code: crd?.code ?? null,
+          crd_name: crd?.name ?? null,
+          title: String(contrato?.fornecedor || `Mensalidade #${row.id}`),
+          subtitle: String(contrato?.periodicidade || "mensal"),
+          description: row.observacao ?? contrato?.observacoes ?? null,
+          reference_date: String(row.competencia || "").slice(0, 10),
+          issue_date: null,
+          amount: Number(row.valor) || 0,
+          status: String(row.status || "open"),
+          flow_stage: null,
+          user_name: row.users?.name ?? contrato?.responsavel ?? null,
+          file_path: null,
+          file_name: null,
+          assinado: undefined,
+          alerta_vencimento: false,
+          fornecedor: contrato?.fornecedor ? String(contrato.fornecedor) : null,
+          vencimento,
+        };
+        if (!matchesSector(item.sector_id, item.type)) continue;
+        if (!inDateRange(item.reference_date)) continue;
+        if (!matchesStatus(item)) continue;
+        items.push(item);
+      }
+
+      items.sort((a, b) => String(b.reference_date).localeCompare(String(a.reference_date)));
+
+      const summary = {
+        total: items.length,
+        pending: items.filter((i) => isPendingApprovalItem(i)).length,
+        by_type: items.reduce((acc: Record<string, number>, i) => {
+          acc[i.type] = (acc[i.type] || 0) + 1;
+          return acc;
+        }, {}),
+      };
+
+      res.json({ items, summary });
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: "Erro ao carregar aprovações." });
+    }
   });
 
   // ====================================================
@@ -2546,18 +2931,23 @@ export function createApp() {
   app.patch("/api/comandas/:id/status", async (req, res) => {
     const { id } = req.params;
     const { status } = req.body;
-    if (!["open", "cancelled", "posted"].includes(status)) {
+    if (!["open", "approved", "cancelled", "posted"].includes(status)) {
       return res.status(400).json({ error: "Status inválido" });
     }
 
     const { data: existing, error: fetchError } = await supabase
       .from("comandas")
-      .select("id")
+      .select("id, status")
       .eq("id", id)
       .single();
     if (fetchError || !existing) {
       return res.status(404).json({ error: "Comanda não encontrada" });
     }
+
+    const role = String(req.user?.role || "");
+    const current = String((existing as any).status || "open");
+    const validation = validateLaunchFlowStatus(role, current, status);
+    if (validation.ok === false) return res.status(validation.status).json({ error: validation.error });
 
     const { error } = await supabase.from("comandas").update({ status }).eq("id", id);
     if (error) {
@@ -2963,7 +3353,7 @@ export function createApp() {
     }
     if (!data) return res.status(404).json({ error: "Nota não encontrada" });
 
-    let rawPath = String((data as Record<string, unknown>)[field] || "");
+    let rawPath = String((data as unknown as Record<string, unknown>)[field] || "");
     if (field === "boleto_file_path") {
       const paths = collectBoletoPaths(data as { boleto_file_path?: string; boleto_file_paths?: unknown });
       const index = Number((req.query as { index?: string }).index);
@@ -8833,6 +9223,135 @@ export function createApp() {
     if (error) {
       console.error("Erro ao excluir contrato:", error);
       return res.status(500).json({ error: "Não foi possível excluir o contrato." });
+    }
+    res.json({ success: true });
+  });
+
+  app.get("/api/contrato-lancamentos", requireRole("admin", "controle", "manager", "finance", "diretoria"), async (_req, res) => {
+    const { data, error } = await supabase
+      .from("contrato_lancamentos")
+      .select("*, contratos(fornecedor, sector_id, vencimento, periodicidade, sectors(name), crds(id, code, name)), users(id, name)")
+      .order("competencia", { ascending: false });
+    if (error) {
+      console.error("Erro ao listar lançamentos de contrato:", error);
+      if (String(error.message || "").includes("contrato_lancamentos") || error.code === "42P01" || error.code === "PGRST205") {
+        return res.status(500).json({
+          error: "Tabela contrato_lancamentos não encontrada. Execute sql/35_contrato_lancamentos.sql no Supabase.",
+        });
+      }
+      return res.status(500).json({ error: "Erro ao listar lançamentos de mensalidade." });
+    }
+    res.json(
+      (data ?? []).map((row: any) => {
+        const contrato = row.contratos;
+        const crd = contrato?.crds;
+        return {
+          id: row.id,
+          contrato_id: Number(row.contrato_id),
+          competencia: String(row.competencia || "").slice(0, 10),
+          valor: Number(row.valor) || 0,
+          observacao: row.observacao ?? null,
+          status: String(row.status || "open"),
+          user_name: row.users?.name ?? null,
+          fornecedor: contrato?.fornecedor ?? null,
+          sector_id: contrato?.sector_id != null ? Number(contrato.sector_id) : null,
+          sector_name: contrato?.sectors?.name ?? null,
+          crd_code: crd?.code ?? null,
+          crd_name: crd?.name ?? null,
+          vencimento: contrato?.vencimento ? String(contrato.vencimento).slice(0, 10) : null,
+          created_at: row.created_at,
+        };
+      })
+    );
+  });
+
+  app.post("/api/contratos/:id/lancamentos", requireRole("admin", "controle", "manager", "finance"), async (req, res) => {
+    const contratoId = Number(req.params.id);
+    if (!Number.isFinite(contratoId)) return res.status(400).json({ error: "id inválido." });
+
+    const { data: contrato, error: contratoError } = await supabase
+      .from("contratos")
+      .select("id, sector_id, valor, status, ativo")
+      .eq("id", contratoId)
+      .single();
+    if (contratoError || !contrato) return res.status(404).json({ error: "Contrato não encontrado." });
+    if (contrato.ativo === false || contrato.status === "encerrado") {
+      return res.status(400).json({ error: "Contrato inativo ou encerrado." });
+    }
+
+    const sectorId = Number(contrato.sector_id);
+    if (Number.isFinite(sectorId)) {
+      const access = await assertSectorAccessForUser(req, sectorId);
+      if (!access.ok) return res.status(access.status).json({ error: access.error });
+    }
+
+    const { data: pending } = await supabase
+      .from("contrato_lancamentos")
+      .select("id")
+      .eq("contrato_id", contratoId)
+      .in("status", ["open", "approved"])
+      .limit(1);
+    if ((pending ?? []).length > 0) {
+      return res.status(400).json({ error: "Já existe um lançamento pendente para este contrato." });
+    }
+
+    const competencia = req.body?.competencia ? String(req.body.competencia).slice(0, 10) : new Date().toISOString().slice(0, 10);
+    const valor = req.body?.valor != null ? Number(req.body.valor) : Number(contrato.valor) || 0;
+    if (!Number.isFinite(valor) || valor <= 0) {
+      return res.status(400).json({ error: "valor inválido." });
+    }
+
+    const { data, error } = await supabase
+      .from("contrato_lancamentos")
+      .insert({
+        contrato_id: contratoId,
+        user_id: req.user!.id,
+        competencia,
+        valor,
+        observacao: req.body?.observacao ? String(req.body.observacao).trim() : null,
+        status: "open",
+      })
+      .select("id")
+      .single();
+    if (error) {
+      console.error("Erro ao criar lançamento de contrato:", error);
+      return res.status(500).json({ error: "Não foi possível solicitar o pagamento." });
+    }
+    res.json({ id: data.id });
+  });
+
+  app.patch("/api/contrato-lancamentos/:id/status", requireRole("admin", "controle", "manager", "finance"), async (req, res) => {
+    const id = Number(req.params.id);
+    const { status } = req.body;
+    if (!Number.isFinite(id)) return res.status(400).json({ error: "id inválido." });
+    if (!["open", "approved", "cancelled", "posted"].includes(status)) {
+      return res.status(400).json({ error: "Status inválido" });
+    }
+
+    const { data: existing, error: fetchError } = await supabase
+      .from("contrato_lancamentos")
+      .select("id, status, contrato_id, contratos(sector_id)")
+      .eq("id", id)
+      .single();
+    if (fetchError || !existing) {
+      return res.status(404).json({ error: "Lançamento não encontrado" });
+    }
+
+    const sectorId = Number((existing as any).contratos?.sector_id);
+    if (Number.isFinite(sectorId)) {
+      const access = await assertSectorAccessForUser(req, sectorId);
+      if (!access.ok) return res.status(access.status).json({ error: access.error });
+    }
+
+    const role = String(req.user?.role || "");
+    const current = String((existing as any).status || "open");
+    const validation = validateLaunchFlowStatus(role, current, status);
+    if (validation.ok === false) return res.status(validation.status).json({ error: validation.error });
+
+    const { error } = await supabase.from("contrato_lancamentos").update({ status }).eq("id", id);
+    if (error) {
+      console.error(error);
+      return res.status(500).json({ error: "Erro interno ao processar a solicitação." });
     }
     res.json({ success: true });
   });

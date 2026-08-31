@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { RefreshCcw, Plus, Trash2, AlertTriangle, Save } from 'lucide-react';
 import { cn, formatCurrency } from '../lib/utils';
+import { confirmDelete } from '../lib/confirmAction';
 import { ValueTrace } from '../components/ValueTrace';
 import {
   getPainelByKey,
@@ -452,6 +453,7 @@ export const PainelSetorial: React.FC<Props> = ({ painelKey }) => {
               { key: 'custo', label: 'Custo', fmt: 'money' },
             ]}
             onDelete={async (id) => {
+              if (!confirmDelete('este registro de quebra')) return;
               await fetch(`/api/paineis/ab/quebras/${id}`, { method: 'DELETE' });
               load();
             }}
@@ -494,6 +496,7 @@ export const PainelSetorial: React.FC<Props> = ({ painelKey }) => {
               { key: 'custo', label: 'Custo', fmt: 'money' },
             ]}
             onDelete={async (id) => {
+              if (!confirmDelete('este registro de sobra')) return;
               await fetch(`/api/paineis/ab/sobras/${id}`, { method: 'DELETE' });
               load();
             }}
@@ -618,6 +621,7 @@ export const PainelSetorial: React.FC<Props> = ({ painelKey }) => {
                     <td className="px-4 py-2 text-sm text-right tabular-nums">{formatCurrency(Number(a.custo_realizado) || 0)}</td>
                     <td className="px-4 py-2 text-right">
                       <button type="button" className="p-1.5 text-red-400 hover:bg-red-50 rounded-lg" onClick={async () => {
+                        if (!confirmDelete(`a ação "${a.titulo}"`)) return;
                         await fetch(`/api/paineis/nutricionista/acoes/${a.id}`, { method: 'DELETE' });
                         load();
                       }}>
@@ -710,6 +714,7 @@ export const PainelSetorial: React.FC<Props> = ({ painelKey }) => {
                       </td>
                       <td className="px-4 py-2 text-right">
                         <button type="button" className="p-1.5 text-red-400 hover:bg-red-50 rounded-lg" onClick={async () => {
+                          if (!confirmDelete(`o registro "${row.item}"`)) return;
                           await fetch(`/api/paineis/controladoria/semanal/${row.id}`, { method: 'DELETE' });
                           load();
                         }}>

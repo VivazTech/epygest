@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, Landmark, Plus, RefreshCcw, Trash2, Pencil, X } from 'lucide-react';
 import { cn, formatCurrency } from '../lib/utils';
+import { confirmDelete } from '../lib/confirmAction';
 import { SearchableSelect } from '../components/SearchableSelect';
 import { useSearch } from '../context/SearchContext';
 import { matchesSearch } from '../lib/search';
@@ -225,7 +226,7 @@ export const InvestimentosPage: React.FC = () => {
   };
 
   const remove = async (row: Investimento) => {
-    if (!window.confirm(`Remover o investimento "${row.nome}"?`)) return;
+    if (!confirmDelete(`o investimento "${row.nome}"`)) return;
     const res = await fetch(`/api/investimentos/${row.id}`, { method: 'DELETE' });
     const json = await res.json().catch(() => ({}));
     if (!res.ok) {
