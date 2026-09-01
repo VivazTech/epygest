@@ -3,6 +3,8 @@ import { AlertTriangle, CalendarDays, CheckCircle2, Loader2, RefreshCcw } from '
 import { cn, formatCurrency } from '../lib/utils';
 import { useSearch } from '../context/SearchContext';
 import { matchesSearch } from '../lib/search';
+import { ImportCorrectionCell } from '../components/ImportCorrectionCell';
+import type { CorrectableValueMeta } from '../lib/importCorrections';
 
 export const MESES_REL_CRD = [
   '', 'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
@@ -17,6 +19,7 @@ type RelCrdRow = {
   lancamentos: number;
   cancelamentos: number;
   saldo_lanc: number;
+  saldo_lanc_meta?: CorrectableValueMeta;
   baixas: number;
   estorno: number;
   baixas_liquido: number;
@@ -101,7 +104,7 @@ export const RelatorioCrdPage: React.FC<RelatorioCrdPageProps> = ({ onSelectMont
         <div>
           <h2 className="text-2xl font-bold text-slate-900">Relatorio de CRD</h2>
           <p className="text-sm text-slate-500">
-            Resumo das competências importadas em Importação › Rel. CRD. O saldo lanç. continua alimentando o Prev x Real Mensal.
+            Consolidado de fechamento mensal importado em Importação › Rel. CRD. Referência para Prev × Real Mensal e apurações de fechamento.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -226,6 +229,17 @@ export const RelatorioCrdMesPage: React.FC<RelatorioCrdMesPageProps> = ({ month 
   const [rows, setRows] = useState<RelCrdRow[]>([]);
   const [summary, setSummary] = useState<RelCrdSummary | null>(null);
   const [onlyEstouradas, setOnlyEstouradas] = useState(false);
+  const [canEdit, setCanEdit] = useState(false);
+
+  useEffect(() => {
+    fetch('/api/auth/me')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((user) => {
+        const role = String(user?.role || '');
+        setCanEdit(['admin', 'finance', 'controle'].includes(role));
+      })
+      .catch(() => setCanEdit(false));
+  }, []);
 
   const load = async () => {
     setLoading(true);
@@ -440,7 +454,22 @@ export const RelatorioCrdMesPage: React.FC<RelatorioCrdMesPageProps> = ({ month 
                   'px-4 py-2.5 text-xs text-right tabular-nums font-semibold',
                   row.estourada ? 'text-red-700' : 'text-slate-900'
                 )}>
-                  {formatCurrency(row.saldo_lanc)}
+                  {row.id && row.saldo_lanc_meta ? (
+                    <ImportCorrectionCell
+                      sourceTable="rel_crd_rows"
+                      rowId={row.id}
+                      fieldName="saldo_lanc"
+                      meta={row.saldo_lanc_meta}
+                      rowLabel={`${row.codigo} · ${row.nome || ''}`}
+                      year={Number(year)}
+                      month={month}
+                      canEdit={canEdit}
+                      onSaved={load}
+                      className="w-full"
+                    />
+                  ) : (
+                    formatCurrency(row.saldo_lanc)
+                  )}
                 </td>
                 <td className="px-4 py-2.5 text-xs text-right tabular-nums">{formatCurrency(row.baixas)}</td>
                 <td className="px-4 py-2.5 text-xs text-right tabular-nums text-slate-500">{formatCurrency(row.estorno)}</td>

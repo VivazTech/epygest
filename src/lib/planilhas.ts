@@ -62,7 +62,7 @@ export const isConsumoInternoTab = (tab: string) =>
   tab === 'rel-consumo' || /^rel-consumo-\d+$/.test(tab);
 
 export const isCmvTab = (tab: string) =>
-  tab === 'cmv' || /^cmv-\d+$/.test(tab);
+  tab === 'cmv' || tab === 'cmv-tarifas' || /^cmv-\d+$/.test(tab);
 
 export const isRdsTab = (tab: string) =>
   tab === 'rel-rds' || /^rel-rds-\d+$/.test(tab);

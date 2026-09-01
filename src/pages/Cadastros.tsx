@@ -20,6 +20,11 @@ import { SearchableSelect } from '../components/SearchableSelect';
 import { useSearch } from '../context/SearchContext';
 import { matchesSearch } from '../lib/search';
 import { confirmCancel, confirmDelete } from '../lib/confirmAction';
+import {
+  COLABORADOR_EMPRESAS,
+  emptyColaboradorForm,
+  type OutroAdicional,
+} from '../lib/colaboradorCadastro';
 
 export const CadastrosPage: React.FC = () => {
   const { query } = useSearch();
@@ -33,14 +38,13 @@ export const CadastrosPage: React.FC = () => {
   const [cargos, setCargos] = useState<any[]>([]);
   const [newCargoForm, setNewCargoForm] = useState({ name: '', sector_id: '' });
   const [colaboradores, setColaboradores] = useState<any[]>([]);
-  const [newColaboradorForm, setNewColaboradorForm] = useState({
-    nome: '',
-    funcao_id: '',
-    sector_id: '',
-  });
-  const [newSectorForm, setNewSectorForm] = useState({ name: '', budget_limit: '' });
+  const [newColaboradorForm, setNewColaboradorForm] = useState(emptyColaboradorForm);
+  const [editingColaborador, setEditingColaborador] = useState<any | null>(null);
+  const [editColaboradorForm, setEditColaboradorForm] = useState(emptyColaboradorForm());
+  const [savingColaborador, setSavingColaborador] = useState(false);
+  const [newSectorForm, setNewSectorForm] = useState({ code: '', name: '', budget_limit: '' });
   const [editingSectorId, setEditingSectorId] = useState<number | null>(null);
-  const [editSectorForm, setEditSectorForm] = useState({ name: '', budget_limit: '' });
+  const [editSectorForm, setEditSectorForm] = useState({ code: '', name: '', budget_limit: '' });
   const [savingSector, setSavingSector] = useState(false);
   const [newName, setNewName] = useState('');
   const [newKey, setNewKey] = useState('');
@@ -113,7 +117,7 @@ export const CadastrosPage: React.FC = () => {
     [categories, query]
   );
   const filteredSectors = useMemo(
-    () => sectors.filter((sector) => matchesSearch(query, sector.name, sector.budget_limit)),
+    () => sectors.filter((sector) => matchesSearch(query, sector.code, sector.name, sector.budget_limit)),
     [sectors, query]
   );
   const filteredPaymentMethods = useMemo(
@@ -137,9 +141,14 @@ export const CadastrosPage: React.FC = () => {
         matchesSearch(
           query,
           c.nome,
+          c.nome_oficial,
+          c.empresa_nome,
+          c.codigo_funcionario,
           c.cargo_descricao,
           c.ccusto_descricao,
           c.sector_name,
+          c.salario_base,
+          c.remuneracao_total,
           ...(Array.isArray(c.funcoes) ? c.funcoes.map((f: any) => f.name) : [])
         )
       ),
@@ -436,6 +445,7 @@ export const CadastrosPage: React.FC = () => {
 
   const createSector = async () => {
     const name = newSectorForm.name.trim();
+    const code = newSectorForm.code.trim();
     if (!name) {
       alert('Informe o nome do setor / centro de custo.');
       return;
@@ -447,6 +457,7 @@ export const CadastrosPage: React.FC = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name,
+          code: code || undefined,
           budget_limit: Number(newSectorForm.budget_limit) || 0,
         }),
       });
@@ -455,7 +466,7 @@ export const CadastrosPage: React.FC = () => {
         alert(data.error || 'Erro ao cadastrar setor.');
         return;
       }
-      setNewSectorForm({ name: '', budget_limit: '' });
+      setNewSectorForm({ code: '', name: '', budget_limit: '' });
       await refreshSectors();
       if (data?.id) {
         setNewCargoForm((p) => ({ ...p, sector_id: String(data.id) }));
@@ -469,6 +480,7 @@ export const CadastrosPage: React.FC = () => {
   const startEditSector = (sector: any) => {
     setEditingSectorId(Number(sector.id));
     setEditSectorForm({
+      code: String(sector.code || ''),
       name: String(sector.name || ''),
       budget_limit: String(sector.budget_limit ?? ''),
     });
@@ -476,13 +488,18 @@ export const CadastrosPage: React.FC = () => {
 
   const cancelEditSector = () => {
     setEditingSectorId(null);
-    setEditSectorForm({ name: '', budget_limit: '' });
+    setEditSectorForm({ code: '', name: '', budget_limit: '' });
   };
 
   const saveSector = async (sector: any) => {
     const name = editSectorForm.name.trim();
+    const code = editSectorForm.code.trim();
     if (!name) {
       alert('Informe o nome do setor / centro de custo.');
+      return;
+    }
+    if (!code) {
+      alert('Informe o código do setor (identificador do Desbravador).');
       return;
     }
     setSavingSector(true);
@@ -492,6 +509,7 @@ export const CadastrosPage: React.FC = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name,
+          code,
           budget_limit: Number(editSectorForm.budget_limit) || 0,
           previous_name: sector.name,
         }),
@@ -561,29 +579,273 @@ export const CadastrosPage: React.FC = () => {
     refreshCargos();
   };
 
+  const openEditColaborador = (colaborador: any) => {
+    setEditingColaborador(colaborador);
+    setEditColaboradorForm({
+      nome: colaborador.nome || '',
+      nome_oficial: colaborador.nome_oficial || colaborador.nome || '',
+      empresa_key: colaborador.empresa_key || '',
+      funcao_id: colaborador.funcao_id != null ? String(colaborador.funcao_id) : '',
+      sector_id:
+        colaborador.sector_id != null
+          ? String(colaborador.sector_id)
+          : sectors.find(
+              (s: any) =>
+                String(s.name || '').trim().toLowerCase() ===
+                String(colaborador.sector_name || colaborador.ccusto_descricao || '').trim().toLowerCase()
+            )?.id != null
+            ? String(
+                sectors.find(
+                  (s: any) =>
+                    String(s.name || '').trim().toLowerCase() ===
+                    String(colaborador.sector_name || colaborador.ccusto_descricao || '')
+                      .trim()
+                      .toLowerCase()
+                )?.id
+              )
+            : '',
+      codigo_funcionario: colaborador.codigo_funcionario || '',
+      salario_base: colaborador.salario_base ? String(colaborador.salario_base) : '',
+      adicionais_fixos: colaborador.adicionais_fixos ? String(colaborador.adicionais_fixos) : '',
+      adicional_quebra_caixa: colaborador.adicional_quebra_caixa
+        ? String(colaborador.adicional_quebra_caixa)
+        : '',
+      adicional_idioma: colaborador.adicional_idioma ? String(colaborador.adicional_idioma) : '',
+      outros_adicionais: Array.isArray(colaborador.outros_adicionais)
+        ? colaborador.outros_adicionais
+        : [],
+      observacao: colaborador.observacao || '',
+    });
+  };
+
+  const buildColaboradorPayload = (form: ReturnType<typeof emptyColaboradorForm>) => ({
+    nome: form.nome_oficial.trim() || form.nome.trim(),
+    nome_oficial: form.nome_oficial.trim() || form.nome.trim(),
+    empresa_key: form.empresa_key || null,
+    funcao_id: form.funcao_id ? Number(form.funcao_id) : null,
+    sector_id: form.sector_id ? Number(form.sector_id) : null,
+    codigo_funcionario: form.codigo_funcionario.trim() || null,
+    salario_base: Number(form.salario_base) || 0,
+    adicionais_fixos: Number(form.adicionais_fixos) || 0,
+    adicional_quebra_caixa: Number(form.adicional_quebra_caixa) || 0,
+    adicional_idioma: Number(form.adicional_idioma) || 0,
+    outros_adicionais: (form.outros_adicionais || []).filter((o) => o.label.trim()),
+    observacao: form.observacao.trim() || null,
+  });
+
   const createColaborador = async () => {
-    const nome = newColaboradorForm.nome.trim();
+    const nome = newColaboradorForm.nome_oficial.trim() || newColaboradorForm.nome.trim();
     if (!nome) {
       alert('Informe o nome do colaborador.');
       return;
     }
-    const res = await fetch('/api/colaboradores', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        nome,
-        funcao_id: newColaboradorForm.funcao_id ? Number(newColaboradorForm.funcao_id) : null,
-        sector_id: newColaboradorForm.sector_id ? Number(newColaboradorForm.sector_id) : null,
-      }),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      alert(data.error || 'Erro ao cadastrar colaborador.');
-      return;
+    setSavingColaborador(true);
+    try {
+      const res = await fetch('/api/colaboradores', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(buildColaboradorPayload(newColaboradorForm)),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        alert(data.error || 'Erro ao cadastrar colaborador.');
+        return;
+      }
+      setNewColaboradorForm(emptyColaboradorForm());
+      refreshColaboradores();
+    } finally {
+      setSavingColaborador(false);
     }
-    setNewColaboradorForm({ nome: '', funcao_id: '', sector_id: '' });
-    refreshColaboradores();
   };
+
+  const saveEditColaborador = async () => {
+    if (!editingColaborador) return;
+    setSavingColaborador(true);
+    try {
+      const res = await fetch(`/api/colaboradores/${editingColaborador.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(buildColaboradorPayload(editColaboradorForm)),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        alert(data.error || 'Erro ao salvar colaborador.');
+        return;
+      }
+      setEditingColaborador(null);
+      refreshColaboradores();
+    } finally {
+      setSavingColaborador(false);
+    }
+  };
+
+  const updateOutroAdicional = (
+    form: 'new' | 'edit',
+    idx: number,
+    field: keyof OutroAdicional,
+    value: string
+  ) => {
+    const setter = form === 'new' ? setNewColaboradorForm : setEditColaboradorForm;
+    setter((prev) => {
+      const list = [...(prev.outros_adicionais || [])];
+      const cur = list[idx] || { label: '', valor: 0 };
+      list[idx] = {
+        ...cur,
+        [field]: field === 'valor' ? Number(value) || 0 : value,
+      };
+      return { ...prev, outros_adicionais: list };
+    });
+  };
+
+  const addOutroAdicional = (form: 'new' | 'edit') => {
+    const setter = form === 'new' ? setNewColaboradorForm : setEditColaboradorForm;
+    setter((prev) => ({
+      ...prev,
+      outros_adicionais: [...(prev.outros_adicionais || []), { label: '', valor: 0 }],
+    }));
+  };
+
+  const removeOutroAdicional = (form: 'new' | 'edit', idx: number) => {
+    const setter = form === 'new' ? setNewColaboradorForm : setEditColaboradorForm;
+    setter((prev) => ({
+      ...prev,
+      outros_adicionais: (prev.outros_adicionais || []).filter((_, i) => i !== idx),
+    }));
+  };
+
+  const renderColaboradorFormFields = (
+    form: ReturnType<typeof emptyColaboradorForm>,
+    setForm: React.Dispatch<React.SetStateAction<ReturnType<typeof emptyColaboradorForm>>>,
+    formKey: 'new' | 'edit'
+  ) => (
+    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+      <label className="text-sm md:col-span-2">
+        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Nome oficial</span>
+        <input
+          value={form.nome_oficial || form.nome}
+          onChange={(e) => setForm((p) => ({ ...p, nome: e.target.value, nome_oficial: e.target.value }))}
+          className="mt-1 w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+        />
+      </label>
+      <label className="text-sm">
+        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Matrícula (folha)</span>
+        <input
+          value={form.codigo_funcionario}
+          onChange={(e) => setForm((p) => ({ ...p, codigo_funcionario: e.target.value }))}
+          placeholder="Código no Desbravador"
+          className="mt-1 w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+        />
+      </label>
+      <label className="text-sm">
+        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Empresa</span>
+        <select
+          value={form.empresa_key}
+          onChange={(e) => setForm((p) => ({ ...p, empresa_key: e.target.value as any }))}
+          className="mt-1 w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+        >
+          <option value="">Selecione…</option>
+          {COLABORADOR_EMPRESAS.map((e) => (
+            <option key={e.key} value={e.key}>{e.nome}</option>
+          ))}
+        </select>
+      </label>
+      <div className="text-sm">
+        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Função / cargo</span>
+        <div className="mt-1">
+          <SearchableSelect
+            value={form.funcao_id}
+            onChange={(value) => {
+              const cargo = cargos.find((c) => String(c.id) === value);
+              setForm((p) => ({
+                ...p,
+                funcao_id: value,
+                sector_id: cargo?.sector_id != null ? String(cargo.sector_id) : p.sector_id,
+              }));
+            }}
+            options={funcaoOptions}
+            placeholder="Selecionar função"
+            emptyMessage="Cadastre funções na aba Setores"
+          />
+        </div>
+      </div>
+      <div className="text-sm">
+        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Setor</span>
+        <div className="mt-1">
+          <SearchableSelect
+            value={form.sector_id}
+            onChange={(value) => setForm((p) => ({ ...p, sector_id: value }))}
+            options={sectorOptions}
+            placeholder="Setor / centro de custo"
+            emptyMessage="Cadastre setores na aba Setores"
+          />
+        </div>
+      </div>
+      {[
+        { key: 'salario_base', label: 'Salário base' },
+        { key: 'adicionais_fixos', label: 'Adicionais fixos' },
+        { key: 'adicional_quebra_caixa', label: 'Quebra de caixa' },
+        { key: 'adicional_idioma', label: 'Adicional de idioma' },
+      ].map((f) => (
+        <label key={f.key} className="text-sm">
+          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{f.label}</span>
+          <input
+            type="number"
+            min={0}
+            step="0.01"
+            value={(form as any)[f.key]}
+            onChange={(e) => setForm((p) => ({ ...p, [f.key]: e.target.value }))}
+            className="mt-1 w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm tabular-nums"
+          />
+        </label>
+      ))}
+      <label className="text-sm md:col-span-2 xl:col-span-3">
+        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Observação</span>
+        <input
+          value={form.observacao}
+          onChange={(e) => setForm((p) => ({ ...p, observacao: e.target.value }))}
+          className="mt-1 w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+        />
+      </label>
+      <div className="md:col-span-2 xl:col-span-3 space-y-2">
+        <div className="flex items-center justify-between">
+          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Outros adicionais fixos</span>
+          <button
+            type="button"
+            onClick={() => addOutroAdicional(formKey)}
+            className="text-xs font-bold text-[#004D40] hover:underline"
+          >
+            + Adicionar
+          </button>
+        </div>
+        {(form.outros_adicionais || []).map((item, idx) => (
+          <div key={idx} className="flex gap-2">
+            <input
+              value={item.label}
+              onChange={(e) => updateOutroAdicional(formKey, idx, 'label', e.target.value)}
+              placeholder="Descrição"
+              className="flex-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+            />
+            <input
+              type="number"
+              min={0}
+              step="0.01"
+              value={item.valor || ''}
+              onChange={(e) => updateOutroAdicional(formKey, idx, 'valor', e.target.value)}
+              placeholder="Valor"
+              className="w-32 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm tabular-nums"
+            />
+            <button
+              type="button"
+              onClick={() => removeOutroAdicional(formKey, idx)}
+              className="px-2 text-red-500 hover:bg-red-50 rounded-lg"
+            >
+              ×
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 
   const setColaboradorFuncao = async (colaborador: any, funcaoId: string) => {
     const res = await fetch(`/api/colaboradores/${colaborador.id}`, {
@@ -730,7 +992,7 @@ export const CadastrosPage: React.FC = () => {
                 className="w-44 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
               >
                 <option value="">Setor</option>
-                {sectors.map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                {sectors.map((s: any) => <option key={s.id} value={s.id}>{s.code ? `${s.code} — ${s.name}` : s.name}</option>)}
               </select>
               <input
                 type="number"
@@ -878,7 +1140,7 @@ export const CadastrosPage: React.FC = () => {
                                         className="w-44 px-2 py-1 bg-white border border-slate-200 rounded-lg text-xs"
                                       >
                                         <option value="">Grupo</option>
-                                        {sectors.map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                                        {sectors.map((s: any) => <option key={s.id} value={s.id}>{s.code ? `${s.code} — ${s.name}` : s.name}</option>)}
                                       </select>
                                     </div>
                                   </td>
@@ -972,10 +1234,16 @@ export const CadastrosPage: React.FC = () => {
               <div>
                 <h3 className="text-sm font-bold text-slate-800">Setores / Centros de Custo</h3>
                 <p className="text-xs text-slate-500">
-                  Cadastre e edite a estrutura organizacional usada no orçamento, funções e colaboradores.
+                  Cadastre setores com código do Desbravador — usado como identificador principal nas importações.
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
+                <input
+                  value={newSectorForm.code}
+                  onChange={(e) => setNewSectorForm((p) => ({ ...p, code: e.target.value }))}
+                  placeholder="Código (ex.: 12)"
+                  className="w-28 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+                />
                 <input
                   value={newSectorForm.name}
                   onChange={(e) => setNewSectorForm((p) => ({ ...p, name: e.target.value }))}
@@ -1005,6 +1273,7 @@ export const CadastrosPage: React.FC = () => {
               <table className="w-full text-left border-collapse">
                 <thead>
                   <tr className="bg-slate-50/50">
+                    <th className="px-6 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Código</th>
                     <th className="px-6 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Nome</th>
                     <th className="px-6 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Limite de Orçamento</th>
                     <th className="px-6 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-right">Cargos</th>
@@ -1014,7 +1283,7 @@ export const CadastrosPage: React.FC = () => {
                 <tbody className="divide-y divide-slate-50">
                   {filteredSectors.length === 0 && (
                     <tr>
-                      <td colSpan={4} className="px-6 py-8 text-center text-sm text-slate-400">
+                      <td colSpan={5} className="px-6 py-8 text-center text-sm text-slate-400">
                         Nenhum setor cadastrado.
                       </td>
                     </tr>
@@ -1023,6 +1292,17 @@ export const CadastrosPage: React.FC = () => {
                     const isEditing = editingSectorId === Number(sector.id);
                     return (
                       <tr key={sector.id} className="hover:bg-slate-50/50 transition-colors group">
+                        <td className="px-6 py-3">
+                          {isEditing ? (
+                            <input
+                              value={editSectorForm.code}
+                              onChange={(e) => setEditSectorForm((p) => ({ ...p, code: e.target.value }))}
+                              className="w-24 px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-mono"
+                            />
+                          ) : (
+                            <span className="text-sm font-mono font-semibold text-slate-600">{sector.code || '—'}</span>
+                          )}
+                        </td>
                         <td className="px-6 py-3">
                           {isEditing ? (
                             <input
@@ -1200,205 +1480,166 @@ export const CadastrosPage: React.FC = () => {
 
       {/* ============ Colaboradores ============ */}
       {activeTab === 'colaboradores' && (
-        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-          <div className="p-4 border-b border-slate-50 flex flex-wrap items-end justify-between gap-3">
-            <div>
+        <div className="space-y-4">
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+            <div className="p-4 border-b border-slate-50">
               <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2">
                 <UserRound className="w-4 h-4 text-[#004D40]" />
-                Colaboradores
+                Novo colaborador
               </h3>
-              <p className="text-xs text-slate-500">
-                Vincule funções e o setor / centro de custo. A função principal pode sugerir o setor; você também pode cadastrar e alterar o setor diretamente.
+              <p className="text-xs text-slate-500 mt-1">
+                Cadastro mestre para RH e orçamento: empresa, setor, cargo, salário e adicionais fixos.
               </p>
             </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <input
-                value={newColaboradorForm.nome}
-                onChange={(e) => setNewColaboradorForm((p) => ({ ...p, nome: e.target.value }))}
-                placeholder="Nome"
-                className="w-56 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
-              />
-              <div className="w-64">
-                <SearchableSelect
-                  value={newColaboradorForm.funcao_id}
-                  onChange={(value) => {
-                    const cargo = cargos.find((c) => String(c.id) === value);
-                    setNewColaboradorForm((p) => ({
-                      ...p,
-                      funcao_id: value,
-                      sector_id:
-                        cargo?.sector_id != null
-                          ? String(cargo.sector_id)
-                          : p.sector_id,
-                    }));
-                  }}
-                  options={funcaoOptions}
-                  placeholder="Função (opcional)"
-                  emptyMessage="Cadastre funções na aba Setores"
-                />
-              </div>
-              <div className="w-56">
-                <SearchableSelect
-                  value={newColaboradorForm.sector_id}
-                  onChange={(value) => setNewColaboradorForm((p) => ({ ...p, sector_id: value }))}
-                  options={sectorOptions}
-                  placeholder="Setor / Ccusto"
-                  emptyMessage="Cadastre setores na aba Setores"
-                />
-              </div>
+            <div className="p-4 space-y-4">
+              {renderColaboradorFormFields(newColaboradorForm, setNewColaboradorForm, 'new')}
               <button
                 onClick={createColaborador}
-                className="inline-flex items-center gap-2 px-4 py-2 bg-[#004D40] text-white font-bold rounded-xl hover:bg-[#003d33] transition-colors"
+                disabled={savingColaborador}
+                className="inline-flex items-center gap-2 px-4 py-2 bg-[#004D40] text-white font-bold rounded-xl hover:bg-[#003d33] transition-colors disabled:opacity-60"
               >
                 <Plus className="w-4 h-4" />
-                Adicionar
+                {savingColaborador ? 'Salvando...' : 'Adicionar colaborador'}
               </button>
             </div>
           </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="bg-slate-50/50">
-                  <th className="px-6 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Nome</th>
-                  <th className="px-6 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest min-w-[220px]">Função</th>
-                  <th className="px-6 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Setor / Ccusto</th>
-                  <th className="px-6 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Status</th>
-                  <th className="px-6 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-right">Ações</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-50">
-                {filteredColaboradores.length === 0 && (
-                  <tr>
-                    <td colSpan={5} className="px-6 py-8 text-center text-sm text-slate-400">
-                      {query ? 'Nenhum resultado encontrado.' : 'Nenhum colaborador cadastrado.'}
-                    </td>
-                  </tr>
-                )}
-                {filteredColaboradores.map((colaborador) => {
-                  const funcoes = Array.isArray(colaborador.funcoes) ? colaborador.funcoes : [];
-                  const primaryId = colaborador.funcao_id != null ? String(colaborador.funcao_id) : '';
-                  const sectorLabel = String(
-                    colaborador.sector_name ||
-                      colaborador.ccusto_descricao ||
-                      funcoes.find((f: any) => f.is_primary)?.sector_name ||
-                      ''
-                  ).trim();
-                  const matchedSector = sectors.find(
-                    (s: any) =>
-                      String(s.name || '').trim().toLowerCase() === sectorLabel.toLowerCase()
-                  );
-                  const sectorValue =
-                    matchedSector != null
-                      ? String(matchedSector.id)
-                      : colaborador.sector_id != null
-                        ? String(colaborador.sector_id)
-                        : '';
-                  return (
-                  <tr key={colaborador.id} className="hover:bg-slate-50/50 transition-colors group">
-                    <td className="px-6 py-3 text-sm font-medium text-slate-800">{colaborador.nome}</td>
-                    <td className="px-6 py-3">
-                      <div className="space-y-2 min-w-[220px]">
-                        <SearchableSelect
-                          value={primaryId}
-                          onChange={(value) => setColaboradorFuncao(colaborador, value)}
-                          options={funcaoOptions}
-                          placeholder="Selecionar função"
-                          emptyMessage="Cadastre funções na aba Setores"
-                        />
-                        {funcoes.length > 0 && (
-                          <div className="flex flex-wrap gap-1.5">
-                            {funcoes.map((f: any) => (
-                              <button
-                                key={f.id}
-                                type="button"
-                                title={f.is_primary ? 'Função principal' : 'Clique para tornar principal · X remove'}
-                                onClick={() => {
-                                  if (!f.is_primary) setColaboradorFuncao(colaborador, String(f.id));
-                                }}
-                                className={cn(
-                                  'inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-semibold border transition-colors',
-                                  f.is_primary
-                                    ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                                    : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
-                                )}
-                              >
-                                {f.name}
-                                <span
-                                  role="button"
-                                  tabIndex={0}
-                                  className="ml-0.5 text-slate-400 hover:text-red-500"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    removeColaboradorFuncao(colaborador, f.id, f.name);
-                                  }}
-                                  onKeyDown={(e) => {
-                                    if (e.key === 'Enter' || e.key === ' ') {
-                                      e.stopPropagation();
-                                      removeColaboradorFuncao(colaborador, f.id, f.name);
-                                    }
-                                  }}
-                                >
-                                  ×
-                                </span>
-                              </button>
-                            ))}
-                            <div className="w-full max-w-[200px]">
-                              <SearchableSelect
-                                value=""
-                                onChange={(value) => addColaboradorFuncao(colaborador, value)}
-                                options={funcaoOptions.filter(
-                                  (o) => !funcoes.some((f: any) => String(f.id) === o.value)
-                                )}
-                                placeholder="+ Outra função"
-                                emptyMessage="Sem funções restantes"
-                              />
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    </td>
-                    <td className="px-6 py-3 min-w-[200px]">
-                      <SearchableSelect
-                        value={sectorValue}
-                        onChange={(value) => setColaboradorSector(colaborador, value)}
-                        options={sectorOptions}
-                        placeholder="Selecionar setor / ccusto"
-                        emptyMessage="Cadastre setores na aba Setores"
-                      />
-                    </td>
-                    <td className="px-6 py-3">
-                      <span
+
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+            <div className="px-4 py-3 border-b border-slate-50">
+              <h3 className="text-sm font-bold text-slate-800">Colaboradores cadastrados</h3>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse min-w-[1100px]">
+                <thead>
+                  <tr className="bg-slate-50/50">
+                    {['Nome', 'Empresa', 'Matr.', 'Função', 'Setor', 'Salário', 'Remun. total', 'Status', 'Ações'].map((h) => (
+                      <th
+                        key={h}
                         className={cn(
-                          'text-[10px] font-bold px-2 py-1 rounded-lg uppercase tracking-wider',
-                          colaborador.active ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-600'
+                          'px-4 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest',
+                          ['Salário', 'Remun. total', 'Ações'].includes(h) && 'text-right',
+                          h === 'Status' && 'text-center'
                         )}
                       >
-                        {colaborador.active ? 'Ativo' : 'Inativo'}
-                      </span>
-                    </td>
-                    <td className="px-6 py-3 text-right">
-                      <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button
-                          onClick={() => toggleColaboradorActive(colaborador)}
-                          className="px-2 py-1 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-lg"
-                        >
-                          {colaborador.active ? 'Desativar' : 'Ativar'}
-                        </button>
-                        <button
-                          onClick={() => deleteColaborador(colaborador)}
-                          className="p-2 text-red-400 hover:bg-red-50 rounded-lg transition-colors"
-                          title="Excluir colaborador"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </td>
+                        {h}
+                      </th>
+                    ))}
                   </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                </thead>
+                <tbody className="divide-y divide-slate-50">
+                  {filteredColaboradores.length === 0 && (
+                    <tr>
+                      <td colSpan={9} className="px-6 py-8 text-center text-sm text-slate-400">
+                        {query ? 'Nenhum resultado encontrado.' : 'Nenhum colaborador cadastrado.'}
+                      </td>
+                    </tr>
+                  )}
+                  {filteredColaboradores.map((colaborador) => {
+                    const funcoes = Array.isArray(colaborador.funcoes) ? colaborador.funcoes : [];
+                    const primary = funcoes.find((f: any) => f.is_primary) || funcoes[0];
+                    const sectorLabel = String(
+                      colaborador.sector_name || colaborador.ccusto_descricao || primary?.sector_name || ''
+                    ).trim();
+                    return (
+                      <tr key={colaborador.id} className="hover:bg-slate-50/50 transition-colors group">
+                        <td className="px-4 py-3 text-sm font-medium text-slate-800">
+                          {colaborador.nome_oficial || colaborador.nome}
+                        </td>
+                        <td className="px-4 py-3 text-xs text-slate-600">{colaborador.empresa_nome || '—'}</td>
+                        <td className="px-4 py-3 text-xs tabular-nums text-slate-500">
+                          {colaborador.codigo_funcionario || '—'}
+                        </td>
+                        <td className="px-4 py-3 text-xs text-slate-700">
+                          {colaborador.cargo_descricao || primary?.name || '—'}
+                        </td>
+                        <td className="px-4 py-3 text-xs text-slate-600">{sectorLabel || '—'}</td>
+                        <td className="px-4 py-3 text-xs text-right tabular-nums">
+                          {formatCurrency(Number(colaborador.salario_base) || 0)}
+                        </td>
+                        <td className="px-4 py-3 text-xs text-right tabular-nums font-semibold text-slate-900">
+                          {formatCurrency(Number(colaborador.remuneracao_total) || 0)}
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          <span
+                            className={cn(
+                              'text-[10px] font-bold px-2 py-1 rounded-lg uppercase tracking-wider',
+                              colaborador.active ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-600'
+                            )}
+                          >
+                            {colaborador.active ? 'Ativo' : 'Inativo'}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          <div className="flex items-center justify-end gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
+                            <button
+                              onClick={() => openEditColaborador(colaborador)}
+                              className="p-2 text-slate-500 hover:bg-slate-100 rounded-lg"
+                              title="Editar cadastro completo"
+                            >
+                              <Edit2 className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => toggleColaboradorActive(colaborador)}
+                              className="px-2 py-1 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-lg"
+                            >
+                              {colaborador.active ? 'Desativar' : 'Ativar'}
+                            </button>
+                            <button
+                              onClick={() => deleteColaborador(colaborador)}
+                              className="p-2 text-red-400 hover:bg-red-50 rounded-lg transition-colors"
+                              title="Excluir colaborador"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           </div>
+
+          {editingColaborador && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
+              <div className="bg-white rounded-2xl shadow-xl w-full max-w-4xl max-h-[90vh] overflow-auto">
+                <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between sticky top-0 bg-white">
+                  <div>
+                    <h3 className="text-sm font-bold text-slate-900">Editar colaborador</h3>
+                    <p className="text-xs text-slate-500">{editingColaborador.nome_oficial || editingColaborador.nome}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setEditingColaborador(null)}
+                    className="text-slate-400 hover:text-slate-600 text-xl leading-none px-2"
+                  >
+                    ×
+                  </button>
+                </div>
+                <div className="p-5 space-y-4">
+                  {renderColaboradorFormFields(editColaboradorForm, setEditColaboradorForm, 'edit')}
+                </div>
+                <div className="px-5 py-4 border-t border-slate-100 flex justify-end gap-2 sticky bottom-0 bg-white">
+                  <button
+                    type="button"
+                    onClick={() => setEditingColaborador(null)}
+                    className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={saveEditColaborador}
+                    disabled={savingColaborador}
+                    className="px-4 py-2 bg-[#004D40] text-white text-sm font-bold rounded-xl disabled:opacity-60"
+                  >
+                    {savingColaborador ? 'Salvando...' : 'Salvar'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

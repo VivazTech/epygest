@@ -3,25 +3,41 @@ import { AlertTriangle, CalendarDays, CheckCircle2, Loader2, RefreshCcw } from '
 import { cn, formatCurrency } from '../lib/utils';
 import { useSearch } from '../context/SearchContext';
 import { matchesSearch } from '../lib/search';
+import {
+  REQ_DESTINO_BADGES,
+  REQ_DESTINO_LABELS,
+  REQ_DESTINOS,
+  REQ_CMV_SUBTIPO_BADGES,
+  REQ_CMV_SUBTIPO_LABELS,
+  type ReqDestino,
+  type ReqCmvSubtipo,
+  normalizeReqDestino,
+  normalizeReqCmvSubtipo,
+  isReqDestinoCmv,
+} from '../lib/requisicoesDestino';
+import { ReqDestinoPicker } from '../components/ReqDestinoPicker';
+import { ReqCmvSubtipoPicker } from '../components/ReqCmvSubtipoPicker';
+import { ImportCorrectionCell } from '../components/ImportCorrectionCell';
+import type { CorrectableValueMeta } from '../lib/importCorrections';
 
 export const MESES_REL_REQ = [
   '', 'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
   'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro',
 ];
 
-const DESTINO_LABELS: Record<string, string> = {
-  cmv: 'CMV',
-  uso_consumo: 'Uso e Consumo',
-  investimento: 'Investimento',
-};
+const DESTINO_LABELS = REQ_DESTINO_LABELS;
+const DESTINO_BADGES = REQ_DESTINO_BADGES;
 
-const DESTINO_BADGES: Record<string, string> = {
-  cmv: 'bg-amber-100 text-amber-800 border-amber-200',
-  uso_consumo: 'bg-blue-100 text-blue-800 border-blue-200',
-  investimento: 'bg-purple-100 text-purple-800 border-purple-200',
+type ReqGrupo = {
+  id?: number;
+  codigo: number;
+  nome: string;
+  valor: number;
+  valor_meta?: CorrectableValueMeta;
+  destino: string;
+  cmv_subtipo?: string;
+  setor_codigo: number;
 };
-
-type ReqGrupo = { codigo: number; nome: string; valor: number; destino: string };
 type ReqSetor = { codigo: number; nome: string; total: number; grupos: ReqGrupo[] };
 
 type ReqSummary = {
@@ -29,7 +45,9 @@ type ReqSummary = {
   grupos: number;
   total_geral: number;
   por_destino: Record<string, number>;
+  por_cmv_subtipo?: Record<string, number>;
   nao_classificados: number;
+  cmv_sem_subtipo?: number;
 };
 
 type Competencia = {
@@ -91,7 +109,7 @@ export const RelatorioRequisicoesPage: React.FC<RelatorioRequisicoesPageProps> =
         <div>
           <h2 className="text-2xl font-bold text-slate-900">Requisição Sintética</h2>
           <p className="text-sm text-slate-500">
-            Resumo das competências importadas em Importação › Requisições Sintética por Grupo de Itens.
+            Consolidado de fechamento mensal importado em Importação › Requisições Sintética.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -215,6 +233,18 @@ export const RelatorioRequisicoesMesPage: React.FC<RelatorioRequisicoesMesPagePr
   const [error, setError] = useState('');
   const [setores, setSetores] = useState<ReqSetor[]>([]);
   const [summary, setSummary] = useState<ReqSummary | null>(null);
+  const [canEdit, setCanEdit] = useState(false);
+  const [savingKey, setSavingKey] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch('/api/auth/me')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((user) => {
+        const role = String(user?.role || '');
+        setCanEdit(['admin', 'finance', 'controle'].includes(role));
+      })
+      .catch(() => setCanEdit(false));
+  }, []);
 
   const load = async () => {
     setLoading(true);
@@ -239,6 +269,56 @@ export const RelatorioRequisicoesMesPage: React.FC<RelatorioRequisicoesMesPagePr
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [year, month]);
 
+  const updateGrupoDestino = async (setorCodigo: number, grupo: ReqGrupo, destino: ReqDestino) => {
+    const key = `${setorCodigo}-${grupo.codigo}`;
+    setSavingKey(key);
+    try {
+      const res = await fetch('/api/requisicoes-sintetica/destino', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          year: Number(year),
+          month,
+          setor_codigo: setorCodigo,
+          grupo_codigo: grupo.codigo,
+          destino,
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error || 'Falha ao salvar classificação.');
+      await load();
+    } catch (err: any) {
+      alert(err?.message || 'Erro ao salvar classificação.');
+    } finally {
+      setSavingKey(null);
+    }
+  };
+
+  const updateGrupoCmvSubtipo = async (setorCodigo: number, grupo: ReqGrupo, cmv_subtipo: ReqCmvSubtipo) => {
+    const key = `${setorCodigo}-${grupo.codigo}-cmv`;
+    setSavingKey(key);
+    try {
+      const res = await fetch('/api/requisicoes-sintetica/destino', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          year: Number(year),
+          month,
+          setor_codigo: setorCodigo,
+          grupo_codigo: grupo.codigo,
+          cmv_subtipo,
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error || 'Falha ao salvar subclassificação CMV.');
+      await load();
+    } catch (err: any) {
+      alert(err?.message || 'Erro ao salvar subclassificação CMV.');
+    } finally {
+      setSavingKey(null);
+    }
+  };
+
   const visibleSetores = useMemo(
     () =>
       setores.filter(
@@ -254,9 +334,12 @@ export const RelatorioRequisicoesMesPage: React.FC<RelatorioRequisicoesMesPagePr
         { label: 'Setores', value: summary.setores, currency: false },
         { label: 'Grupos de itens', value: summary.grupos, currency: false },
         { label: 'Total geral', value: summary.total_geral },
-        { label: 'CMV', value: summary.por_destino?.cmv ?? 0 },
-        { label: 'Uso e Consumo', value: summary.por_destino?.uso_consumo ?? 0 },
-        { label: 'Investimento', value: summary.por_destino?.investimento ?? 0 },
+        ...REQ_DESTINOS.map((dest) => ({
+          label: REQ_DESTINO_LABELS[dest],
+          value: summary.por_destino?.[dest] ?? 0,
+        })),
+        { label: 'CMV Alimentos', value: summary.por_cmv_subtipo?.alimentos ?? 0 },
+        { label: 'CMV Bebidas', value: summary.por_cmv_subtipo?.bebidas ?? 0 },
         { label: 'Não classificado', value: summary.por_destino?.[''] ?? 0 },
         { label: 'Grupos sem destino', value: summary.nao_classificados, currency: false },
       ]
@@ -271,6 +354,7 @@ export const RelatorioRequisicoesMesPage: React.FC<RelatorioRequisicoesMesPagePr
           </h2>
           <p className="text-sm text-slate-500">
             Requisições por setor e grupo de itens importadas do relatório Requisições Sintética.
+            {canEdit && ' Clique nos botões de destino para classificar cada grupo.'}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -321,13 +405,14 @@ export const RelatorioRequisicoesMesPage: React.FC<RelatorioRequisicoesMesPagePr
               <th className="px-4 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Código</th>
               <th className="px-4 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Setor / Grupo de itens</th>
               <th className="px-4 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-center">Destino</th>
+              <th className="px-4 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-center">CMV</th>
               <th className="px-4 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-right">Valor</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-50">
             {loading && setores.length === 0 && (
               <tr>
-                <td colSpan={4} className="px-4 py-10 text-center text-sm text-slate-400">
+                <td colSpan={5} className="px-4 py-10 text-center text-sm text-slate-400">
                   <span className="inline-flex items-center gap-2">
                     <Loader2 className="w-4 h-4 animate-spin" /> Carregando...
                   </span>
@@ -336,7 +421,7 @@ export const RelatorioRequisicoesMesPage: React.FC<RelatorioRequisicoesMesPagePr
             )}
             {!loading && visibleSetores.length === 0 && (
               <tr>
-                <td colSpan={4} className="px-4 py-10 text-center text-sm text-slate-400">
+                <td colSpan={5} className="px-4 py-10 text-center text-sm text-slate-400">
                   Nenhuma requisição importada para {MESES_REL_REQ[month]}/{year}. Importe em Importação › Requisições Sintética por Grupo de Itens.
                 </td>
               </tr>
@@ -346,6 +431,7 @@ export const RelatorioRequisicoesMesPage: React.FC<RelatorioRequisicoesMesPagePr
                 <tr className="bg-slate-100/80 font-bold hover:bg-slate-100">
                   <td className="px-4 py-2.5 text-xs tabular-nums text-slate-700">{setor.codigo}</td>
                   <td className="px-4 py-2.5 text-xs text-slate-900">{setor.nome}</td>
+                  <td className="px-4 py-2.5" />
                   <td className="px-4 py-2.5" />
                   <td className="px-4 py-2.5 text-xs text-right tabular-nums font-bold">{formatCurrency(setor.total)}</td>
                 </tr>
@@ -360,7 +446,13 @@ export const RelatorioRequisicoesMesPage: React.FC<RelatorioRequisicoesMesPagePr
                         <span className="pl-3">{g.nome}</span>
                       </td>
                       <td className="px-4 py-2 text-center">
-                        {g.destino ? (
+                        {canEdit ? (
+                          <ReqDestinoPicker
+                            value={normalizeReqDestino(g.destino)}
+                            onChange={(destino) => updateGrupoDestino(setor.codigo, g, destino)}
+                            disabled={savingKey === `${setor.codigo}-${g.codigo}`}
+                          />
+                        ) : g.destino ? (
                           <span className={cn('inline-block px-2 py-0.5 rounded-lg border text-[10px] font-bold', DESTINO_BADGES[g.destino])}>
                             {DESTINO_LABELS[g.destino] ?? g.destino}
                           </span>
@@ -368,7 +460,43 @@ export const RelatorioRequisicoesMesPage: React.FC<RelatorioRequisicoesMesPagePr
                           <span className="text-[10px] font-bold uppercase text-slate-300">—</span>
                         )}
                       </td>
-                      <td className="px-4 py-2 text-xs text-right tabular-nums text-slate-700">{formatCurrency(g.valor)}</td>
+                      <td className="px-4 py-2 text-center">
+                        {isReqDestinoCmv(g.destino) ? (
+                          canEdit ? (
+                            <ReqCmvSubtipoPicker
+                              value={normalizeReqCmvSubtipo(g.cmv_subtipo)}
+                              onChange={(subtipo) => updateGrupoCmvSubtipo(setor.codigo, g, subtipo)}
+                              disabled={savingKey === `${setor.codigo}-${g.codigo}-cmv`}
+                            />
+                          ) : g.cmv_subtipo ? (
+                            <span className={cn('inline-block px-2 py-0.5 rounded-lg border text-[10px] font-bold', REQ_CMV_SUBTIPO_BADGES[g.cmv_subtipo])}>
+                              {REQ_CMV_SUBTIPO_LABELS[g.cmv_subtipo] ?? g.cmv_subtipo}
+                            </span>
+                          ) : (
+                            <span className="text-[10px] font-bold uppercase text-slate-300">—</span>
+                          )
+                        ) : (
+                          <span className="text-[10px] text-slate-300">—</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-2 text-xs text-right tabular-nums text-slate-700">
+                        {g.id && g.valor_meta ? (
+                          <ImportCorrectionCell
+                            sourceTable="requisicoes_rows"
+                            rowId={g.id}
+                            fieldName="valor"
+                            meta={g.valor_meta}
+                            rowLabel={`${g.codigo} · ${g.nome}`}
+                            year={Number(year)}
+                            month={month}
+                            canEdit={canEdit}
+                            onSaved={load}
+                            className="w-full"
+                          />
+                        ) : (
+                          formatCurrency(g.valor)
+                        )}
+                      </td>
                     </tr>
                   ))}
               </React.Fragment>

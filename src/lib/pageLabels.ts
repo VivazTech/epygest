@@ -42,11 +42,16 @@ const STATIC_LABELS: Record<string, string> = {
   aprovacoes: 'Aprovações',
   'compras-ordem': 'Compras / Ordem de Compra',
   'folha-apuracao': 'Apuração da Folha',
+  'painel-rh': 'Orçado × Realizado — Folha',
+  absenteismo: 'Absenteísmo',
+  turnover: 'Turnover',
+  'tangerino-ponto': 'Tangerino — Ponto',
   tutorial: 'Tutorial guiado',
   'rel-crd': 'Apuração de Resultados / Relatorio de CRD / Resumo',
   'rel-req': 'Apuração de Resultados / Requisição Sintética / Resumo',
   'rel-consumo': 'Apuração de Resultados / Consumo interno / Resumo',
   cmv: 'Apuração de Resultados / CMV / Resumo',
+  'cmv-tarifas': 'Apuração de Resultados / CMV / Configurações',
   'rel-rds': 'Apuração de Receita / Relatório Diário de Situação / Resumo',
 };
 

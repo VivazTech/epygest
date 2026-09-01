@@ -76,6 +76,13 @@ export const PERMISSION_RESOURCES: PermissionResource[] = [
     group: 'Módulos',
     actions: ['view', 'edit'],
   },
+  {
+    key: 'emprestimos',
+    label: 'Empréstimos consignados',
+    group: 'Módulos',
+    actions: ['view', 'edit'],
+    description: 'Dados confidenciais — colaborador, parcelas e conciliação. Restrito ao RH e ao financeiro.',
+  },
   { key: 'tutorial', label: 'Tutorial', group: 'Ajuda', actions: ['view'] },
   {
     key: 'uml',
@@ -94,6 +101,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, Partial<Record<string, Per
   finance: {
     investimentos: ['view'],
     aprovacoes: ['view', 'edit'],
+    emprestimos: ['view', 'edit'],
     comandas: ['view', 'create', 'edit'],
     'lancamentos-manuais': ['view', 'create', 'edit'],
     requisicoes: ['view', 'create', 'edit'],
@@ -206,7 +214,8 @@ export const slugifyRole = (label: string): string => {
 export const resolvePermissionResourceKey = (tabId: string): string => {
   if (!tabId) return tabId;
   if (PERMISSION_RESOURCE_KEYS.includes(tabId)) return tabId;
-  if (tabId.startsWith('folha-')) return 'folha';
+  if (tabId.startsWith('folha-') || tabId === 'painel-rh' || tabId === 'absenteismo' || tabId === 'turnover' || tabId === 'tangerino-ponto') return 'folha';
+  if (tabId === 'emprestimos') return 'emprestimos';
   if (
     tabId.startsWith('rel-crd') ||
     tabId.startsWith('rel-req') ||

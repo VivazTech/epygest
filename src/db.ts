@@ -22,6 +22,8 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS sectors (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
+    code TEXT UNIQUE,
+    active INTEGER NOT NULL DEFAULT 1,
     budget_limit REAL DEFAULT 0,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );

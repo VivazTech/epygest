@@ -3,6 +3,8 @@ import { AlertTriangle, Boxes, CalendarDays, CheckCircle2, Loader2, RefreshCcw }
 import { cn, formatCurrency } from '../lib/utils';
 import { useSearch } from '../context/SearchContext';
 import { matchesSearch } from '../lib/search';
+import { ImportCorrectionCell } from '../components/ImportCorrectionCell';
+import type { CorrectableValueMeta } from '../lib/importCorrections';
 
 export const MESES_CONSUMO = [
   '', 'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
@@ -28,11 +30,13 @@ type ConsumoLine = {
   nf?: string | null;
   data?: string | null;
   quantidade?: number;
+  quantidade_meta?: CorrectableValueMeta;
   vl_unitario?: number;
   vl_total?: number;
   vl_desconto?: number;
   taxa_servico?: number;
   vl_liquido?: number;
+  vl_liquido_meta?: CorrectableValueMeta;
   forma_pgto?: string | null;
 };
 
@@ -97,7 +101,7 @@ export const ConsumoInternoPage: React.FC<ConsumoInternoPageProps> = ({ onSelect
         <div>
           <h2 className="text-2xl font-bold text-slate-900">Consumo interno</h2>
           <p className="text-sm text-slate-500">
-            Resumo das competências importadas em Importação › Consumo interno.
+            Consolidado de fechamento mensal importado em Importação › Consumo interno.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -204,6 +208,17 @@ export const ConsumoInternoMesPage: React.FC<ConsumoInternoMesPageProps> = ({ mo
   const [error, setError] = useState('');
   const [lines, setLines] = useState<ConsumoLine[]>([]);
   const [summary, setSummary] = useState<ConsumoSummary | null>(null);
+  const [canEdit, setCanEdit] = useState(false);
+
+  useEffect(() => {
+    fetch('/api/auth/me')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((user) => {
+        const role = String(user?.role || '');
+        setCanEdit(['admin', 'finance', 'controle'].includes(role));
+      })
+      .catch(() => setCanEdit(false));
+  }, []);
 
   const load = async () => {
     setLoading(true);
@@ -351,7 +366,22 @@ export const ConsumoInternoMesPage: React.FC<ConsumoInternoMesPageProps> = ({ mo
                     <td className="px-3 py-2 text-xs text-slate-500 tabular-nums">{line.nf ?? '—'}</td>
                     <td className="px-3 py-2 text-xs text-slate-600 tabular-nums">{line.data || '—'}</td>
                     <td className="px-3 py-2 text-xs text-right tabular-nums text-slate-700">
-                      {Number(line.quantidade || 0).toLocaleString('pt-BR')}
+                      {line.id && line.quantidade_meta ? (
+                        <ImportCorrectionCell
+                          sourceTable="consumo_interno_rows"
+                          rowId={line.id}
+                          fieldName="quantidade"
+                          meta={line.quantidade_meta}
+                          rowLabel={`${line.produto_codigo || ''} · ${line.produto || ''}`}
+                          year={Number(year)}
+                          month={month}
+                          canEdit={canEdit}
+                          onSaved={load}
+                          className="w-full"
+                        />
+                      ) : (
+                        Number(line.quantidade || 0).toLocaleString('pt-BR')
+                      )}
                     </td>
                     <td className="px-3 py-2 text-xs text-right tabular-nums text-slate-700">
                       {formatCurrency(Number(line.vl_unitario) || 0)}
@@ -366,7 +396,22 @@ export const ConsumoInternoMesPage: React.FC<ConsumoInternoMesPageProps> = ({ mo
                       {formatCurrency(Number(line.taxa_servico) || 0)}
                     </td>
                     <td className="px-3 py-2 text-xs text-right tabular-nums font-semibold text-slate-900">
-                      {formatCurrency(Number(line.vl_liquido) || 0)}
+                      {line.id && line.vl_liquido_meta ? (
+                        <ImportCorrectionCell
+                          sourceTable="consumo_interno_rows"
+                          rowId={line.id}
+                          fieldName="vl_liquido"
+                          meta={line.vl_liquido_meta}
+                          rowLabel={`${line.produto_codigo || ''} · ${line.produto || ''}`}
+                          year={Number(year)}
+                          month={month}
+                          canEdit={canEdit}
+                          onSaved={load}
+                          className="w-full"
+                        />
+                      ) : (
+                        formatCurrency(Number(line.vl_liquido) || 0)
+                      )}
                     </td>
                     <td className="px-3 py-2 text-xs text-slate-600 whitespace-nowrap">{line.forma_pgto || '—'}</td>
                   </tr>

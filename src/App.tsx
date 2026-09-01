@@ -25,10 +25,16 @@ import { PlanilhasPage } from './pages/Planilhas';
 import { PLANILHAS, APURACAO_RECEITA_ITENS, BASE_ORCAMENTO_ITENS, isApuracaoReceitaPlanilha, isBaseOrcamentoTab } from './lib/planilhas';
 import { FolhaPagamentoPage, MESES_FOLHA } from './pages/FolhaPagamento';
 import { FolhaApuracaoPage } from './pages/FolhaApuracao';
+import { PainelRhPage } from './pages/PainelRh';
+import { AbsenteismoPage } from './pages/Absenteismo';
+import { TurnoverPage } from './pages/Turnover';
+import { TangerinoPontoPage } from './pages/TangerinoPonto';
+import { EmprestimosPage } from './pages/Emprestimos';
 import { RelatorioCrdPage, RelatorioCrdMesPage, MESES_REL_CRD } from './pages/RelatorioCrd';
 import { RelatorioRequisicoesPage, RelatorioRequisicoesMesPage, MESES_REL_REQ } from './pages/RelatorioRequisicoes';
 import { ConsumoInternoPage, ConsumoInternoMesPage, MESES_CONSUMO } from './pages/ConsumoInterno';
 import { CmvPage, CmvMesPage } from './pages/Cmv';
+import { CmvTarifasPage } from './pages/CmvTarifas';
 import { MESES_CMV } from './lib/cmv';
 import { UmlPage } from './pages/Uml';
 import { RelatorioRdsPage, RelatorioRdsMesPage, MESES_RDS } from './pages/RelatorioRds';
@@ -208,6 +214,31 @@ export default function App() {
       return <FolhaApuracaoPage />;
     }
 
+    if (activeTab === 'painel-rh') {
+      if (!canAccessTab('folha')) return <Dashboard />;
+      return <PainelRhPage user={user ?? undefined} />;
+    }
+
+    if (activeTab === 'absenteismo') {
+      if (!canAccessTab('folha')) return <Dashboard />;
+      return <AbsenteismoPage />;
+    }
+
+    if (activeTab === 'turnover') {
+      if (!canAccessTab('folha')) return <Dashboard />;
+      return <TurnoverPage />;
+    }
+
+    if (activeTab === 'tangerino-ponto') {
+      if (!canAccessTab('folha')) return <Dashboard />;
+      return <TangerinoPontoPage />;
+    }
+
+    if (activeTab === 'emprestimos') {
+      if (!canAccessTab('emprestimos')) return <Dashboard />;
+      return <EmprestimosPage />;
+    }
+
     if (activeTab === 'rel-crd') {
       if (!canAccessTab(activeTab)) return <Dashboard />;
       return <RelatorioCrdPage onSelectMonth={(m) => setActiveTab(`rel-crd-${m}`)} />;
@@ -250,6 +281,11 @@ export default function App() {
     if (activeTab === 'cmv') {
       if (!canAccessTab(activeTab)) return <Dashboard />;
       return <CmvPage onSelectMonth={(m) => setActiveTab(`cmv-${m}`)} />;
+    }
+
+    if (activeTab === 'cmv-tarifas') {
+      if (!canAccessTab(activeTab)) return <Dashboard />;
+      return <CmvTarifasPage />;
     }
 
     if (activeTab.startsWith('cmv-')) {
@@ -517,6 +553,14 @@ function AppShell({
                 ? 'Apuração de Resultados / Prev x Real Mensal'
                 : activeTab.startsWith('planilha-')
                 ? `Apuração de Resultados / ${PLANILHAS.find((p) => `planilha-${p.indice}` === activeTab)?.nome ?? ''}`
+                : activeTab === 'absenteismo'
+                ? 'Apuração da Folha / Absenteísmo'
+                : activeTab === 'turnover'
+                ? 'Apuração da Folha / Turnover'
+                : activeTab === 'tangerino-ponto'
+                ? 'Apuração da Folha / Tangerino — Ponto'
+                : activeTab === 'painel-rh'
+                ? 'Apuração da Folha / Painel RH'
                 : activeTab === 'folha-apuracao'
                 ? 'Apuração da Folha / Apuração'
                 : activeTab.startsWith('folha-')
@@ -579,7 +623,7 @@ function AppShell({
 
         <div
           data-tour="page-content"
-          className={activeTab === 'notas' || activeTab === 'danfe' || activeTab === 'comandas' || activeTab === 'lancamentos-manuais' || activeTab === 'requisicoes' || activeTab === 'mensalidades' || activeTab === 'aprovacoes' || activeTab === 'compras-mensalidades' || activeTab === 'cadastros' || activeTab === 'sintase' || activeTab === 'prev-real' || activeTab === 'indicadores' || activeTab === 'dre' || activeTab === 'rel-crd' || activeTab.startsWith('rel-crd-') || activeTab === 'rel-req' || activeTab.startsWith('rel-req-') || activeTab === 'rel-consumo' || activeTab.startsWith('rel-consumo-') || activeTab === 'rel-rds' || activeTab.startsWith('rel-rds-') || activeTab.startsWith('planilha-') || activeTab.startsWith('folha-') || activeTab === 'compras-ordem' || activeTab === 'investimentos' || activeTab === 'tutorial' || activeTab === 'sugestoes' || isPainelSetorialTab(activeTab) ? 'p-8 pt-4 md:pt-8 w-full max-w-none' : 'p-8 pt-4 md:pt-8 max-w-7xl mx-auto'}
+          className={activeTab === 'notas' || activeTab === 'danfe' || activeTab === 'comandas' || activeTab === 'lancamentos-manuais' || activeTab === 'requisicoes' || activeTab === 'mensalidades' || activeTab === 'aprovacoes' || activeTab === 'compras-mensalidades' || activeTab === 'cadastros' || activeTab === 'sintase' || activeTab === 'prev-real' || activeTab === 'indicadores' || activeTab === 'dre' || activeTab === 'rel-crd' || activeTab.startsWith('rel-crd-') || activeTab === 'rel-req' || activeTab.startsWith('rel-req-') || activeTab === 'rel-consumo' || activeTab.startsWith('rel-consumo-') || activeTab === 'rel-rds' || activeTab.startsWith('rel-rds-') || activeTab.startsWith('planilha-') || activeTab.startsWith('folha-') || activeTab === 'painel-rh' || activeTab === 'absenteismo' || activeTab === 'turnover' || activeTab === 'tangerino-ponto' || activeTab === 'folha-apuracao' || activeTab === 'compras-ordem' || activeTab === 'investimentos' || activeTab === 'tutorial' || activeTab === 'sugestoes' || isPainelSetorialTab(activeTab) ? 'p-8 pt-4 md:pt-8 w-full max-w-none' : 'p-8 pt-4 md:pt-8 max-w-7xl mx-auto'}
         >
           {renderContent()}
         </div>

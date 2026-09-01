@@ -20,13 +20,37 @@ import {
 import { formatCurrency, formatApiError, formatDate } from '../lib/utils';
 import { useSearch } from '../context/SearchContext';
 import { matchesSearch } from '../lib/search';
+import {
+  defaultRelCrdDestinosForScope,
+  formatPeriodLabel,
+  IMPORT_SCOPE_LABELS,
+  suggestWeekIndexInMonth,
+  type ImportScope,
+} from '../lib/importPeriod';
+import { ImportPeriodPicker } from '../components/ImportPeriodPicker';
+import {
+  REQ_DEFAULT_DESTINO_MAP,
+  REQ_DEFAULT_CMV_SUBTIPO_MAP,
+  REQ_DESTINO_LABELS,
+  REQ_DESTINO_BADGES,
+  REQ_DESTINOS,
+  type ReqDestino,
+  type ReqCmvSubtipo,
+  emptyReqDestinoTotals,
+  emptyReqCmvSubtipoTotals,
+  isReqDestinoCmv,
+  resolveReqCmvSubtipo,
+  normalizeReqCmvSubtipo,
+} from '../lib/requisicoesDestino';
+import { ReqDestinoPicker } from '../components/ReqDestinoPicker';
+import { ReqCmvSubtipoPicker } from '../components/ReqCmvSubtipoPicker';
 
 // Fontes de importação a configurar (somente os cards por enquanto; a configuração vem depois).
 const IMPORT_SOURCES = [
   {
     key: 'consumo_interno',
     title: 'Consumo interno',
-    description: 'Relatório de consumo interno por setor e mês.',
+    description: 'Relatório de consumo interno — acompanhamento semanal ou fechamento mensal.',
     icon: Boxes,
   },
   {
@@ -85,6 +109,9 @@ type ImportHistoryRow = {
   status: 'success' | 'error';
   year?: number | null;
   month?: number | null;
+  import_scope?: ImportScope | string | null;
+  period_key?: string | null;
+  week_index?: number | null;
   records_count?: number | null;
   total_amount?: number | null;
   user_name?: string | null;
@@ -188,8 +215,7 @@ type RelCrdSummary = {
 
 type RelCrdDestinoFlags = { D: boolean; M: boolean };
 
-const REL_CRD_DESTINO_DEFAULT: RelCrdDestinoFlags = { D: true, M: true };
-const REL_CRD_DESTINO_LS_KEY = 'relCrd:destino_map:v1';
+const REL_CRD_DESTINO_LS_KEY = 'relCrd:destino_map:v2';
 
 const loadRelCrdDestinoMap = (): Record<string, RelCrdDestinoFlags> => {
   try {
@@ -218,18 +244,20 @@ const saveRelCrdDestinoMap = (map: Record<string, RelCrdDestinoFlags>) => {
   }
 };
 
-/** Monta destinos do arquivo atual: reaproveita a última seleção por código; contas novas ficam D+M. */
+/** Monta destinos do arquivo atual: reaproveita a última seleção por código; contas novas usam o padrão do escopo. */
 const buildRelCrdDestinosForAccounts = (
   accounts: RelCrdAccount[],
+  scope: ImportScope,
   saved: Record<string, RelCrdDestinoFlags> = loadRelCrdDestinoMap()
 ): Record<string, RelCrdDestinoFlags> => {
+  const scopeDefault = defaultRelCrdDestinosForScope(scope);
   const destinos: Record<string, RelCrdDestinoFlags> = {};
   for (const acc of accounts) {
     const codigo = String(acc.codigo);
     const prev = saved[codigo];
     destinos[codigo] = prev
       ? { D: Boolean(prev.D), M: Boolean(prev.M) }
-      : { ...REL_CRD_DESTINO_DEFAULT };
+      : { ...scopeDefault };
   }
   return destinos;
 };
@@ -268,45 +296,32 @@ type RdsWeekRow = { dia: string; data: string; quantidade: number; percentual: n
 
 type RequisicaoGrupo = { codigo: number; nome: string; valor: number };
 type RequisicaoSetor = { codigo: number; nome: string; grupos: RequisicaoGrupo[]; total: number | null };
-type ReqDestino = 'uso_consumo' | 'cmv' | 'investimento' | '';
-
-const REQ_DESTINO_LABELS: Record<string, string> = {
-  uso_consumo: 'Uso e Consumo',
-  cmv: 'CMV',
-  investimento: 'Investimento',
-};
-const REQ_DESTINO_COLORS: Record<string, string> = {
-  uso_consumo: 'bg-blue-100 text-blue-800 border-blue-200',
-  cmv: 'bg-amber-100 text-amber-800 border-amber-200',
-  investimento: 'bg-purple-100 text-purple-800 border-purple-200',
-};
-const REQ_DEFAULT_MAP: Record<number, ReqDestino> = {
-  7: 'cmv', 10: 'cmv', 11: 'cmv', 15: 'cmv', 16: 'cmv', 17: 'cmv',
-  25: 'cmv', 26: 'cmv', 28: 'cmv', 30: 'cmv', 32: 'cmv', 33: 'cmv',
-  34: 'cmv', 35: 'cmv', 36: 'cmv', 37: 'cmv', 38: 'cmv', 39: 'cmv',
-  45: 'cmv',
-  29: 'uso_consumo', 40: 'uso_consumo', 41: 'uso_consumo', 42: 'uso_consumo',
-  43: 'uso_consumo', 44: 'uso_consumo', 46: 'uso_consumo', 47: 'uso_consumo',
-  48: 'uso_consumo', 49: 'uso_consumo', 51: 'uso_consumo', 52: 'uso_consumo',
-  53: 'uso_consumo', 54: 'uso_consumo', 56: 'uso_consumo', 58: 'uso_consumo',
-  80: 'uso_consumo', 81: 'uso_consumo', 84: 'uso_consumo', 86: 'uso_consumo',
-  125: 'uso_consumo',
-  91: 'investimento', 95: 'investimento', 98: 'investimento',
-  101: 'investimento', 104: 'investimento', 111: 'investimento',
-};
 
 const REQ_DESTINO_LS_KEY = 'requisicoes:destino_map';
+const REQ_CMV_SUBTIPO_LS_KEY = 'requisicoes:cmv_subtipo_map';
 
 const loadReqDestinoMap = (): Record<number, ReqDestino> => {
   try {
     const raw = localStorage.getItem(REQ_DESTINO_LS_KEY);
-    if (raw) return { ...REQ_DEFAULT_MAP, ...JSON.parse(raw) };
+    if (raw) return { ...REQ_DEFAULT_DESTINO_MAP, ...JSON.parse(raw) };
   } catch { /* ignore */ }
-  return { ...REQ_DEFAULT_MAP };
+  return { ...REQ_DEFAULT_DESTINO_MAP };
+};
+
+const loadReqCmvSubtipoMap = (): Record<number, ReqCmvSubtipo> => {
+  try {
+    const raw = localStorage.getItem(REQ_CMV_SUBTIPO_LS_KEY);
+    if (raw) return { ...REQ_DEFAULT_CMV_SUBTIPO_MAP, ...JSON.parse(raw) };
+  } catch { /* ignore */ }
+  return { ...REQ_DEFAULT_CMV_SUBTIPO_MAP };
 };
 
 const saveReqDestinoMap = (map: Record<number, ReqDestino>) => {
   try { localStorage.setItem(REQ_DESTINO_LS_KEY, JSON.stringify(map)); } catch { /* ignore */ }
+};
+
+const saveReqCmvSubtipoMap = (map: Record<number, ReqCmvSubtipo>) => {
+  try { localStorage.setItem(REQ_CMV_SUBTIPO_LS_KEY, JSON.stringify(map)); } catch { /* ignore */ }
 };
 
 type Provisao13Totals = {
@@ -370,29 +385,51 @@ export const ImportacaoPage: React.FC = () => {
   const [consumoDestino, setConsumoDestino] = useState<{ setor: string; conta: string } | null>(null);
   const [consumoCommitting, setConsumoCommitting] = useState(false);
   const [consumoCommitMsg, setConsumoCommitMsg] = useState('');
+  const [consumoImportScope, setConsumoImportScope] = useState<ImportScope>('acompanhamento');
+  const [consumoWeekIndex, setConsumoWeekIndex] = useState(String(suggestWeekIndexInMonth()));
+  const [consumoImportMonth, setConsumoImportMonth] = useState(String(new Date().getMonth() + 1));
+  const [consumoImportYear, setConsumoImportYear] = useState(String(new Date().getFullYear()));
 
   const commitConsumoInterno = async () => {
     if (consumoCommitting || !consumoFile) return;
-    if (!consumoPeriod) {
-      alert('Não foi possível detectar o mês do relatório.');
+    const month = Number(consumoImportMonth) || consumoPeriod?.month;
+    const year = Number(consumoImportYear) || consumoPeriod?.year;
+    if (!month || !year) {
+      alert('Informe a competência (mês e ano) do relatório.');
       return;
+    }
+    if (consumoImportScope === 'acompanhamento') {
+      const week = Number(consumoWeekIndex);
+      if (!Number.isFinite(week) || week < 1 || week > 5) {
+        alert('Informe a semana (1 a 5) para importação de acompanhamento.');
+        return;
+      }
     }
     setConsumoCommitting(true);
     setConsumoCommitMsg('');
     const formData = new FormData();
     formData.append('consumo_file', consumoFile);
-    formData.append('month', String(consumoPeriod.month));
-    formData.append('year', String(consumoPeriod.year));
+    formData.append('month', String(month));
+    formData.append('year', String(year));
+    formData.append('import_scope', consumoImportScope);
+    if (consumoImportScope === 'acompanhamento') {
+      formData.append('week_index', consumoWeekIndex);
+    }
     try {
       const res = await fetch('/api/import/consumo-interno/commit', { method: 'POST', body: formData });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        alert(formatApiError(data, 'Falha ao enviar para Prev x Real.'));
+        alert(formatApiError(data, 'Falha ao enviar o Consumo Interno.'));
         return;
       }
+      const scopeLabel = IMPORT_SCOPE_LABELS[consumoImportScope];
       setConsumoCommitMsg(
-        `Enviado: ${formatCurrency(data.total)} → Prev x Real › ${data.destino.setor} › ${data.destino.conta} › Real` +
-          ` e Apuração de Resultados › Consumo interno › ${periodoLabel(data.period)}.`
+        `${scopeLabel}: ${formatCurrency(data.total)} → ` +
+          (consumoImportScope === 'acompanhamento'
+            ? 'Prev x Real Diário'
+            : 'Prev x Real Mensal') +
+          ` › ${data.destino.setor} › ${data.destino.conta}` +
+          (consumoImportScope === 'fechamento' ? ' · Apuração › Consumo interno' : '')
       );
       loadImportHistory();
     } finally {
@@ -477,6 +514,8 @@ export const ImportacaoPage: React.FC = () => {
   const now = new Date();
   const [relCrdImportMonth, setRelCrdImportMonth] = useState(String(now.getMonth() + 1));
   const [relCrdImportYear, setRelCrdImportYear] = useState(String(now.getFullYear()));
+  const [relCrdImportScope, setRelCrdImportScope] = useState<ImportScope>('fechamento');
+  const [relCrdWeekIndex, setRelCrdWeekIndex] = useState(String(suggestWeekIndexInMonth()));
   const [relCrdCommitting, setRelCrdCommitting] = useState(false);
   const [relCrdCommitResult, setRelCrdCommitResult] = useState<{ imported: number; not_found: string[] } | null>(null);
 
@@ -487,6 +526,36 @@ export const ImportacaoPage: React.FC = () => {
   const [provisaoFeriasTotals, setProvisaoFeriasTotals] = useState<ProvisaoFeriasTotals | null>(null);
   const [provisaoFeriasPeriod, setProvisaoFeriasPeriod] = useState<{ month?: number; year?: number } | null>(null);
   const [provisaoFeriasRows, setProvisaoFeriasRows] = useState<ProvisaoFeriasRow[]>([]);
+  const [provisaoFeriasCommitting, setProvisaoFeriasCommitting] = useState(false);
+  const [provisaoFeriasCommitMsg, setProvisaoFeriasCommitMsg] = useState('');
+
+  const commitProvisaoFerias = async () => {
+    if (!provisaoFeriasRows.length) return;
+    const year = provisaoFeriasPeriod?.year ?? new Date().getFullYear();
+    const month = provisaoFeriasPeriod?.month;
+    if (!month) {
+      alert('Não foi possível detectar o mês no PDF. Informe a competência manualmente na tela de Absenteísmo.');
+      return;
+    }
+    setProvisaoFeriasCommitting(true);
+    setProvisaoFeriasCommitMsg('');
+    try {
+      const res = await fetch('/api/import/provisao-ferias/commit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ year, month, rows: provisaoFeriasRows }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Falha ao gravar provisão de férias.');
+      setProvisaoFeriasCommitMsg(
+        `${data.rows ?? provisaoFeriasRows.length} funcionário(s) gravado(s) — faltas no Absenteísmo e FGTS férias no painel RH.`
+      );
+    } catch (err: any) {
+      alert(err?.message || 'Erro ao gravar.');
+    } finally {
+      setProvisaoFeriasCommitting(false);
+    }
+  };
 
   const uploadProvisaoFerias = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -524,6 +593,36 @@ export const ImportacaoPage: React.FC = () => {
   const [provisao13Totals, setProvisao13Totals] = useState<Provisao13Totals | null>(null);
   const [provisao13Period, setProvisao13Period] = useState<{ month?: number; year?: number } | null>(null);
   const [provisao13Rows, setProvisao13Rows] = useState<Provisao13Row[]>([]);
+  const [provisao13Committing, setProvisao13Committing] = useState(false);
+  const [provisao13CommitMsg, setProvisao13CommitMsg] = useState('');
+
+  const commitProvisao13 = async () => {
+    if (!provisao13Rows.length) return;
+    const year = provisao13Period?.year ?? new Date().getFullYear();
+    const month = provisao13Period?.month;
+    if (!month) {
+      alert('Não foi possível detectar o mês no PDF. Verifique o arquivo importado.');
+      return;
+    }
+    setProvisao13Committing(true);
+    setProvisao13CommitMsg('');
+    try {
+      const res = await fetch('/api/import/provisao-13/commit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ year, month, rows: provisao13Rows }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Falha ao gravar provisão de 13º.');
+      setProvisao13CommitMsg(
+        `${data.rows ?? provisao13Rows.length} funcionário(s) gravado(s) — FGTS 13º: ${formatCurrency(data.fgts_13 ?? 0)} no painel RH.`
+      );
+    } catch (err: any) {
+      alert(err?.message || 'Erro ao gravar.');
+    } finally {
+      setProvisao13Committing(false);
+    }
+  };
 
   const uploadProvisao13 = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -640,8 +739,11 @@ export const ImportacaoPage: React.FC = () => {
   const [requisicoesSetores, setRequisicoesSetores] = useState<RequisicaoSetor[]>([]);
   const [requisicoesTotalGeral, setRequisicoesTotalGeral] = useState<number | null>(null);
   const [requisicoesDestinos, setRequisicoesDestinos] = useState<Record<number, ReqDestino>>(() => loadReqDestinoMap());
+  const [requisicoesCmvSubtipos, setRequisicoesCmvSubtipos] = useState<Record<number, ReqCmvSubtipo>>(() => loadReqCmvSubtipoMap());
   const [reqImportMonth, setReqImportMonth] = useState(String(new Date().getMonth() + 1));
   const [reqImportYear, setReqImportYear] = useState(String(new Date().getFullYear()));
+  const [reqImportScope, setReqImportScope] = useState<ImportScope>('acompanhamento');
+  const [reqWeekIndex, setReqWeekIndex] = useState(String(suggestWeekIndexInMonth()));
   const [reqCommitting, setReqCommitting] = useState(false);
   const [reqCommitResult, setReqCommitResult] = useState<{ imported: number } | null>(null);
 
@@ -690,11 +792,43 @@ export const ImportacaoPage: React.FC = () => {
       saveReqDestinoMap(next);
       return next;
     });
+    if (!isReqDestinoCmv(destino)) {
+      setRequisicoesCmvSubtipos((prev) => {
+        if (!(codigo in prev)) return prev;
+        const next = { ...prev };
+        delete next[codigo];
+        saveReqCmvSubtipoMap(next);
+        return next;
+      });
+    } else {
+      setRequisicoesCmvSubtipos((prev) => {
+        if (prev[codigo]) return prev;
+        const sub = resolveReqCmvSubtipo(codigo, destino) ?? 'alimentos';
+        const next = { ...prev, [codigo]: sub };
+        saveReqCmvSubtipoMap(next);
+        return next;
+      });
+    }
+  };
+
+  const setReqCmvSubtipo = (codigo: number, subtipo: ReqCmvSubtipo) => {
+    setRequisicoesCmvSubtipos((prev) => {
+      const next = { ...prev, [codigo]: subtipo };
+      saveReqCmvSubtipoMap(next);
+      return next;
+    });
   };
 
   // Envia as requisições do preview para a competência escolhida (Apuração de Resultados › Requisição Sintética).
   const commitRequisicoes = async () => {
     if (reqCommitting || !requisicoesSetores.length) return;
+    if (reqImportScope === 'acompanhamento') {
+      const week = Number(reqWeekIndex);
+      if (!Number.isFinite(week) || week < 1 || week > 5) {
+        alert('Informe a semana (1 a 5) para importação de acompanhamento.');
+        return;
+      }
+    }
     setReqCommitting(true);
     setReqCommitResult(null);
     try {
@@ -704,6 +838,8 @@ export const ImportacaoPage: React.FC = () => {
         body: JSON.stringify({
           month: Number(reqImportMonth),
           year: Number(reqImportYear),
+          import_scope: reqImportScope,
+          week_index: reqImportScope === 'acompanhamento' ? Number(reqWeekIndex) : undefined,
           file_name: requisicoesFileName || undefined,
           setores: requisicoesSetores.map((st) => ({
             codigo: st.codigo,
@@ -713,6 +849,7 @@ export const ImportacaoPage: React.FC = () => {
               nome: g.nome,
               valor: g.valor,
               destino: requisicoesDestinos[g.codigo] ?? '',
+              cmv_subtipo: requisicoesCmvSubtipos[g.codigo] ?? '',
             })),
           })),
         }),
@@ -724,9 +861,13 @@ export const ImportacaoPage: React.FC = () => {
       }
       setReqCommitResult({ imported: data.imported ?? 0 });
       const mesLabel = ['', 'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'][Number(reqImportMonth)] || reqImportMonth;
+      const scopeLabel = IMPORT_SCOPE_LABELS[reqImportScope];
       alert(
-        `${data.imported ?? 0} grupo(s) importado(s) para ${mesLabel}/${reqImportYear}.` +
-          `\n→ Apuração de Resultados › Requisição Sintética › ${mesLabel}.`
+        `${data.imported ?? 0} grupo(s) importado(s) — ${scopeLabel} · ${mesLabel}/${reqImportYear}.` +
+          (reqImportScope === 'acompanhamento' ? `\n→ Semana ${reqWeekIndex}` : '') +
+          (reqImportScope === 'fechamento'
+            ? `\n→ Apuração de Resultados › Requisição Sintética › ${mesLabel}.`
+            : '\n→ Acompanhamento semanal (não altera o fechamento do mês).')
       );
     } catch (err: any) {
       alert(err?.message || 'Erro inesperado ao importar.');
@@ -779,11 +920,19 @@ export const ImportacaoPage: React.FC = () => {
     [historyRows, query]
   );
 
-  const periodoHistorico = (row: ImportHistoryRow) => {
-    if (!row.year) return '—';
-    if (row.month && row.month >= 1 && row.month <= 12) return `${MESES[row.month]}/${row.year}`;
-    return String(row.year);
-  };
+  const periodoHistorico = (row: ImportHistoryRow) =>
+    formatPeriodLabel(row.year, row.month, row.import_scope, row.week_index, row.period_key);
+
+  const relCrdScopeDefault = useMemo(
+    () => defaultRelCrdDestinosForScope(relCrdImportScope),
+    [relCrdImportScope]
+  );
+
+  useEffect(() => {
+    if (!relCrdAccounts.length) return;
+    setRelCrdDestinos(buildRelCrdDestinosForAccounts(relCrdAccounts, relCrdImportScope));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [relCrdImportScope]);
 
   const canUndoImport = (row: ImportHistoryRow) => {
     if (row.status === 'error') return true;
@@ -918,7 +1067,7 @@ export const ImportacaoPage: React.FC = () => {
       const accounts = Array.isArray(data.accounts) ? data.accounts : [];
       setRelCrdAccounts(accounts);
       setRelCrdSummary(data.summary || null);
-      setRelCrdDestinos(buildRelCrdDestinosForAccounts(accounts));
+      setRelCrdDestinos(buildRelCrdDestinosForAccounts(accounts, relCrdImportScope));
       setRelCrdCommitResult(null);
     } catch (err: any) {
       setRelCrdError(err?.message || 'Erro inesperado ao importar o arquivo.');
@@ -930,7 +1079,7 @@ export const ImportacaoPage: React.FC = () => {
 
   const toggleRelCrdDestino = (codigo: string, key: 'D' | 'M') => {
     setRelCrdDestinos((prev) => {
-      const current = prev[codigo] ?? { ...REL_CRD_DESTINO_DEFAULT };
+      const current = prev[codigo] ?? { ...relCrdScopeDefault };
       const next = { ...prev, [codigo]: { ...current, [key]: !current[key] } };
       // Mescla com o mapa salvo para não perder códigos de importações anteriores.
       saveRelCrdDestinoMap({ ...loadRelCrdDestinoMap(), ...next });
@@ -946,7 +1095,7 @@ export const ImportacaoPage: React.FC = () => {
       const next = { ...prev };
       for (const acc of targets) {
         const codigo = String(acc.codigo);
-        const current = next[codigo] ?? { ...REL_CRD_DESTINO_DEFAULT };
+        const current = next[codigo] ?? { ...relCrdScopeDefault };
         next[codigo] = {
           D: patch.D !== undefined ? Boolean(patch.D) : current.D,
           M: patch.M !== undefined ? Boolean(patch.M) : current.M,
@@ -959,15 +1108,22 @@ export const ImportacaoPage: React.FC = () => {
 
   const relCrdAllD = useMemo(() => {
     const list = filteredRelCrdAccounts;
-    return list.length > 0 && list.every((a) => (relCrdDestinos[a.codigo] ?? REL_CRD_DESTINO_DEFAULT).D);
-  }, [filteredRelCrdAccounts, relCrdDestinos]);
+    return list.length > 0 && list.every((a) => (relCrdDestinos[a.codigo] ?? relCrdScopeDefault).D);
+  }, [filteredRelCrdAccounts, relCrdDestinos, relCrdScopeDefault]);
 
   const relCrdAllM = useMemo(() => {
     const list = filteredRelCrdAccounts;
-    return list.length > 0 && list.every((a) => (relCrdDestinos[a.codigo] ?? REL_CRD_DESTINO_DEFAULT).M);
-  }, [filteredRelCrdAccounts, relCrdDestinos]);
+    return list.length > 0 && list.every((a) => (relCrdDestinos[a.codigo] ?? relCrdScopeDefault).M);
+  }, [filteredRelCrdAccounts, relCrdDestinos, relCrdScopeDefault]);
 
   const commitRelCrd = async () => {
+    if (relCrdImportScope === 'acompanhamento') {
+      const week = Number(relCrdWeekIndex);
+      if (!Number.isFinite(week) || week < 1 || week > 5) {
+        alert('Informe a semana (1 a 5) para importação de acompanhamento.');
+        return;
+      }
+    }
     const targetRows = relCrdAccounts
       .map((a) => {
         const dest = relCrdDestinos[a.codigo] ?? { D: false, M: false };
@@ -978,7 +1134,11 @@ export const ImportacaoPage: React.FC = () => {
       })
       .filter((a) => a.destinos.length > 0);
     if (!targetRows.length) {
-      alert('Selecione ao menos D ou M em alguma linha para importar.');
+      alert(
+        relCrdImportScope === 'acompanhamento'
+          ? 'Selecione ao menos D (Diário) em alguma linha para importar o acompanhamento.'
+          : 'Selecione ao menos M (Mensal) em alguma linha para importar o fechamento.'
+      );
       return;
     }
     // Garante que a seleção atual vira o padrão da próxima importação.
@@ -1005,6 +1165,9 @@ export const ImportacaoPage: React.FC = () => {
           })),
           month: Number(relCrdImportMonth),
           year: Number(relCrdImportYear),
+          import_scope: relCrdImportScope,
+          week_index: relCrdImportScope === 'acompanhamento' ? Number(relCrdWeekIndex) : undefined,
+          file_name: relCrdFileName || undefined,
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -1014,10 +1177,12 @@ export const ImportacaoPage: React.FC = () => {
       }
       setRelCrdCommitResult({ imported: data.imported, not_found: data.not_found ?? [] });
       const mesLabel = ['', 'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'][Number(relCrdImportMonth)] || relCrdImportMonth;
+      const scopeLabel = IMPORT_SCOPE_LABELS[relCrdImportScope];
       alert(
-        `${data.imported} conta(s) importada(s) para ${mesLabel}/${relCrdImportYear}.` +
-          `\n→ Prev x Real Diario: ${data.to_diario ?? 0} · Prev x Real Mensal: ${data.to_mensal ?? 0}` +
-          `\n→ Relatorio de CRD › ${mesLabel}.`
+        `${data.imported} conta(s) importada(s) — ${scopeLabel} · ${mesLabel}/${relCrdImportYear}.` +
+          (relCrdImportScope === 'acompanhamento' ? `\n→ Semana ${relCrdWeekIndex}` : '') +
+          `\n→ Prev x Real Diário: ${data.to_diario ?? 0} · Prev x Real Mensal: ${data.to_mensal ?? 0}` +
+          (relCrdImportScope === 'fechamento' ? `\n→ Relatório de CRD › ${mesLabel}.` : '')
       );
     } catch (err: any) {
       alert(err?.message || 'Erro inesperado ao importar.');
@@ -1095,6 +1260,8 @@ export const ImportacaoPage: React.FC = () => {
       setConsumoLines(Array.isArray(data.lines) ? data.lines : []);
       setConsumoSummary(data.summary || null);
       setConsumoPeriod(data.period || null);
+      if (data.period?.month) setConsumoImportMonth(String(data.period.month));
+      if (data.period?.year) setConsumoImportYear(String(data.period.year));
       setConsumoDestino(data.destino || null);
     } catch (err: any) {
       setConsumoError(err?.message || 'Erro inesperado ao importar o arquivo.');
@@ -1365,33 +1532,50 @@ export const ImportacaoPage: React.FC = () => {
 
           {/* Envio do total para a Prev x Real (Controle › CONSUMO INTERNO (SEM CRD) › Real) */}
           {consumoSummary && !consumoError && (
-            <div className="px-4 py-3 border-b border-slate-100 bg-slate-50/60 flex flex-wrap items-center justify-between gap-3">
-              <div className="text-xs text-slate-600 space-y-0.5">
-                <p>
-                  Mês detectado: <span className="font-bold text-slate-900">{periodoLabel(consumoPeriod)}</span>
-                  <span className="mx-2 text-slate-300">|</span>
-                  Total a enviar: <span className="font-bold text-slate-900">{formatCurrency(consumoSummary.total_liquido)}</span>
-                </p>
-                <p className="text-[11px] text-slate-500">
-                  Destinos: Prev x Real › <b>{consumoDestino?.setor ?? 'Controle'}</b> › <b>{consumoDestino?.conta ?? 'CONSUMO INTERNO (SEM CRD)'}</b> › Real
-                  {' · '}
-                  Apuração de Resultados › <b>Consumo interno</b> › mês detectado
-                </p>
-                {consumoCommitMsg && (
-                  <p className="text-[11px] font-semibold text-emerald-700 inline-flex items-center gap-1">
-                    <CheckCircle2 className="w-3.5 h-3.5" /> {consumoCommitMsg}
+            <div className="px-4 py-3 border-b border-slate-100 bg-slate-50/60 space-y-3">
+              <ImportPeriodPicker
+                scope={consumoImportScope}
+                onScopeChange={setConsumoImportScope}
+                weekIndex={consumoWeekIndex}
+                onWeekIndexChange={setConsumoWeekIndex}
+                month={consumoImportMonth}
+                onMonthChange={setConsumoImportMonth}
+                year={consumoImportYear}
+                onYearChange={setConsumoImportYear}
+                hint={
+                  consumoImportScope === 'acompanhamento'
+                    ? 'Alimenta Prev × Real Diário (última semana no acompanhamento)'
+                    : 'Consolidado de fechamento → Prev × Real Mensal e Apuração'
+                }
+              />
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="text-xs text-slate-600 space-y-0.5">
+                  <p>
+                    {consumoPeriod ? (
+                      <>Período no arquivo: <span className="font-bold text-slate-900">{periodoLabel(consumoPeriod)}</span></>
+                    ) : null}
+                    <span className={consumoPeriod ? 'mx-2 text-slate-300' : ''}>|</span>
+                    Total: <span className="font-bold text-slate-900">{formatCurrency(consumoSummary.total_liquido)}</span>
                   </p>
-                )}
+                  <p className="text-[11px] text-slate-500">
+                    Destino: <b>{consumoDestino?.setor ?? 'Controle'}</b> › <b>{consumoDestino?.conta ?? 'CONSUMO INTERNO (SEM CRD)'}</b>
+                  </p>
+                  {consumoCommitMsg && (
+                    <p className="text-[11px] font-semibold text-emerald-700 inline-flex items-center gap-1">
+                      <CheckCircle2 className="w-3.5 h-3.5" /> {consumoCommitMsg}
+                    </p>
+                  )}
+                </div>
+                <button
+                  onClick={commitConsumoInterno}
+                  disabled={consumoCommitting}
+                  title="Importa o período selecionado (substitui a mesma semana ou fechamento)"
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-[#004D40] text-white text-sm font-bold hover:bg-[#003d33] disabled:opacity-60 transition-colors"
+                >
+                  {consumoCommitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowRightCircle className="w-4 h-4" />}
+                  {consumoCommitting ? 'Importando...' : 'Importar'}
+                </button>
               </div>
-              <button
-                onClick={commitConsumoInterno}
-                disabled={consumoCommitting || !consumoPeriod}
-                title={!consumoPeriod ? 'Mês não detectado no relatório' : 'Envia o total como realizado do mês'}
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-[#004D40] text-white text-sm font-bold hover:bg-[#003d33] disabled:opacity-60 transition-colors"
-              >
-                {consumoCommitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowRightCircle className="w-4 h-4" />}
-                {consumoCommitting ? 'Enviando...' : 'Enviar para Prev x Real'}
-              </button>
             </div>
           )}
 
@@ -1639,31 +1823,18 @@ export const ImportacaoPage: React.FC = () => {
             <>
               {/* Barra de ações: seletor de mês/ano + importar */}
               <div className="px-4 py-3 border-b border-slate-100 bg-slate-50/50 flex flex-wrap gap-3 items-center justify-between">
-                <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
-                  <span className="font-semibold">Importar realizado em:</span>
-                  <select
-                    value={relCrdImportMonth}
-                    onChange={(e) => setRelCrdImportMonth(e.target.value)}
-                    className="border border-slate-200 rounded-lg px-2 py-1 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-[#004D40]/30"
-                  >
-                    {['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'].map((m, i) => (
-                      <option key={i+1} value={String(i+1)}>{m}</option>
-                    ))}
-                  </select>
-                  <select
-                    value={relCrdImportYear}
-                    onChange={(e) => setRelCrdImportYear(e.target.value)}
-                    className="border border-slate-200 rounded-lg px-2 py-1 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-[#004D40]/30"
-                  >
-                    {Array.from({ length: 6 }, (_, i) => now.getFullYear() - 2 + i).map((y) => (
-                      <option key={y} value={String(y)}>{y}</option>
-                    ))}
-                  </select>
-                  <span className="text-slate-400">·</span>
-                  <span title="D = Prev x Real Diario · M = Prev x Real Mensal">
-                    Destino: <b>D</b> Diario · <b>M</b> Mensal (reusa a última seleção)
-                  </span>
-                </div>
+                <ImportPeriodPicker
+                  scope={relCrdImportScope}
+                  onScopeChange={setRelCrdImportScope}
+                  weekIndex={relCrdWeekIndex}
+                  onWeekIndexChange={setRelCrdWeekIndex}
+                  month={relCrdImportMonth}
+                  onMonthChange={setRelCrdImportMonth}
+                  year={relCrdImportYear}
+                  onYearChange={setRelCrdImportYear}
+                  yearBase={now.getFullYear()}
+                  hint={`Destino padrão: ${relCrdImportScope === 'acompanhamento' ? 'D (Diário)' : 'M (Mensal)'}`}
+                />
                 <button
                   onClick={() => commitRelCrd()}
                   disabled={relCrdCommitting}
@@ -1731,7 +1902,7 @@ export const ImportacaoPage: React.FC = () => {
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {filteredRelCrdAccounts.map((acc, idx) => {
-                      const dest = relCrdDestinos[acc.codigo] ?? { D: true, M: true };
+                      const dest = relCrdDestinos[acc.codigo] ?? relCrdScopeDefault;
                       return (
                         <tr
                           key={idx}
@@ -1826,9 +1997,24 @@ export const ImportacaoPage: React.FC = () => {
           {provisaoFeriasTotals && (
             <div className="p-4 border-b border-slate-100">
               <p className="text-xs text-slate-500 mb-3">
-                Relatório completo extraído (todas as linhas e colunas). O destino de lançamento ainda não foi
-                definido — os valores ficam disponíveis aqui para decisão posterior.
+                Relatório completo extraído. As <b>faltas</b> podem ser enviadas ao módulo de Absenteísmo.
               </p>
+              <div className="flex flex-wrap items-center gap-3 mb-3">
+                <button
+                  type="button"
+                  onClick={commitProvisaoFerias}
+                  disabled={provisaoFeriasCommitting || !provisaoFeriasRows.length}
+                  className="inline-flex items-center gap-2 px-4 py-2 bg-[#004D40] text-white text-xs font-bold rounded-xl disabled:opacity-50"
+                >
+                  {provisaoFeriasCommitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowRightCircle className="w-4 h-4" />}
+                  {provisaoFeriasCommitting ? 'Gravando...' : 'Enviar faltas para Absenteísmo'}
+                </button>
+                {provisaoFeriasCommitMsg && (
+                  <span className="text-xs text-emerald-700 flex items-center gap-1">
+                    <CheckCircle2 className="w-3.5 h-3.5" /> {provisaoFeriasCommitMsg}
+                  </span>
+                )}
+              </div>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 {[
                   ['Salário', provisaoFeriasTotals.salario],
@@ -1943,9 +2129,24 @@ export const ImportacaoPage: React.FC = () => {
           {provisao13Totals && (
             <div className="p-4 border-b border-slate-100">
               <p className="text-xs text-slate-500 mb-3">
-                Relatório completo extraído (todas as linhas e colunas). O destino de lançamento ainda não foi
-                definido — os valores ficam disponíveis aqui para decisão posterior.
+                Relatório completo extraído. Os valores de FGTS 13º alimentam o painel <b>Orç. × Real. Folha</b>.
               </p>
+              <div className="flex flex-wrap items-center gap-3 mb-3">
+                <button
+                  type="button"
+                  onClick={commitProvisao13}
+                  disabled={provisao13Committing || !provisao13Rows.length}
+                  className="inline-flex items-center gap-2 px-4 py-2 bg-[#004D40] text-white text-xs font-bold rounded-xl disabled:opacity-50"
+                >
+                  {provisao13Committing ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowRightCircle className="w-4 h-4" />}
+                  {provisao13Committing ? 'Gravando...' : 'Gravar provisão 13º (FGTS no painel)'}
+                </button>
+                {provisao13CommitMsg && (
+                  <span className="text-xs text-emerald-700 flex items-center gap-1">
+                    <CheckCircle2 className="w-3.5 h-3.5" /> {provisao13CommitMsg}
+                  </span>
+                )}
+              </div>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 {[
                   ['Salário 13º', provisao13Totals.salario_13],
@@ -2191,11 +2392,17 @@ export const ImportacaoPage: React.FC = () => {
       {/* Pré-visualização das Requisições Sintética — todos os setores e grupos de itens. */}
       {(requisicoesFileName || requisicoesError) && (() => {
         // Calcula totais por categoria para o painel de resumo
-        const totaisPorCategoria: Record<string, number> = { uso_consumo: 0, cmv: 0, investimento: 0, '': 0 };
+        const totaisPorCategoria = emptyReqDestinoTotals();
+        const totaisCmvSubtipo = emptyReqCmvSubtipoTotals();
         for (const st of requisicoesSetores) {
           for (const g of st.grupos) {
             const dest = requisicoesDestinos[g.codigo] ?? '';
             totaisPorCategoria[dest] = (totaisPorCategoria[dest] ?? 0) + g.valor;
+            if (isReqDestinoCmv(dest)) {
+              const sub = requisicoesCmvSubtipos[g.codigo] || resolveReqCmvSubtipo(g.codigo, dest) || '';
+              totaisCmvSubtipo[sub in totaisCmvSubtipo ? sub : ''] =
+                (totaisCmvSubtipo[sub in totaisCmvSubtipo ? sub : ''] ?? 0) + g.valor;
+            }
           }
         }
 
@@ -2246,29 +2453,21 @@ export const ImportacaoPage: React.FC = () => {
               <>
                 {/* Barra de ações: seletor de mês/ano + enviar para a Apuração */}
                 <div className="px-4 py-3 border-b border-slate-100 bg-slate-50/50 flex flex-wrap gap-3 items-center justify-between">
-                  <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
-                    <span className="font-semibold">Importar em:</span>
-                    <select
-                      value={reqImportMonth}
-                      onChange={(e) => setReqImportMonth(e.target.value)}
-                      className="border border-slate-200 rounded-lg px-2 py-1 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-[#004D40]/30"
-                    >
-                      {['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'].map((m, i) => (
-                        <option key={i+1} value={String(i+1)}>{m}</option>
-                      ))}
-                    </select>
-                    <select
-                      value={reqImportYear}
-                      onChange={(e) => setReqImportYear(e.target.value)}
-                      className="border border-slate-200 rounded-lg px-2 py-1 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-[#004D40]/30"
-                    >
-                      {Array.from({ length: 6 }, (_, i) => new Date().getFullYear() - 2 + i).map((y) => (
-                        <option key={y} value={String(y)}>{y}</option>
-                      ))}
-                    </select>
-                    <span className="text-slate-400">·</span>
-                    <span>Destino: Apuração de Resultados › Requisição Sintética (substitui o mês)</span>
-                  </div>
+                  <ImportPeriodPicker
+                    scope={reqImportScope}
+                    onScopeChange={setReqImportScope}
+                    weekIndex={reqWeekIndex}
+                    onWeekIndexChange={setReqWeekIndex}
+                    month={reqImportMonth}
+                    onMonthChange={setReqImportMonth}
+                    year={reqImportYear}
+                    onYearChange={setReqImportYear}
+                    hint={
+                      reqImportScope === 'acompanhamento'
+                        ? 'Acompanhamento semanal — não altera o fechamento'
+                        : 'Consolidado mensal para Apuração de Resultados'
+                    }
+                  />
                   <button
                     onClick={() => commitRequisicoes()}
                     disabled={reqCommitting}
@@ -2280,15 +2479,30 @@ export const ImportacaoPage: React.FC = () => {
                 </div>
 
                 {/* Painel de totais por categoria */}
-                <div className="px-4 py-3 border-b border-slate-100 bg-slate-50/40 grid grid-cols-2 sm:grid-cols-4 gap-3">
-                  {(['cmv', 'uso_consumo', 'investimento', ''] as ReqDestino[]).map((cat) => (
-                    <div key={cat || 'sem'} className={`rounded-xl border px-3 py-2.5 ${cat ? REQ_DESTINO_COLORS[cat] : 'bg-slate-100 text-slate-600 border-slate-200'}`}>
+                <div className="px-4 py-3 border-b border-slate-100 bg-slate-50/40 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+                  {([...REQ_DESTINOS, ''] as ReqDestino[]).map((cat) => (
+                    <div key={cat || 'sem'} className={`rounded-xl border px-3 py-2.5 ${cat ? REQ_DESTINO_BADGES[cat] : 'bg-slate-100 text-slate-600 border-slate-200'}`}>
                       <p className="text-[10px] font-bold uppercase tracking-widest opacity-70">
                         {cat ? REQ_DESTINO_LABELS[cat] : 'Não classificado'}
                       </p>
                       <p className="text-sm font-bold mt-0.5 tabular-nums">{formatCurrency(totaisPorCategoria[cat] ?? 0)}</p>
                     </div>
                   ))}
+                </div>
+
+                <div className="px-4 py-3 border-b border-slate-100 bg-amber-50/40 grid grid-cols-2 sm:grid-cols-3 gap-3">
+                  <div className="rounded-xl border border-orange-200 bg-orange-50 px-3 py-2.5">
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-orange-700/80">CMV · Alimentos</p>
+                    <p className="text-sm font-bold mt-0.5 tabular-nums text-orange-900">{formatCurrency(totaisCmvSubtipo.alimentos ?? 0)}</p>
+                  </div>
+                  <div className="rounded-xl border border-sky-200 bg-sky-50 px-3 py-2.5">
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-sky-700/80">CMV · Bebidas</p>
+                    <p className="text-sm font-bold mt-0.5 tabular-nums text-sky-900">{formatCurrency(totaisCmvSubtipo.bebidas ?? 0)}</p>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5">
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">CMV sem subtipo</p>
+                    <p className="text-sm font-bold mt-0.5 tabular-nums text-slate-700">{formatCurrency(totaisCmvSubtipo[''] ?? 0)}</p>
+                  </div>
                 </div>
 
                 <div className="p-4 space-y-3 max-h-[640px] overflow-auto">
@@ -2307,6 +2521,7 @@ export const ImportacaoPage: React.FC = () => {
                               <th className="px-3 py-1.5 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Grupo de itens</th>
                               <th className="px-3 py-1.5 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-right">Valor</th>
                               <th className="px-3 py-1.5 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-center">Destino</th>
+                              <th className="px-3 py-1.5 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-center">CMV</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-50">
@@ -2314,28 +2529,27 @@ export const ImportacaoPage: React.FC = () => {
                               .filter((g) => !query || matchesSearch(query, g.nome, String(g.codigo), g.valor))
                               .map((g, gi) => {
                                 const dest = requisicoesDestinos[g.codigo] ?? '';
+                                const cmvSub = normalizeReqCmvSubtipo(requisicoesCmvSubtipos[g.codigo] ?? resolveReqCmvSubtipo(g.codigo, dest) ?? '');
                                 return (
                                   <tr key={gi} className={`${dest ? 'bg-opacity-20' : ''} hover:bg-slate-50/70`}>
                                     <td className="px-3 py-1.5 text-xs text-slate-500 tabular-nums">{g.codigo}</td>
                                     <td className="px-3 py-1.5 text-xs text-slate-700">{g.nome}</td>
                                     <td className="px-3 py-1.5 text-xs text-right tabular-nums text-slate-700">{formatCurrency(g.valor)}</td>
                                     <td className="px-3 py-1.5 text-center">
-                                      <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden text-[10px] font-bold">
-                                        {(['cmv', 'uso_consumo', 'investimento'] as ReqDestino[]).map((cat) => (
-                                          <button
-                                            key={cat}
-                                            onClick={() => setReqDestino(g.codigo, dest === cat ? '' : cat)}
-                                            className={`px-2 py-1 transition-colors ${dest === cat
-                                              ? cat === 'cmv' ? 'bg-amber-400 text-amber-900'
-                                                : cat === 'uso_consumo' ? 'bg-blue-400 text-blue-900'
-                                                : 'bg-purple-400 text-purple-900'
-                                              : 'bg-white text-slate-400 hover:bg-slate-50'
-                                            }`}
-                                          >
-                                            {cat === 'cmv' ? 'CMV' : cat === 'uso_consumo' ? 'U&C' : 'INV'}
-                                          </button>
-                                        ))}
-                                      </div>
+                                      <ReqDestinoPicker
+                                        value={dest}
+                                        onChange={(next) => setReqDestino(g.codigo, next)}
+                                      />
+                                    </td>
+                                    <td className="px-3 py-1.5 text-center">
+                                      {isReqDestinoCmv(dest) ? (
+                                        <ReqCmvSubtipoPicker
+                                          value={cmvSub}
+                                          onChange={(sub) => setReqCmvSubtipo(g.codigo, sub)}
+                                        />
+                                      ) : (
+                                        <span className="text-[10px] text-slate-300">—</span>
+                                      )}
                                     </td>
                                   </tr>
                                 );
@@ -2680,8 +2894,7 @@ export const ImportacaoPage: React.FC = () => {
                   </p>
                 ) : (
                   <p className="mt-1 text-amber-700">
-                    Serão apagados os dados gravados por essa importação na competência acima (Prev × Real,
-                    apurações e tabelas relacionadas).
+                    Serão apagados apenas os dados desta importação (período/escopo acima) — outras semanas ou o fechamento do mês não são afetados.
                   </p>
                 )}
               </div>

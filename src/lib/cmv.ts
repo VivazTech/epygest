@@ -76,6 +76,18 @@ export const toCmvInputs = (row: Partial<Record<keyof CmvInputs, any>> | null | 
 };
 
 export interface CmvDerived {
+  /** CMV A&B — receitas */
+  venda_ab: number;
+  cafe_manha: number;
+  pensao: number;
+  consumo_interno: number;
+  receita_considerada: number;
+  /** CMV A&B — custos */
+  custo_alimentos: number;
+  custo_bebidas: number;
+  outros_custos_cmv: number;
+  custo_ab: number;
+  /** Detalhes legados / apoio */
   venda_direta_alimentos: number;
   ci_alimentos: number;
   receita_total: number;
@@ -93,39 +105,46 @@ export interface CmvDerived {
 
 const safeDiv = (a: number, b: number) => (b === 0 ? 0 : a / b);
 
-/** Calcula os indicadores derivados de uma competência (colunas B..D das abas mensais). */
+/** Calcula os indicadores derivados de uma competência. */
 export const computeCmv = (i: CmvInputs): CmvDerived => {
-  const venda_direta_alimentos = i.venda_direta_total - i.venda_direta_bebidas; // B5 = B4-B6
-  const ci_alimentos = i.ci_total - i.ci_bebidas; // B13 = B12-B14
-  const receita_total =
-    i.venda_direta_total +
-    i.cafe_manha_pensao +
-    i.cafe_manha_chds +
-    i.almoco_jantar_pensao +
-    i.almoco_jantar_chds +
-    i.almoco_jantar_antec +
-    i.ci_total; // B15
-  const ci_pct_receita = safeDiv(i.ci_total, receita_total); // B16
-  const requisicoes_alimentos = i.requisicoes_total - i.requisicoes_bebidas; // B18 = B17-B19
-  const requisicoes_cmv = i.requisicoes_total - i.refeitorio - i.outros - i.aquamania; // B23
-  const cmv_apurado = safeDiv(requisicoes_cmv, receita_total); // B24
+  const venda_ab = i.venda_direta_total;
+  const cafe_manha = i.cafe_manha_pensao + i.cafe_manha_chds;
+  const pensao = i.almoco_jantar_pensao + i.almoco_jantar_chds + i.almoco_jantar_antec;
+  const consumo_interno = i.ci_total;
+  const receita_considerada = venda_ab + cafe_manha + pensao + consumo_interno;
+
+  const requisicoes_alimentos = i.requisicoes_total - i.requisicoes_bebidas;
+  const custo_alimentos = requisicoes_alimentos - i.refeitorio - i.outros - i.aquamania;
+  const custo_bebidas = i.requisicoes_bebidas;
+  const outros_custos_cmv = i.refeitorio + i.outros + i.aquamania;
+  const custo_ab = custo_alimentos + custo_bebidas + outros_custos_cmv;
+
+  const venda_direta_alimentos = i.venda_direta_total - i.venda_direta_bebidas;
+  const ci_alimentos = i.ci_total - i.ci_bebidas;
+  const receita_total = receita_considerada;
+  const ci_pct_receita = safeDiv(i.ci_total, receita_considerada);
+  const requisicoes_cmv = i.requisicoes_total - i.refeitorio - i.outros - i.aquamania;
+  const cmv_apurado = safeDiv(custo_ab, receita_considerada);
   const cmv_alimentos = safeDiv(
-    requisicoes_alimentos - i.refeitorio - i.outros - i.aquamania,
-    venda_direta_alimentos +
-      i.cafe_manha_pensao +
-      i.cafe_manha_chds +
-      i.almoco_jantar_pensao +
-      i.almoco_jantar_chds +
-      i.almoco_jantar_antec +
-      ci_alimentos
-  ); // B25
-  const cmv_bebidas = safeDiv(i.requisicoes_bebidas, i.venda_direta_bebidas + i.ci_bebidas); // B26
-  const vlr_cmv_sobre_vendas = (receita_total - i.ci_total) * cmv_apurado; // B28
-  const cmv_sobre_ci = i.ci_total * cmv_apurado; // B30
-  const cmv_limite_valor = receita_total * i.limite_pct; // B33
-  const economia = cmv_limite_valor - requisicoes_cmv; // B35
+    custo_alimentos,
+    venda_direta_alimentos + cafe_manha + pensao + ci_alimentos
+  );
+  const cmv_bebidas = safeDiv(i.requisicoes_bebidas, i.venda_direta_bebidas + i.ci_bebidas);
+  const vlr_cmv_sobre_vendas = (receita_considerada - i.ci_total) * cmv_apurado;
+  const cmv_sobre_ci = i.ci_total * cmv_apurado;
+  const cmv_limite_valor = receita_considerada * i.limite_pct;
+  const economia = cmv_limite_valor - custo_ab;
 
   return {
+    venda_ab,
+    cafe_manha,
+    pensao,
+    consumo_interno,
+    receita_considerada,
+    custo_alimentos,
+    custo_bebidas,
+    outros_custos_cmv,
+    custo_ab,
     venda_direta_alimentos,
     ci_alimentos,
     receita_total,
@@ -150,6 +169,15 @@ export interface CmvMonthData {
 }
 
 export interface CmvSintetico {
+  venda_ab: number;
+  cafe_manha: number;
+  pensao: number;
+  consumo_interno: number;
+  receita_considerada: number;
+  custo_alimentos: number;
+  custo_bebidas: number;
+  outros_custos_cmv: number;
+  custo_ab: number;
   // Somatórios anuais dos campos digitados / valores.
   venda_direta_total: number;
   venda_direta_alimentos: number;
@@ -185,6 +213,15 @@ export interface CmvSintetico {
 /** Consolida os 12 meses como a aba "CMV SINTETICO RESULTADO MENSAL" (coluna N). */
 export const computeSintetico = (months: CmvMonthData[]): CmvSintetico => {
   const s: CmvSintetico = {
+    venda_ab: 0,
+    cafe_manha: 0,
+    pensao: 0,
+    consumo_interno: 0,
+    receita_considerada: 0,
+    custo_alimentos: 0,
+    custo_bebidas: 0,
+    outros_custos_cmv: 0,
+    custo_ab: 0,
     venda_direta_total: 0,
     venda_direta_alimentos: 0,
     venda_direta_bebidas: 0,
@@ -218,6 +255,15 @@ export const computeSintetico = (months: CmvMonthData[]): CmvSintetico => {
   for (const m of months) {
     const i = m.inputs;
     const d = m.derived;
+    s.venda_ab += d.venda_ab;
+    s.cafe_manha += d.cafe_manha;
+    s.pensao += d.pensao;
+    s.consumo_interno += d.consumo_interno;
+    s.receita_considerada += d.receita_considerada;
+    s.custo_alimentos += d.custo_alimentos;
+    s.custo_bebidas += d.custo_bebidas;
+    s.outros_custos_cmv += d.outros_custos_cmv;
+    s.custo_ab += d.custo_ab;
     s.venda_direta_total += i.venda_direta_total;
     s.venda_direta_alimentos += d.venda_direta_alimentos;
     s.venda_direta_bebidas += i.venda_direta_bebidas;
@@ -244,22 +290,17 @@ export const computeSintetico = (months: CmvMonthData[]): CmvSintetico => {
   }
 
   // Índices anuais recalculados dos somatórios (não é média das colunas).
-  s.ci_pct_receita = safeDiv(s.ci_total, s.receita_total); // N17
-  s.cmv_apurado = safeDiv(s.requisicoes_cmv, s.receita_total); // N25
+  s.ci_pct_receita = safeDiv(s.ci_total, s.receita_considerada);
+  s.cmv_apurado = safeDiv(s.custo_ab, s.receita_considerada);
   s.cmv_alimentos = safeDiv(
-    s.requisicoes_alimentos - s.refeitorio - s.outros - s.aquamania,
-    s.venda_direta_alimentos +
-      s.cafe_manha_pensao +
-      s.cafe_manha_chds +
-      s.almoco_jantar_pensao +
-      s.almoco_jantar_chds +
-      s.almoco_jantar_antec +
-      s.ci_alimentos
-  ); // N26
-  s.cmv_bebidas = safeDiv(s.requisicoes_bebidas, s.venda_direta_bebidas + s.ci_bebidas); // N27
-  s.economia_pct = safeDiv(s.economia, s.receita_total); // N38
+    s.custo_alimentos,
+    s.venda_direta_alimentos + s.cafe_manha + s.pensao + s.ci_alimentos
+  );
+  s.cmv_bebidas = safeDiv(s.requisicoes_bebidas, s.venda_direta_bebidas + s.ci_bebidas);
+  s.economia_pct = safeDiv(s.economia, s.receita_considerada);
 
   return s;
 };
 
-export const isCmvTab = (tab: string) => tab === 'cmv' || /^cmv-\d+$/.test(tab);
+export const isCmvTab = (tab: string) =>
+  tab === 'cmv' || tab === 'cmv-tarifas' || /^cmv-\d+$/.test(tab);

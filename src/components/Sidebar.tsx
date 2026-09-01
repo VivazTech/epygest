@@ -35,6 +35,10 @@ import {
   ShieldCheck,
   Percent,
   Network,
+  Settings2,
+  UserX,
+  UserRound,
+  Clock,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { PLANILHAS_RESULTADOS, APURACAO_RECEITA_ITENS, BASE_ORCAMENTO_ITENS, isBaseOrcamentoTab, isRelCrdTab, isRelReqTab, isConsumoInternoTab, isCmvTab, isRdsTab, isApuracaoReceitaTab as checkApuracaoReceitaTab, isApuracaoResultadosTab as checkApuracaoResultadosTab } from '../lib/planilhas';
@@ -45,6 +49,15 @@ const FOLHA_MESES = [
   'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
   'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro',
 ];
+
+const isFolhaRhNavTab = (tab: string) =>
+  tab.startsWith('folha-') ||
+  tab === 'folha-apuracao' ||
+  tab === 'painel-rh' ||
+  tab === 'absenteismo' ||
+  tab === 'turnover' ||
+  tab === 'tangerino-ponto' ||
+  tab === 'emprestimos';
 
 const REL_CRD_MESES = FOLHA_MESES;
 interface SidebarProps {
@@ -113,6 +126,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const showLancamentos = lancamentosMenu.length > 0;
   const showAprovacoes = canView('aprovacoes', ['admin', 'finance', 'controle']);
   const showFolha = canView('folha', ['admin', 'controle']);
+  const showEmprestimos = canView('emprestimos', ['admin', 'finance', 'controle']);
+  const showFolhaGroup = showFolha || showEmprestimos;
   const showCompras = canView('compras-ordem', ['admin', 'controle', 'manager']);
   const comprasIds = ['compras-ordem'];
   const [comprasExpanded, setComprasExpanded] = React.useState(comprasIds.includes(activeTab));
@@ -147,9 +162,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [consumoExpanded, setConsumoExpanded] = React.useState(isConsumoActive);
   const [cmvExpanded, setCmvExpanded] = React.useState(isCmvActive);
   const [rdsExpanded, setRdsExpanded] = React.useState(isRdsActive);
-  const [folhaExpanded, setFolhaExpanded] = React.useState(
-    activeTab.startsWith('folha-') || activeTab === 'folha-apuracao'
-  );
+  const [folhaExpanded, setFolhaExpanded] = React.useState(isFolhaRhNavTab(activeTab));
 
   type ExpandSetter = React.Dispatch<React.SetStateAction<boolean>>;
   const menuExpandSetters = React.useMemo<ExpandSetter[]>(
@@ -171,7 +184,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   );
 
   React.useEffect(() => {
-    const isFolhaTab = activeTab.startsWith('folha-') || activeTab === 'folha-apuracao';
+    const isFolhaTab = isFolhaRhNavTab(activeTab);
     const expandRules: Array<[boolean, ExpandSetter[]]> = [
       [comprasIds.includes(activeTab), [setComprasExpanded]],
       [constructionMenu.some((item) => item.id === activeTab), [setConstructionExpanded]],
@@ -726,6 +739,21 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       )} />
                       <span className="font-medium text-xs truncate text-left">Resumo</span>
                     </button>
+                    <button
+                      onClick={() => setActiveTab('cmv-tarifas')}
+                      className={cn(
+                        "w-full flex items-center gap-3 pl-14 pr-4 py-2 rounded-xl transition-all duration-200 group",
+                        activeTab === 'cmv-tarifas'
+                          ? "bg-emerald-500 text-white shadow-lg shadow-emerald-900/20"
+                          : "text-white/70 hover:bg-white/5 hover:text-white"
+                      )}
+                    >
+                      <Settings2 className={cn(
+                        "w-3.5 h-3.5 min-w-3.5 min-h-3.5 shrink-0",
+                        activeTab === 'cmv-tarifas' ? "scale-110" : "group-hover:scale-110"
+                      )} />
+                      <span className="font-medium text-xs truncate text-left">Config. CMV</span>
+                    </button>
                     {REL_CRD_MESES.map((mes, idx) => {
                       const tabId = `cmv-${idx + 1}`;
                       return (
@@ -877,14 +905,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
         )}
 
-        {showFolha && (
+        {showFolhaGroup && (
           <div className="space-y-1">
             <button
               onClick={() => setFolhaExpanded((prev) => !prev)}
               data-tour="group-folha"
               className={cn(
                 "w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group",
-                activeTab.startsWith('folha-') || activeTab === 'folha-apuracao'
+                activeTab.startsWith('folha-') || isFolhaRhNavTab(activeTab)
                   ? "text-white bg-white/10"
                   : "text-white/80 hover:bg-white/5 hover:text-white"
               )}
@@ -902,7 +930,97 @@ export const Sidebar: React.FC<SidebarProps> = ({
               />
             </button>
 
-            {!collapsed && folhaExpanded && (
+            {!collapsed && folhaExpanded && showFolha && (
+              <button
+                onClick={() => setActiveTab('tangerino-ponto')}
+                className={cn(
+                  "w-full flex items-center gap-3 pl-11 pr-4 py-2 rounded-xl transition-all duration-200 group",
+                  activeTab === 'tangerino-ponto'
+                    ? "bg-emerald-500 text-white shadow-lg shadow-emerald-900/20"
+                    : "text-white/70 hover:bg-white/5 hover:text-white"
+                )}
+              >
+                <Clock className={cn(
+                  "w-4 h-4 min-w-4 min-h-4 shrink-0",
+                  activeTab === 'tangerino-ponto' ? "scale-110" : "group-hover:scale-110"
+                )} />
+                <span className="font-medium text-xs truncate text-left">Tangerino — Ponto</span>
+              </button>
+            )}
+
+            {!collapsed && folhaExpanded && showFolha && (
+              <button
+                onClick={() => setActiveTab('turnover')}
+                className={cn(
+                  "w-full flex items-center gap-3 pl-11 pr-4 py-2 rounded-xl transition-all duration-200 group",
+                  activeTab === 'turnover'
+                    ? "bg-emerald-500 text-white shadow-lg shadow-emerald-900/20"
+                    : "text-white/70 hover:bg-white/5 hover:text-white"
+                )}
+              >
+                <UserRound className={cn(
+                  "w-4 h-4 min-w-4 min-h-4 shrink-0",
+                  activeTab === 'turnover' ? "scale-110" : "group-hover:scale-110"
+                )} />
+                <span className="font-medium text-xs truncate text-left">Turnover</span>
+              </button>
+            )}
+
+            {!collapsed && folhaExpanded && showFolha && (
+              <button
+                onClick={() => setActiveTab('absenteismo')}
+                className={cn(
+                  "w-full flex items-center gap-3 pl-11 pr-4 py-2 rounded-xl transition-all duration-200 group",
+                  activeTab === 'absenteismo'
+                    ? "bg-emerald-500 text-white shadow-lg shadow-emerald-900/20"
+                    : "text-white/70 hover:bg-white/5 hover:text-white"
+                )}
+              >
+                <UserX className={cn(
+                  "w-4 h-4 min-w-4 min-h-4 shrink-0",
+                  activeTab === 'absenteismo' ? "scale-110" : "group-hover:scale-110"
+                )} />
+                <span className="font-medium text-xs truncate text-left">Absenteísmo</span>
+              </button>
+            )}
+
+            {!collapsed && folhaExpanded && showEmprestimos && (
+              <button
+                onClick={() => setActiveTab('emprestimos')}
+                className={cn(
+                  "w-full flex items-center gap-3 pl-11 pr-4 py-2 rounded-xl transition-all duration-200 group",
+                  activeTab === 'emprestimos'
+                    ? "bg-emerald-500 text-white shadow-lg shadow-emerald-900/20"
+                    : "text-white/70 hover:bg-white/5 hover:text-white"
+                )}
+              >
+                <Landmark className={cn(
+                  "w-4 h-4 min-w-4 min-h-4 shrink-0",
+                  activeTab === 'emprestimos' ? "scale-110" : "group-hover:scale-110"
+                )} />
+                <span className="font-medium text-xs truncate text-left">Empréstimos</span>
+              </button>
+            )}
+
+            {!collapsed && folhaExpanded && showFolha && (
+              <button
+                onClick={() => setActiveTab('painel-rh')}
+                className={cn(
+                  "w-full flex items-center gap-3 pl-11 pr-4 py-2 rounded-xl transition-all duration-200 group",
+                  activeTab === 'painel-rh'
+                    ? "bg-emerald-500 text-white shadow-lg shadow-emerald-900/20"
+                    : "text-white/70 hover:bg-white/5 hover:text-white"
+                )}
+              >
+                <BarChart3 className={cn(
+                  "w-4 h-4 min-w-4 min-h-4 shrink-0",
+                  activeTab === 'painel-rh' ? "scale-110" : "group-hover:scale-110"
+                )} />
+                <span className="font-medium text-xs truncate text-left">Orç. × Real. Folha</span>
+              </button>
+            )}
+
+            {!collapsed && folhaExpanded && showFolha && (
               <button
                 onClick={() => setActiveTab('folha-apuracao')}
                 data-tour="nav-folha-apuracao"
@@ -921,7 +1039,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               </button>
             )}
 
-            {!collapsed && folhaExpanded && FOLHA_MESES.map((mes, idx) => {
+            {!collapsed && folhaExpanded && showFolha && FOLHA_MESES.map((mes, idx) => {
               const tabId = `folha-${idx + 1}`;
               return (
                 <button

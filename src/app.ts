@@ -19,6 +19,7 @@ import {
   sessionCookieOptions,
   requireAuth,
   requireRole,
+  type SessionUser,
 } from "./lib/auth.js";
 import {
   PERMISSION_RESOURCES,
@@ -29,6 +30,21 @@ import {
   type RolePermissionRow,
 } from "./lib/permissionCatalog.js";
 import { logImportHistory } from "./lib/importHistory.js";
+import { buildPeriodKey, parseImportPeriodInput, type ImportScope } from "./lib/importPeriod.js";
+import { computeCmv, toCmvInputs } from "./lib/cmv.js";
+import { parseCmvApuracaoPeriod } from "./lib/cmvHistorico.js";
+import {
+  applyFieldCorrection,
+  isImportCorrectionField,
+  isImportCorrectionSource,
+  parseCorrectionNumber,
+} from "./lib/importCorrections.js";
+import {
+  fetchCorrectionsForCompetencia,
+  fetchCorrectionsForRows,
+  getCorrectionFromMap,
+  mapCorrectionRow,
+} from "./lib/importCorrectionsDb.js";
 import {
   classificarLancamentosImportacao,
   calcularApuracaoMensal,
@@ -40,9 +56,104 @@ import {
   type EncargosParametro,
   type FolhaConfig,
 } from "./lib/folhaApuracao.js";
+import {
+  aggregateLancamentosPorSetor,
+  allocateValorPorSetor,
+  buildStatusLabel,
+  calcPctDesvio,
+  componentesFromApuracao,
+  componentesFromCustoLinhas,
+  matchFolhaSetor,
+  normalizeFolhaFilterText,
+  resolveSectorMonthlyBudget,
+} from "./lib/folhaPainel.js";
+import {
+  buildCadastroSetorMap,
+  buildEmployeeCostWeights,
+  buildFuncionariosDrilldown,
+  calcularCustoPorSetor,
+  enrichLancamentosComCadastroSetor,
+  normalizeSetorKey,
+} from "./lib/folhaCustoSetor.js";
+import { buildComposicaoCusto } from "./lib/folhaComposicao.js";
+import { buildTaxaServicoAnalise, extractCreditoTaxaRds } from "./lib/folhaTaxaServico.js";
+import { buildFgtsAnalise, sanitizeFgtsEmprestimosDetalhe } from "./lib/folhaFgts.js";
+import {
+  canViewEmprestimosConfidenciais,
+  EMPRESTIMOS_ACESSO_NEGADO_MSG,
+} from "./lib/emprestimosAccess.js";
+import {
+  aggregateEmprestimoLancamentos,
+  buildEmprestimosListResponse,
+  buildEmprestimoDivergencias,
+  buildEmprestimoHistorico,
+  classifyEmprestimoLancamento,
+  computePrevisaoTermino,
+  emprestimoConciliacaoKey,
+  extractInstituicaoFromRubrica,
+  inferStatusFromParcelas,
+  mapEmprestimoRow,
+  REGRAS_RESCISAO_PENDENTES,
+  resolveEmprestimoHistoricoPeriodo,
+  shouldProjectEmprestimoParcelas,
+  sumConciliacao,
+  type EmprestimoDivergenciaMotivo,
+  type EmprestimoResponsabilidade,
+  type EmprestimoStatus,
+} from "./lib/folhaEmprestimos.js";
+import {
+  extractHorasValorFromCells,
+  formatHorasCell,
+  summarizeAbsenteismo,
+} from "./lib/absenteismo.js";
+import { loadAbsenteismoConfig, syncAbsenteismoCompetencia } from "./lib/absenteismoDb.js";
+import {
+  calcularTurnoverPct,
+  FORMULA_OPTIONS,
+  isSituacaoDesligamento,
+  summarizeTurnoverPeriodo,
+  type TurnoverFormula,
+} from "./lib/turnover.js";
+import { loadTurnoverConfig, syncTurnoverCompetencia } from "./lib/turnoverDb.js";
+import {
+  calcularRemuneracaoTotal,
+  empresaNomeFromKey,
+  parseOutrosAdicionais,
+  resolveEmpresaKey,
+} from "./lib/colaboradorCadastro.js";
+import {
+  applyTangerinoToAbsenteismo,
+  commitTangerinoImport,
+  upsertVinculo,
+} from "./lib/tangerinoDb.js";
+import {
+  empresaNomeFromKey as tangerinoEmpresaNomeFromKey,
+  parseTangerinoCsv,
+  summarizeTangerino,
+  type TangerinoEmpresaKey,
+  TANGERINO_EMPRESAS,
+} from "./lib/tangerino.js";
 
 import { parseInvoicePdfText } from "./lib/parseInvoicePdf.js";
 import { isSharedCrdCode } from "./lib/sharedCrds.js";
+import {
+  addReqDestinoTotal,
+  addReqCmvSubtipoTotal,
+  emptyReqDestinoTotals,
+  emptyReqCmvSubtipoTotals,
+  isReqCmvSubtipoValid,
+  isReqDestinoCmv,
+  isReqDestinoValid,
+  resolveReqCmvSubtipo,
+} from "./lib/requisicoesDestino.js";
+import {
+  getSectorCache,
+  normalizeSectorName,
+  parseSectorText,
+  resolveSector,
+  resolveSectorByCode,
+  slugSectorCodeFromName,
+} from "./lib/sectorResolve.js";
 import {
   STORAGE_BUCKET,
   STORAGE_PREFIXES,
@@ -391,6 +502,7 @@ const uploadDir = process.env.VERCEL
 
 export function createApp() {
   const app = express();
+  const sectorCache = getSectorCache(supabase);
 
   if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
   // Limite de tamanho para evitar DoS/esgotamento de disco. Excel/PDF grandes cabem em 20MB.
@@ -1868,23 +1980,28 @@ export function createApp() {
   app.post("/api/sectors", requireRole("admin", "controle"), async (req, res) => {
     const name = String(req.body?.name ?? "").trim();
     if (!name) return res.status(400).json({ error: "O nome do setor / centro de custo é obrigatório." });
+    const codeRaw = String(req.body?.code ?? "").trim();
+    const code = codeRaw || slugSectorCodeFromName(name);
     const budget_limit = Number(req.body?.budget_limit);
     const { data, error } = await supabase
       .from("sectors")
       .insert({
         name,
+        code,
+        active: true,
         budget_limit: Number.isFinite(budget_limit) ? budget_limit : 0,
       })
-      .select("id, name, budget_limit, created_at")
+      .select("id, name, code, budget_limit, active, created_at")
       .single();
     if (error) {
       console.error("Erro ao criar setor:", error);
       const detail = String(error.message || "").toLowerCase();
       if (detail.includes("duplicate") || detail.includes("unique")) {
-        return res.status(409).json({ error: "Já existe um setor com este nome." });
+        return res.status(409).json({ error: "Já existe um setor com este nome ou código." });
       }
       return res.status(500).json({ error: "Não foi possível criar o setor." });
     }
+    await sectorCache.reload(true);
     res.json(data);
   });
 
@@ -1901,6 +2018,14 @@ export function createApp() {
       const budget_limit = Number(req.body.budget_limit);
       patch.budget_limit = Number.isFinite(budget_limit) ? budget_limit : 0;
     }
+    if (req.body?.code != null) {
+      const code = String(req.body.code).trim();
+      if (!code) return res.status(400).json({ error: "Código inválido." });
+      patch.code = code;
+    }
+    if (req.body?.active != null) {
+      patch.active = Boolean(req.body.active);
+    }
     if (!Object.keys(patch).length) {
       return res.status(400).json({ error: "Nenhum campo para atualizar." });
     }
@@ -1915,7 +2040,7 @@ export function createApp() {
       .from("sectors")
       .update(patch)
       .eq("id", id)
-      .select("id, name, budget_limit, created_at")
+      .select("id, name, code, budget_limit, active, created_at")
       .single();
     if (error) {
       console.error("Erro ao atualizar setor:", error);
@@ -1927,6 +2052,7 @@ export function createApp() {
         .update({ ccusto_descricao: patch.name, updated_at: new Date().toISOString() })
         .eq("ccusto_descricao", previousName);
     }
+    await sectorCache.reload(true);
     res.json(data ?? { success: true });
   });
 
@@ -3725,6 +3851,116 @@ export function createApp() {
       is_primary: boolean;
     }>;
 
+  const mapColaboradorRow = (row: any) => {
+    const funcoes = mapColaboradorFuncoes(row.colaborador_funcoes);
+    const primary = funcoes.find((f) => f.is_primary) || funcoes[0] || null;
+    const outros = parseOutrosAdicionais(row.outros_adicionais);
+    const remuneracao = calcularRemuneracaoTotal({
+      salario_base: row.salario_base,
+      adicionais_fixos: row.adicionais_fixos,
+      adicional_quebra_caixa: row.adicional_quebra_caixa,
+      adicional_idioma: row.adicional_idioma,
+      outros_adicionais: outros,
+    });
+    return {
+      id: row.id,
+      nome: row.nome,
+      nome_oficial: row.nome_oficial || row.nome,
+      empresa_key: row.empresa_key ?? null,
+      empresa_nome: row.empresa_nome || empresaNomeFromKey(row.empresa_key) || null,
+      codigo_funcionario: row.codigo_funcionario ?? null,
+      cargo_descricao: row.cargo_descricao ?? "",
+      ccusto_descricao: row.ccusto_descricao ?? "",
+      sector_id: row.sector_id != null ? Number(row.sector_id) : primary?.sector_id ?? null,
+      sector_name:
+        row.sectors?.name ||
+        row.ccusto_descricao ||
+        primary?.sector_name ||
+        null,
+      salario_base: Number(row.salario_base) || 0,
+      adicionais_fixos: Number(row.adicionais_fixos) || 0,
+      adicional_quebra_caixa: Number(row.adicional_quebra_caixa) || 0,
+      adicional_idioma: Number(row.adicional_idioma) || 0,
+      outros_adicionais: outros,
+      remuneracao_total: remuneracao,
+      observacao: row.observacao ?? null,
+      active: row.active !== false,
+      created_at: row.created_at,
+      funcoes,
+      funcao_id: primary?.id ?? null,
+    };
+  };
+
+  const applyColaboradorRemuneracaoBody = (body: any, patch: Record<string, any>) => {
+    if (body?.nome_oficial != null) {
+      const nomeOficial = String(body.nome_oficial).trim();
+      patch.nome_oficial = nomeOficial || null;
+    }
+    if (body?.codigo_funcionario !== undefined) {
+      patch.codigo_funcionario = String(body.codigo_funcionario ?? "").trim() || null;
+    }
+    if (body?.empresa_key !== undefined) {
+      const key = String(body.empresa_key ?? "").trim();
+      if (key && !["vivaz", "aqua"].includes(key)) {
+        return "empresa_key deve ser vivaz ou aqua.";
+      }
+      patch.empresa_key = key || null;
+      patch.empresa_nome = key ? empresaNomeFromKey(key) : null;
+    }
+    if (body?.salario_base != null) patch.salario_base = Number(body.salario_base) || 0;
+    if (body?.adicionais_fixos != null) patch.adicionais_fixos = Number(body.adicionais_fixos) || 0;
+    if (body?.adicional_quebra_caixa != null) {
+      patch.adicional_quebra_caixa = Number(body.adicional_quebra_caixa) || 0;
+    }
+    if (body?.adicional_idioma != null) patch.adicional_idioma = Number(body.adicional_idioma) || 0;
+    if (body?.outros_adicionais != null) {
+      patch.outros_adicionais = parseOutrosAdicionais(body.outros_adicionais);
+    }
+    if (body?.observacao !== undefined) {
+      patch.observacao = body.observacao ? String(body.observacao).slice(0, 500) : null;
+    }
+    return null;
+  };
+
+  const syncColaboradorParaFolha = async (colaboradorId: number) => {
+    const { data: row } = await supabase
+      .from("colaboradores")
+      .select(
+        `id, nome, nome_oficial, empresa_key, empresa_nome, codigo_funcionario,
+         cargo_descricao, ccusto_descricao, sector_id, salario_base, adicionais_fixos,
+         adicional_quebra_caixa, adicional_idioma, outros_adicionais, active,
+         sectors ( name, code )`
+      )
+      .eq("id", colaboradorId)
+      .maybeSingle();
+    if (!row) return;
+    const codigo = String((row as any).codigo_funcionario ?? "").trim();
+    if (!codigo) return;
+    const sector = (row as any).sectors;
+    await supabase.from("folha_funcionarios").upsert(
+      {
+        codigo_funcionario: codigo,
+        nome: String((row as any).nome_oficial || (row as any).nome).trim(),
+        cargo_nome: (row as any).cargo_descricao ?? null,
+        setor_nome: (row as any).ccusto_descricao || sector?.name || null,
+        setor_codigo: sector?.code ?? null,
+        sector_id: (row as any).sector_id ?? null,
+        empresa_key: (row as any).empresa_key ?? null,
+        empresa_nome:
+          (row as any).empresa_nome || empresaNomeFromKey((row as any).empresa_key) || null,
+        salario_base: Number((row as any).salario_base) || 0,
+        adicionais_fixos: Number((row as any).adicionais_fixos) || 0,
+        adicional_quebra_caixa: Number((row as any).adicional_quebra_caixa) || 0,
+        adicional_idioma: Number((row as any).adicional_idioma) || 0,
+        outros_adicionais: parseOutrosAdicionais((row as any).outros_adicionais),
+        colaborador_id: colaboradorId,
+        ativo: (row as any).active !== false,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "codigo_funcionario" }
+    );
+  };
+
   const fetchCargoWithSector = async (cargoId: number) => {
     const { data, error } = await supabase
       .from("cargos")
@@ -3784,6 +4020,7 @@ export function createApp() {
       .update({
         cargo_descricao: cargo.name,
         ccusto_descricao: sectorName,
+        sector_id: cargo.sector_id ?? null,
         updated_at: new Date().toISOString(),
       })
       .eq("id", colaboradorId);
@@ -3806,7 +4043,11 @@ export function createApp() {
     let query = supabase
       .from("colaboradores")
       .select(
-        `id, nome, cargo_descricao, ccusto_descricao, active, created_at,
+        `id, nome, nome_oficial, empresa_key, empresa_nome, codigo_funcionario,
+         cargo_descricao, ccusto_descricao, sector_id, salario_base, adicionais_fixos,
+         adicional_quebra_caixa, adicional_idioma, outros_adicionais, observacao,
+         active, created_at,
+         sectors ( name, code ),
          colaborador_funcoes (
            is_primary,
            cargo_id,
@@ -3821,7 +4062,12 @@ export function createApp() {
     if (error && colaboradorFuncoesMissing(error)) {
       let fbQuery = supabase
         .from("colaboradores")
-        .select("id, nome, cargo_descricao, ccusto_descricao, active, created_at")
+        .select(
+          `id, nome, nome_oficial, empresa_key, empresa_nome, codigo_funcionario,
+           cargo_descricao, ccusto_descricao, sector_id, salario_base, adicionais_fixos,
+           adicional_quebra_caixa, adicional_idioma, outros_adicionais, observacao,
+           active, created_at, sectors ( name, code )`
+        )
         .order("nome");
       if (activeOnly) fbQuery = fbQuery.eq("active", true);
       const fb = await fbQuery;
@@ -3839,28 +4085,11 @@ export function createApp() {
       return res.status(500).json({ error: "Erro interno ao processar a solicitação." });
     }
 
-    res.json(
-      (data ?? []).map((row: any) => {
-        const funcoes = mapColaboradorFuncoes(row.colaborador_funcoes);
-        const primary = funcoes.find((f) => f.is_primary) || funcoes[0] || null;
-        return {
-          id: row.id,
-          nome: row.nome,
-          cargo_descricao: row.cargo_descricao ?? "",
-          ccusto_descricao: row.ccusto_descricao ?? "",
-          active: row.active !== false,
-          created_at: row.created_at,
-          funcoes,
-          funcao_id: primary?.id ?? null,
-          sector_id: primary?.sector_id ?? null,
-          sector_name: row.ccusto_descricao || primary?.sector_name || null,
-        };
-      })
-    );
+    res.json((data ?? []).map((row: any) => mapColaboradorRow(row)));
   });
 
   app.post("/api/colaboradores", requireRole("admin", "controle"), async (req, res) => {
-    const nome = String(req.body?.nome ?? "").trim();
+    const nome = String(req.body?.nome ?? req.body?.nome_oficial ?? "").trim();
     const cargo = String(req.body?.cargo_descricao ?? "").trim();
     const ccusto = String(req.body?.ccusto_descricao ?? "").trim();
     const sectorIdRaw = req.body?.sector_id;
@@ -3897,14 +4126,30 @@ export function createApp() {
       }
     }
 
+    const empresaKeyRaw = String(req.body?.empresa_key ?? "").trim();
+    const empresaKey = empresaKeyRaw && ["vivaz", "aqua"].includes(empresaKeyRaw) ? empresaKeyRaw : null;
+
+    const insertRow: Record<string, any> = {
+      nome,
+      nome_oficial: String(req.body?.nome_oficial ?? nome).trim() || nome,
+      cargo_descricao: cargoDescricao,
+      ccusto_descricao: ccustoDescricao,
+      sector_id: sectorId != null && Number.isFinite(sectorId) ? sectorId : null,
+      empresa_key: empresaKey,
+      empresa_nome: empresaKey ? empresaNomeFromKey(empresaKey) : null,
+      codigo_funcionario: String(req.body?.codigo_funcionario ?? "").trim() || null,
+      salario_base: Number(req.body?.salario_base) || 0,
+      adicionais_fixos: Number(req.body?.adicionais_fixos) || 0,
+      adicional_quebra_caixa: Number(req.body?.adicional_quebra_caixa) || 0,
+      adicional_idioma: Number(req.body?.adicional_idioma) || 0,
+      outros_adicionais: parseOutrosAdicionais(req.body?.outros_adicionais),
+      observacao: req.body?.observacao ? String(req.body.observacao).slice(0, 500) : null,
+      active: true,
+    };
+
     const { data, error } = await supabase
       .from("colaboradores")
-      .insert({
-        nome,
-        cargo_descricao: cargoDescricao,
-        ccusto_descricao: ccustoDescricao,
-        active: true,
-      })
+      .insert(insertRow)
       .select("id")
       .single();
     if (error) {
@@ -3932,6 +4177,12 @@ export function createApp() {
       }
     }
 
+    try {
+      await syncColaboradorParaFolha(data.id);
+    } catch (e) {
+      console.error("sync folha_funcionarios após criar colaborador:", e);
+    }
+
     res.json({ id: data.id });
   });
 
@@ -3939,6 +4190,8 @@ export function createApp() {
     const id = Number(req.params.id);
     if (!Number.isFinite(id)) return res.status(400).json({ error: "id inválido." });
     const patch: Record<string, any> = { updated_at: new Date().toISOString() };
+    const remErr = applyColaboradorRemuneracaoBody(req.body, patch);
+    if (remErr) return res.status(400).json({ error: remErr });
     if (req.body?.nome != null) {
       const nome = String(req.body.nome).trim();
       if (!nome) return res.status(400).json({ error: "Nome inválido." });
@@ -3957,6 +4210,7 @@ export function createApp() {
           : null;
       if (sectorId == null) {
         patch.ccusto_descricao = null;
+        patch.sector_id = null;
       } else if (Number.isFinite(sectorId)) {
         const { data: sectorRow } = await supabase
           .from("sectors")
@@ -3965,6 +4219,7 @@ export function createApp() {
           .maybeSingle();
         if (!sectorRow) return res.status(400).json({ error: "Setor inválido." });
         patch.ccusto_descricao = String(sectorRow.name);
+        patch.sector_id = sectorId;
       } else {
         return res.status(400).json({ error: "sector_id inválido." });
       }
@@ -4057,6 +4312,11 @@ export function createApp() {
         console.error("Erro ao atualizar colaborador:", error);
         return res.status(500).json({ error: "Não foi possível atualizar o colaborador." });
       }
+    }
+    try {
+      await syncColaboradorParaFolha(id);
+    } catch (e) {
+      console.error("sync folha_funcionarios após atualizar colaborador:", e);
     }
     res.json({ success: true });
   });
@@ -4326,28 +4586,19 @@ export function createApp() {
       }));
 
       const uniqueGroupNames = [...new Set(groupedCrdRows.map((r) => r.groupName.trim()).filter(Boolean))];
-      const { data: existingSectors, error: sectorsError } = await supabase.from("sectors").select("id, name");
-      if (sectorsError) throw sectorsError;
+      await sectorCache.reload(true);
 
       const sectorIdByGroup = new Map<string, number>();
-      for (const sector of existingSectors ?? []) {
-        sectorIdByGroup.set(String(sector.name).trim().toUpperCase(), Number(sector.id));
+      for (const groupName of uniqueGroupNames) {
+        const resolved = await resolveSector(supabase, { name: groupName, create: true }, sectorCache);
+        if (resolved) sectorIdByGroup.set(groupName.toUpperCase(), resolved.id);
       }
 
       const createdGroups: string[] = [];
       for (const groupName of uniqueGroupNames) {
-        const key = groupName.toUpperCase();
-        if (sectorIdByGroup.has(key)) continue;
-
-        const { data: created, error: createSectorError } = await supabase
-          .from("sectors")
-          .insert({ name: groupName, budget_limit: 0 })
-          .select("id, name")
-          .single();
-        if (createSectorError) throw createSectorError;
-
-        sectorIdByGroup.set(String(created.name).trim().toUpperCase(), Number(created.id));
-        createdGroups.push(groupName);
+        if (!sectorIdByGroup.has(groupName.toUpperCase())) {
+          createdGroups.push(groupName);
+        }
       }
 
       const payload = groupedCrdRows
@@ -4426,6 +4677,184 @@ export function createApp() {
       return res.status(500).json({ error: detail || "Erro ao carregar histórico de importações." });
     }
     res.json(data ?? []);
+  });
+
+  const importCorrectionsTableMissing = (error: any) =>
+    String(error?.message || "").toLowerCase().includes("import_row_correction") ||
+    error?.code === "42P01";
+
+  const IMPORT_CORRECTION_TABLE_MAP: Record<string, string> = {
+    requisicoes_rows: "requisicoes_rows",
+    rel_crd_rows: "rel_crd_rows",
+    consumo_interno_rows: "consumo_interno_rows",
+  };
+
+  app.get("/api/import/correcoes/historico", requireRole("admin", "finance", "controle", "manager"), async (req, res) => {
+    const q = req.query as {
+      source_table?: string;
+      row_id?: string;
+      field_name?: string;
+      year?: string;
+      month?: string;
+      limit?: string;
+    };
+    const limit = Math.min(Math.max(Number(q.limit) || 100, 1), 500);
+    let query = supabase
+      .from("import_row_correction_history")
+      .select("*")
+      .order("created_at", { ascending: false })
+      .limit(limit);
+    if (q.source_table?.trim()) query = query.eq("source_table", q.source_table.trim());
+    if (q.row_id && Number.isFinite(Number(q.row_id))) query = query.eq("row_id", Number(q.row_id));
+    if (q.field_name?.trim()) query = query.eq("field_name", q.field_name.trim());
+    if (q.year && Number.isFinite(Number(q.year))) query = query.eq("year", Number(q.year));
+    if (q.month && Number.isFinite(Number(q.month))) query = query.eq("month", Number(q.month));
+    const { data, error } = await query;
+    if (error) {
+      console.error(error);
+      if (importCorrectionsTableMissing(error)) {
+        return res.status(500).json({
+          error: "Tabela de correções ausente. Execute sql/44_import_row_corrections.sql no Supabase.",
+        });
+      }
+      return res.status(500).json({ error: "Não foi possível carregar o histórico de correções." });
+    }
+    res.json({ rows: data ?? [] });
+  });
+
+  app.get("/api/import/correcoes", requireRole("admin", "finance", "controle", "manager"), async (req, res) => {
+    const q = req.query as { source_table?: string; year?: string; month?: string };
+    const sourceTable = String(q.source_table ?? "").trim();
+    const year = Number(q.year);
+    const month = Number(q.month);
+    if (!isImportCorrectionSource(sourceTable)) {
+      return res.status(400).json({ error: "source_table inválida." });
+    }
+    if (!Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12) {
+      return res.status(400).json({ error: "Informe year e month válidos." });
+    }
+    const { data, error } = await supabase
+      .from("import_row_corrections")
+      .select("*")
+      .eq("source_table", sourceTable)
+      .eq("year", year)
+      .eq("month", month)
+      .order("updated_at", { ascending: false });
+    if (error) {
+      console.error(error);
+      if (importCorrectionsTableMissing(error)) {
+        return res.status(500).json({
+          error: "Tabela de correções ausente. Execute sql/44_import_row_corrections.sql no Supabase.",
+        });
+      }
+      return res.status(500).json({ error: "Não foi possível carregar correções." });
+    }
+    res.json({ rows: (data ?? []).map(mapCorrectionRow) });
+  });
+
+  app.patch("/api/import/correcoes", requireRole("admin", "finance", "controle"), async (req, res) => {
+    const body = req.body as Record<string, any>;
+    const sourceTable = String(body?.source_table ?? "").trim();
+    const fieldName = String(body?.field_name ?? "").trim();
+    const rowId = Number(body?.row_id);
+    const year = Number(body?.year);
+    const month = Number(body?.month);
+    const motivo = String(body?.motivo ?? "").trim();
+    const valorCorrigido = parseCorrectionNumber(body?.valor_corrigido);
+
+    if (!isImportCorrectionSource(sourceTable)) {
+      return res.status(400).json({ error: "source_table inválida." });
+    }
+    if (!isImportCorrectionField(sourceTable, fieldName)) {
+      return res.status(400).json({ error: "field_name não permitido para esta fonte." });
+    }
+    if (!Number.isFinite(rowId) || rowId <= 0) {
+      return res.status(400).json({ error: "row_id inválido." });
+    }
+    if (!Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12) {
+      return res.status(400).json({ error: "Informe year e month válidos." });
+    }
+    if (!motivo) return res.status(400).json({ error: "Informe o motivo da correção." });
+    if (valorCorrigido == null) return res.status(400).json({ error: "valor_corrigido inválido." });
+
+    const dbTable = IMPORT_CORRECTION_TABLE_MAP[sourceTable];
+    const { data: sourceRow, error: loadErr } = await supabase
+      .from(dbTable)
+      .select(`id, year, month, ${fieldName}`)
+      .eq("id", rowId)
+      .maybeSingle();
+    if (loadErr) {
+      console.error(loadErr);
+      return res.status(500).json({ error: "Não foi possível carregar o registro importado." });
+    }
+    if (!sourceRow) return res.status(404).json({ error: "Registro importado não encontrado." });
+
+    const importedValue = Number((sourceRow as any)[fieldName]) || 0;
+    const { data: existing } = await supabase
+      .from("import_row_corrections")
+      .select("*")
+      .eq("source_table", sourceTable)
+      .eq("row_id", rowId)
+      .eq("field_name", fieldName)
+      .maybeSingle();
+
+    const valorOriginal = existing
+      ? Number((existing as any).valor_original) || importedValue
+      : importedValue;
+    const valorAnterior = existing ? Number((existing as any).valor_corrigido) : importedValue;
+    const user = (req as any).user;
+    const nowIso = new Date().toISOString();
+    const record = {
+      source_table: sourceTable,
+      row_id: rowId,
+      field_name: fieldName,
+      year,
+      month,
+      valor_original: valorOriginal,
+      valor_corrigido: valorCorrigido,
+      row_label: body?.row_label ? String(body.row_label).slice(0, 300) : null,
+      motivo: motivo.slice(0, 2000),
+      user_id: user?.id != null ? String(user.id) : null,
+      user_name: user?.name ?? null,
+      user_email: user?.email ?? null,
+      updated_at: nowIso,
+    };
+
+    const { data: saved, error: saveErr } = await supabase
+      .from("import_row_corrections")
+      .upsert(record, { onConflict: "source_table,row_id,field_name" })
+      .select("*")
+      .single();
+    if (saveErr) {
+      console.error(saveErr);
+      if (importCorrectionsTableMissing(saveErr)) {
+        return res.status(500).json({
+          error: "Tabela de correções ausente. Execute sql/44_import_row_corrections.sql no Supabase.",
+        });
+      }
+      return res.status(500).json({ error: "Não foi possível salvar a correção." });
+    }
+
+    const { error: histErr } = await supabase.from("import_row_correction_history").insert({
+      correction_id: saved?.id ?? null,
+      source_table: sourceTable,
+      row_id: rowId,
+      field_name: fieldName,
+      year,
+      month,
+      valor_original: valorOriginal,
+      valor_anterior: valorAnterior,
+      valor_corrigido: valorCorrigido,
+      row_label: record.row_label,
+      motivo: record.motivo,
+      user_id: record.user_id,
+      user_name: record.user_name,
+      user_email: record.user_email,
+      created_at: nowIso,
+    });
+    if (histErr) console.error("import_row_correction_history insert:", histErr);
+
+    res.json({ ok: true, correction: mapCorrectionRow(saved) });
   });
 
   /** Desfaz uma importação do histórico: apaga os dados daquela competência e remove o registro. */
@@ -4509,28 +4938,71 @@ export function createApp() {
       });
     }
 
+    const importScope = String((row as any).import_scope || "");
+    const periodKey = String((row as any).period_key || "");
+    const importHistoryId = Number((row as any).id);
+
+    // Desfaz por importação específica quando há vínculo por import_history_id ou period_key.
+    const undoByImportHistoryId = async (table: string, label?: string) => {
+      await tryDelete(table, (q) => q.eq("import_history_id", importHistoryId), label || table);
+    };
+
     if (sourceType === "consumo_interno") {
-      await tryDelete("consumo_interno_rows", (q) => q.eq("year", year).eq("month", month));
-      await tryDelete(
-        "crd_realizado",
-        (q) => q.eq("year", year).eq("month", month).eq("source", "consumo_interno"),
-        "crd_realizado (consumo_interno)"
-      );
+      if (importHistoryId) {
+        await undoByImportHistoryId("consumo_interno_rows");
+        await undoByImportHistoryId("crd_realizado", "crd_realizado (consumo_interno)");
+      } else if (periodKey) {
+        await tryDelete("consumo_interno_rows", (q) =>
+          q.eq("year", year).eq("month", month).eq("period_key", periodKey)
+        );
+        await tryDelete("crd_realizado", (q) =>
+          q.eq("year", year).eq("month", month).eq("period_key", periodKey).eq("source", "consumo_interno"),
+          "crd_realizado (consumo_interno)"
+        );
+      } else {
+        await tryDelete("consumo_interno_rows", (q) => q.eq("year", year).eq("month", month));
+        await tryDelete(
+          "crd_realizado",
+          (q) => q.eq("year", year).eq("month", month).eq("source", "consumo_interno"),
+          "crd_realizado (consumo_interno)"
+        );
+      }
     } else if (sourceType === "rel_crd") {
-      await tryDelete("rel_crd_rows", (q) => q.eq("year", year).eq("month", month));
-      await tryDelete(
-        "crd_realizado",
-        (q) =>
-          q
-            .eq("year", year)
-            .eq("month", month)
-            .in("source", ["rel_crd", "rel_crd_diario", "rel_crd_mensal"]),
-        "crd_realizado (Rel. CRD)"
-      );
+      if (importHistoryId) {
+        await undoByImportHistoryId("rel_crd_rows");
+        await undoByImportHistoryId("crd_realizado", "crd_realizado (Rel. CRD)");
+      } else if (periodKey) {
+        await tryDelete("rel_crd_rows", (q) =>
+          q.eq("year", year).eq("month", month).eq("period_key", periodKey)
+        );
+        await tryDelete("crd_realizado", (q) =>
+          q.eq("year", year).eq("month", month).eq("period_key", periodKey),
+          "crd_realizado (Rel. CRD)"
+        );
+      } else {
+        await tryDelete("rel_crd_rows", (q) => q.eq("year", year).eq("month", month));
+        await tryDelete(
+          "crd_realizado",
+          (q) =>
+            q
+              .eq("year", year)
+              .eq("month", month)
+              .in("source", ["rel_crd", "rel_crd_diario", "rel_crd_mensal"]),
+          "crd_realizado (Rel. CRD)"
+        );
+      }
     } else if (sourceType === "rds") {
       await tryDelete("rds_snapshots", (q) => q.eq("year", year).eq("month", month));
     } else if (sourceType === "requisicoes_sintetica") {
-      await tryDelete("requisicoes_rows", (q) => q.eq("year", year).eq("month", month));
+      if (importHistoryId) {
+        await undoByImportHistoryId("requisicoes_rows");
+      } else if (periodKey) {
+        await tryDelete("requisicoes_rows", (q) =>
+          q.eq("year", year).eq("month", month).eq("period_key", periodKey)
+        );
+      } else {
+        await tryDelete("requisicoes_rows", (q) => q.eq("year", year).eq("month", month));
+      }
     } else if (sourceType === "extrato_mensal") {
       await tryDelete("folha_pagamento", (q) => q.eq("year", year).eq("month", month));
       await tryDelete("folha_rubricas", (q) => q.eq("year", year).eq("month", month));
@@ -4700,7 +5172,8 @@ export function createApp() {
   // ====================================================
   // Conta/setor de destino do Consumo Interno na Prev x Real.
   const CONSUMO_INTERNO_CRD_NOME = "CONSUMO INTERNO (SEM CRD)";
-  const CONSUMO_INTERNO_SETOR = "Controle";
+  const CONSUMO_INTERNO_SETOR_CODE = "CONTROLE";
+  const CONSUMO_INTERNO_SETOR_NAME = "Controle";
 
   // Faz o parse do .xls de Consumo Interno: linhas + resumo + período detectado.
   const parseConsumoInternoFile = (filePath: string) => {
@@ -4783,30 +5256,22 @@ export function createApp() {
     };
   };
 
-  // Encontra (ou cria) o setor pelo nome.
-  const resolveSectorIdByName = async (sectorName: string): Promise<number | null> => {
-    const { data: sectors } = await supabase.from("sectors").select("id, name");
-    const found = (sectors ?? []).find((s: any) => normalizeName(s.name) === normalizeName(sectorName));
-    if (found) return Number((found as any).id);
-    const { data: created, error } = await supabase
-      .from("sectors")
-      .insert({ name: sectorName, budget_limit: 0 })
-      .select("id")
-      .single();
-    if (error || !created) {
-      console.error("Falha ao criar setor:", sectorName, error);
-      return null;
-    }
-    return Number(created.id);
-  };
-
-  // Encontra (ou cria) a CRD por nome dentro de um setor.
-  const resolveCrdByNameAndSector = async (name: string, sectorName: string, code: string): Promise<number | null> => {
-    const sectorId = await resolveSectorIdByName(sectorName);
+  // Encontra (ou cria) a CRD por nome dentro de um setor (prioriza código do setor).
+  const resolveCrdByNameAndSector = async (
+    name: string,
+    sector: { code?: string | number | null; name?: string | null },
+    code: string
+  ): Promise<number | null> => {
+    const resolved = await resolveSector(
+      supabase,
+      { code: sector.code, name: sector.name, create: true },
+      sectorCache
+    );
+    if (!resolved) return null;
+    const sectorId = resolved.id;
     const { data: crds } = await supabase.from("crds").select("id, name, sector_id");
-    const matches = (crds ?? []).filter((c: any) => normalizeName(c.name) === normalizeName(name));
-    const chosen =
-      matches.find((c: any) => sectorId != null && Number(c.sector_id) === sectorId) || matches[0];
+    const matches = (crds ?? []).filter((c: any) => normalizeSectorName(c.name) === normalizeSectorName(name));
+    const chosen = matches.find((c: any) => Number(c.sector_id) === sectorId) || matches[0];
     if (chosen) return Number((chosen as any).id);
     const { data: created, error } = await supabase
       .from("crds")
@@ -4841,7 +5306,7 @@ export function createApp() {
         period: parsed.period,
         summary: parsed.summary,
         lines: parsed.lines,
-        destino: { setor: CONSUMO_INTERNO_SETOR, conta: CONSUMO_INTERNO_CRD_NOME },
+        destino: { setor: CONSUMO_INTERNO_SETOR_NAME, setor_codigo: CONSUMO_INTERNO_SETOR_CODE, conta: CONSUMO_INTERNO_CRD_NOME },
       });
     } catch (error: any) {
       console.error("Erro ao processar Consumo Interno:", error);
@@ -4872,36 +5337,52 @@ export function createApp() {
         return res.status(400).json({ error: "Não foi possível determinar o mês do relatório. Informe mês e ano." });
       }
 
-      const crdId = await resolveCrdByNameAndSector(CONSUMO_INTERNO_CRD_NOME, CONSUMO_INTERNO_SETOR, "CONSUMO-INTERNO");
+      const periodParsed = parseImportPeriodInput(
+        year,
+        month,
+        (req.body as any)?.import_scope,
+        (req.body as any)?.week_index
+      );
+      if ("error" in periodParsed) return res.status(400).json({ error: periodParsed.error });
+      const { scope, weekIndex, periodKey } = periodParsed;
+
+      const historyId = await logImportHistory({
+        source_type: "consumo_interno",
+        file_name: req.file.originalname,
+        status: "success",
+        year,
+        month,
+        import_scope: scope,
+        period_key: periodKey,
+        week_index: weekIndex,
+        records_count: 0,
+        user: req.user,
+        summary: { import_scope: scope, period_key: periodKey },
+      });
+
+      const consumoSetor = await resolveSectorByCode(
+        supabase,
+        CONSUMO_INTERNO_SETOR_CODE,
+        CONSUMO_INTERNO_SETOR_NAME,
+        sectorCache
+      );
+      const crdId = await resolveCrdByNameAndSector(
+        CONSUMO_INTERNO_CRD_NOME,
+        { code: CONSUMO_INTERNO_SETOR_CODE, name: CONSUMO_INTERNO_SETOR_NAME },
+        "CONSUMO-INTERNO"
+      );
       if (!crdId) return res.status(500).json({ error: "Não foi possível resolver a conta de destino." });
 
       const total = parsed.summary.total_liquido;
-      const { error } = await supabase
-        .from("crd_realizado")
-        .upsert(
-          { crd_id: crdId, year, month, source: "consumo_interno", value: total },
-          { onConflict: "crd_id,year,month,source" }
-        );
-      if (error) {
-        console.error("Erro ao gravar realizado do Consumo Interno:", error);
-        await logImportHistory({
-          source_type: "consumo_interno",
-          file_name: req.file.originalname,
-          status: "error",
-          year,
-          month,
-          user: req.user,
-          error_message: String(error.message || "Não foi possível gravar o realizado.").slice(0, 500),
-        });
-        return res.status(500).json({ error: "Não foi possível gravar o realizado." });
-      }
 
-      // Persiste detalhe por linha na Apuração de Resultados › Consumo interno.
+      // Substitui apenas o período/escopo (semanal não interfere no fechamento).
       const { error: delRowsErr } = await supabase
         .from("consumo_interno_rows")
         .delete()
         .eq("year", year)
-        .eq("month", month);
+        .eq("month", month)
+        .eq("import_scope", scope)
+        .eq("period_key", periodKey);
       if (delRowsErr) {
         console.error("consumo_interno_rows delete (execute sql/17_consumo_interno_rows.sql):", delRowsErr);
         return res.status(500).json({
@@ -4912,6 +5393,11 @@ export function createApp() {
       const detailRows = (parsed.lines ?? []).map((l: any) => ({
         year,
         month,
+        import_scope: scope,
+        period_key: periodKey,
+        week_index: weekIndex,
+        import_history_id: historyId,
+        sector_id: consumoSetor?.id ?? null,
         cliente_id: l.cliente_id != null ? String(l.cliente_id) : null,
         cliente_nome: String(l.cliente_nome ?? "").trim() || null,
         produto_codigo: l.produto_codigo != null ? String(l.produto_codigo) : null,
@@ -4941,26 +5427,92 @@ export function createApp() {
         }
       }
 
-      await logImportHistory({
-        source_type: "consumo_interno",
-        file_name: req.file.originalname,
-        status: "success",
+      // Prev x Real: acompanhamento → diário; fechamento → mensal.
+      if (historyId) {
+        await supabase.from("crd_realizado").delete().eq("import_history_id", historyId);
+      }
+      await supabase
+        .from("crd_realizado")
+        .delete()
+        .eq("year", year)
+        .eq("month", month)
+        .eq("period_key", periodKey)
+        .eq("source", "consumo_interno");
+
+      const { error: realErr } = await supabase.from("crd_realizado").insert({
+        crd_id: crdId,
         year,
         month,
-        records_count: parsed.summary.lines_count,
-        total_amount: total,
-        user: req.user,
-        summary: {
-          destino: { setor: CONSUMO_INTERNO_SETOR, conta: CONSUMO_INTERNO_CRD_NOME },
-          destino_apuracao: "Apuração de Resultados › Consumo interno",
-          lines_count: parsed.summary.lines_count,
-          clientes_count: parsed.summary.clientes_count,
-        },
+        source: "consumo_interno",
+        value: total,
+        import_scope: scope,
+        period_key: periodKey,
+        import_history_id: historyId,
       });
+      if (realErr) {
+        console.error("Erro ao gravar realizado do Consumo Interno:", realErr);
+        await logImportHistory({
+          source_type: "consumo_interno",
+          file_name: req.file.originalname,
+          status: "error",
+          year,
+          month,
+          import_scope: scope,
+          period_key: periodKey,
+          week_index: weekIndex,
+          user: req.user,
+          error_message: String(realErr.message || "Não foi possível gravar o realizado.").slice(0, 500),
+        });
+        return res.status(500).json({ error: "Não foi possível gravar o realizado." });
+      }
+
+      if (historyId) {
+        await supabase
+          .from("import_history")
+          .update({
+            records_count: parsed.summary.lines_count,
+            total_amount: total,
+            summary: {
+              import_scope: scope,
+              period_key: periodKey,
+              week_index: weekIndex,
+              destino: { setor: CONSUMO_INTERNO_SETOR_NAME, setor_codigo: CONSUMO_INTERNO_SETOR_CODE, conta: CONSUMO_INTERNO_CRD_NOME },
+              destino_apuracao: "Apuração de Resultados › Consumo interno",
+              lines_count: parsed.summary.lines_count,
+              clientes_count: parsed.summary.clientes_count,
+            },
+          })
+          .eq("id", historyId);
+      } else {
+        await logImportHistory({
+          source_type: "consumo_interno",
+          file_name: req.file.originalname,
+          status: "success",
+          year,
+          month,
+          import_scope: scope,
+          period_key: periodKey,
+          week_index: weekIndex,
+          records_count: parsed.summary.lines_count,
+          total_amount: total,
+          user: req.user,
+          summary: {
+            destino: { setor: CONSUMO_INTERNO_SETOR_NAME, setor_codigo: CONSUMO_INTERNO_SETOR_CODE, conta: CONSUMO_INTERNO_CRD_NOME },
+            destino_apuracao: "Apuração de Resultados › Consumo interno",
+            lines_count: parsed.summary.lines_count,
+            clientes_count: parsed.summary.clientes_count,
+            import_scope: scope,
+            period_key: periodKey,
+          },
+        });
+      }
 
       res.json({
         success: true,
-        destino: { setor: CONSUMO_INTERNO_SETOR, conta: CONSUMO_INTERNO_CRD_NOME },
+        import_scope: scope,
+        period_key: periodKey,
+        week_index: weekIndex,
+        destino: { setor: CONSUMO_INTERNO_SETOR_NAME, setor_codigo: CONSUMO_INTERNO_SETOR_CODE, conta: CONSUMO_INTERNO_CRD_NOME },
         destino_apuracao: { secao: "Apuração de Resultados", sub: "Consumo interno", month, year },
         period: { month, year },
         total,
@@ -4986,10 +5538,13 @@ export function createApp() {
   // ====================================================
   app.get("/api/consumo-interno/competencias", requireRole("admin", "finance", "controle", "manager"), async (req, res) => {
     const year = Number((req.query as { year?: string }).year) || new Date().getFullYear();
+    const scopeParam = String((req.query as { scope?: string }).scope || "fechamento");
+    const scope = scopeParam === "acompanhamento" ? "acompanhamento" : "fechamento";
     const { data, error } = await supabase
       .from("consumo_interno_rows")
-      .select("month, vl_liquido, quantidade, cliente_id")
-      .eq("year", year);
+      .select("month, vl_liquido, quantidade, cliente_id, import_scope, period_key, week_index")
+      .eq("year", year)
+      .eq("import_scope", scope);
     if (error) {
       console.error(error);
       return res.status(500).json({
@@ -5013,6 +5568,7 @@ export function createApp() {
 
     res.json({
       year,
+      import_scope: scope,
       months: Array.from(byMonth.entries()).map(([month, agg]) => ({
         month,
         importado: agg.linhas > 0,
@@ -5027,17 +5583,40 @@ export function createApp() {
   app.get("/api/consumo-interno", requireRole("admin", "finance", "controle", "manager"), async (req, res) => {
     const year = Number((req.query as { year?: string }).year) || new Date().getFullYear();
     const month = Number((req.query as { month?: string }).month);
+    const scopeParam = String((req.query as { scope?: string }).scope || "fechamento");
+    const scope = scopeParam === "acompanhamento" ? "acompanhamento" : "fechamento";
+    const weekIndex = Number((req.query as { week_index?: string }).week_index);
     if (!month || month < 1 || month > 12) {
       return res.status(400).json({ error: "Informe o mês (1-12)." });
     }
 
-    const { data, error } = await supabase
+    let query = supabase
       .from("consumo_interno_rows")
       .select("*")
       .eq("year", year)
       .eq("month", month)
+      .eq("import_scope", scope)
       .order("data_iso", { ascending: true })
       .order("cliente_nome", { ascending: true });
+
+    if (scope === "acompanhamento" && Number.isFinite(weekIndex) && weekIndex >= 1 && weekIndex <= 5) {
+      query = query.eq("week_index", weekIndex);
+    } else if (scope === "acompanhamento") {
+      const { data: weekRows } = await supabase
+        .from("consumo_interno_rows")
+        .select("week_index")
+        .eq("year", year)
+        .eq("month", month)
+        .eq("import_scope", "acompanhamento")
+        .order("week_index", { ascending: false })
+        .limit(1);
+      const latestWeek = Number((weekRows?.[0] as any)?.week_index);
+      if (Number.isFinite(latestWeek) && latestWeek >= 1) {
+        query = query.eq("week_index", latestWeek);
+      }
+    }
+
+    const { data, error } = await query;
 
     if (error) {
       console.error(error);
@@ -5047,21 +5626,46 @@ export function createApp() {
     }
 
     const lines = data ?? [];
+    const corrections = await fetchCorrectionsForCompetencia(
+      supabase,
+      "consumo_interno_rows",
+      year,
+      month
+    );
     const clientes = new Set(
       lines.map((l: any) => String(l.cliente_id ?? l.cliente_nome ?? "").trim()).filter(Boolean)
     );
     const n = (v: any) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+    const enrichedLines = lines.map((l: any) => {
+      const id = Number(l.id);
+      const quantidadeMeta = applyFieldCorrection(
+        n(l.quantidade),
+        getCorrectionFromMap(corrections, "consumo_interno_rows", id, "quantidade")
+      );
+      const liquidoMeta = applyFieldCorrection(
+        n(l.vl_liquido),
+        getCorrectionFromMap(corrections, "consumo_interno_rows", id, "vl_liquido")
+      );
+      return {
+        ...l,
+        quantidade: quantidadeMeta.value,
+        vl_liquido: liquidoMeta.value,
+        quantidade_meta: quantidadeMeta,
+        vl_liquido_meta: liquidoMeta,
+      };
+    });
     res.json({
       year,
       month,
-      lines,
+      import_scope: scope,
+      lines: enrichedLines,
       summary: {
-        lines_count: lines.length,
+        lines_count: enrichedLines.length,
         clientes_count: clientes.size,
-        total_quantidade: lines.reduce((s: number, l: any) => s + n(l.quantidade), 0),
-        total_liquido: lines.reduce((s: number, l: any) => s + n(l.vl_liquido), 0),
-        total_bruto: lines.reduce((s: number, l: any) => s + n(l.vl_total), 0),
-        total_desconto: lines.reduce((s: number, l: any) => s + n(l.vl_desconto), 0),
+        total_quantidade: enrichedLines.reduce((s: number, l: any) => s + n(l.quantidade), 0),
+        total_liquido: enrichedLines.reduce((s: number, l: any) => s + n(l.vl_liquido), 0),
+        total_bruto: enrichedLines.reduce((s: number, l: any) => s + n(l.vl_total), 0),
+        total_desconto: enrichedLines.reduce((s: number, l: any) => s + n(l.vl_desconto), 0),
       },
     });
   });
@@ -5156,7 +5760,7 @@ export function createApp() {
   // Também persiste as linhas em rel_crd_rows para o Relatorio de CRD.
   // ====================================================
   app.post("/api/import/rel-crd/commit", async (req, res) => {
-    const { rows, month, year } = req.body as {
+    const { rows, month, year, import_scope, week_index, file_name } = req.body as {
       rows: {
         codigo: string;
         nome?: string;
@@ -5172,11 +5776,35 @@ export function createApp() {
       }[];
       month: number;
       year: number;
+      import_scope?: ImportScope;
+      week_index?: number;
+      file_name?: string;
     };
     if (!Array.isArray(rows) || !rows.length)
       return res.status(400).json({ error: "Nenhuma linha enviada." });
     if (!month || !year || month < 1 || month > 12 || year < 2000)
       return res.status(400).json({ error: "Mês/ano inválido." });
+
+    const scope: ImportScope = import_scope === "acompanhamento" ? "acompanhamento" : "fechamento";
+    const weekIndex = Number(week_index);
+    if (scope === "acompanhamento" && (!Number.isFinite(weekIndex) || weekIndex < 1 || weekIndex > 5)) {
+      return res.status(400).json({ error: "Informe a semana (1 a 5) para importação de acompanhamento." });
+    }
+    const periodKey = buildPeriodKey(year, month, scope, scope === "acompanhamento" ? weekIndex : null);
+
+    const historyId = await logImportHistory({
+      source_type: "rel_crd",
+      file_name: file_name || `Rel. CRD ${month}/${year}`,
+      status: "success",
+      year: Number(year),
+      month: Number(month),
+      import_scope: scope,
+      period_key: periodKey,
+      week_index: scope === "acompanhamento" ? weekIndex : null,
+      records_count: 0,
+      user: (req as any).user,
+      summary: { import_scope: scope, period_key: periodKey },
+    });
 
     const { data: crds, error: crdErr } = await supabase.from("crds").select("id, code, name");
     if (crdErr) return res.status(500).json({ error: crdErr.message });
@@ -5204,7 +5832,16 @@ export function createApp() {
     // Só grava realizado nas contas folha (nível mais profundo) para não duplicar pais+filhos.
     const maxNivel = rows.reduce((m, r) => Math.max(m, Number(r.nivel) || 1), 1);
 
-    const upserts: { crd_id: number; year: number; month: number; source: string; value: number }[] = [];
+    const upserts: {
+      crd_id: number;
+      year: number;
+      month: number;
+      source: string;
+      value: number;
+      import_scope: ImportScope;
+      period_key: string;
+      import_history_id: number | null;
+    }[] = [];
     const reportRows: Record<string, any>[] = [];
     const notFound: string[] = [];
     let toDiario = 0;
@@ -5216,30 +5853,41 @@ export function createApp() {
       const crdId = resolveCrdId(codigo);
       if (!crdId) notFound.push(codigo);
       const saldo = Number(row.saldo_lanc ?? row.lanc_liquido ?? 0);
-      const destinosRaw = Array.isArray(row.destinos) ? row.destinos : ["D", "M"];
+      const destinosRaw = Array.isArray(row.destinos) ? row.destinos : scope === "acompanhamento" ? ["D"] : ["M"];
       const wantD = destinosRaw.some((d) => String(d).toUpperCase() === "D");
       const wantM = destinosRaw.some((d) => String(d).toUpperCase() === "M");
       if (!wantD && !wantM) continue;
 
+      // Acompanhamento semanal: só alimenta Prev x Real Diário. Fechamento: só mensal.
+      const allowD = scope === "acompanhamento" ? wantD : false;
+      const allowM = scope === "fechamento" ? wantM : false;
+      if (!allowD && !allowM) continue;
+
       // Realizado por CRD: apenas folhas (nível máximo do arquivo).
       if (crdId && nivel >= maxNivel) {
-        if (wantD) {
+        if (allowD) {
           upserts.push({
             crd_id: crdId,
             year: Number(year),
             month: Number(month),
             source: "rel_crd_diario",
             value: saldo,
+            import_scope: scope,
+            period_key: periodKey,
+            import_history_id: historyId,
           });
           toDiario += 1;
         }
-        if (wantM) {
+        if (allowM) {
           upserts.push({
             crd_id: crdId,
             year: Number(year),
             month: Number(month),
             source: "rel_crd",
             value: saldo,
+            import_scope: scope,
+            period_key: periodKey,
+            import_history_id: historyId,
           });
           toMensal += 1;
         }
@@ -5248,6 +5896,10 @@ export function createApp() {
       reportRows.push({
         year: Number(year),
         month: Number(month),
+        import_scope: scope,
+        period_key: periodKey,
+        week_index: scope === "acompanhamento" ? weekIndex : null,
+        import_history_id: historyId,
         nivel,
         codigo,
         nome: String(row.nome ?? "").trim() || null,
@@ -5273,7 +5925,9 @@ export function createApp() {
       .from("rel_crd_rows")
       .delete()
       .eq("year", Number(year))
-      .eq("month", Number(month));
+      .eq("month", Number(month))
+      .eq("import_scope", scope)
+      .eq("period_key", periodKey);
     if (delErr) {
       console.error("rel_crd_rows delete (execute sql/13_rel_crd_rows.sql):", delErr);
       return res.status(500).json({
@@ -5288,50 +5942,66 @@ export function createApp() {
       return res.status(500).json({ error: insertErr.message });
     }
 
-    // Limpa realizado Rel. CRD do mês (diario + mensal) e reinsere conforme destinos.
-    const { data: existingReal } = await supabase
+    // Substitui apenas o realizado deste período/escopo (não mistura semanal com fechamento).
+    if (historyId) {
+      await supabase.from("crd_realizado").delete().eq("import_history_id", historyId);
+    }
+    const realizedSources =
+      scope === "acompanhamento" ? ["rel_crd_diario"] : ["rel_crd", "rel_crd_mensal"];
+    await supabase
       .from("crd_realizado")
-      .select("id, source")
+      .delete()
       .eq("year", Number(year))
       .eq("month", Number(month))
-      .in("source", ["rel_crd", "rel_crd_diario"]);
-    if (existingReal?.length) {
-      const ids = existingReal.map((r: any) => r.id).filter(Boolean);
-      if (ids.length) {
-        await supabase.from("crd_realizado").delete().in("id", ids);
-      } else {
-        await supabase
-          .from("crd_realizado")
-          .delete()
-          .eq("year", Number(year))
-          .eq("month", Number(month))
-          .in("source", ["rel_crd", "rel_crd_diario"]);
-      }
-    }
+      .eq("period_key", periodKey)
+      .in("source", realizedSources);
 
     if (upserts.length) {
-      const { error: upsertErr } = await supabase
-        .from("crd_realizado")
-        .upsert(upserts, { onConflict: "crd_id,year,month,source" });
+      const { error: upsertErr } = await supabase.from("crd_realizado").insert(upserts);
       if (upsertErr) return res.status(500).json({ error: upsertErr.message });
     }
 
+    if (historyId) {
+      await supabase
+        .from("import_history")
+        .update({
+          records_count: reportRows.length,
+          total_amount: reportRows.reduce((s, r) => s + Number(r.saldo_lanc || 0), 0),
+          summary: {
+            import_scope: scope,
+            period_key: periodKey,
+            week_index: scope === "acompanhamento" ? weekIndex : null,
+            to_diario: toDiario,
+            to_mensal: toMensal,
+            not_found: notFound,
+          },
+        })
+        .eq("id", historyId);
+    }
+
     try {
-      await logImportHistory({
-        source_type: "rel_crd",
-        file_name: `Rel. CRD ${month}/${year}`,
-        status: "success",
-        year: Number(year),
-        month: Number(month),
-        records_count: reportRows.length,
-        total_amount: reportRows.reduce((s, r) => s + Number(r.saldo_lanc || 0), 0),
-        summary: {
-          to_diario: toDiario,
-          to_mensal: toMensal,
-          not_found: notFound,
-        },
-        user: (req as any).user,
-      });
+      if (!historyId) {
+        await logImportHistory({
+          source_type: "rel_crd",
+          file_name: file_name || `Rel. CRD ${month}/${year}`,
+          status: "success",
+          year: Number(year),
+          month: Number(month),
+          import_scope: scope,
+          period_key: periodKey,
+          week_index: scope === "acompanhamento" ? weekIndex : null,
+          records_count: reportRows.length,
+          total_amount: reportRows.reduce((s, r) => s + Number(r.saldo_lanc || 0), 0),
+          summary: {
+            to_diario: toDiario,
+            to_mensal: toMensal,
+            not_found: notFound,
+            import_scope: scope,
+            period_key: periodKey,
+          },
+          user: (req as any).user,
+        });
+      }
     } catch (e) {
       console.error("Falha ao registrar histórico Rel. CRD:", e);
     }
@@ -5340,6 +6010,9 @@ export function createApp() {
       success: true,
       imported: reportRows.length,
       matched: upserts.length,
+      import_scope: scope,
+      period_key: periodKey,
+      week_index: scope === "acompanhamento" ? weekIndex : null,
       to_diario: toDiario,
       to_mensal: toMensal,
       not_found: notFound,
@@ -5351,10 +6024,13 @@ export function createApp() {
   // ====================================================
   app.get("/api/rel-crd/competencias", requireRole("admin", "finance", "controle", "manager"), async (req, res) => {
     const year = Number((req.query as { year?: string }).year) || new Date().getFullYear();
+    const scopeParam = String((req.query as { scope?: string }).scope || "fechamento");
+    const scope = scopeParam === "acompanhamento" ? "acompanhamento" : "fechamento";
     const { data, error } = await supabase
       .from("rel_crd_rows")
-      .select("month, saldo_lanc, codigo")
-      .eq("year", year);
+      .select("month, saldo_lanc, codigo, import_scope, period_key, week_index")
+      .eq("year", year)
+      .eq("import_scope", scope);
     if (error) {
       console.error(error);
       return res.status(500).json({
@@ -5374,6 +6050,7 @@ export function createApp() {
 
     res.json({
       year,
+      import_scope: scope,
       months: Array.from(byMonth.entries()).map(([month, agg]) => ({
         month,
         importado: agg.contas > 0,
@@ -5386,17 +6063,40 @@ export function createApp() {
   app.get("/api/rel-crd", requireRole("admin", "finance", "controle", "manager"), async (req, res) => {
     const year = Number((req.query as { year?: string }).year) || new Date().getFullYear();
     const month = Number((req.query as { month?: string }).month);
+    const scopeParam = String((req.query as { scope?: string }).scope || "fechamento");
+    const scope = scopeParam === "acompanhamento" ? "acompanhamento" : "fechamento";
+    const weekIndex = Number((req.query as { week_index?: string }).week_index);
     if (!month || month < 1 || month > 12) {
       return res.status(400).json({ error: "Informe month (1-12)." });
     }
 
-    const { data, error } = await supabase
+    let query = supabase
       .from("rel_crd_rows")
       .select("*")
       .eq("year", year)
       .eq("month", month)
+      .eq("import_scope", scope)
       .order("nivel", { ascending: true })
       .order("codigo", { ascending: true });
+
+    if (scope === "acompanhamento" && Number.isFinite(weekIndex) && weekIndex >= 1 && weekIndex <= 5) {
+      query = query.eq("week_index", weekIndex);
+    } else if (scope === "acompanhamento") {
+      const { data: weekRows } = await supabase
+        .from("rel_crd_rows")
+        .select("week_index")
+        .eq("year", year)
+        .eq("month", month)
+        .eq("import_scope", "acompanhamento")
+        .order("week_index", { ascending: false })
+        .limit(1);
+      const latestWeek = Number((weekRows?.[0] as any)?.week_index);
+      if (Number.isFinite(latestWeek) && latestWeek >= 1) {
+        query = query.eq("week_index", latestWeek);
+      }
+    }
+
+    const { data, error } = await query;
 
     if (error) {
       console.error(error);
@@ -5405,7 +6105,20 @@ export function createApp() {
       });
     }
 
-    const rows = data ?? [];
+    const rawRows = data ?? [];
+    const corrections = await fetchCorrectionsForCompetencia(supabase, "rel_crd_rows", year, month);
+    const rows = rawRows.map((r: any) => {
+      const id = Number(r.id);
+      const saldoMeta = applyFieldCorrection(
+        Number(r.saldo_lanc) || 0,
+        getCorrectionFromMap(corrections, "rel_crd_rows", id, "saldo_lanc")
+      );
+      return {
+        ...r,
+        saldo_lanc: saldoMeta.value,
+        saldo_lanc_meta: saldoMeta,
+      };
+    });
     const nivel1 = rows.filter((r: any) => Number(r.nivel) === 1);
     const summaryBase = nivel1.length ? nivel1 : rows;
 
@@ -5461,6 +6174,7 @@ export function createApp() {
     res.json({
       year,
       month,
+      import_scope: scope,
       rows: enrichedRows,
       summary: {
         contas: enrichedRows.length,
@@ -5617,6 +6331,88 @@ export function createApp() {
     }
   });
 
+  app.post("/api/import/provisao-ferias/commit", requireRole("admin", "finance", "controle"), async (req, res) => {
+    const body = req.body as { year?: number; month?: number; rows?: any[] };
+    const year = Number(body?.year);
+    const month = Number(body?.month);
+    if (!year || !month || month < 1 || month > 12) {
+      return res.status(400).json({ error: "Informe year e month válidos." });
+    }
+    const rows = Array.isArray(body?.rows) ? body.rows : [];
+    if (!rows.length) return res.status(400).json({ error: "Nenhuma linha para gravar." });
+
+    await supabase.from("folha_provisao_ferias").delete().eq("year", year).eq("month", month);
+    const payload = rows.map((r: any) => ({
+      year,
+      month,
+      codigo_funcionario: String(r.codigo ?? r.codigo_funcionario ?? "").trim(),
+      nome: String(r.nome ?? "").trim(),
+      faltas: Number(r.faltas) || 0,
+      fer_ven: Number(r.fer_ven) || 0,
+      fer_pro: Number(r.fer_pro) || 0,
+      salario: Number(r.salario) || 0,
+      valor_mes: Number(r.valor_mes) || 0,
+      inss: Number(r.inss) || 0,
+      fgts: Number(r.fgts) || 0,
+      pis: Number(r.pis) || 0,
+      media_vantagens: Number(r.media_vantagens) || 0,
+      terco_ferias: Number(r.terco_ferias) || 0,
+      valor_devido: Number(r.valor_devido) || 0,
+      updated_at: new Date().toISOString(),
+    })).filter((r) => r.codigo_funcionario);
+
+    const { error } = await supabase.from("folha_provisao_ferias").insert(payload);
+    if (error) {
+      console.error("folha_provisao_ferias insert:", error);
+      return res.status(500).json({
+        error: "Não foi possível gravar a provisão de férias. Execute sql/46_absenteismo.sql e sql/52_folha_fgts_guias.sql.",
+      });
+    }
+
+    const fgtsFeriasTotal = payload.reduce((s, r) => s + (Number((r as any).fgts) || 0), 0);
+    const { data: guiaExistente } = await supabase
+      .from("folha_fgts_guia_mensal")
+      .select("*")
+      .eq("year", year)
+      .eq("month", month)
+      .maybeSingle();
+    await supabase.from("folha_fgts_guia_mensal").upsert(
+      {
+        year,
+        month,
+        fgts_normal: Number((guiaExistente as any)?.fgts_normal) || 0,
+        fgts_ferias: fgtsFeriasTotal,
+        fgts_13: Number((guiaExistente as any)?.fgts_13) || 0,
+        fgts_outros: Number((guiaExistente as any)?.fgts_outros) || 0,
+        fonte_normal: (guiaExistente as any)?.fonte_normal ?? null,
+        fonte_ferias: "Guia Provisão de Férias (importação)",
+        fonte_13: (guiaExistente as any)?.fonte_13 ?? null,
+        fonte_outros: (guiaExistente as any)?.fonte_outros ?? null,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "year,month" }
+    );
+
+    const { data: importacao } = await supabase
+      .from("folha_importacoes")
+      .select("empresa_nome")
+      .eq("competencia_ano", year)
+      .eq("competencia_mes", month)
+      .maybeSingle();
+    try {
+      await syncAbsenteismoCompetencia(supabase, year, month, (importacao as any)?.empresa_nome ?? null);
+    } catch (e) {
+      console.error("sync absenteismo após provisão férias:", e);
+    }
+    try {
+      await syncTurnoverCompetencia(supabase, year, month, (importacao as any)?.empresa_nome ?? null);
+    } catch (e) {
+      console.error("sync turnover após provisão férias:", e);
+    }
+
+    res.json({ ok: true, rows: payload.length });
+  });
+
   // ====================================================
   // IMPORTAÇÃO: PROVISÃO DE 13º SALÁRIO (PDF do Desbravador)
   // Extrai todas as linhas (uma por funcionário) e os totais do relatório.
@@ -5751,6 +6547,71 @@ export function createApp() {
     } finally {
       if (req.file?.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
     }
+  });
+
+  app.post("/api/import/provisao-13/commit", requireRole("admin", "finance", "controle"), async (req, res) => {
+    const body = req.body as { year?: number; month?: number; rows?: any[] };
+    const year = Number(body?.year);
+    const month = Number(body?.month);
+    if (!year || !month || month < 1 || month > 12) {
+      return res.status(400).json({ error: "Informe year e month válidos." });
+    }
+    const rows = Array.isArray(body?.rows) ? body.rows : [];
+    if (!rows.length) return res.status(400).json({ error: "Nenhuma linha para gravar." });
+
+    await supabase.from("folha_provisao_13").delete().eq("year", year).eq("month", month);
+    const payload = rows
+      .map((r: any) => ({
+        year,
+        month,
+        codigo_funcionario: String(r.codigo ?? r.codigo_funcionario ?? "").trim(),
+        nome: String(r.nome ?? "").trim(),
+        salario_13: Number(r.salario_13) || 0,
+        media_vantagens: Number(r.media_vantagens) || 0,
+        adiantamento_13: Number(r.adiantamento_13) || 0,
+        valor_devido: Number(r.valor_devido) || 0,
+        valor_mes: Number(r.valor_mes) || 0,
+        inss: Number(r.inss) || 0,
+        fgts: Number(r.fgts) || 0,
+        pis: Number(r.pis) || 0,
+        avos: r.avos ? String(r.avos) : null,
+        updated_at: new Date().toISOString(),
+      }))
+      .filter((r) => r.codigo_funcionario);
+
+    const { error } = await supabase.from("folha_provisao_13").insert(payload);
+    if (error) {
+      console.error("folha_provisao_13 insert:", error);
+      return res.status(500).json({
+        error: "Não foi possível gravar a provisão de 13º. Execute sql/52_folha_fgts_guias.sql.",
+      });
+    }
+
+    const fgts13Total = payload.reduce((s, r) => s + (Number(r.fgts) || 0), 0);
+    const { data: guiaExistente13 } = await supabase
+      .from("folha_fgts_guia_mensal")
+      .select("*")
+      .eq("year", year)
+      .eq("month", month)
+      .maybeSingle();
+    await supabase.from("folha_fgts_guia_mensal").upsert(
+      {
+        year,
+        month,
+        fgts_normal: Number((guiaExistente13 as any)?.fgts_normal) || 0,
+        fgts_ferias: Number((guiaExistente13 as any)?.fgts_ferias) || 0,
+        fgts_13: fgts13Total,
+        fgts_outros: Number((guiaExistente13 as any)?.fgts_outros) || 0,
+        fonte_normal: (guiaExistente13 as any)?.fonte_normal ?? null,
+        fonte_ferias: (guiaExistente13 as any)?.fonte_ferias ?? null,
+        fonte_13: "Guia Provisão 13º (importação)",
+        fonte_outros: (guiaExistente13 as any)?.fonte_outros ?? null,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "year,month" }
+    );
+
+    res.json({ ok: true, rows: payload.length, fgts_13: fgts13Total });
   });
 
   // ====================================================
@@ -6240,41 +7101,69 @@ export function createApp() {
   // Grava as Requisições Sintética do mês em requisicoes_rows (substitui a competência).
   // Alimenta Apuração de Resultados › Requisição Sintética (Resumo + meses).
   app.post("/api/import/requisicoes-sintetica/commit", async (req, res) => {
-    const { setores, month, year, file_name } = req.body as {
+    const { setores, month, year, file_name, import_scope, week_index } = req.body as {
       setores: {
         codigo: number;
         nome: string;
-        grupos: { codigo: number; nome: string; valor: number; destino?: string | null }[];
+        grupos: { codigo: number; nome: string; valor: number; destino?: string | null; cmv_subtipo?: string | null }[];
       }[];
       month: number;
       year: number;
       file_name?: string;
+      import_scope?: ImportScope;
+      week_index?: number;
     };
     if (!Array.isArray(setores) || !setores.length)
       return res.status(400).json({ error: "Nenhum setor enviado." });
     if (!month || !year || month < 1 || month > 12 || year < 2000)
       return res.status(400).json({ error: "Mês/ano inválido." });
 
-    const DESTINOS_VALIDOS = new Set(["cmv", "uso_consumo", "investimento"]);
+    const periodParsed = parseImportPeriodInput(year, month, import_scope, week_index);
+    if ("error" in periodParsed) return res.status(400).json({ error: periodParsed.error });
+    const { scope, weekIndex, periodKey } = periodParsed;
+
+    const historyId = await logImportHistory({
+      source_type: "requisicoes_sintetica",
+      file_name: file_name || `Requisições Sintética ${month}/${year}`,
+      status: "success",
+      year: Number(year),
+      month: Number(month),
+      import_scope: scope,
+      period_key: periodKey,
+      week_index: weekIndex,
+      records_count: 0,
+      summary: { import_scope: scope, period_key: periodKey },
+      user: (req as any).user,
+    });
+
     const rows: Record<string, any>[] = [];
     for (const setor of setores) {
       const setorCodigo = Number(setor.codigo);
       const setorNome = String(setor.nome ?? "").trim();
       if (!Number.isFinite(setorCodigo) || !setorNome) continue;
+      const resolvedSector = await resolveSectorByCode(supabase, setorCodigo, setorNome, sectorCache);
       for (const grupo of setor.grupos ?? []) {
         const grupoCodigo = Number(grupo.codigo);
         const grupoNome = String(grupo.nome ?? "").trim();
         if (!Number.isFinite(grupoCodigo) || !grupoNome) continue;
         const destino = String(grupo.destino ?? "").trim();
+        const destinoNorm = isReqDestinoValid(destino) ? destino : null;
+        const cmvSubtipo = resolveReqCmvSubtipo(grupoCodigo, destinoNorm ?? '', grupo.cmv_subtipo);
         rows.push({
           year: Number(year),
           month: Number(month),
+          import_scope: scope,
+          period_key: periodKey,
+          week_index: weekIndex,
+          import_history_id: historyId,
           setor_codigo: setorCodigo,
           setor_nome: setorNome,
+          sector_id: resolvedSector?.id ?? null,
           grupo_codigo: grupoCodigo,
           grupo_nome: grupoNome,
           valor: Number(grupo.valor) || 0,
-          destino: DESTINOS_VALIDOS.has(destino) ? destino : null,
+          destino: destinoNorm,
+          cmv_subtipo: cmvSubtipo,
         });
       }
     }
@@ -6285,7 +7174,9 @@ export function createApp() {
       .from("requisicoes_rows")
       .delete()
       .eq("year", Number(year))
-      .eq("month", Number(month));
+      .eq("month", Number(month))
+      .eq("import_scope", scope)
+      .eq("period_key", periodKey);
     if (delErr) {
       console.error("requisicoes_rows delete (execute sql/14_requisicoes_rows.sql):", delErr);
       return res.status(500).json({
@@ -6301,27 +7192,57 @@ export function createApp() {
     }
 
     const totalGeral = rows.reduce((s, r) => s + Number(r.valor || 0), 0);
-    try {
-      await logImportHistory({
-        source_type: "requisicoes_sintetica",
-        file_name: file_name || `Requisições Sintética ${month}/${year}`,
-        status: "success",
-        year: Number(year),
-        month: Number(month),
-        records_count: rows.length,
-        total_amount: totalGeral,
-        summary: {
-          setores: setores.length,
-          grupos: rows.length,
-          nao_classificados: rows.filter((r) => !r.destino).length,
-        },
-        user: (req as any).user,
-      });
-    } catch (e) {
-      console.error("Falha ao registrar histórico Requisições Sintética:", e);
+    if (historyId) {
+      await supabase
+        .from("import_history")
+        .update({
+          records_count: rows.length,
+          total_amount: totalGeral,
+          summary: {
+            import_scope: scope,
+            period_key: periodKey,
+            week_index: weekIndex,
+            setores: setores.length,
+            grupos: rows.length,
+            nao_classificados: rows.filter((r) => !r.destino).length,
+          },
+        })
+        .eq("id", historyId);
+    } else {
+      try {
+        await logImportHistory({
+          source_type: "requisicoes_sintetica",
+          file_name: file_name || `Requisições Sintética ${month}/${year}`,
+          status: "success",
+          year: Number(year),
+          month: Number(month),
+          import_scope: scope,
+          period_key: periodKey,
+          week_index: weekIndex,
+          records_count: rows.length,
+          total_amount: totalGeral,
+          summary: {
+            setores: setores.length,
+            grupos: rows.length,
+            nao_classificados: rows.filter((r) => !r.destino).length,
+            import_scope: scope,
+            period_key: periodKey,
+          },
+          user: (req as any).user,
+        });
+      } catch (e) {
+        console.error("Falha ao registrar histórico Requisições Sintética:", e);
+      }
     }
 
-    res.json({ success: true, imported: rows.length, total_geral: totalGeral });
+    res.json({
+      success: true,
+      imported: rows.length,
+      total_geral: totalGeral,
+      import_scope: scope,
+      period_key: periodKey,
+      week_index: weekIndex,
+    });
   });
 
   // ====================================================
@@ -6329,10 +7250,13 @@ export function createApp() {
   // ====================================================
   app.get("/api/requisicoes-sintetica/competencias", requireRole("admin", "finance", "controle", "manager"), async (req, res) => {
     const year = Number((req.query as { year?: string }).year) || new Date().getFullYear();
+    const scopeParam = String((req.query as { scope?: string }).scope || "fechamento");
+    const scope = scopeParam === "acompanhamento" ? "acompanhamento" : "fechamento";
     const { data, error } = await supabase
       .from("requisicoes_rows")
-      .select("month, valor, setor_codigo")
-      .eq("year", year);
+      .select("month, valor, setor_codigo, import_scope, period_key, week_index")
+      .eq("year", year)
+      .eq("import_scope", scope);
     if (error) {
       console.error(error);
       return res.status(500).json({
@@ -6352,6 +7276,7 @@ export function createApp() {
 
     res.json({
       year,
+      import_scope: scope,
       months: Array.from(byMonth.entries()).map(([month, agg]) => ({
         month,
         importado: agg.grupos > 0,
@@ -6365,17 +7290,40 @@ export function createApp() {
   app.get("/api/requisicoes-sintetica", requireRole("admin", "finance", "controle", "manager"), async (req, res) => {
     const year = Number((req.query as { year?: string }).year) || new Date().getFullYear();
     const month = Number((req.query as { month?: string }).month);
+    const scopeParam = String((req.query as { scope?: string }).scope || "fechamento");
+    const scope = scopeParam === "acompanhamento" ? "acompanhamento" : "fechamento";
+    const weekIndex = Number((req.query as { week_index?: string }).week_index);
     if (!month || month < 1 || month > 12) {
       return res.status(400).json({ error: "Informe month (1-12)." });
     }
 
-    const { data, error } = await supabase
+    let query = supabase
       .from("requisicoes_rows")
       .select("*")
       .eq("year", year)
       .eq("month", month)
+      .eq("import_scope", scope)
       .order("setor_codigo", { ascending: true })
       .order("grupo_codigo", { ascending: true });
+
+    if (scope === "acompanhamento" && Number.isFinite(weekIndex) && weekIndex >= 1 && weekIndex <= 5) {
+      query = query.eq("week_index", weekIndex);
+    } else if (scope === "acompanhamento") {
+      const { data: weekRows } = await supabase
+        .from("requisicoes_rows")
+        .select("week_index")
+        .eq("year", year)
+        .eq("month", month)
+        .eq("import_scope", "acompanhamento")
+        .order("week_index", { ascending: false })
+        .limit(1);
+      const latestWeek = Number((weekRows?.[0] as any)?.week_index);
+      if (Number.isFinite(latestWeek) && latestWeek >= 1) {
+        query = query.eq("week_index", latestWeek);
+      }
+    }
+
+    const { data, error } = await query;
 
     if (error) {
       console.error(error);
@@ -6385,8 +7333,10 @@ export function createApp() {
     }
 
     const rows = data ?? [];
+    const corrections = await fetchCorrectionsForCompetencia(supabase, "requisicoes_rows", year, month);
     const setoresMap = new Map<number, { codigo: number; nome: string; total: number; grupos: any[] }>();
-    const porDestino: Record<string, number> = { cmv: 0, uso_consumo: 0, investimento: 0, "": 0 };
+    const porDestino = emptyReqDestinoTotals();
+    const porCmvSubtipo = emptyReqCmvSubtipoTotals();
     for (const r of rows as any[]) {
       const codigo = Number(r.setor_codigo);
       let setor = setoresMap.get(codigo);
@@ -6394,30 +7344,112 @@ export function createApp() {
         setor = { codigo, nome: String(r.setor_nome ?? ""), total: 0, grupos: [] };
         setoresMap.set(codigo, setor);
       }
-      const valor = Number(r.valor) || 0;
+      const rowId = Number(r.id);
+      const valorMeta = applyFieldCorrection(
+        Number(r.valor) || 0,
+        getCorrectionFromMap(corrections, "requisicoes_rows", rowId, "valor")
+      );
+      const valor = valorMeta.value;
       setor.total += valor;
       setor.grupos.push({
+        id: rowId,
         codigo: Number(r.grupo_codigo),
         nome: String(r.grupo_nome ?? ""),
         valor,
+        valor_meta: valorMeta,
         destino: r.destino ?? "",
+        cmv_subtipo: r.cmv_subtipo ?? "",
+        setor_codigo: codigo,
       });
-      const destino = String(r.destino ?? "");
-      porDestino[destino in porDestino ? destino : ""] += valor;
+      addReqDestinoTotal(porDestino, String(r.destino ?? ""), valor);
+      addReqCmvSubtipoTotal(porCmvSubtipo, String(r.destino ?? ""), String(r.cmv_subtipo ?? ""), valor);
     }
 
     res.json({
       year,
       month,
+      import_scope: scope,
       setores: Array.from(setoresMap.values()),
       summary: {
         setores: setoresMap.size,
         grupos: rows.length,
         total_geral: rows.reduce((s: number, r: any) => s + (Number(r.valor) || 0), 0),
         por_destino: porDestino,
+        por_cmv_subtipo: porCmvSubtipo,
         nao_classificados: (rows as any[]).filter((r) => !r.destino).length,
+        cmv_sem_subtipo: (rows as any[]).filter(
+          (r) => isReqDestinoCmv(r.destino) && !isReqCmvSubtipoValid(r.cmv_subtipo)
+        ).length,
       },
     });
+  });
+
+  // Atualiza a classificação (destino e subtipo CMV) de um grupo já importado.
+  app.patch("/api/requisicoes-sintetica/destino", requireRole("admin", "finance", "controle"), async (req, res) => {
+    const year = Number((req.body as any)?.year);
+    const month = Number((req.body as any)?.month);
+    const setorCodigo = Number((req.body as any)?.setor_codigo);
+    const grupoCodigo = Number((req.body as any)?.grupo_codigo);
+    const destinoRaw = (req.body as any)?.destino;
+    const cmvSubtipoRaw = (req.body as any)?.cmv_subtipo;
+
+    if (!year || !month || month < 1 || month > 12) {
+      return res.status(400).json({ error: "Informe ano e mês válidos." });
+    }
+    if (!Number.isFinite(setorCodigo) || !Number.isFinite(grupoCodigo)) {
+      return res.status(400).json({ error: "Informe setor_codigo e grupo_codigo." });
+    }
+
+    const patch: Record<string, string | null> = {};
+    if (destinoRaw !== undefined) {
+      const destinoStr = String(destinoRaw ?? "").trim();
+      patch.destino = isReqDestinoValid(destinoStr) ? destinoStr : null;
+      if (!isReqDestinoCmv(patch.destino)) {
+        patch.cmv_subtipo = null;
+      }
+    }
+    if (cmvSubtipoRaw !== undefined) {
+      const subStr = String(cmvSubtipoRaw ?? "").trim();
+      patch.cmv_subtipo = isReqCmvSubtipoValid(subStr) ? subStr : null;
+    }
+
+    if (!Object.keys(patch).length) {
+      return res.status(400).json({ error: "Informe destino e/ou cmv_subtipo." });
+    }
+
+    if (patch.cmv_subtipo && !patch.destino) {
+      const { data: current } = await supabase
+        .from("requisicoes_rows")
+        .select("destino")
+        .eq("year", year)
+        .eq("month", month)
+        .eq("setor_codigo", setorCodigo)
+        .eq("grupo_codigo", grupoCodigo)
+        .maybeSingle();
+      if (!isReqDestinoCmv((current as any)?.destino)) {
+        return res.status(400).json({ error: "Subtipo CMV só se aplica a destino CMV ou Crédito CMV." });
+      }
+    }
+
+    const { data, error } = await supabase
+      .from("requisicoes_rows")
+      .update(patch)
+      .eq("year", year)
+      .eq("month", month)
+      .eq("setor_codigo", setorCodigo)
+      .eq("grupo_codigo", grupoCodigo)
+      .select("id, destino, cmv_subtipo")
+      .maybeSingle();
+
+    if (error) {
+      console.error("requisicoes_rows destino update:", error);
+      return res.status(500).json({ error: "Não foi possível atualizar a classificação." });
+    }
+    if (!data) {
+      return res.status(404).json({ error: "Grupo não encontrado nesta competência." });
+    }
+
+    res.json({ success: true, destino: data.destino ?? null, cmv_subtipo: data.cmv_subtipo ?? null });
   });
 
   // ====================================================
@@ -6447,6 +7479,79 @@ export function createApp() {
   const cmvTableMissing = (error: any) =>
     String(error?.message || "").toLowerCase().includes("cmv_apuracao") ||
     error?.code === "42P01";
+
+  const cmvHistoricoTableMissing = (error: any) =>
+    String(error?.message || "").toLowerCase().includes("cmv_apuracao_historico") ||
+    error?.code === "42P01";
+
+  const mapCmvHistoricoRow = (row: any) => ({
+    id: Number(row.id),
+    year: Number(row.year),
+    month: Number(row.month),
+    apuracao_scope: String(row.apuracao_scope ?? "acompanhamento"),
+    periodo_inicio: String(row.periodo_inicio).slice(0, 10),
+    periodo_fim: String(row.periodo_fim).slice(0, 10),
+    period_key: String(row.period_key ?? ""),
+    period_label: String(row.period_label ?? ""),
+    venda_direta_total: Number(row.venda_direta_total) || 0,
+    venda_direta_bebidas: Number(row.venda_direta_bebidas) || 0,
+    cafe_manha_pensao: Number(row.cafe_manha_pensao) || 0,
+    cafe_manha_chds: Number(row.cafe_manha_chds) || 0,
+    almoco_jantar_pensao: Number(row.almoco_jantar_pensao) || 0,
+    almoco_jantar_chds: Number(row.almoco_jantar_chds) || 0,
+    almoco_jantar_antec: Number(row.almoco_jantar_antec) || 0,
+    ci_total: Number(row.ci_total) || 0,
+    ci_bebidas: Number(row.ci_bebidas) || 0,
+    requisicoes_total: Number(row.requisicoes_total) || 0,
+    requisicoes_bebidas: Number(row.requisicoes_bebidas) || 0,
+    refeitorio: Number(row.refeitorio) || 0,
+    outros: Number(row.outros) || 0,
+    aquamania: Number(row.aquamania) || 0,
+    limite_pct: Number(row.limite_pct) || 0.29,
+    receita_considerada: Number(row.receita_considerada) || 0,
+    custo_ab: Number(row.custo_ab) || 0,
+    cmv_apurado: Number(row.cmv_apurado) || 0,
+    created_at: row.created_at ?? null,
+    created_by: row.created_by ?? null,
+  });
+
+  const buildCmvRecordFromBody = (body: Record<string, any>, year: number, month: number) => {
+    const num = (v: any) => {
+      if (v == null || v === "") return 0;
+      const n = Number(String(v).replace(",", "."));
+      return Number.isFinite(n) ? n : 0;
+    };
+    const record: Record<string, any> = { year, month };
+    for (const field of CMV_NUMERIC_FIELDS) record[field] = num(body?.[field]);
+    if (!Number.isFinite(record.limite_pct) || record.limite_pct <= 0) record.limite_pct = 0.29;
+    return record;
+  };
+
+  // Histórico de apurações de uma competência.
+  app.get("/api/cmv/historico", requireRole("admin", "finance", "controle", "manager"), async (req, res) => {
+    const year = Number((req.query as { year?: string }).year) || new Date().getFullYear();
+    const month = Number((req.query as { month?: string }).month);
+    if (!month || month < 1 || month > 12) {
+      return res.status(400).json({ error: "Informe o mês (1-12)." });
+    }
+    const { data, error } = await supabase
+      .from("cmv_apuracao_historico")
+      .select("*")
+      .eq("year", year)
+      .eq("month", month)
+      .order("periodo_fim", { ascending: true })
+      .order("created_at", { ascending: true });
+    if (error) {
+      console.error(error);
+      if (cmvHistoricoTableMissing(error)) {
+        return res.status(500).json({
+          error: "Tabela de histórico CMV ausente. Execute sql/43_cmv_apuracao_historico.sql no Supabase.",
+        });
+      }
+      return res.status(500).json({ error: "Não foi possível carregar o histórico do CMV." });
+    }
+    res.json({ year, month, rows: (data ?? []).map(mapCmvHistoricoRow) });
+  });
 
   // Todas as competências do ano (usado no Resumo e no Sintético).
   app.get("/api/cmv/ano", requireRole("admin", "finance", "controle", "manager"), async (req, res) => {
@@ -6487,6 +7592,13 @@ export function createApp() {
       .eq("year", year)
       .eq("month", month)
       .maybeSingle();
+    const { data: historicoRows, error: histErr } = await supabase
+      .from("cmv_apuracao_historico")
+      .select("*")
+      .eq("year", year)
+      .eq("month", month)
+      .order("periodo_fim", { ascending: true })
+      .order("created_at", { ascending: true });
     if (error) {
       console.error(error);
       if (cmvTableMissing(error)) {
@@ -6496,10 +7608,23 @@ export function createApp() {
       }
       return res.status(500).json({ error: "Não foi possível carregar o CMV." });
     }
-    res.json({ year, month, importado: Boolean(data), row: data ?? null });
+    if (histErr && !cmvHistoricoTableMissing(histErr)) {
+      console.error(histErr);
+      return res.status(500).json({ error: "Não foi possível carregar o histórico do CMV." });
+    }
+    const historico = (historicoRows ?? []).map(mapCmvHistoricoRow);
+    const latest = historico.length ? historico[historico.length - 1] : null;
+    res.json({
+      year,
+      month,
+      importado: Boolean(data) || historico.length > 0,
+      row: data ?? null,
+      historico,
+      latest,
+    });
   });
 
-  // Salva (upsert) os valores digitados de uma competência.
+  // Registra nova apuração (histórico — não sobrescreve anteriores).
   app.post("/api/cmv", requireRole("admin", "finance", "controle"), async (req, res) => {
     const body = req.body as Record<string, any>;
     const year = Number(body?.year);
@@ -6509,33 +7634,528 @@ export function createApp() {
     if (!Number.isFinite(month) || month < 1 || month > 12)
       return res.status(400).json({ error: "month deve estar entre 1 e 12" });
 
+    const period = parseCmvApuracaoPeriod(
+      year,
+      month,
+      body?.apuracao_scope,
+      body?.periodo_fim_dia
+    );
+    if ("error" in period) return res.status(400).json({ error: period.error });
+
+    const record = buildCmvRecordFromBody(body, year, month);
+    const inputs = toCmvInputs(record);
+    const derived = computeCmv(inputs);
+    const user = (req as any).user;
+    const created_by = user?.name ?? user?.email ?? null;
+
+    const historicoInsert = {
+      year,
+      month,
+      apuracao_scope: period.scope,
+      periodo_inicio: period.periodo_inicio,
+      periodo_fim: period.periodo_fim,
+      period_key: period.period_key,
+      period_label: period.period_label,
+      ...Object.fromEntries(CMV_NUMERIC_FIELDS.map((f) => [f, record[f]])),
+      receita_considerada: derived.receita_considerada,
+      custo_ab: derived.custo_ab,
+      cmv_apurado: derived.cmv_apurado,
+      created_by,
+    };
+
+    const { data: historico, error: histError } = await supabase
+      .from("cmv_apuracao_historico")
+      .insert(historicoInsert)
+      .select("*")
+      .single();
+    if (histError) {
+      console.error(histError);
+      if (cmvHistoricoTableMissing(histError)) {
+        return res.status(500).json({
+          error: "Tabela de histórico CMV ausente. Execute sql/43_cmv_apuracao_historico.sql no Supabase.",
+        });
+      }
+      if (histError.code === "23505") {
+        return res.status(409).json({
+          error: `Já existe apuração para o período "${period.period_label}". Escolha outro dia final ou altere o período.`,
+        });
+      }
+      return res.status(500).json({ error: "Não foi possível registrar a apuração." });
+    }
+
+    let fechamentoRow = null;
+    if (period.scope === "fechamento") {
+      const upsertRecord = {
+        ...record,
+        updated_at: new Date().toISOString(),
+        updated_by: created_by,
+      };
+      const { data, error } = await supabase
+        .from("cmv_apuracao")
+        .upsert(upsertRecord, { onConflict: "year,month" })
+        .select("*")
+        .single();
+      if (error) {
+        console.error(error);
+        if (cmvTableMissing(error)) {
+          return res.status(500).json({
+            error: "Tabela de CMV ausente. Execute sql/36_cmv_apuracao.sql no Supabase.",
+          });
+        }
+        return res.status(500).json({
+          error: "Apuração registrada no histórico, mas falhou ao atualizar o fechamento mensal.",
+        });
+      }
+      fechamentoRow = data;
+    }
+
+    res.json({
+      ok: true,
+      historico: mapCmvHistoricoRow(historico),
+      row: fechamentoRow,
+      period_label: period.period_label,
+    });
+  });
+
+  const cmvTarifasTableMissing = (error: any) =>
+    String(error?.message || "").toLowerCase().includes("cmv_tarifas_config") ||
+    error?.code === "42P01";
+
+  const CMV_TARIFA_MOTIVOS = new Set([
+    "padrao",
+    "carnaval",
+    "reveillon",
+    "pacote",
+    "promocao",
+    "outro",
+  ]);
+
+  const CMV_TARIFA_MOTIVO_PRIORIDADE: Record<string, number> = {
+    padrao: 0,
+    promocao: 5,
+    pacote: 8,
+    carnaval: 10,
+    reveillon: 10,
+    outro: 5,
+  };
+
+  const parseIsoDateOnly = (value: unknown): string | null => {
+    const s = String(value ?? "").trim().slice(0, 10);
+    return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null;
+  };
+
+  const minusOneDayIso = (iso: string): string => {
+    const [y, m, d] = iso.split("-").map(Number);
+    const dt = new Date(Date.UTC(y, m - 1, d));
+    dt.setUTCDate(dt.getUTCDate() - 1);
+    return dt.toISOString().slice(0, 10);
+  };
+
+  const mapCmvTarifaRow = (row: any) => ({
+    id: Number(row.id),
+    nome: String(row.nome ?? ""),
+    motivo: String(row.motivo ?? "padrao"),
+    prioridade: Number(row.prioridade) || 0,
+    vigencia_inicio: String(row.vigencia_inicio).slice(0, 10),
+    vigencia_fim: row.vigencia_fim ? String(row.vigencia_fim).slice(0, 10) : null,
+    cafe_manha_adulto: Number(row.cafe_manha_adulto) || 0,
+    cafe_manha_crianca: Number(row.cafe_manha_crianca) || 0,
+    pensao_adulto: Number(row.pensao_adulto) || 0,
+    pensao_crianca: Number(row.pensao_crianca) || 0,
+    observacoes: row.observacoes ?? null,
+    created_at: row.created_at ?? null,
+    created_by_name: row.created_by_name ?? null,
+    encerrado_em: row.encerrado_em ?? null,
+  });
+
+  // Lista histórico de tarifas internas do CMV.
+  app.get("/api/cmv/tarifas", requireRole("admin", "finance", "controle", "manager"), async (_req, res) => {
+    const { data, error } = await supabase
+      .from("cmv_tarifas_config")
+      .select("*")
+      .order("vigencia_inicio", { ascending: false })
+      .order("prioridade", { ascending: false })
+      .order("id", { ascending: false });
+    if (error) {
+      console.error(error);
+      if (cmvTarifasTableMissing(error)) {
+        return res.status(500).json({
+          error: "Tabela de tarifas CMV ausente. Execute sql/41_cmv_tarifas_config.sql no Supabase.",
+        });
+      }
+      return res.status(500).json({ error: "Não foi possível carregar as tarifas do CMV." });
+    }
+    res.json({ rows: (data ?? []).map(mapCmvTarifaRow) });
+  });
+
+  // Tarifas vigentes em uma data (prioridade + período mais específico).
+  app.get("/api/cmv/tarifas/vigente", requireRole("admin", "finance", "controle", "manager"), async (req, res) => {
+    const date =
+      parseIsoDateOnly((req.query as { date?: string }).date) ||
+      new Date().toISOString().slice(0, 10);
+    const { data, error } = await supabase.from("cmv_tarifas_config").select("*");
+    if (error) {
+      console.error(error);
+      if (cmvTarifasTableMissing(error)) {
+        return res.status(500).json({
+          error: "Tabela de tarifas CMV ausente. Execute sql/41_cmv_tarifas_config.sql no Supabase.",
+        });
+      }
+      return res.status(500).json({ error: "Não foi possível resolver as tarifas vigentes." });
+    }
+    const rows = (data ?? []).map(mapCmvTarifaRow);
+    const matching = rows.filter((row) => {
+      if (row.vigencia_inicio > date) return false;
+      if (row.vigencia_fim && row.vigencia_fim < date) return false;
+      return true;
+    });
+    matching.sort((a, b) => {
+      if (b.prioridade !== a.prioridade) return b.prioridade - a.prioridade;
+      const range = (r: typeof a) => {
+        const end = r.vigencia_fim || r.vigencia_inicio;
+        const [y1, m1, d1] = r.vigencia_inicio.split("-").map(Number);
+        const [y2, m2, d2] = end.split("-").map(Number);
+        const t1 = Date.UTC(y1, m1 - 1, d1);
+        const t2 = Date.UTC(y2, m2 - 1, d2);
+        return Math.max(1, Math.round((t2 - t1) / 86400000) + 1);
+      };
+      const ra = range(a);
+      const rb = range(b);
+      if (ra !== rb) return ra - rb;
+      return b.vigencia_inicio.localeCompare(a.vigencia_inicio);
+    });
+    const config = matching[0] ?? null;
+    const rates = config
+      ? {
+          cafe_manha_adulto: config.cafe_manha_adulto,
+          cafe_manha_crianca: config.cafe_manha_crianca,
+          pensao_adulto: config.pensao_adulto,
+          pensao_crianca: config.pensao_crianca,
+        }
+      : {
+          cafe_manha_adulto: 70,
+          cafe_manha_crianca: 35,
+          pensao_adulto: 130,
+          pensao_crianca: 65,
+        };
+    res.json({ date, config, rates, fallback: !config });
+  });
+
+  // Nova vigência de tarifas (histórico preservado — insert only).
+  app.post("/api/cmv/tarifas", requireRole("admin", "finance", "controle"), async (req, res) => {
+    const body = req.body as Record<string, any>;
+    const nome = String(body?.nome ?? "").trim();
+    const motivo = String(body?.motivo ?? "padrao").trim().toLowerCase();
+    const vigencia_inicio = parseIsoDateOnly(body?.vigencia_inicio);
+    const vigencia_fim = body?.vigencia_fim ? parseIsoDateOnly(body.vigencia_fim) : null;
+    const fecharPadraoAnterior = body?.fechar_padrao_anterior !== false;
+
+    if (!nome) return res.status(400).json({ error: "Informe o nome da configuração." });
+    if (!CMV_TARIFA_MOTIVOS.has(motivo)) {
+      return res.status(400).json({ error: "Motivo inválido." });
+    }
+    if (!vigencia_inicio) {
+      return res.status(400).json({ error: "Informe a vigência inicial (AAAA-MM-DD)." });
+    }
+    if (vigencia_fim && vigencia_fim < vigencia_inicio) {
+      return res.status(400).json({ error: "A vigência final deve ser igual ou posterior à inicial." });
+    }
+
     const num = (v: any) => {
       if (v == null || v === "") return 0;
       const n = Number(String(v).replace(",", "."));
-      return Number.isFinite(n) ? n : 0;
+      return Number.isFinite(n) && n >= 0 ? n : NaN;
     };
+    const cafe_manha_adulto = num(body?.cafe_manha_adulto);
+    const cafe_manha_crianca = num(body?.cafe_manha_crianca);
+    const pensao_adulto = num(body?.pensao_adulto);
+    const pensao_crianca = num(body?.pensao_crianca);
+    if ([cafe_manha_adulto, cafe_manha_crianca, pensao_adulto, pensao_crianca].some((n) => Number.isNaN(n))) {
+      return res.status(400).json({ error: "Informe valores numéricos válidos (≥ 0) para todas as tarifas." });
+    }
 
-    const record: Record<string, any> = { year, month };
-    for (const field of CMV_NUMERIC_FIELDS) record[field] = num(body?.[field]);
-    if (!Number.isFinite(record.limite_pct) || record.limite_pct <= 0) record.limite_pct = 0.29;
-    record.updated_at = new Date().toISOString();
-    record.updated_by = (req as any).user?.name ?? (req as any).user?.email ?? null;
+    const prioridade =
+      Number.isFinite(Number(body?.prioridade)) && Number(body?.prioridade) >= 0
+        ? Number(body.prioridade)
+        : CMV_TARIFA_MOTIVO_PRIORIDADE[motivo] ?? 0;
+
+    const user = (req as any).user;
+    const created_by_name = user?.name ?? user?.email ?? null;
+    const created_by_id = user?.id != null ? Number(user.id) : null;
+
+    if (motivo === "padrao" && fecharPadraoAnterior) {
+      const fimAnterior = minusOneDayIso(vigencia_inicio);
+      const { error: closeErr } = await supabase
+        .from("cmv_tarifas_config")
+        .update({
+          vigencia_fim: fimAnterior,
+          encerrado_em: new Date().toISOString(),
+        })
+        .eq("motivo", "padrao")
+        .is("vigencia_fim", null)
+        .lt("vigencia_inicio", vigencia_inicio);
+      if (closeErr) {
+        console.error(closeErr);
+        if (cmvTarifasTableMissing(closeErr)) {
+          return res.status(500).json({
+            error: "Tabela de tarifas CMV ausente. Execute sql/41_cmv_tarifas_config.sql no Supabase.",
+          });
+        }
+        return res.status(500).json({ error: "Não foi possível encerrar a tarifa padrão anterior." });
+      }
+    }
 
     const { data, error } = await supabase
-      .from("cmv_apuracao")
-      .upsert(record, { onConflict: "year,month" })
+      .from("cmv_tarifas_config")
+      .insert({
+        nome,
+        motivo,
+        prioridade,
+        vigencia_inicio,
+        vigencia_fim,
+        cafe_manha_adulto,
+        cafe_manha_crianca,
+        pensao_adulto,
+        pensao_crianca,
+        observacoes: body?.observacoes ? String(body.observacoes).trim() : null,
+        created_by_id: Number.isFinite(created_by_id) ? created_by_id : null,
+        created_by_name,
+      })
+      .select("*")
+      .single();
+
+    if (error) {
+      console.error(error);
+      if (cmvTarifasTableMissing(error)) {
+        return res.status(500).json({
+          error: "Tabela de tarifas CMV ausente. Execute sql/41_cmv_tarifas_config.sql no Supabase.",
+        });
+      }
+      return res.status(500).json({ error: "Não foi possível salvar a nova vigência de tarifas." });
+    }
+    res.json({ ok: true, row: mapCmvTarifaRow(data) });
+  });
+
+  // Encerra antecipadamente uma vigência (mantém histórico).
+  app.patch("/api/cmv/tarifas/:id/encerrar", requireRole("admin", "finance", "controle"), async (req, res) => {
+    const id = Number((req.params as { id?: string }).id);
+    if (!Number.isFinite(id) || id <= 0) {
+      return res.status(400).json({ error: "ID inválido." });
+    }
+    const vigencia_fim =
+      parseIsoDateOnly((req.body as { vigencia_fim?: string })?.vigencia_fim) ||
+      new Date().toISOString().slice(0, 10);
+
+    const { data: existing, error: loadErr } = await supabase
+      .from("cmv_tarifas_config")
+      .select("*")
+      .eq("id", id)
+      .maybeSingle();
+    if (loadErr) {
+      console.error(loadErr);
+      return res.status(500).json({ error: "Não foi possível carregar a vigência." });
+    }
+    if (!existing) return res.status(404).json({ error: "Configuração não encontrada." });
+    const ini = String(existing.vigencia_inicio).slice(0, 10);
+    if (vigencia_fim < ini) {
+      return res.status(400).json({ error: "A data de encerramento deve ser igual ou posterior ao início da vigência." });
+    }
+
+    const { data, error } = await supabase
+      .from("cmv_tarifas_config")
+      .update({
+        vigencia_fim,
+        encerrado_em: new Date().toISOString(),
+      })
+      .eq("id", id)
       .select("*")
       .single();
     if (error) {
       console.error(error);
-      if (cmvTableMissing(error)) {
+      return res.status(500).json({ error: "Não foi possível encerrar a vigência." });
+    }
+    res.json({ ok: true, row: mapCmvTarifaRow(data) });
+  });
+
+  const cmvMetaTableMissing = (error: any) =>
+    String(error?.message || "").toLowerCase().includes("cmv_meta_config") ||
+    error?.code === "42P01";
+
+  const mapCmvMetaRow = (row: any) => ({
+    id: Number(row.id),
+    nome: String(row.nome ?? ""),
+    meta_pct: Number(row.meta_pct) || 0.29,
+    vigencia_inicio: String(row.vigencia_inicio).slice(0, 10),
+    vigencia_fim: row.vigencia_fim ? String(row.vigencia_fim).slice(0, 10) : null,
+    observacoes: row.observacoes ?? null,
+    created_at: row.created_at ?? null,
+    created_by_name: row.created_by_name ?? null,
+    encerrado_em: row.encerrado_em ?? null,
+  });
+
+  app.get("/api/cmv/meta", requireRole("admin", "finance", "controle", "manager"), async (_req, res) => {
+    const { data, error } = await supabase
+      .from("cmv_meta_config")
+      .select("*")
+      .order("vigencia_inicio", { ascending: false })
+      .order("id", { ascending: false });
+    if (error) {
+      console.error(error);
+      if (cmvMetaTableMissing(error)) {
         return res.status(500).json({
-          error: "Tabela de CMV ausente. Execute sql/36_cmv_apuracao.sql no Supabase.",
+          error: "Tabela de meta CMV ausente. Execute sql/42_cmv_meta_config.sql no Supabase.",
         });
       }
-      return res.status(500).json({ error: "Não foi possível salvar o CMV." });
+      return res.status(500).json({ error: "Não foi possível carregar a meta de CMV." });
     }
-    res.json({ ok: true, row: data });
+    res.json({ rows: (data ?? []).map(mapCmvMetaRow) });
+  });
+
+  app.get("/api/cmv/meta/vigente", requireRole("admin", "finance", "controle", "manager"), async (req, res) => {
+    const date =
+      parseIsoDateOnly((req.query as { date?: string }).date) ||
+      new Date().toISOString().slice(0, 10);
+    const { data, error } = await supabase.from("cmv_meta_config").select("*");
+    if (error) {
+      console.error(error);
+      if (cmvMetaTableMissing(error)) {
+        return res.status(500).json({
+          error: "Tabela de meta CMV ausente. Execute sql/42_cmv_meta_config.sql no Supabase.",
+        });
+      }
+      return res.status(500).json({ error: "Não foi possível resolver a meta vigente." });
+    }
+    const rows = (data ?? []).map(mapCmvMetaRow);
+    const matching = rows.filter((row) => {
+      if (row.vigencia_inicio > date) return false;
+      if (row.vigencia_fim && row.vigencia_fim < date) return false;
+      return true;
+    });
+    matching.sort((a, b) => {
+      const range = (r: typeof a) => {
+        const end = r.vigencia_fim || r.vigencia_inicio;
+        const [y1, m1, d1] = r.vigencia_inicio.split("-").map(Number);
+        const [y2, m2, d2] = end.split("-").map(Number);
+        const t1 = Date.UTC(y1, m1 - 1, d1);
+        const t2 = Date.UTC(y2, m2 - 1, d2);
+        return Math.max(1, Math.round((t2 - t1) / 86400000) + 1);
+      };
+      return range(a) - range(b);
+    });
+    const config = matching[0] ?? null;
+    const meta_pct = config?.meta_pct && config.meta_pct > 0 ? config.meta_pct : 0.29;
+    res.json({ date, config, meta_pct, fallback: !config });
+  });
+
+  app.post("/api/cmv/meta", requireRole("admin", "finance", "controle"), async (req, res) => {
+    const body = req.body as Record<string, any>;
+    const nome = String(body?.nome ?? "").trim();
+    const vigencia_inicio = parseIsoDateOnly(body?.vigencia_inicio);
+    const vigencia_fim = body?.vigencia_fim ? parseIsoDateOnly(body.vigencia_fim) : null;
+    const fecharAnterior = body?.fechar_anterior !== false;
+
+    if (!nome) return res.status(400).json({ error: "Informe o nome da configuração." });
+    if (!vigencia_inicio) {
+      return res.status(400).json({ error: "Informe a vigência inicial (AAAA-MM-DD)." });
+    }
+    if (vigencia_fim && vigencia_fim < vigencia_inicio) {
+      return res.status(400).json({ error: "A vigência final deve ser igual ou posterior à inicial." });
+    }
+
+    let meta_pct = Number(String(body?.meta_pct ?? "").replace(",", "."));
+    if (meta_pct > 1 && meta_pct <= 100) meta_pct = meta_pct / 100;
+    if (!Number.isFinite(meta_pct) || meta_pct <= 0 || meta_pct > 1) {
+      return res.status(400).json({ error: "Informe a meta entre 0 e 100% (ex.: 29 ou 0,29)." });
+    }
+
+    const user = (req as any).user;
+    const created_by_name = user?.name ?? user?.email ?? null;
+    const created_by_id = user?.id != null ? Number(user.id) : null;
+
+    if (fecharAnterior) {
+      const fimAnterior = minusOneDayIso(vigencia_inicio);
+      const { error: closeErr } = await supabase
+        .from("cmv_meta_config")
+        .update({
+          vigencia_fim: fimAnterior,
+          encerrado_em: new Date().toISOString(),
+        })
+        .is("vigencia_fim", null)
+        .lt("vigencia_inicio", vigencia_inicio);
+      if (closeErr) {
+        console.error(closeErr);
+        if (cmvMetaTableMissing(closeErr)) {
+          return res.status(500).json({
+            error: "Tabela de meta CMV ausente. Execute sql/42_cmv_meta_config.sql no Supabase.",
+          });
+        }
+        return res.status(500).json({ error: "Não foi possível encerrar a meta anterior." });
+      }
+    }
+
+    const { data, error } = await supabase
+      .from("cmv_meta_config")
+      .insert({
+        nome,
+        meta_pct,
+        vigencia_inicio,
+        vigencia_fim,
+        observacoes: body?.observacoes ? String(body.observacoes).trim() : null,
+        created_by_id: Number.isFinite(created_by_id) ? created_by_id : null,
+        created_by_name,
+      })
+      .select("*")
+      .single();
+    if (error) {
+      console.error(error);
+      if (cmvMetaTableMissing(error)) {
+        return res.status(500).json({
+          error: "Tabela de meta CMV ausente. Execute sql/42_cmv_meta_config.sql no Supabase.",
+        });
+      }
+      return res.status(500).json({ error: "Não foi possível salvar a nova meta." });
+    }
+    res.json({ ok: true, row: mapCmvMetaRow(data) });
+  });
+
+  app.patch("/api/cmv/meta/:id/encerrar", requireRole("admin", "finance", "controle"), async (req, res) => {
+    const id = Number((req.params as { id?: string }).id);
+    if (!Number.isFinite(id) || id <= 0) {
+      return res.status(400).json({ error: "ID inválido." });
+    }
+    const vigencia_fim =
+      parseIsoDateOnly((req.body as { vigencia_fim?: string })?.vigencia_fim) ||
+      new Date().toISOString().slice(0, 10);
+
+    const { data: existing, error: loadErr } = await supabase
+      .from("cmv_meta_config")
+      .select("*")
+      .eq("id", id)
+      .maybeSingle();
+    if (loadErr) {
+      console.error(loadErr);
+      return res.status(500).json({ error: "Não foi possível carregar a vigência." });
+    }
+    if (!existing) return res.status(404).json({ error: "Configuração não encontrada." });
+    const ini = String(existing.vigencia_inicio).slice(0, 10);
+    if (vigencia_fim < ini) {
+      return res.status(400).json({ error: "A data de encerramento deve ser igual ou posterior ao início da vigência." });
+    }
+
+    const { data, error } = await supabase
+      .from("cmv_meta_config")
+      .update({
+        vigencia_fim,
+        encerrado_em: new Date().toISOString(),
+      })
+      .eq("id", id)
+      .select("*")
+      .single();
+    if (error) {
+      console.error(error);
+      return res.status(500).json({ error: "Não foi possível encerrar a vigência." });
+    }
+    res.json({ ok: true, row: mapCmvMetaRow(data) });
   });
 
   // ====================================================
@@ -6594,6 +8214,24 @@ export function createApp() {
       }
     }
     return grid;
+  };
+
+  // Extrai o nome da empresa no cabeçalho do Extrato Mensal (quando disponível).
+  const parseExtratoEmpresa = (grid: any[][]): string | null => {
+    for (let r = 0; r < Math.min(grid.length, 30); r++) {
+      const row = grid[r] || [];
+      for (let c = 0; c < row.length; c++) {
+        const cell = String(row[c] ?? "").trim();
+        if (!/^(empresa|raz[aã]o social|razao social)\s*:/i.test(cell)) continue;
+        const inline = cell.split(":").slice(1).join(":").trim();
+        if (inline) return inline.slice(0, 200);
+        for (let k = c + 1; k < Math.min(c + 4, row.length); k++) {
+          const next = String(row[k] ?? "").trim();
+          if (next) return next.slice(0, 200);
+        }
+      }
+    }
+    return null;
   };
 
   // Extrai a folha por funcionário a partir da grade do Extrato Mensal.
@@ -6665,7 +8303,6 @@ export function createApp() {
   };
 
   // Extrai a seção "Resumo por Rubrica" do Extrato Mensal (totais por rubrica do mês).
-  // Cada linha tem dois lados: esquerda (cols 1/8/19/24/31) e direita (cols 34/38/53/65/73).
   const parseExtratoRubricas = (grid: any[][]): any[] => {
     const toNum = (v: any) => {
       if (typeof v === "number") return Number.isFinite(v) ? v : 0;
@@ -6675,7 +8312,6 @@ export function createApp() {
       const n = Number(s);
       return Number.isFinite(n) ? n : 0;
     };
-    // Localiza o início do "Resumo por Rubrica".
     let start = -1;
     for (let r = 0; r < grid.length; r++) {
       if ((grid[r] || []).some((c) => String(c).trim() === "Resumo por Rubrica")) {
@@ -6685,26 +8321,63 @@ export function createApp() {
     }
     if (start < 0) return [];
 
+    const detectSide = (row: any[], startCol: number) => {
+      const defaults = { code: startCol, name: startCol + 7, horas: startCol + 18, val: startCol + 23, tipo: startCol + 30 };
+      const slice = row.slice(startCol, startCol + 40);
+      const horasIdx = slice.findIndex((c) => String(c ?? "").trim().toLowerCase() === "horas");
+      const valorIdx = slice.findIndex((c) => String(c ?? "").trim().toLowerCase() === "valor");
+      const tipoIdx = slice.findIndex((c) => String(c ?? "").trim().toLowerCase() === "tipo");
+      const codeIdx = slice.findIndex((c) => /c[oó]digo/i.test(String(c ?? "").trim()));
+      const nameIdx = slice.findIndex((c) => /rubrica|descri/i.test(String(c ?? "").trim()));
+      return {
+        code: codeIdx >= 0 ? startCol + codeIdx : defaults.code,
+        name: nameIdx >= 0 ? startCol + nameIdx : defaults.name,
+        horas: horasIdx >= 0 ? startCol + horasIdx : defaults.horas,
+        val: valorIdx >= 0 ? startCol + valorIdx : defaults.val,
+        tipo: tipoIdx >= 0 ? startCol + tipoIdx : defaults.tipo,
+      };
+    };
+
+    let leftCols = { code: 1, name: 8, horas: 19, val: 24, tipo: 31 };
+    let rightCols = { code: 34, name: 38, horas: 53, val: 65, tipo: 73 };
+    for (let r = start; r < Math.min(start + 6, grid.length); r++) {
+      const row = grid[r] || [];
+      if (row.some((c) => String(c ?? "").trim().toLowerCase() === "horas")) {
+        leftCols = detectSide(row, 0);
+        rightCols = detectSide(row, 33);
+        break;
+      }
+    }
+
     const out: any[] = [];
-    const addSide = (row: any[], codeCol: number, nameCol: number, horasCol: number, valCol: number, tipoCol: number) => {
-      const codigo = row[codeCol];
-      const nome = String(row[nameCol] ?? "").trim();
-      const tipo = String(row[tipoCol] ?? "").trim().toUpperCase();
+    const addSide = (row: any[], cols: typeof leftCols) => {
+      const codigo = row[cols.code];
+      const nome = String(row[cols.name] ?? "").trim();
+      const tipo = String(row[cols.tipo] ?? "").trim().toUpperCase();
       if ((typeof codigo !== "number" && !String(codigo ?? "").trim()) || !nome) return;
       if (tipo !== "P" && tipo !== "D") return;
+      const horasRaw = row[cols.horas];
+      const horas =
+        formatHorasCell(horasRaw) ||
+        (() => {
+          const val = toNum(row[cols.val]);
+          const h = toNum(horasRaw);
+          if (h > 0 && h < 500 && (val === 0 || h < val * 0.5)) return formatHorasCell(h);
+          return "";
+        })();
       out.push({
         codigo: String(codigo).trim(),
         nome,
-        horas: String(row[horasCol] ?? "").trim(),
-        valor: toNum(row[valCol]),
+        horas,
+        valor: toNum(row[cols.val]),
         tipo,
-        operacao: tipo === "D" ? "subtracao" : "soma", // padrão: P soma, D subtrai
+        operacao: tipo === "D" ? "subtracao" : "soma",
       });
     };
     for (let r = start + 1; r < grid.length; r++) {
       const row = grid[r] || [];
-      addSide(row, 1, 8, 19, 24, 31); // lado esquerdo
-      addSide(row, 34, 38, 53, 65, 73); // lado direito
+      addSide(row, leftCols);
+      addSide(row, rightCols);
     }
     return out;
   };
@@ -6769,18 +8442,29 @@ export function createApp() {
       let valor = 0;
       let horas = "";
       let descricao = "";
+      const numericCells: { c: number; v: unknown }[] = [];
       for (const cell of cells.slice(1)) {
         const s = String(cell.v).trim();
         const upper = s.toUpperCase();
-        if (upper === "P" || upper === "D") tipo = upper;
-        else if (typeof cell.v === "number" && Math.abs(cell.v) >= 0.001 && cell.v !== codigoRaw) {
-          if (Math.abs(cell.v) >= Math.abs(valor)) valor = toNum(cell.v);
-        } else if (s.length > 2 && !/^\d+([.,]\d+)?$/.test(s)) {
+        if (upper === "P" || upper === "D") {
+          tipo = upper;
+          continue;
+        }
+        if (typeof cell.v === "number" && Number.isFinite(cell.v)) {
+          numericCells.push(cell);
+          continue;
+        }
+        if (/^\d+([.,]\d+)?$/.test(s)) {
+          numericCells.push(cell);
+          continue;
+        }
+        if (s.length > 2) {
           if (!descricao || s.length > descricao.length) descricao = s;
-        } else if (/^\d+([.,]\d+)?$/.test(s) && !horas) {
-          horas = s;
         }
       }
+      const extracted = extractHorasValorFromCells(numericCells, codigoRaw);
+      valor = extracted.valor;
+      horas = extracted.horas;
       if (!tipo || !valor) continue;
       out.push({
         matricula: emp.matricula,
@@ -6977,6 +8661,7 @@ export function createApp() {
           error: "Não consegui ler o conteúdo do Excel. O arquivo pode estar corrompido ou em formato não suportado.",
         });
       }
+      const empresaNome = parseExtratoEmpresa(grid);
       const employees = parseExtratoEmployees(grid);
       if (!employees.length) {
         return res.status(422).json({
@@ -6986,7 +8671,7 @@ export function createApp() {
       }
 
       // Mapa opcional de cargos definidos na pré-visualização: [{ matricula, cargo_id }]
-      let cargoByMatricula = new Map<string, { cargo_id: number; cargo_name: string; sector_id: number; sector_name: string }>();
+      let cargoByMatricula = new Map<string, { cargo_id: number; cargo_name: string; sector_id: number; sector_name: string; sector_code: string }>();
       try {
         const rawMap = (req.body as any)?.cargo_map;
         const parsed = typeof rawMap === "string" ? JSON.parse(rawMap || "[]") : Array.isArray(rawMap) ? rawMap : [];
@@ -7000,7 +8685,7 @@ export function createApp() {
         if (cargoIds.length) {
           const { data: cargoRows } = await supabase
             .from("cargos")
-            .select("id, name, sector_id, sectors(name)")
+            .select("id, name, sector_id, sectors(name, code)")
             .in("id", cargoIds)
             .eq("active", true);
           const byId = new Map<number, any>((cargoRows ?? []).map((c: any) => [Number(c.id), c]));
@@ -7014,6 +8699,7 @@ export function createApp() {
               cargo_name: String(cargo.name ?? "").trim(),
               sector_id: Number(cargo.sector_id),
               sector_name: String(cargo.sectors?.name ?? "").trim(),
+              sector_code: String(cargo.sectors?.code ?? "").trim(),
             });
           }
         }
@@ -7029,6 +8715,31 @@ export function createApp() {
           e.setor = assigned.sector_name;
           e.cargo_id = assigned.cargo_id;
           e.sector_id = assigned.sector_id;
+          e.setor_codigo = assigned.sector_code;
+          if (!e.setor_codigo && assigned.sector_name) {
+            const resolvedFromCargo = await resolveSector(
+              supabase,
+              { name: assigned.sector_name, create: false },
+              sectorCache
+            );
+            if (resolvedFromCargo) {
+              e.setor_codigo = resolvedFromCargo.code;
+              e.sector_id = resolvedFromCargo.id;
+              e.setor = resolvedFromCargo.name;
+            }
+          }
+        } else if (e.setor) {
+          const parsedSetor = parseSectorText(String(e.setor));
+          const resolved = await resolveSector(
+            supabase,
+            { code: parsedSetor.code, name: parsedSetor.name || e.setor, create: true },
+            sectorCache
+          );
+          if (resolved) {
+            e.sector_id = resolved.id;
+            e.setor_codigo = resolved.code;
+            e.setor = resolved.name;
+          }
         }
       }
 
@@ -7048,11 +8759,17 @@ export function createApp() {
         base_fgts: e.base_fgts || 0,
         base_irrf: e.base_irrf || 0,
       }));
-      const setorByMatriculaImport = new Map<string, string>();
+      const setorByMatriculaImport = new Map<string, { nome: string; codigo: string | null; sector_id: number | null }>();
       for (const e of employees) {
         const mat = String(e.matricula ?? "").trim() || "SEM-MATRICULA";
         const setor = String(e.setor ?? "").trim();
-        if (setor) setorByMatriculaImport.set(mat, setor);
+        if (setor) {
+          setorByMatriculaImport.set(mat, {
+            nome: setor,
+            codigo: e.setor_codigo ? String(e.setor_codigo) : null,
+            sector_id: e.sector_id ?? null,
+          });
+        }
       }
 
       // Substitui a folha do mês.
@@ -7107,7 +8824,27 @@ export function createApp() {
         const mat = String(d.matricula ?? "").trim();
         const setor = String(d.setor ?? "").trim();
         if (mat && setor && !setorByMatriculaImport.has(mat)) {
-          setorByMatriculaImport.set(mat, setor);
+          const parsedSetor = parseSectorText(setor);
+          const resolved = await resolveSector(
+            supabase,
+            { code: parsedSetor.code, name: parsedSetor.name || setor, create: true },
+            sectorCache
+          );
+          setorByMatriculaImport.set(mat, {
+            nome: resolved?.name ?? setor,
+            codigo: resolved?.code ?? parsedSetor.code,
+            sector_id: resolved?.id ?? null,
+          });
+          if (resolved) {
+            d.setor = resolved.name;
+            d.setor_codigo = resolved.code;
+            d.sector_id = resolved.id;
+          }
+        } else if (mat && setorByMatriculaImport.has(mat)) {
+          const info = setorByMatriculaImport.get(mat)!;
+          d.setor = info.nome;
+          d.setor_codigo = info.codigo;
+          d.sector_id = info.sector_id;
         }
       }
 
@@ -7154,6 +8891,7 @@ export function createApp() {
           status: "importado",
           total_funcionarios: rows.length,
           total_rubricas: rubricasParsed.length,
+          empresa_nome: empresaNome,
           updated_at: new Date().toISOString(),
         },
         { onConflict: "competencia_ano,competencia_mes" }
@@ -7174,6 +8912,8 @@ export function createApp() {
             cpf_funcionario: d.cpf,
             cargo_nome: d.cargo,
             setor_nome: d.setor || null,
+            setor_codigo: d.setor_codigo ?? null,
+            sector_id: d.sector_id ?? null,
             situacao: d.situacao,
             codigo_rubrica: d.codigo,
             descricao_rubrica: d.nome_rubrica,
@@ -7186,7 +8926,7 @@ export function createApp() {
 
         for (const r of rows) {
           const mat = String(r.matricula || "SEM-MATRICULA");
-          const setorNome = setorByMatriculaImport.get(mat);
+          const setorInfo = setorByMatriculaImport.get(mat);
           const payload: Record<string, any> = {
             codigo_funcionario: mat,
             nome: r.nome,
@@ -7197,7 +8937,11 @@ export function createApp() {
             ativo: true,
             updated_at: new Date().toISOString(),
           };
-          if (setorNome) payload.setor_nome = setorNome;
+          if (setorInfo) {
+            payload.setor_nome = setorInfo.nome;
+            payload.setor_codigo = setorInfo.codigo;
+            payload.sector_id = setorInfo.sector_id;
+          }
           await supabase.from("folha_funcionarios").upsert(payload, { onConflict: "codigo_funcionario" });
         }
         const situacoes = new Map<string, number>();
@@ -7217,13 +8961,29 @@ export function createApp() {
         console.error("Falha ao registrar dados de apuração v2 (execute sql/folha_apuracao_module_v2.sql):", e);
       }
 
+      try {
+        await syncAbsenteismoCompetencia(supabase, year, month, empresaNome);
+      } catch (e) {
+        console.error("Falha ao sincronizar absenteísmo (execute sql/46_absenteismo.sql):", e);
+      }
+
+      try {
+        await syncTurnoverCompetencia(supabase, year, month, empresaNome);
+      } catch (e) {
+        console.error("Falha ao sincronizar turnover (execute sql/47_turnover.sql):", e);
+      }
+
       const totalLiquido = rows.reduce((s, r) => s + r.liquido, 0);
 
       // Lança o líquido total como Realizado na linha "Folha de pagamento" do Setor RH
       // (aparece em Prev x Real > RH > Folha de pagamento > Real do mês).
       let realizadoCrdId: number | null = null;
       try {
-        realizadoCrdId = await resolveCrdByNameAndSector("Folha de pagamento", "RH", "RH-FOLHA-PAGAMENTO");
+        realizadoCrdId = await resolveCrdByNameAndSector(
+          "Folha de pagamento",
+          { code: "RH", name: "RH" },
+          "RH-FOLHA-PAGAMENTO"
+        );
         if (realizadoCrdId) {
           const { error: realErr } = await supabase
             .from("crd_realizado")
@@ -7367,7 +9127,11 @@ export function createApp() {
     }
     const total = computeRubricasTotal(rubricas);
 
-    const crdId = await resolveCrdByNameAndSector("Folha de pagamento", "RH", "RH-FOLHA-PAGAMENTO");
+    const crdId = await resolveCrdByNameAndSector(
+      "Folha de pagamento",
+      { code: "RH", name: "RH" },
+      "RH-FOLHA-PAGAMENTO"
+    );
     if (!crdId) return res.status(500).json({ error: "Não foi possível resolver a conta RH > Folha de pagamento." });
 
     // Previsto (crd_monthly_values) e Realizado (crd_realizado) do mês.
@@ -7516,7 +9280,2008 @@ export function createApp() {
       console.error("Erro ao salvar FGTS manual:", error);
       return res.status(500).json({ error: "Não foi possível salvar." });
     }
+
+    const { data: guiaExistenteManual } = await supabase
+      .from("folha_fgts_guia_mensal")
+      .select("*")
+      .eq("year", year)
+      .eq("month", month)
+      .maybeSingle();
+    const patchGuia: Record<string, unknown> = {
+      year,
+      month,
+      fgts_normal:
+        row.fgts !== undefined ? row.fgts : Number((guiaExistenteManual as any)?.fgts_normal) || 0,
+      fgts_ferias:
+        row.fgts_prov_ferias !== undefined
+          ? row.fgts_prov_ferias
+          : Number((guiaExistenteManual as any)?.fgts_ferias) || 0,
+      fgts_13:
+        row.fgts_prov_13 !== undefined
+          ? row.fgts_prov_13
+          : Number((guiaExistenteManual as any)?.fgts_13) || 0,
+      fgts_outros: Number((guiaExistenteManual as any)?.fgts_outros) || 0,
+      fonte_normal:
+        row.fgts !== undefined
+          ? "Cadastro manual (folha_custo_manual)"
+          : (guiaExistenteManual as any)?.fonte_normal ?? null,
+      fonte_ferias:
+        row.fgts_prov_ferias !== undefined
+          ? "Cadastro manual (folha_custo_manual)"
+          : (guiaExistenteManual as any)?.fonte_ferias ?? null,
+      fonte_13:
+        row.fgts_prov_13 !== undefined
+          ? "Cadastro manual (folha_custo_manual)"
+          : (guiaExistenteManual as any)?.fonte_13 ?? null,
+      fonte_outros: (guiaExistenteManual as any)?.fonte_outros ?? null,
+      updated_at: new Date().toISOString(),
+    };
+    await supabase.from("folha_fgts_guia_mensal").upsert(patchGuia, { onConflict: "year,month" });
+
     res.json({ success: true });
+  });
+
+  // Painel consolidado de custos e indicadores de RH
+  app.patch("/api/folha/funcionarios/setor", requireRole("admin", "finance", "controle"), async (req, res) => {
+    const body = req.body as any;
+    const codigo = String(body?.codigo_funcionario ?? "").trim();
+    const setor_nome = String(body?.setor_nome ?? "").trim();
+    if (!codigo || !setor_nome) {
+      return res.status(400).json({ error: "Informe codigo_funcionario e setor_nome." });
+    }
+    let setor_codigo = body?.setor_codigo ? String(body.setor_codigo).trim() : null;
+    let sector_id: number | null = body?.sector_id != null ? Number(body.sector_id) : null;
+
+    if (!setor_codigo || !sector_id) {
+      const { data: sector } = await supabase
+        .from("sectors")
+        .select("id, code, name")
+        .ilike("name", setor_nome)
+        .eq("active", true)
+        .limit(1)
+        .maybeSingle();
+      if (sector) {
+        sector_id = Number((sector as any).id) || sector_id;
+        setor_codigo = setor_codigo || ((sector as any).code ? String((sector as any).code) : null);
+      }
+    }
+
+    const { data, error } = await supabase
+      .from("folha_funcionarios")
+      .upsert(
+        {
+          codigo_funcionario: codigo,
+          nome: body?.nome ? String(body.nome).trim() : codigo,
+          setor_nome,
+          setor_codigo,
+          sector_id,
+          ativo: true,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "codigo_funcionario" }
+      )
+      .select()
+      .single();
+    if (error) return res.status(500).json({ error: "Não foi possível atualizar o setor do funcionário." });
+    res.json(data);
+  });
+
+  app.get("/api/folha/painel", requireRole("admin", "finance", "controle", "manager", "diretoria"), async (req, res) => {
+    const year = Number((req.query as any)?.year) || new Date().getFullYear();
+    const month = Number((req.query as any)?.month);
+    if (!month || month < 1 || month > 12) return res.status(400).json({ error: "Informe o mês (1-12)." });
+    const filtroSetor = String((req.query as any)?.setor ?? "").trim();
+    const filtroEmpresa = String((req.query as any)?.empresa ?? "").trim();
+
+    const [
+      { data: apuracao },
+      { data: lancamentos },
+      { data: importacao },
+      { data: funcRows },
+      { data: funcCadastro },
+      { data: sectors },
+      { data: empresasRows },
+      { data: folhaCrd },
+      { data: rdsSnapshot },
+      { data: encargosRows },
+      { data: taxaMensalRow },
+      { data: fgtsGuiaRow },
+      { data: provFeriasFgtsRows },
+      { data: prov13FgtsRows },
+    ] = await Promise.all([
+      supabase.from("folha_apuracoes_mensais").select("*").eq("competencia_ano", year).eq("competencia_mes", month).maybeSingle(),
+      supabase
+        .from("folha_lancamentos")
+        .select("codigo_funcionario, setor_nome, valor_provento, valor_retorno, valor_comissao, valor_produtividade")
+        .eq("competencia_ano", year)
+        .eq("competencia_mes", month),
+      supabase.from("folha_importacoes").select("*").eq("competencia_ano", year).eq("competencia_mes", month).maybeSingle(),
+      supabase.from("folha_pagamento").select("matricula, nome, situacao, proventos, salario, liquido").eq("year", year).eq("month", month),
+      supabase
+        .from("folha_funcionarios")
+        .select("codigo_funcionario, nome, setor_nome, setor_codigo, sector_id")
+        .eq("ativo", true),
+      supabase.from("sectors").select("id, name, code, budget_limit, active").eq("active", true),
+      supabase.from("folha_importacoes").select("empresa_nome").not("empresa_nome", "is", null),
+      supabase.from("crds").select("id, previsto_mes").eq("code", "RH-FOLHA-PAGAMENTO").maybeSingle(),
+      supabase.from("rds_snapshots").select("sections").eq("year", year).eq("month", month).maybeSingle(),
+      supabase
+        .from("folha_parametros_encargos")
+        .select("*")
+        .eq("ano", year)
+        .eq("ativo", true)
+        .maybeSingle(),
+      supabase
+        .from("folha_taxa_servico_mensal")
+        .select("orcado_bruto, credito_rds, observacao")
+        .eq("year", year)
+        .eq("month", month)
+        .maybeSingle(),
+      supabase
+        .from("folha_fgts_guia_mensal")
+        .select("*")
+        .eq("year", year)
+        .eq("month", month)
+        .maybeSingle(),
+      supabase.from("folha_provisao_ferias").select("fgts").eq("year", year).eq("month", month),
+      supabase.from("folha_provisao_13").select("fgts").eq("year", year).eq("month", month),
+    ]);
+
+    const empresaCompetencia = String((importacao as any)?.empresa_nome ?? "").trim() || null;
+    const empresaBloqueia =
+      Boolean(filtroEmpresa) &&
+      Boolean(empresaCompetencia) &&
+      !normalizeFolhaFilterText(empresaCompetencia!).includes(normalizeFolhaFilterText(filtroEmpresa)) &&
+      !normalizeFolhaFilterText(filtroEmpresa).includes(normalizeFolhaFilterText(empresaCompetencia!));
+
+    let orcadoGlobal = sanitizeMonthBudget((folhaCrd as any)?.previsto_mes);
+    if (folhaCrd?.id) {
+      const { data: mv } = await supabase
+        .from("crd_monthly_values")
+        .select("value")
+        .eq("crd_id", folhaCrd.id)
+        .eq("year", year)
+        .eq("month", month)
+        .maybeSingle();
+      if (mv) orcadoGlobal = sanitizeMonthBudget((mv as any).value);
+    }
+
+    let totalCusto = Number((apuracao as any)?.total_custo) || 0;
+    let realizadoFonte = "Apuração mensal (total de custo)";
+
+    const sectorBudgetByName = new Map<string, { budget: number; code: string | null }>();
+    for (const s of sectors ?? []) {
+      const name = String((s as any).name ?? "").trim();
+      if (!name) continue;
+      sectorBudgetByName.set(normalizeSetorKey(name), {
+        budget: resolveSectorMonthlyBudget(Number((s as any).budget_limit) || 0),
+        code: (s as any).code ? String((s as any).code) : null,
+      });
+    }
+
+    const cadastroMap = buildCadastroSetorMap(funcCadastro ?? []);
+    const weights = buildEmployeeCostWeights(lancamentos ?? [], funcRows ?? [], cadastroMap);
+
+    let setorStats = aggregateLancamentosPorSetor(lancamentos ?? []);
+    let totalSalarioGlobal = Array.from(setorStats.values()).reduce((s, g) => s + g.total_salario, 0);
+    if (!totalCusto && totalSalarioGlobal > 0) {
+      totalCusto = totalSalarioGlobal;
+      realizadoFonte = "Salários classificados (apuração pendente)";
+    }
+
+    let custoPorSetor = allocateValorPorSetor(setorStats, totalCusto, totalSalarioGlobal);
+    let setoresResumoCalc: ReturnType<typeof calcularCustoPorSetor>["resumos"] = [];
+
+    if (weights.length) {
+      const calculado = calcularCustoPorSetor({
+        weights,
+        totalCusto,
+        sectorBudgetByName,
+        setoresCatalogo: (sectors ?? []).map((s: any) => ({
+          nome: String(s.name ?? "").trim(),
+          codigo: s.code ? String(s.code) : null,
+        })),
+      });
+      setorStats = calculado.setorStats;
+      totalSalarioGlobal = calculado.totalSalarioGlobal;
+      custoPorSetor = calculado.custoPorSetor;
+      setoresResumoCalc = calculado.resumos;
+      if (!totalCusto && totalSalarioGlobal > 0) {
+        totalCusto = totalSalarioGlobal;
+        realizadoFonte = "Salários por setor (cadastro do funcionário)";
+      }
+    }
+
+    const setoresList = Array.from(
+      new Map(
+        [
+          ...(sectors ?? []).map((s: any) => {
+            const nome = String(s.name ?? "").trim();
+            return [normalizeSetorKey(nome), { nome, codigo: s.code ? String(s.code) : null }];
+          }),
+          ...Array.from(setorStats.keys()).map((nome) => {
+            const meta = sectorBudgetByName.get(normalizeSetorKey(nome));
+            return [normalizeSetorKey(nome), { nome, codigo: meta?.code ?? null }];
+          }),
+        ] as Array<[string, { nome: string; codigo: string | null }]>
+      ).values()
+    ).sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
+
+    const empresasSet = new Set<string>();
+    for (const r of empresasRows ?? []) {
+      const e = String((r as any).empresa_nome ?? "").trim();
+      if (e) empresasSet.add(e);
+    }
+    if (empresaCompetencia) empresasSet.add(empresaCompetencia);
+
+    const buildSetorResumo = () =>
+      setoresResumoCalc.length
+        ? setoresResumoCalc.map((r) => ({
+            setor: r.setor,
+            setor_codigo: r.setor_codigo,
+            orcado: r.orcado,
+            realizado: r.realizado,
+            diferenca: r.diferenca,
+            pct_diferenca: r.pct_diferenca,
+            acima_orcamento: r.acima_orcamento,
+            status_label: r.status_label,
+            funcionarios: r.funcionarios,
+          }))
+        : Array.from(setorStats.entries())
+            .map(([setor, stats]) => {
+              const meta = sectorBudgetByName.get(normalizeSetorKey(setor));
+              const orcadoSetor = meta?.budget ?? 0;
+              const realizadoSetor = custoPorSetor.get(setor) ?? 0;
+              const diferencaSetor = realizadoSetor - orcadoSetor;
+              return {
+                setor,
+                setor_codigo: meta?.code ?? null,
+                orcado: orcadoSetor,
+                realizado: realizadoSetor,
+                diferenca: diferencaSetor,
+                pct_diferenca: calcPctDesvio(orcadoSetor, diferencaSetor),
+                acima_orcamento: diferencaSetor > 0.009,
+                status_label: buildStatusLabel(diferencaSetor),
+                funcionarios: stats.funcionarios.size,
+              };
+            })
+            .sort((a, b) => b.realizado - a.realizado);
+
+    let orcado = orcadoGlobal;
+    let realizado = totalCusto;
+    let scale = 1;
+    let orcadoFonte = "CRD RH-FOLHA-PAGAMENTO (orçamento mensal)";
+    let setorSelecionado: string | null = null;
+
+    if (filtroSetor) {
+      const entry = Array.from(setorStats.entries()).find(([nome]) => matchFolhaSetor(nome, filtroSetor));
+      const resumoEntry = setoresResumoCalc.find((r) => matchFolhaSetor(r.setor, filtroSetor));
+      if (entry || resumoEntry) {
+        setorSelecionado = entry?.[0] ?? resumoEntry!.setor;
+        const meta = sectorBudgetByName.get(normalizeSetorKey(setorSelecionado));
+        orcado = meta?.budget ?? resumoEntry?.orcado ?? 0;
+        orcadoFonte = "Limite orçamentário do setor (cadastro de centros de custo)";
+        realizado = custoPorSetor.get(setorSelecionado) ?? resumoEntry?.realizado ?? 0;
+        scale = totalCusto > 0 ? realizado / totalCusto : 0;
+      } else {
+        setorSelecionado = filtroSetor;
+        const meta = sectorBudgetByName.get(normalizeSetorKey(filtroSetor));
+        orcado = meta?.budget ?? 0;
+        realizado = 0;
+        scale = 0;
+      }
+    }
+
+    if (empresaBloqueia) {
+      orcado = 0;
+      realizado = 0;
+      scale = 0;
+    }
+
+    const diferenca = realizado - orcado;
+    const funcionarios = (funcRows ?? []).length;
+    const trabalhando = (funcRows ?? []).filter((f: any) => /trabalh/i.test(String(f.situacao ?? ""))).length;
+
+    let componentes = apuracao && scale > 0 ? componentesFromApuracao(apuracao as any, scale) : [];
+
+    const { data: rubricasPainel } = await supabase
+      .from("folha_rubricas")
+      .select("codigo, nome, valor, tipo")
+      .eq("year", year)
+      .eq("month", month);
+
+    const { data: manualRowsPainel } = await supabase
+      .from("folha_custo_manual")
+      .select("fgts, fgts_prov_ferias, fgts_prov_13")
+      .eq("year", year)
+      .eq("month", month)
+      .limit(1);
+    const manualPainel = (manualRowsPainel && manualRowsPainel[0]) || {
+      fgts: 0,
+      fgts_prov_ferias: 0,
+      fgts_prov_13: 0,
+    };
+
+    let composicao =
+      scale > 0 && (apuracao || (rubricasPainel?.length ?? 0) > 0)
+        ? buildComposicaoCusto({
+            apuracao: apuracao as any,
+            rubricas: (rubricasPainel ?? []).map((rb: any) => ({
+              codigo: rb.codigo,
+              nome: rb.nome,
+              valor: rb.valor,
+              tipo: rb.tipo,
+            })),
+            manualFgts: manualPainel as any,
+            scale,
+            fonte: apuracao
+              ? realizadoFonte
+              : rubricasPainel?.length
+                ? "Rubricas importadas (apuração pendente)"
+                : realizadoFonte,
+          })
+        : null;
+
+    if (!componentes.length && realizado > 0 && filtroSetor && setorSelecionado) {
+      const stats = setorStats.get(setorSelecionado);
+      if (stats) {
+        componentes = [
+          {
+            key: "total_salario",
+            label: "Salários e rubricas do setor",
+            valor: stats.total_salario,
+            pct: 100,
+          },
+        ];
+      }
+    }
+
+    if (!componentes.length && realizado > 0) {
+      if (rubricasPainel?.length) {
+        const groups: Record<string, { valor: number; codigos: any[] }> = {};
+        for (const rb of rubricasPainel) {
+          const cat = classifyRubrica((rb as any).nome, (rb as any).tipo);
+          if (!groups[cat]) groups[cat] = { valor: 0, codigos: [] };
+          const v = Number((rb as any).valor) || 0;
+          groups[cat].valor += v;
+          groups[cat].codigos.push({ codigo: (rb as any).codigo, nome: (rb as any).nome, valor: v });
+        }
+        const g = (k: string) => groups[k] || { valor: 0, codigos: [] };
+        const proventos = g("proventos").valor;
+        const comissao = g("comissao").valor;
+        const produtividade = g("produtividade").valor;
+        const total_salario = proventos + comissao + produtividade;
+        const retornos = g("retornos").valor;
+        const decimo = g("decimo_terceiro").valor;
+        const ferias = g("ferias").valor;
+        const umTerco = g("um_terco_ferias").valor;
+        const inss = g("inss").valor;
+        const inss13 = g("inss_13").valor;
+        const inssProvFerias = g("inss_prov_ferias").valor;
+        const linhas = [
+          { key: "proventos", label: "Proventos", valor: proventos },
+          { key: "comissao", label: "Comissão", valor: comissao },
+          { key: "produtividade", label: "Produtividade", valor: produtividade },
+          { key: "total_salario", label: "Total Salário", valor: total_salario },
+          { key: "retornos", label: "Retornos", valor: -Math.abs(retornos) },
+          { key: "decimo_terceiro", label: "13º", valor: decimo },
+          { key: "ferias", label: "Férias", valor: ferias },
+          { key: "um_terco_ferias", label: "1/3 Férias", valor: umTerco },
+          { key: "fgts", label: "FGTS", valor: Number(manualPainel.fgts) || 0 },
+          { key: "fgts_prov_ferias", label: "FGTS Prov. Férias", valor: Number(manualPainel.fgts_prov_ferias) || 0 },
+          { key: "fgts_prov_13", label: "FGTS Prov. 13º", valor: Number(manualPainel.fgts_prov_13) || 0 },
+          { key: "inss", label: "INSS", valor: inss },
+          { key: "inss_13", label: "INSS 13º", valor: inss13 },
+          { key: "inss_prov_ferias", label: "INSS Prov. Férias", valor: inssProvFerias },
+        ];
+        componentes = componentesFromCustoLinhas(linhas, scale || 1);
+        if (!apuracao) realizadoFonte = "Rubricas importadas (apuração pendente)";
+      }
+    }
+
+    if (!componentes.length && realizado > 0) {
+      componentes = [{ key: "total_custo", label: "Custo total", valor: realizado, pct: 100 }];
+    }
+
+    const pct_diferenca = calcPctDesvio(orcado, diferenca);
+    const drilldown =
+      setorSelecionado && weights.length
+        ? {
+            setor: setorSelecionado,
+            funcionarios: buildFuncionariosDrilldown({
+              setor: setorSelecionado,
+              weights,
+              orcadoSetor: orcado,
+              realizadoSetor: realizado,
+              cadastro: cadastroMap,
+              folhaPagamento: funcRows ?? [],
+            }),
+          }
+        : null;
+
+    const creditoRdsTaxa = extractCreditoTaxaRds((rdsSnapshot as any)?.sections);
+    const taxa_servico = buildTaxaServicoAnalise({
+      rubricas: (rubricasPainel ?? []).map((rb: any) => ({
+        codigo: rb.codigo,
+        nome: rb.nome,
+        valor: rb.valor,
+        tipo: rb.tipo,
+      })),
+      apuracao: apuracao as any,
+      encargos: (encargosRows as any) ?? null,
+      orcadoFolha: orcado,
+      realizadoFolha: realizado,
+      diferencaFolha: diferenca,
+      orcadoTaxaBruto: (taxaMensalRow as any)?.orcado_bruto ?? null,
+      creditoRds: creditoRdsTaxa,
+      creditoRdsOverride: (taxaMensalRow as any)?.credito_rds ?? null,
+      scale,
+    });
+
+    const provisaoFeriasFgtsSum = (provFeriasFgtsRows ?? []).reduce(
+      (s: number, r: any) => s + (Number(r.fgts) || 0),
+      0
+    );
+    const provisao13FgtsSum = (prov13FgtsRows ?? []).reduce((s: number, r: any) => s + (Number(r.fgts) || 0), 0);
+    const fgtsRaw = buildFgtsAnalise({
+      scale,
+      apuracao: apuracao as any,
+      manual: manualPainel as any,
+      guiaMensal: (fgtsGuiaRow as any) ?? null,
+      provisaoFeriasFgtsSum,
+      provisao13FgtsSum,
+      rubricas: (rubricasPainel ?? []).map((rb: any) => ({
+        codigo: rb.codigo,
+        nome: rb.nome,
+        valor: rb.valor,
+        tipo: rb.tipo,
+      })),
+    });
+    const fgts = sanitizeFgtsEmprestimosDetalhe(
+      fgtsRaw,
+      await canUserViewEmprestimos(req.user)
+    );
+
+    res.json({
+      year,
+      month,
+      empresa: filtroEmpresa || null,
+      setor: setorSelecionado,
+      filtros: {
+        empresas: Array.from(empresasSet).sort((a, b) => a.localeCompare(b, "pt-BR")),
+        setores: setoresList,
+      },
+      orcado,
+      realizado,
+      diferenca,
+      pct_diferenca,
+      acima_orcamento: diferenca > 0.009,
+      status_label: buildStatusLabel(diferenca),
+      drilldown,
+      componentes: componentes.sort((a, b) => b.valor - a.valor),
+      composicao,
+      taxa_servico,
+      fgts,
+      setores_resumo: buildSetorResumo(),
+      indicadores: {
+        funcionarios,
+        trabalhando,
+        custo_medio: funcionarios > 0 ? realizado / funcionarios : 0,
+        apuracao_calculada: Boolean(apuracao?.total_custo),
+        importado: Boolean(importacao) || funcionarios > 0,
+      },
+      fontes: {
+        orcado: orcadoFonte,
+        realizado: realizadoFonte,
+        setor: "Cadastro do funcionário (folha_funcionarios) — não exige reclassificação mensal",
+      },
+      sem_setor: weights.filter((w) => w.setor_nome === "Sem setor").length,
+    });
+  });
+
+  app.patch("/api/folha/taxa-servico", requireRole("admin", "finance", "controle"), async (req, res) => {
+    const year = Number((req.body as any)?.year);
+    const month = Number((req.body as any)?.month);
+    if (!year || !month || month < 1 || month > 12) {
+      return res.status(400).json({ error: "Informe ano e mês (1 a 12)." });
+    }
+    const patch: Record<string, unknown> = {
+      year,
+      month,
+      updated_at: new Date().toISOString(),
+    };
+    if ((req.body as any)?.orcado_bruto != null) {
+      patch.orcado_bruto = Number((req.body as any).orcado_bruto) || 0;
+    }
+    if ((req.body as any)?.credito_rds != null) {
+      const v = Number((req.body as any).credito_rds);
+      patch.credito_rds = Number.isFinite(v) ? v : null;
+    }
+    if ((req.body as any)?.observacao != null) {
+      patch.observacao = String((req.body as any).observacao ?? "").trim() || null;
+    }
+    const { data, error } = await supabase
+      .from("folha_taxa_servico_mensal")
+      .upsert(patch, { onConflict: "year,month" })
+      .select()
+      .single();
+    if (error) {
+      console.error("folha_taxa_servico_mensal:", error);
+      return res.status(500).json({
+        error: "Tabela folha_taxa_servico_mensal indisponível. Execute sql/51_folha_taxa_servico.sql.",
+      });
+    }
+    res.json(data);
+  });
+
+  const absenteismoRoles = requireRole("admin", "finance", "controle", "manager", "diretoria");
+
+  app.get("/api/folha/absenteismo", absenteismoRoles, async (req, res) => {
+    const q = req.query as any;
+    const year = Number(q?.year) || new Date().getFullYear();
+    const monthFrom = Number(q?.month_from || q?.month) || 1;
+    const monthTo = Number(q?.month_to || q?.month) || monthFrom;
+    const filtroSetor = String(q?.setor ?? "").trim().toLowerCase();
+    const filtroEmpresa = String(q?.empresa ?? "").trim().toLowerCase();
+
+    if (monthFrom < 1 || monthTo > 12 || monthFrom > monthTo) {
+      return res.status(400).json({ error: "Período inválido (month_from / month_to)." });
+    }
+
+    let query = supabase
+      .from("folha_absenteismo_mensal")
+      .select("*")
+      .eq("year", year)
+      .gte("month", monthFrom)
+      .lte("month", monthTo)
+      .order("month")
+      .order("setor_nome")
+      .order("nome_funcionario");
+
+    const { data, error } = await query;
+    if (error) {
+      console.error("folha_absenteismo_mensal:", error);
+      return res.status(500).json({
+        error: "Tabela de absenteísmo ausente. Execute sql/46_absenteismo.sql e processe a competência.",
+      });
+    }
+
+    let rows = (data ?? []).map((r: any) => ({
+      ...r,
+      absenteismo_pct:
+        r.absenteismo_pct != null
+          ? Number(r.absenteismo_pct)
+          : r.horas_previstas > 0
+            ? (Number(r.horas_ausencia) / Number(r.horas_previstas)) * 100
+            : null,
+    }));
+
+    if (filtroSetor) {
+      rows = rows.filter((r: any) =>
+        String(r.setor_nome ?? "")
+          .toLowerCase()
+          .includes(filtroSetor)
+      );
+    }
+    if (filtroEmpresa) {
+      rows = rows.filter((r: any) =>
+        String(r.empresa_nome ?? "")
+          .toLowerCase()
+          .includes(filtroEmpresa)
+      );
+    }
+
+    const config = await loadAbsenteismoConfig(supabase);
+    const funcionarios = summarizeAbsenteismo(
+      rows.map((r: any) => ({
+        codigo_funcionario: r.codigo_funcionario,
+        nome_funcionario: r.nome_funcionario,
+        setor_nome: r.setor_nome,
+        setor_codigo: r.setor_codigo,
+        horas_previstas: Number(r.horas_previstas) || 0,
+        horas_trabalhadas: Number(r.horas_trabalhadas) || 0,
+        horas_ausencia: Number(r.horas_ausencia) || 0,
+        dias_faltas: Number(r.dias_faltas) || 0,
+        fonte_previstas: r.fonte_previstas,
+        fonte_trabalhadas: r.fonte_trabalhadas,
+        fonte_ausencias: r.fonte_ausencias,
+      }))
+    );
+
+    const empresas = Array.from(
+      new Set((data ?? []).map((r: any) => String(r.empresa_nome ?? "").trim()).filter(Boolean))
+    ).sort((a, b) => a.localeCompare(b, "pt-BR"));
+    const setores = Array.from(
+      new Map(
+        (data ?? []).map((r: any) => [
+          String(r.setor_nome ?? ""),
+          { nome: String(r.setor_nome ?? ""), codigo: r.setor_codigo ?? null },
+        ])
+      ).values()
+    ).filter((s) => s.nome);
+
+    const porMes = new Map<number, typeof rows>();
+    for (const r of rows) {
+      const m = Number((r as any).month);
+      if (!porMes.has(m)) porMes.set(m, []);
+      porMes.get(m)!.push(r);
+    }
+    const evolucao = Array.from({ length: monthTo - monthFrom + 1 }, (_, i) => {
+      const m = monthFrom + i;
+      const mesRows = porMes.get(m) ?? [];
+      const resumo = summarizeAbsenteismo(
+        mesRows.map((r: any) => ({
+          codigo_funcionario: r.codigo_funcionario,
+          nome_funcionario: r.nome_funcionario,
+          setor_nome: r.setor_nome,
+          setor_codigo: r.setor_codigo,
+          horas_previstas: Number(r.horas_previstas) || 0,
+          horas_trabalhadas: Number(r.horas_trabalhadas) || 0,
+          horas_ausencia: Number(r.horas_ausencia) || 0,
+          dias_faltas: Number(r.dias_faltas) || 0,
+          fonte_previstas: r.fonte_previstas,
+          fonte_trabalhadas: r.fonte_trabalhadas,
+          fonte_ausencias: r.fonte_ausencias,
+        }))
+      );
+      return { month: m, ...resumo };
+    });
+
+    res.json({
+      year,
+      month_from: monthFrom,
+      month_to: monthTo,
+      config,
+      filtros: { empresas, setores },
+      resumo: funcionarios,
+      evolucao,
+      rows,
+    });
+  });
+
+  app.post("/api/folha/absenteismo/processar", requireRole("admin", "finance", "controle"), async (req, res) => {
+    const year = Number((req.body as any)?.year);
+    const month = Number((req.body as any)?.month);
+    if (!year || !month || month < 1 || month > 12) {
+      return res.status(400).json({ error: "Informe year e month válidos." });
+    }
+    const { data: importacao } = await supabase
+      .from("folha_importacoes")
+      .select("empresa_nome")
+      .eq("competencia_ano", year)
+      .eq("competencia_mes", month)
+      .maybeSingle();
+    try {
+      const result = await syncAbsenteismoCompetencia(
+        supabase,
+        year,
+        month,
+        (importacao as any)?.empresa_nome ?? null
+      );
+      res.json({ ok: true, ...result });
+    } catch (e: any) {
+      console.error(e);
+      return res.status(500).json({
+        error: "Falha ao processar absenteísmo. Execute sql/46_absenteismo.sql.",
+      });
+    }
+  });
+
+  app.patch("/api/folha/absenteismo/config", requireRole("admin", "finance", "controle"), async (req, res) => {
+    const body = req.body as any;
+    const num = (v: unknown, fallback: number) => {
+      const n = Number(v);
+      return Number.isFinite(n) ? n : fallback;
+    };
+    const { data, error } = await supabase
+      .from("folha_absenteismo_config")
+      .upsert(
+        {
+          id: 1,
+          horas_previstas_padrao: num(body?.horas_previstas_padrao, 220),
+          horas_dia_padrao: num(body?.horas_dia_padrao, 8),
+          dias_uteis_padrao: num(body?.dias_uteis_padrao, 22),
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "id" }
+      )
+      .select()
+      .single();
+    if (error) {
+      return res.status(500).json({ error: "Execute sql/46_absenteismo.sql." });
+    }
+    res.json(data);
+  });
+
+  app.get("/api/folha/absenteismo/config", absenteismoRoles, async (_req, res) => {
+    res.json(await loadAbsenteismoConfig(supabase));
+  });
+
+  app.patch("/api/folha/absenteismo/funcionario", requireRole("admin", "finance", "controle"), async (req, res) => {
+    const body = req.body as any;
+    const year = Number(body?.year);
+    const month = Number(body?.month);
+    const codigo = String(body?.codigo_funcionario ?? "").trim();
+    if (!year || !month || !codigo) {
+      return res.status(400).json({ error: "Informe year, month e codigo_funcionario." });
+    }
+    const n = (v: unknown) => (Number.isFinite(Number(v)) ? Number(v) : undefined);
+    const row: Record<string, unknown> = {
+      year,
+      month,
+      codigo_funcionario: codigo,
+      nome_funcionario: body?.nome_funcionario ? String(body.nome_funcionario) : undefined,
+      setor_nome: body?.setor_nome ? String(body.setor_nome) : undefined,
+      updated_at: new Date().toISOString(),
+    };
+    if (body?.horas_previstas != null) {
+      row.horas_previstas = n(body.horas_previstas) ?? 0;
+      row.fonte_previstas = "Importação manual";
+    }
+    if (body?.horas_trabalhadas != null) {
+      row.horas_trabalhadas = n(body.horas_trabalhadas) ?? 0;
+      row.fonte_trabalhadas = "Importação manual";
+    }
+    if (body?.horas_ausencia != null) {
+      row.horas_ausencia = n(body.horas_ausencia) ?? 0;
+      row.fonte_ausencias = "Importação manual";
+    }
+    if (body?.dias_faltas != null) row.dias_faltas = n(body.dias_faltas) ?? 0;
+    const hp = n(row.horas_previstas);
+    const ha = n(row.horas_ausencia);
+    if (hp != null && ha != null) row.absenteismo_pct = hp > 0 ? (ha / hp) * 100 : null;
+
+    const { data, error } = await supabase
+      .from("folha_absenteismo_mensal")
+      .upsert(row, { onConflict: "year,month,codigo_funcionario" })
+      .select()
+      .single();
+    if (error) {
+      return res.status(500).json({ error: "Não foi possível salvar os dados do funcionário." });
+    }
+    res.json(data);
+  });
+
+  const turnoverRoles = requireRole("admin", "finance", "controle", "manager", "diretoria");
+
+  app.get("/api/folha/turnover", turnoverRoles, async (req, res) => {
+    const q = req.query as any;
+    const year = Number(q?.year) || new Date().getFullYear();
+    const monthFrom = Number(q?.month_from || q?.month) || 1;
+    const monthTo = Number(q?.month_to || q?.month) || monthFrom;
+    const filtroSetor = String(q?.setor ?? "").trim();
+    const filtroEmpresa = String(q?.empresa ?? "").trim().toLowerCase();
+
+    if (monthFrom < 1 || monthTo > 12 || monthFrom > monthTo) {
+      return res.status(400).json({ error: "Período inválido (month_from / month_to)." });
+    }
+
+    const config = await loadTurnoverConfig(supabase);
+
+    const [{ data: resumos, error: resErr }, { data: movimentos, error: movErr }] = await Promise.all([
+      supabase
+        .from("folha_turnover_mensal")
+        .select("*")
+        .eq("year", year)
+        .gte("month", monthFrom)
+        .lte("month", monthTo)
+        .order("month")
+        .order("setor_nome"),
+      supabase
+        .from("folha_turnover_movimentos")
+        .select("*")
+        .eq("year", year)
+        .gte("month", monthFrom)
+        .lte("month", monthTo)
+        .order("month")
+        .order("tipo")
+        .order("nome_funcionario"),
+    ]);
+
+    if (resErr || movErr) {
+      console.error(resErr || movErr);
+      return res.status(500).json({
+        error: "Tabela de turnover ausente. Execute sql/47_turnover.sql e importe a folha do mês.",
+      });
+    }
+
+    let resumoRows = (resumos ?? []).filter((r: any) => {
+      if (filtroSetor) return String(r.setor_nome ?? "") === filtroSetor;
+      return String(r.setor_nome ?? "") === "";
+    });
+    if (filtroEmpresa) {
+      resumoRows = resumoRows.filter((r: any) =>
+        String(r.empresa_nome ?? "")
+          .toLowerCase()
+          .includes(filtroEmpresa)
+      );
+    }
+
+    let movRows = movimentos ?? [];
+    if (filtroSetor) {
+      movRows = movRows.filter((m: any) => String(m.setor_nome ?? "") === filtroSetor);
+    }
+    if (filtroEmpresa) {
+      movRows = movRows.filter((m: any) =>
+        String(m.empresa_nome ?? "")
+          .toLowerCase()
+          .includes(filtroEmpresa)
+      );
+    }
+
+    const periodoAgg = summarizeTurnoverPeriodo(
+      resumoRows.map((r: any) => ({
+        year: Number(r.year),
+        month: Number(r.month),
+        setor_nome: String(r.setor_nome ?? ""),
+        setor_codigo: r.setor_codigo,
+        headcount_inicio: Number(r.headcount_inicio) || 0,
+        headcount_fim: Number(r.headcount_fim) || 0,
+        admissoes: Number(r.admissoes) || 0,
+        desligamentos: Number(r.desligamentos) || 0,
+        turnover_pct: r.turnover_pct != null ? Number(r.turnover_pct) : null,
+      }))
+    );
+
+    const turnover_periodo_pct = calcularTurnoverPct(
+      periodoAgg.admissoes,
+      periodoAgg.desligamentos,
+      periodoAgg.headcount_inicio,
+      periodoAgg.headcount_fim,
+      config.formula as TurnoverFormula
+    );
+
+    const empresas = Array.from(
+      new Set((resumos ?? []).map((r: any) => String(r.empresa_nome ?? "").trim()).filter(Boolean))
+    ).sort((a, b) => a.localeCompare(b, "pt-BR"));
+
+    const setores = Array.from(
+      new Map(
+        (resumos ?? [])
+          .filter((r: any) => String(r.setor_nome ?? "").trim())
+          .map((r: any) => [
+            String(r.setor_nome),
+            { nome: String(r.setor_nome), codigo: r.setor_codigo ?? null },
+          ])
+      ).values()
+    );
+
+    res.json({
+      year,
+      month_from: monthFrom,
+      month_to: monthTo,
+      config: {
+        ...config,
+        formulas_disponiveis: FORMULA_OPTIONS,
+      },
+      filtros: { empresas, setores },
+      resumo: {
+        ...periodoAgg,
+        turnover_pct: turnover_periodo_pct,
+      },
+      evolucao: resumoRows.map((r: any) => ({
+        month: Number(r.month),
+        setor_nome: r.setor_nome,
+        headcount_inicio: Number(r.headcount_inicio) || 0,
+        headcount_fim: Number(r.headcount_fim) || 0,
+        admissoes: Number(r.admissoes) || 0,
+        desligamentos: Number(r.desligamentos) || 0,
+        turnover_pct: r.turnover_pct != null ? Number(r.turnover_pct) : null,
+      })),
+      movimentos: movRows,
+      setores_resumo: (resumos ?? [])
+        .filter((r: any) => String(r.setor_nome ?? "").trim() && Number(r.month) === monthTo)
+        .map((r: any) => ({
+          setor_nome: r.setor_nome,
+          setor_codigo: r.setor_codigo,
+          headcount_fim: Number(r.headcount_fim) || 0,
+          admissoes: Number(r.admissoes) || 0,
+          desligamentos: Number(r.desligamentos) || 0,
+          turnover_pct: r.turnover_pct != null ? Number(r.turnover_pct) : null,
+        }))
+        .sort((a: any, b: any) => (b.turnover_pct ?? 0) - (a.turnover_pct ?? 0)),
+    });
+  });
+
+  app.post("/api/folha/turnover/processar", requireRole("admin", "finance", "controle"), async (req, res) => {
+    const year = Number((req.body as any)?.year);
+    const month = Number((req.body as any)?.month);
+    if (!year || !month || month < 1 || month > 12) {
+      return res.status(400).json({ error: "Informe year e month válidos." });
+    }
+    const { data: importacao } = await supabase
+      .from("folha_importacoes")
+      .select("empresa_nome")
+      .eq("competencia_ano", year)
+      .eq("competencia_mes", month)
+      .maybeSingle();
+    try {
+      const result = await syncTurnoverCompetencia(
+        supabase,
+        year,
+        month,
+        (importacao as any)?.empresa_nome ?? null
+      );
+      res.json({ ok: true, ...result });
+    } catch (e) {
+      console.error(e);
+      return res.status(500).json({ error: "Falha ao processar turnover. Execute sql/47_turnover.sql." });
+    }
+  });
+
+  app.get("/api/folha/turnover/config", turnoverRoles, async (_req, res) => {
+    const config = await loadTurnoverConfig(supabase);
+    res.json({ ...config, formulas_disponiveis: FORMULA_OPTIONS });
+  });
+
+  app.patch("/api/folha/turnover/config", requireRole("admin", "finance", "controle"), async (req, res) => {
+    const body = req.body as any;
+    const formula = String(body?.formula ?? "").trim() as TurnoverFormula;
+    const valid = FORMULA_OPTIONS.some((f) => f.id === formula);
+    if (!valid) return res.status(400).json({ error: "Fórmula inválida." });
+    const label = FORMULA_OPTIONS.find((f) => f.id === formula)?.label ?? formula;
+    const { data, error } = await supabase
+      .from("folha_turnover_config")
+      .upsert(
+        {
+          id: 1,
+          formula,
+          formula_label: label,
+          observacao: body?.observacao != null ? String(body.observacao).slice(0, 500) : undefined,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "id" }
+      )
+      .select()
+      .single();
+    if (error) return res.status(500).json({ error: "Execute sql/47_turnover.sql." });
+    res.json(data);
+  });
+
+  const emprestimosRoles = requireEmprestimosConfidencial;
+
+  const canUserViewEmprestimos = async (user?: SessionUser) => {
+    if (!user?.role) return false;
+    const perms = await loadRolePermissions(String(user.role));
+    return canViewEmprestimosConfidenciais(user.role, perms);
+  };
+
+  async function requireEmprestimosConfidencial(req: express.Request, res: express.Response, next: express.NextFunction) {
+    if (!req.user) return res.status(401).json({ error: "Não autenticado" });
+    if (await canUserViewEmprestimos(req.user)) return next();
+    return res.status(403).json({ error: EMPRESTIMOS_ACESSO_NEGADO_MSG });
+  }
+
+  const resolveEmprestimoColaboradorMeta = async (body: Record<string, unknown>) => {
+    const colaboradorId =
+      body.colaborador_id != null && body.colaborador_id !== ""
+        ? Number(body.colaborador_id)
+        : null;
+    const codigo = String(body.codigo_funcionario ?? "").trim();
+    let nome = String(body.nome_colaborador ?? "").trim();
+    let setor_nome = body.setor_nome ? String(body.setor_nome).trim() : null;
+    let empresa_nome = body.empresa_nome ? String(body.empresa_nome).trim() : null;
+    let resolvedColaboradorId: number | null =
+      colaboradorId != null && Number.isFinite(colaboradorId) ? colaboradorId : null;
+
+    if (resolvedColaboradorId) {
+      const { data: col } = await supabase
+        .from("colaboradores")
+        .select("id, nome, nome_oficial, codigo_funcionario, empresa_nome, sectors(name)")
+        .eq("id", resolvedColaboradorId)
+        .maybeSingle();
+      if (col) {
+        nome = String((col as any).nome_oficial ?? (col as any).nome ?? nome).trim() || nome;
+        if (!codigo && (col as any).codigo_funcionario) {
+          (body as any).codigo_funcionario = String((col as any).codigo_funcionario);
+        }
+        if (!setor_nome && (col as any).sectors?.name) setor_nome = String((col as any).sectors.name);
+        if (!empresa_nome && (col as any).empresa_nome) empresa_nome = String((col as any).empresa_nome);
+      }
+    } else if (codigo) {
+      const { data: col } = await supabase
+        .from("colaboradores")
+        .select("id, nome, nome_oficial, empresa_nome, sectors(name)")
+        .eq("codigo_funcionario", codigo)
+        .maybeSingle();
+      if (col) {
+        resolvedColaboradorId = Number((col as any).id) || null;
+        nome = String((col as any).nome_oficial ?? (col as any).nome ?? nome).trim() || nome;
+        if (!setor_nome && (col as any).sectors?.name) setor_nome = String((col as any).sectors.name);
+        if (!empresa_nome && (col as any).empresa_nome) empresa_nome = String((col as any).empresa_nome);
+      } else {
+        const { data: ff } = await supabase
+          .from("folha_funcionarios")
+          .select("nome, setor_nome, empresa_nome")
+          .eq("codigo_funcionario", codigo)
+          .maybeSingle();
+        if (ff) {
+          nome = String((ff as any).nome ?? nome).trim() || nome;
+          if (!setor_nome && (ff as any).setor_nome) setor_nome = String((ff as any).setor_nome);
+          if (!empresa_nome && (ff as any).empresa_nome) empresa_nome = String((ff as any).empresa_nome);
+        }
+      }
+    }
+
+    return {
+      colaborador_id: resolvedColaboradorId,
+      codigo_funcionario: codigo || (body.codigo_funcionario ? String(body.codigo_funcionario) : null),
+      nome_colaborador: nome || codigo || "Colaborador",
+      setor_nome,
+      empresa_nome,
+    };
+  };
+
+  const buildEmprestimoPayload = async (body: Record<string, unknown>, existing?: Record<string, unknown>) => {
+    const meta = await resolveEmprestimoColaboradorMeta(body);
+    const instituicao = String(body.instituicao_financeira ?? existing?.instituicao_financeira ?? "").trim();
+    if (!instituicao) throw new Error("INSTITUICAO_OBRIGATORIA");
+
+    const quantidade_parcelas = Math.max(1, Math.round(Number(body.quantidade_parcelas ?? existing?.quantidade_parcelas) || 1));
+    const parcelas_pagas = Math.max(0, Math.round(Number(body.parcelas_pagas ?? existing?.parcelas_pagas) || 0));
+    const statusRaw = String(body.status ?? existing?.status ?? "ativo").trim() as EmprestimoStatus;
+    const status = inferStatusFromParcelas(statusRaw, quantidade_parcelas, parcelas_pagas);
+    const data_inicio =
+      body.data_inicio != null && String(body.data_inicio).trim()
+        ? String(body.data_inicio).slice(0, 10)
+        : existing?.data_inicio
+          ? String(existing.data_inicio).slice(0, 10)
+          : null;
+
+    const numOrNull = (v: unknown) => {
+      if (v === null || v === undefined || v === "") return null;
+      const n = Number(v);
+      return Number.isFinite(n) ? n : null;
+    };
+
+    const responsabilidadeRaw = String(
+      body.responsabilidade ?? existing?.responsabilidade ?? "empresa"
+    ).trim() as EmprestimoResponsabilidade;
+    const responsabilidade: EmprestimoResponsabilidade = [
+      "empresa",
+      "colaborador",
+      "instituicao",
+      "encerrado",
+    ].includes(responsabilidadeRaw)
+      ? responsabilidadeRaw
+      : "empresa";
+
+    const data_desligamento =
+      body.data_desligamento !== undefined
+        ? body.data_desligamento != null && String(body.data_desligamento).trim()
+          ? String(body.data_desligamento).slice(0, 10)
+          : null
+        : existing?.data_desligamento
+          ? String(existing.data_desligamento).slice(0, 10)
+          : null;
+
+    const projeta_parcelas =
+      body.projeta_parcelas !== undefined
+        ? Boolean(body.projeta_parcelas)
+        : existing?.projeta_parcelas !== undefined
+          ? Boolean(existing.projeta_parcelas)
+          : !data_desligamento;
+
+    const motivo_encerramento =
+      body.motivo_encerramento !== undefined
+        ? body.motivo_encerramento != null
+          ? String(body.motivo_encerramento).slice(0, 500) || null
+          : null
+        : existing?.motivo_encerramento
+          ? String(existing.motivo_encerramento).slice(0, 500)
+          : null;
+
+    const projeta = shouldProjectEmprestimoParcelas({
+      projeta_parcelas,
+      responsabilidade,
+      data_desligamento,
+      status,
+    });
+
+    const previsaoFinal = projeta
+      ? body.previsao_termino != null && String(body.previsao_termino).trim()
+        ? String(body.previsao_termino).slice(0, 10)
+        : computePrevisaoTermino(data_inicio, quantidade_parcelas, parcelas_pagas)
+      : null;
+
+    return {
+      colaborador_id: meta.colaborador_id,
+      codigo_funcionario: meta.codigo_funcionario,
+      nome_colaborador: meta.nome_colaborador,
+      setor_nome: meta.setor_nome,
+      empresa_nome: meta.empresa_nome,
+      instituicao_financeira: instituicao,
+      valor_contratado: numOrNull(body.valor_contratado ?? existing?.valor_contratado),
+      valor_recebido: numOrNull(body.valor_recebido ?? existing?.valor_recebido),
+      valor_parcela: Number(body.valor_parcela ?? existing?.valor_parcela) || 0,
+      quantidade_parcelas,
+      parcelas_pagas,
+      data_inicio,
+      previsao_termino: previsaoFinal,
+      status,
+      rubrica_codigo:
+        body.rubrica_codigo != null
+          ? String(body.rubrica_codigo).trim() || null
+          : existing?.rubrica_codigo
+            ? String(existing.rubrica_codigo)
+            : null,
+      rubrica_nome:
+        body.rubrica_nome != null
+          ? String(body.rubrica_nome).trim() || null
+          : existing?.rubrica_nome
+            ? String(existing.rubrica_nome)
+            : null,
+      observacao:
+        body.observacao != null
+          ? String(body.observacao).slice(0, 500) || null
+          : existing?.observacao
+            ? String(existing.observacao).slice(0, 500)
+            : null,
+      responsabilidade,
+      data_desligamento,
+      projeta_parcelas: projeta,
+      motivo_encerramento,
+      updated_at: new Date().toISOString(),
+    };
+  };
+
+  const mapLancamentoEmprestimo = (l: any) => ({
+    codigo_funcionario: l.codigo_funcionario,
+    nome_funcionario: l.nome_funcionario,
+    setor_nome: l.setor_nome,
+    situacao: l.situacao,
+    codigo_rubrica: l.codigo_rubrica,
+    descricao_rubrica: l.descricao_rubrica,
+    tipo_original: l.tipo_original,
+    valor_original: l.valor_original,
+  });
+
+  app.get("/api/folha/emprestimos", emprestimosRoles, async (req, res) => {
+    const q = req.query as any;
+    const status = String(q?.status ?? "").trim();
+    const empresa = String(q?.empresa ?? "").trim().toLowerCase();
+    const setor = String(q?.setor ?? "").trim().toLowerCase();
+    const busca = String(q?.q ?? "").trim().toLowerCase();
+
+    const { data, error } = await supabase
+      .from("folha_emprestimos_consignados")
+      .select("*")
+      .order("nome_colaborador")
+      .order("instituicao_financeira");
+
+    if (error) {
+      console.error("folha_emprestimos_consignados list:", error);
+      return res.status(500).json({
+        error: "Tabela de empréstimos indisponível. Execute sql/53_folha_emprestimos_consignados.sql.",
+      });
+    }
+
+    let rows = (data ?? []).map((r: any) => mapEmprestimoRow(r));
+    if (status) rows = rows.filter((r) => r.status === status);
+    if (empresa) rows = rows.filter((r) => String(r.empresa_nome ?? "").toLowerCase().includes(empresa));
+    if (setor) rows = rows.filter((r) => String(r.setor_nome ?? "").toLowerCase().includes(setor));
+    if (busca) {
+      rows = rows.filter((r) =>
+        [r.nome_colaborador, r.codigo_funcionario, r.instituicao_financeira, r.rubrica_nome, r.setor_nome]
+          .filter(Boolean)
+          .some((v) => String(v).toLowerCase().includes(busca))
+      );
+    }
+
+    res.json(buildEmprestimosListResponse(rows));
+  });
+
+  app.post("/api/folha/emprestimos", requireRole("admin", "finance", "controle"), async (req, res) => {
+    try {
+      const payload = await buildEmprestimoPayload(req.body as Record<string, unknown>);
+      const { data, error } = await supabase
+        .from("folha_emprestimos_consignados")
+        .insert(payload)
+        .select()
+        .single();
+      if (error) {
+        console.error("folha_emprestimos insert:", error);
+        return res.status(500).json({ error: "Não foi possível cadastrar o empréstimo." });
+      }
+      res.status(201).json(mapEmprestimoRow(data as any));
+    } catch (e: any) {
+      if (e?.message === "INSTITUICAO_OBRIGATORIA") {
+        return res.status(400).json({ error: "Informe a instituição financeira." });
+      }
+      console.error(e);
+      return res.status(500).json({ error: "Erro ao processar cadastro." });
+    }
+  });
+
+  app.patch("/api/folha/emprestimos/:id", requireRole("admin", "finance", "controle"), async (req, res) => {
+    const id = Number((req.params as any).id);
+    if (!id) return res.status(400).json({ error: "ID inválido." });
+    const { data: existing, error: fetchErr } = await supabase
+      .from("folha_emprestimos_consignados")
+      .select("*")
+      .eq("id", id)
+      .maybeSingle();
+    if (fetchErr || !existing) return res.status(404).json({ error: "Empréstimo não encontrado." });
+
+    try {
+      const payload = await buildEmprestimoPayload(req.body as Record<string, unknown>, existing as any);
+      const { data, error } = await supabase
+        .from("folha_emprestimos_consignados")
+        .update(payload)
+        .eq("id", id)
+        .select()
+        .single();
+      if (error) return res.status(500).json({ error: "Não foi possível atualizar." });
+      res.json(mapEmprestimoRow(data as any));
+    } catch (e: any) {
+      if (e?.message === "INSTITUICAO_OBRIGATORIA") {
+        return res.status(400).json({ error: "Informe a instituição financeira." });
+      }
+      return res.status(500).json({ error: "Erro ao atualizar." });
+    }
+  });
+
+  app.delete("/api/folha/emprestimos/:id", requireRole("admin", "finance", "controle"), async (req, res) => {
+    const id = Number((req.params as any).id);
+    if (!id) return res.status(400).json({ error: "ID inválido." });
+    const { error } = await supabase.from("folha_emprestimos_consignados").delete().eq("id", id);
+    if (error) return res.status(500).json({ error: "Não foi possível excluir." });
+    res.json({ ok: true });
+  });
+
+  app.post("/api/folha/emprestimos/sync-folha", requireRole("admin", "finance", "controle"), async (req, res) => {
+    const year = Number((req.body as any)?.year);
+    const month = Number((req.body as any)?.month);
+    if (!year || !month || month < 1 || month > 12) {
+      return res.status(400).json({ error: "Informe year e month válidos." });
+    }
+
+    const { data: lancamentos, error: lancErr } = await supabase
+      .from("folha_lancamentos_importados")
+      .select("*")
+      .eq("competencia_ano", year)
+      .eq("competencia_mes", month);
+
+    if (lancErr) {
+      return res.status(500).json({ error: "Lançamentos da folha indisponíveis para sincronização." });
+    }
+
+    const candidatos = (lancamentos ?? []).filter((l: any) =>
+      classifyEmprestimoLancamento(
+        String(l.descricao_rubrica ?? ""),
+        String(l.tipo_original ?? ""),
+        Number(l.valor_original) || 0
+      )
+    );
+
+    const agregados = aggregateEmprestimoLancamentos(
+      candidatos.map((l: any) => mapLancamentoEmprestimo(l))
+    );
+
+    const { data: existentes } = await supabase.from("folha_emprestimos_consignados").select("*");
+    const byRubricaKey = new Map<string, any>();
+    const byConciliacaoKey = new Map<string, any>();
+    for (const e of existentes ?? []) {
+      const codigo = String((e as any).codigo_funcionario ?? "").trim();
+      const rubrica = String((e as any).rubrica_codigo ?? "").trim();
+      if (codigo && rubrica) byRubricaKey.set(`${codigo}|${rubrica}`, e);
+      const instKey = emprestimoConciliacaoKey(
+        codigo,
+        String((e as any).rubrica_nome ?? (e as any).instituicao_financeira ?? "")
+      );
+      if (codigo && instKey) byConciliacaoKey.set(instKey, e);
+    }
+
+    const findExistente = (linha: (typeof agregados)[0]) => {
+      const rubrica = String(linha.rubrica_codigo ?? "").trim();
+      const byRub = rubrica ? byRubricaKey.get(`${linha.codigo_funcionario}|${rubrica}`) : null;
+      if (byRub) return byRub;
+      return byConciliacaoKey.get(linha.key) ?? null;
+    };
+
+    let criados = 0;
+    let atualizados = 0;
+    const conciliacaoRows: any[] = [];
+
+    for (const linha of agregados) {
+      const existente = findExistente(linha);
+      const valor_cadastro = existente ? Number((existente as any).valor_parcela) || 0 : null;
+      const diferenca =
+        valor_cadastro != null ? linha.desconto_liquido_folha - valor_cadastro : null;
+      let emprestimoId: number | null = existente ? Number((existente as any).id) : null;
+
+      if (existente) {
+        const updatePayload: Record<string, unknown> = {
+          rubrica_nome: linha.rubrica_nome || (existente as any).rubrica_nome,
+          rubrica_codigo: linha.rubrica_codigo || (existente as any).rubrica_codigo,
+          nome_colaborador: linha.nome_funcionario || (existente as any).nome_colaborador,
+          setor_nome: linha.setor_nome || (existente as any).setor_nome,
+          instituicao_financeira: linha.instituicao_financeira || (existente as any).instituicao_financeira,
+          updated_at: new Date().toISOString(),
+        };
+        if (linha.desconto_liquido_folha > 0.009) {
+          updatePayload.valor_parcela = linha.desconto_liquido_folha;
+        }
+        const { error } = await supabase
+          .from("folha_emprestimos_consignados")
+          .update(updatePayload)
+          .eq("id", (existente as any).id);
+        if (!error) atualizados += 1;
+      } else if (linha.desconto_liquido_folha > 0.009) {
+        const meta = await resolveEmprestimoColaboradorMeta({
+          codigo_funcionario: linha.codigo_funcionario,
+          nome_colaborador: linha.nome_funcionario,
+          setor_nome: linha.setor_nome ?? "",
+        });
+
+        const { data: inserted, error } = await supabase
+          .from("folha_emprestimos_consignados")
+          .insert({
+            ...meta,
+            instituicao_financeira: linha.instituicao_financeira,
+            valor_parcela: linha.desconto_liquido_folha,
+            quantidade_parcelas: 1,
+            parcelas_pagas: 0,
+            status: "ativo",
+            rubrica_codigo: linha.rubrica_codigo,
+            rubrica_nome: linha.rubrica_nome,
+            observacao: `Sincronizado da folha ${String(month).padStart(2, "0")}/${year} (folha normal, desconto líquido)`,
+            updated_at: new Date().toISOString(),
+          })
+          .select("id")
+          .single();
+        if (!error && inserted) {
+          criados += 1;
+          emprestimoId = Number((inserted as any).id) || null;
+        }
+      }
+
+      conciliacaoRows.push({
+        year,
+        month,
+        codigo_funcionario: linha.codigo_funcionario,
+        conciliacao_key: linha.key,
+        emprestimo_id: emprestimoId,
+        nome_colaborador: linha.nome_funcionario,
+        setor_nome: linha.setor_nome,
+        instituicao_financeira: linha.instituicao_financeira,
+        rubrica_codigo: linha.rubrica_codigo,
+        rubrica_nome: linha.rubrica_nome,
+        descontos: linha.descontos,
+        estornos: linha.estornos,
+        desconto_liquido: linha.desconto_liquido,
+        valor_cadastro,
+        diferenca,
+        lancamentos: linha.lancamentos,
+        updated_at: new Date().toISOString(),
+      });
+    }
+
+    if (conciliacaoRows.length) {
+      await supabase.from("folha_emprestimos_conciliacao_mensal").delete().eq("year", year).eq("month", month);
+      const { error: concErr } = await supabase.from("folha_emprestimos_conciliacao_mensal").insert(conciliacaoRows);
+      if (concErr) {
+        console.error("folha_emprestimos_conciliacao_mensal:", concErr);
+      }
+    }
+
+    const totais = sumConciliacao(agregados);
+
+    res.json({
+      ok: true,
+      year,
+      month,
+      lancamentos_emprestimo: candidatos.length,
+      linhas_conciliacao: agregados.length,
+      criados,
+      atualizados,
+      descontos: totais.descontos,
+      descontos_folha_normal: totais.descontos_folha_normal,
+      descontos_rescisao: totais.descontos_rescisao,
+      estornos: totais.estornos,
+      desconto_liquido: totais.desconto_liquido,
+      desconto_liquido_folha: totais.desconto_liquido_folha,
+    });
+  });
+
+  app.get("/api/folha/emprestimos/alertas-desligamento", emprestimosRoles, async (_req, res) => {
+    const [{ data: emprestimos, error }, { data: pagamentos, error: pagErr }] = await Promise.all([
+      supabase.from("folha_emprestimos_consignados").select("*").eq("status", "ativo"),
+      supabase
+        .from("folha_pagamento")
+        .select("matricula, nome, situacao, year, month")
+        .order("year", { ascending: false })
+        .order("month", { ascending: false }),
+    ]);
+
+    if (error) {
+      return res.status(500).json({ error: "Não foi possível carregar empréstimos." });
+    }
+    if (pagErr) {
+      console.warn("folha_pagamento alertas-desligamento:", pagErr.message);
+    }
+
+    const situacaoPorMatricula = new Map<
+      string,
+      { situacao: string; nome: string; year: number; month: number }
+    >();
+    for (const p of pagamentos ?? []) {
+      const mat = String((p as any).matricula ?? "").trim();
+      if (!mat || situacaoPorMatricula.has(mat)) continue;
+      situacaoPorMatricula.set(mat, {
+        situacao: String((p as any).situacao ?? ""),
+        nome: String((p as any).nome ?? ""),
+        year: Number((p as any).year) || 0,
+        month: Number((p as any).month) || 0,
+      });
+    }
+
+    const alertas: Array<Record<string, unknown>> = [];
+    for (const raw of emprestimos ?? []) {
+      const row = mapEmprestimoRow(raw as any);
+      if (!row.projeta_parcelas || row.data_desligamento) continue;
+      const codigo = String(row.codigo_funcionario ?? "").trim();
+      if (!codigo) continue;
+      const sit = situacaoPorMatricula.get(codigo);
+      if (!sit || !isSituacaoDesligamento(sit.situacao)) continue;
+      alertas.push({
+        emprestimo_id: row.id,
+        colaborador_id: row.colaborador_id,
+        codigo_funcionario: codigo,
+        nome_colaborador: row.nome_colaborador,
+        instituicao_financeira: row.instituicao_financeira,
+        valor_parcela: row.valor_parcela,
+        parcelas_restantes_exibicao: row.parcelas_restantes_exibicao,
+        situacao_folha: sit.situacao,
+        competencia_folha: { year: sit.year, month: sit.month },
+        sugestao:
+          "Colaborador com situação de desligamento na folha. Registre o desligamento e defina a responsabilidade do contrato.",
+      });
+    }
+
+    alertas.sort((a, b) =>
+      String(a.nome_colaborador).localeCompare(String(b.nome_colaborador), "pt-BR")
+    );
+
+    res.json({
+      regras_rescisao_pendentes: REGRAS_RESCISAO_PENDENTES,
+      alertas,
+    });
+  });
+
+  app.patch("/api/folha/emprestimos/:id/desligamento", requireRole("admin", "finance", "controle"), async (req, res) => {
+    const id = Number((req.params as any).id);
+    if (!id) return res.status(400).json({ error: "ID inválido." });
+
+    const body = req.body as Record<string, unknown>;
+    const data_desligamento = body.data_desligamento ? String(body.data_desligamento).slice(0, 10) : "";
+    if (!data_desligamento) {
+      return res.status(400).json({ error: "Informe a data de desligamento." });
+    }
+
+    const responsabilidadeRaw = String(body.responsabilidade ?? "").trim() as EmprestimoResponsabilidade;
+    if (!["empresa", "colaborador", "instituicao", "encerrado"].includes(responsabilidadeRaw)) {
+      return res.status(400).json({ error: "Responsabilidade inválida." });
+    }
+
+    const aplicarTodos = Boolean(body.aplicar_todos_colaborador);
+    const projeta_parcelas =
+      body.projeta_parcelas !== undefined ? Boolean(body.projeta_parcelas) : false;
+    const motivo_encerramento =
+      body.motivo_encerramento != null ? String(body.motivo_encerramento).slice(0, 500) || null : null;
+
+    const { data: existente, error: fetchErr } = await supabase
+      .from("folha_emprestimos_consignados")
+      .select("*")
+      .eq("id", id)
+      .maybeSingle();
+    if (fetchErr || !existente) return res.status(404).json({ error: "Empréstimo não encontrado." });
+
+    const updatePayload = {
+      data_desligamento,
+      responsabilidade: responsabilidadeRaw,
+      projeta_parcelas,
+      motivo_encerramento,
+      previsao_termino: null,
+      updated_at: new Date().toISOString(),
+      ...(responsabilidadeRaw === "encerrado" ? { status: "quitado" as const } : {}),
+    };
+
+    let idsAtualizados = [id];
+    if (aplicarTodos) {
+      const codigo = String((existente as any).codigo_funcionario ?? "").trim();
+      const colaboradorId = (existente as any).colaborador_id;
+      let q = supabase.from("folha_emprestimos_consignados").select("id").eq("status", "ativo");
+      if (colaboradorId != null) q = q.eq("colaborador_id", colaboradorId);
+      else if (codigo) q = q.eq("codigo_funcionario", codigo);
+      else return res.status(400).json({ error: "Empréstimo sem vínculo de colaborador." });
+      const { data: irmãos } = await q;
+      idsAtualizados = (irmãos ?? []).map((r: any) => Number(r.id)).filter(Boolean);
+    }
+
+    const { data, error } = await supabase
+      .from("folha_emprestimos_consignados")
+      .update(updatePayload)
+      .in("id", idsAtualizados)
+      .select();
+
+    if (error) {
+      console.error("folha_emprestimos desligamento:", error);
+      return res.status(500).json({ error: "Não foi possível registrar o desligamento." });
+    }
+
+    res.json({
+      ok: true,
+      atualizados: (data ?? []).length,
+      emprestimos: (data ?? []).map((r: any) => mapEmprestimoRow(r)),
+      regras_rescisao_pendentes: REGRAS_RESCISAO_PENDENTES,
+    });
+  });
+
+  app.get("/api/folha/emprestimos/conciliacao", emprestimosRoles, async (req, res) => {
+    const year = Number((req.query as any)?.year);
+    const month = Number((req.query as any)?.month);
+    if (!year || !month || month < 1 || month > 12) {
+      return res.status(400).json({ error: "Informe year e month válidos." });
+    }
+
+    const { data: lancamentos, error: lancErr } = await supabase
+      .from("folha_lancamentos_importados")
+      .select("*")
+      .eq("competencia_ano", year)
+      .eq("competencia_mes", month);
+
+    if (lancErr) {
+      return res.status(500).json({ error: "Lançamentos da folha indisponíveis." });
+    }
+
+    const candidatos = (lancamentos ?? []).filter((l: any) =>
+      classifyEmprestimoLancamento(
+        String(l.descricao_rubrica ?? ""),
+        String(l.tipo_original ?? ""),
+        Number(l.valor_original) || 0
+      )
+    );
+
+    const linhasCalc = aggregateEmprestimoLancamentos(
+      candidatos.map((l: any) => mapLancamentoEmprestimo(l))
+    );
+
+    const { data: cadastroRows } = await supabase.from("folha_emprestimos_consignados").select("*");
+    const byRubricaKey = new Map<string, any>();
+    const byConciliacaoKey = new Map<string, any>();
+    for (const e of cadastroRows ?? []) {
+      const codigo = String((e as any).codigo_funcionario ?? "").trim();
+      const rubrica = String((e as any).rubrica_codigo ?? "").trim();
+      if (codigo && rubrica) byRubricaKey.set(`${codigo}|${rubrica}`, e);
+      const instKey = emprestimoConciliacaoKey(
+        codigo,
+        String((e as any).rubrica_nome ?? (e as any).instituicao_financeira ?? "")
+      );
+      if (codigo && instKey) byConciliacaoKey.set(instKey, e);
+    }
+
+    const linhas = linhasCalc.map((linha) => {
+      const rubrica = String(linha.rubrica_codigo ?? "").trim();
+      const existente =
+        (rubrica ? byRubricaKey.get(`${linha.codigo_funcionario}|${rubrica}`) : null) ??
+        byConciliacaoKey.get(linha.key) ??
+        null;
+      const valor_cadastro = existente ? Number((existente as any).valor_parcela) || 0 : null;
+      return {
+        ...linha,
+        valor_cadastro,
+        emprestimo_id: existente ? Number((existente as any).id) : null,
+        diferenca:
+          valor_cadastro != null ? linha.desconto_liquido_folha - valor_cadastro : null,
+      };
+    });
+
+    const cadastroMapped = (cadastroRows ?? []).map((r: any) => mapEmprestimoRow(r));
+
+    const { data: justRows, error: justErr } = await supabase
+      .from("folha_emprestimos_divergencias")
+      .select("*")
+      .eq("year", year)
+      .eq("month", month);
+
+    if (justErr) {
+      console.warn("folha_emprestimos_divergencias:", justErr.message);
+    }
+
+    const divergencias_lista = buildEmprestimoDivergencias(
+      linhas,
+      cadastroMapped,
+      (justRows ?? []).map((j: any) => ({
+        conciliacao_key: String(j.conciliacao_key),
+        motivo: j.motivo,
+        justificativa: j.justificativa,
+      }))
+    );
+
+    const totais = sumConciliacao(linhas);
+    const divergencias = divergencias_lista.length;
+    const divergencias_justificadas = divergencias_lista.filter((d) => d.justificado).length;
+
+    res.json({
+      year,
+      month,
+      resumo: {
+        ...totais,
+        linhas: linhas.length,
+        divergencias,
+        divergencias_justificadas,
+        divergencias_pendentes: divergencias - divergencias_justificadas,
+      },
+      linhas,
+      divergencias_lista,
+    });
+  });
+
+  app.put("/api/folha/emprestimos/divergencias/justificativa", requireRole("admin", "finance", "controle"), async (req, res) => {
+    const body = req.body as Record<string, unknown>;
+    const year = Number(body.year);
+    const month = Number(body.month);
+    const conciliacao_key = String(body.conciliacao_key ?? "").trim();
+    const motivoRaw = String(body.motivo ?? "").trim() as EmprestimoDivergenciaMotivo;
+    const justificativa = body.justificativa != null ? String(body.justificativa).trim() : "";
+
+    if (!year || !month || month < 1 || month > 12) {
+      return res.status(400).json({ error: "Informe year e month válidos." });
+    }
+    if (!conciliacao_key) {
+      return res.status(400).json({ error: "Informe conciliacao_key." });
+    }
+    const motivosValidos: EmprestimoDivergenciaMotivo[] = [
+      "rescisao",
+      "estorno",
+      "parcela_nao_descontada",
+      "reembolso",
+      "diferenca_competencia",
+      "erro_inconsistencia",
+      "outro",
+    ];
+    if (!motivosValidos.includes(motivoRaw)) {
+      return res.status(400).json({ error: "Motivo inválido." });
+    }
+    if (!justificativa) {
+      return res.status(400).json({ error: "Informe a justificativa." });
+    }
+
+    const payload = {
+      year,
+      month,
+      conciliacao_key,
+      emprestimo_id: body.emprestimo_id != null ? Number(body.emprestimo_id) || null : null,
+      codigo_funcionario: String(body.codigo_funcionario ?? "").trim() || "—",
+      nome_colaborador: body.nome_colaborador != null ? String(body.nome_colaborador) : null,
+      instituicao_financeira: body.instituicao_financeira != null ? String(body.instituicao_financeira) : null,
+      valor_esperado: body.valor_esperado != null ? Number(body.valor_esperado) : null,
+      valor_descontado: Number(body.valor_descontado) || 0,
+      valor_repassado: Number(body.valor_repassado) || 0,
+      diferenca: Number(body.diferenca) || 0,
+      motivo: motivoRaw,
+      justificativa,
+      updated_at: new Date().toISOString(),
+    };
+
+    const { data, error } = await supabase
+      .from("folha_emprestimos_divergencias")
+      .upsert(payload, { onConflict: "year,month,conciliacao_key" })
+      .select()
+      .single();
+
+    if (error) {
+      console.error("folha_emprestimos_divergencias upsert:", error);
+      return res.status(500).json({
+        error: "Não foi possível salvar a justificativa. Execute sql/56_folha_emprestimos_divergencias.sql.",
+      });
+    }
+
+    res.json({ ok: true, registro: data });
+  });
+
+  app.get("/api/folha/emprestimos/historico", emprestimosRoles, async (req, res) => {
+    const q = req.query as any;
+    const desdeInicio =
+      String(q?.desde_inicio ?? "") === "1" || String(q?.desde_inicio ?? "").toLowerCase() === "true";
+
+    const { data: lancamentos, error: lancErr } = await supabase
+      .from("folha_lancamentos_importados")
+      .select("*")
+      .order("competencia_ano")
+      .order("competencia_mes");
+
+    if (lancErr) {
+      return res.status(500).json({ error: "Lançamentos da folha indisponíveis." });
+    }
+
+    const candidatos = (lancamentos ?? [])
+      .filter((l: any) =>
+        classifyEmprestimoLancamento(
+          String(l.descricao_rubrica ?? ""),
+          String(l.tipo_original ?? ""),
+          Number(l.valor_original) || 0
+        )
+      )
+      .map((l: any) => ({
+        ...mapLancamentoEmprestimo(l),
+        competencia_ano: l.competencia_ano,
+        competencia_mes: l.competencia_mes,
+      }));
+
+    const periodo = resolveEmprestimoHistoricoPeriodo(candidatos, {
+      desde_inicio: desdeInicio,
+      year_from: Number(q?.year_from),
+      month_from: Number(q?.month_from),
+      year_to: Number(q?.year_to),
+      month_to: Number(q?.month_to),
+    });
+
+    if (!periodo) {
+      return res.json({
+        periodo: null,
+        resumo: {
+          pago_repassado: 0,
+          descontado: 0,
+          estornos: 0,
+          diferenca_acumulada: 0,
+        },
+        evolucao_mensal: [],
+        por_colaborador: [],
+        sem_dados: true,
+      });
+    }
+
+    const filtroCodigo = String(q?.codigo_funcionario ?? "").trim();
+    const filtroBusca = String(q?.q ?? "").trim().toLowerCase();
+
+    let rowsFiltrados = candidatos;
+    if (filtroCodigo) {
+      rowsFiltrados = rowsFiltrados.filter(
+        (l) => String(l.codigo_funcionario ?? "").trim() === filtroCodigo
+      );
+    }
+    if (filtroBusca) {
+      rowsFiltrados = rowsFiltrados.filter((l) => {
+        const desc = String(l.descricao_rubrica ?? "");
+        const inst = extractInstituicaoFromRubrica(desc);
+        return [l.nome_funcionario, l.codigo_funcionario, inst, desc]
+          .filter(Boolean)
+          .some((v) => String(v).toLowerCase().includes(filtroBusca));
+      });
+    }
+
+    const resultado = buildEmprestimoHistorico(rowsFiltrados, periodo);
+
+    res.json(resultado);
+  });
+
+  const tangerinoRoles = requireRole("admin", "finance", "controle", "manager", "diretoria");
+
+  app.get("/api/folha/tangerino", tangerinoRoles, async (req, res) => {
+    const q = req.query as any;
+    const year = Number(q?.year) || new Date().getFullYear();
+    const monthFrom = Number(q?.month_from || q?.month) || 1;
+    const monthTo = Number(q?.month_to || q?.month) || monthFrom;
+    const empresaKey = String(q?.empresa_key ?? "").trim() as TangerinoEmpresaKey | "";
+    const filtroSetor = String(q?.setor ?? "").trim().toLowerCase();
+
+    if (monthFrom < 1 || monthTo > 12 || monthFrom > monthTo) {
+      return res.status(400).json({ error: "Período inválido." });
+    }
+
+    let query = supabase
+      .from("tangerino_ponto_mensal")
+      .select("*")
+      .eq("year", year)
+      .gte("month", monthFrom)
+      .lte("month", monthTo)
+      .order("month")
+      .order("setor_nome")
+      .order("nome_colaborador");
+
+    if (empresaKey) query = query.eq("empresa_key", empresaKey);
+
+    const [{ data: rows, error }, { data: importacoes }, { data: vinculos }] = await Promise.all([
+      query,
+      supabase
+        .from("tangerino_importacoes")
+        .select("*")
+        .eq("year", year)
+        .gte("month", monthFrom)
+        .lte("month", monthTo)
+        .order("created_at", { ascending: false }),
+      supabase.from("tangerino_colaborador_vinculo").select("*").eq("ativo", true).order("nome_tangerino"),
+    ]);
+
+    if (error) {
+      console.error(error);
+      return res.status(500).json({
+        error: "Tabelas Tangerino ausentes. Execute sql/48_tangerino.sql.",
+      });
+    }
+
+    let filtered = rows ?? [];
+    if (filtroSetor) {
+      filtered = filtered.filter((r: any) =>
+        String(r.setor_nome ?? "")
+          .toLowerCase()
+          .includes(filtroSetor)
+      );
+    }
+
+    const resumo = summarizeTangerino(filtered);
+    const setores = Array.from(
+      new Map(
+        filtered
+          .filter((r: any) => String(r.setor_nome ?? "").trim())
+          .map((r: any) => [
+            String(r.setor_nome),
+            { nome: String(r.setor_nome), codigo: r.setor_codigo ?? null },
+          ])
+      ).values()
+    );
+
+    const evolucao = Array.from({ length: monthTo - monthFrom + 1 }, (_, i) => monthFrom + i).map((m) => {
+      const mesRows = filtered.filter((r: any) => Number(r.month) === m);
+      const s = summarizeTangerino(mesRows);
+      return { month: m, ...s };
+    });
+
+    res.json({
+      year,
+      month_from: monthFrom,
+      month_to: monthTo,
+      empresas: TANGERINO_EMPRESAS,
+      filtros: { setores },
+      resumo,
+      evolucao,
+      rows: filtered.map((r: any) => ({
+        ...r,
+        empresa_nome: empresaNomeFromKey(String(r.empresa_key ?? "")),
+        horas_previstas: Number(r.horas_previstas) || 0,
+        horas_trabalhadas: Number(r.horas_trabalhadas) || 0,
+        horas_ausencia: Number(r.horas_ausencia) || 0,
+        dias_faltas: Number(r.dias_faltas) || 0,
+      })),
+      importacoes: importacoes ?? [],
+      vinculos: vinculos ?? [],
+    });
+  });
+
+  app.post("/api/folha/tangerino/import/preview", requireRole("admin", "finance", "controle"), upload.single("tangerino_file"), async (req, res) => {
+    if (!req.file) return res.status(400).json({ error: "Arquivo não enviado." });
+    const empresaKey = (String((req.body as any)?.empresa_key ?? "vivaz").trim() || "vivaz") as TangerinoEmpresaKey;
+    if (!["vivaz", "aqua"].includes(empresaKey)) {
+      return res.status(400).json({ error: "empresa_key deve ser vivaz ou aqua." });
+    }
+
+    const isPdf = req.file.mimetype === "application/pdf" || /\.pdf$/i.test(req.file.originalname || "");
+    if (isPdf) {
+      if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+      return res.status(422).json({
+        success: false,
+        error:
+          "Importação por PDF do Tangerino será mapeada em breve. Por enquanto, exporte o relatório em CSV e envie nesta tela.",
+        pdf_pendente: true,
+      });
+    }
+
+    try {
+      const content = fs.readFileSync(req.file.path, "utf8");
+      const parsed = parseTangerinoCsv(content, empresaKey);
+      if (!parsed.rows.length) {
+        return res.status(422).json({
+          success: false,
+          error: parsed.errors[0] || "Nenhuma linha reconhecida no CSV.",
+          parse_errors: parsed.errors,
+          headers: parsed.headers,
+        });
+      }
+      res.json({
+        success: true,
+        arquivo_nome: req.file.originalname || "tangerino.csv",
+        empresa_key: empresaKey,
+        empresa_nome: empresaNomeFromKey(empresaKey),
+        rows: parsed.rows,
+        resumo: summarizeTangerino(parsed.rows),
+        parse_warnings: parsed.errors,
+        headers: parsed.headers,
+      });
+    } catch (e: any) {
+      console.error(e);
+      res.status(500).json({ error: "Falha ao ler o arquivo CSV." });
+    } finally {
+      if (req.file?.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+    }
+  });
+
+  app.post("/api/folha/tangerino/import/commit", requireRole("admin", "finance", "controle"), async (req, res) => {
+    const body = req.body as any;
+    const year = Number(body?.year);
+    const month = Number(body?.month);
+    const empresaKey = String(body?.empresa_key ?? "vivaz").trim() as TangerinoEmpresaKey;
+    const rows = Array.isArray(body?.rows) ? body.rows : [];
+    const aplicarAbsenteismo = body?.aplicar_absenteismo !== false;
+
+    if (!year || !month || month < 1 || month > 12) {
+      return res.status(400).json({ error: "Informe year e month válidos." });
+    }
+    if (!["vivaz", "aqua"].includes(empresaKey)) {
+      return res.status(400).json({ error: "empresa_key deve ser vivaz ou aqua." });
+    }
+    if (!rows.length) return res.status(400).json({ error: "Nenhuma linha para gravar." });
+
+    try {
+      const result = await commitTangerinoImport(supabase, year, month, empresaKey, rows, {
+        arquivo_nome: body?.arquivo_nome,
+        origem: body?.origem ?? "csv",
+        usuario: (req as any).user?.email ?? null,
+      });
+
+      let absenteismo = { rows: 0 };
+      if (aplicarAbsenteismo) {
+        absenteismo = await applyTangerinoToAbsenteismo(supabase, year, month, empresaKey);
+      }
+
+      res.json({ ok: true, ...result, absenteismo });
+    } catch (e) {
+      console.error(e);
+      return res.status(500).json({ error: "Falha ao gravar importação Tangerino. Execute sql/48_tangerino.sql." });
+    }
+  });
+
+  app.post("/api/folha/tangerino/aplicar-absenteismo", requireRole("admin", "finance", "controle"), async (req, res) => {
+    const year = Number((req.body as any)?.year);
+    const month = Number((req.body as any)?.month);
+    const empresaKey = String((req.body as any)?.empresa_key ?? "").trim() as TangerinoEmpresaKey | "";
+    if (!year || !month) return res.status(400).json({ error: "Informe year e month." });
+    try {
+      const result = await applyTangerinoToAbsenteismo(
+        supabase,
+        year,
+        month,
+        empresaKey && ["vivaz", "aqua"].includes(empresaKey) ? empresaKey : null
+      );
+      res.json({ ok: true, ...result });
+    } catch (e) {
+      console.error(e);
+      return res.status(500).json({ error: "Falha ao aplicar Tangerino no absenteísmo." });
+    }
+  });
+
+  app.get("/api/folha/tangerino/vinculos", tangerinoRoles, async (req, res) => {
+    const empresaKey = String((req.query as any)?.empresa_key ?? "").trim();
+    let q = supabase.from("tangerino_colaborador_vinculo").select("*").order("nome_tangerino");
+    if (empresaKey) q = q.eq("empresa_key", empresaKey);
+    const { data, error } = await q;
+    if (error) return res.status(500).json({ error: "Execute sql/48_tangerino.sql." });
+    res.json(data ?? []);
+  });
+
+  app.patch("/api/folha/tangerino/vinculos", requireRole("admin", "finance", "controle"), async (req, res) => {
+    const body = req.body as any;
+    const empresa_key = String(body?.empresa_key ?? "").trim();
+    const nome_tangerino = String(body?.nome_tangerino ?? "").trim();
+    if (!empresa_key || !nome_tangerino) {
+      return res.status(400).json({ error: "Informe empresa_key e nome_tangerino." });
+    }
+    try {
+      const data = await upsertVinculo(supabase, {
+        empresa_key,
+        nome_tangerino,
+        tangerino_id: body?.tangerino_id,
+        codigo_funcionario: body?.codigo_funcionario,
+        setor_nome: body?.setor_nome,
+        setor_codigo: body?.setor_codigo,
+        ativo: body?.ativo !== false,
+      });
+      res.json(data);
+    } catch (e) {
+      console.error(e);
+      return res.status(500).json({ error: "Não foi possível salvar o vínculo." });
+    }
   });
 
   // ====================================================
@@ -7924,7 +11689,14 @@ export function createApp() {
       return res.status(400).json({ error: "Não há dados importados para esta competência. Importe o extrato mensal primeiro." });
     }
 
-    const rawLancamentos = rawInputs.filter(
+    const { data: funcCadastroRows } = await supabase
+      .from("folha_funcionarios")
+      .select("codigo_funcionario, setor_nome, setor_codigo, sector_id")
+      .eq("ativo", true);
+    const cadastroSetorMap = buildCadastroSetorMap(funcCadastroRows ?? []);
+    const rawInputsComSetor = enrichLancamentosComCadastroSetor(rawInputs, cadastroSetorMap);
+
+    const rawLancamentos = rawInputsComSetor.filter(
       (l) => !ignored.has(String(l.codigo_rubrica).trim())
     );
 
@@ -8086,7 +11858,11 @@ export function createApp() {
     if (sitErr) console.warn("folha_situacoes_resumo indisponível:", sitErr.message);
     if (detErr) console.warn("folha_lancamentos_importados indisponível:", detErr.message);
 
-    const dadosImportados = (funcCount ?? 0) > 0 || (rubCount ?? 0) > 0;
+    const temResumoRubricas = (rubCount ?? 0) > 0;
+    const temDetalheImportado = (detCount ?? 0) > 0;
+    const temFuncionarios = (funcCount ?? 0) > 0;
+    const dadosImportados =
+      Boolean(importacao) || temResumoRubricas || temDetalheImportado || temFuncionarios;
 
     let proventosImportacao = 0;
     let rubricasPendentesProvento = 0;
@@ -8159,7 +11935,7 @@ export function createApp() {
         lancamentos_detalhe: detCount ?? 0,
         proventos_calculados: proventosImportacao,
         rubricas_pendentes: rubricasPendentesProvento,
-        pronto_para_processar: dadosImportados && (rubCount ?? 0) > 0,
+        pronto_para_processar: dadosImportados && (temResumoRubricas || temDetalheImportado),
         aguardando_processamento: dadosImportados && !apuracao,
       },
     });
@@ -8328,11 +12104,18 @@ export function createApp() {
 
   // Sincronizar setores a partir de sectors existente
   app.post("/api/folha/apuracao/setores/sync", folhaApuracaoRoles, async (_req, res) => {
-    const { data: sectors } = await supabase.from("sectors").select("id, name, code").eq("active", true);
+    const { data: sectors } = await supabase.from("sectors").select("id, name, code, active").eq("active", true);
     let count = 0;
     for (const s of sectors ?? []) {
+      const code = (s as any).code ?? slugSectorCodeFromName(String((s as any).name ?? ""));
       await supabase.from("folha_setores").upsert(
-        { nome: (s as any).name, codigo: (s as any).code, sector_id: (s as any).id, ativo: true, updated_at: new Date().toISOString() },
+        {
+          nome: (s as any).name,
+          codigo: code,
+          sector_id: (s as any).id,
+          ativo: true,
+          updated_at: new Date().toISOString(),
+        },
         { onConflict: "nome" }
       );
       count += 1;
@@ -8678,7 +12461,7 @@ export function createApp() {
 
     const { data, error } = await supabase
       .from("rel_crd_rows")
-      .select("month, nivel, codigo, nome, saldo_lanc")
+      .select("id, month, nivel, codigo, nome, saldo_lanc")
       .eq("year", year);
 
     if (error) {
@@ -8687,6 +12470,9 @@ export function createApp() {
         error: "Não foi possível carregar o realizado do Rel. CRD. Execute sql/13_rel_crd_rows.sql se ainda não rodou.",
       });
     }
+
+    const rowIds = (data ?? []).map((r: any) => Number(r.id)).filter((id) => Number.isFinite(id) && id > 0);
+    const corrections = await fetchCorrectionsForRows(supabase, "rel_crd_rows", rowIds);
 
     const maxNivelByMonth = new Map<number, number>();
     for (const row of data ?? []) {
@@ -8706,8 +12492,11 @@ export function createApp() {
       const codigo = String((row as any).codigo ?? "").trim();
       if (!codigo) continue;
       if (!byCodigo[codigo]) byCodigo[codigo] = Array.from({ length: 12 }, () => null);
-      const saldo = Number((row as any).saldo_lanc);
-      byCodigo[codigo][month - 1] = Number.isFinite(saldo) ? saldo : 0;
+      const saldoMeta = applyFieldCorrection(
+        Number((row as any).saldo_lanc) || 0,
+        getCorrectionFromMap(corrections, "rel_crd_rows", Number((row as any).id), "saldo_lanc")
+      );
+      byCodigo[codigo][month - 1] = saldoMeta.value;
       const nome = String((row as any).nome ?? "").trim();
       if (nome && !nomes[codigo]) nomes[codigo] = nome;
     }
@@ -10247,25 +14036,69 @@ export function createApp() {
     // Realizado importado (ex.: Consumo Interno, Rel. CRD).
     // Rel. CRD: rematch a partir de rel_crd_rows (código entre parênteses no nome do CRD)
     // para o SALDO LANÇ alimentar o setor competente mesmo em imports antigos.
+    const relCrdScope = viewMode === "diario" ? "acompanhamento" : "fechamento";
+
     const { data: realizadoImport } = await supabase
       .from("crd_realizado")
-      .select("crd_id, month, value, source")
+      .select("crd_id, month, value, source, import_scope, period_key, week_index")
       .eq("year", selectedYear);
 
-    const { data: relCrdRows } = await supabase
+    const latestConsumoWeekByMonth = new Map<number, number>();
+    if (viewMode === "diario") {
+      for (const row of realizadoImport ?? []) {
+        if (String((row as any).source) !== "consumo_interno") continue;
+        if (String((row as any).import_scope || "") !== "acompanhamento") continue;
+        const month = Number((row as any).month);
+        const week = Number((row as any).week_index) || 0;
+        if (!Number.isFinite(month) || month < 1 || month > 12) continue;
+        latestConsumoWeekByMonth.set(month, Math.max(latestConsumoWeekByMonth.get(month) ?? 0, week));
+      }
+    }
+
+    const { data: relCrdRowsRaw } = await supabase
       .from("rel_crd_rows")
-      .select("month, nivel, codigo, saldo_lanc")
-      .eq("year", selectedYear);
-    const hasRelCrdRows = (relCrdRows?.length ?? 0) > 0;
+      .select("month, nivel, codigo, saldo_lanc, import_scope, week_index, period_key")
+      .eq("year", selectedYear)
+      .eq("import_scope", relCrdScope);
+
+    // Acompanhamento: usa a semana mais recente de cada mês (evita somar S1+S2+…).
+    let relCrdRows = relCrdRowsRaw ?? [];
+    if (viewMode === "diario" && relCrdRows.length > 0) {
+      const latestWeekByMonth = new Map<number, number>();
+      for (const row of relCrdRows) {
+        const month = Number((row as any).month);
+        const week = Number((row as any).week_index) || 0;
+        if (!Number.isFinite(month) || month < 1 || month > 12) continue;
+        latestWeekByMonth.set(month, Math.max(latestWeekByMonth.get(month) ?? 0, week));
+      }
+      relCrdRows = relCrdRows.filter((row) => {
+        const month = Number((row as any).month);
+        const week = Number((row as any).week_index) || 0;
+        return week === (latestWeekByMonth.get(month) ?? week);
+      });
+    }
+
+    const hasRelCrdRows = relCrdRows.length > 0;
 
     for (const row of realizadoImport ?? []) {
       const source = String((row as any).source || "");
+      const rowScope = String((row as any).import_scope || "");
       const isRelCrd =
         source === "rel_crd" || source === "rel_crd_mensal" || source === "rel_crd_diario";
-      // Quando há linhas do Rel. CRD, o rematch abaixo substitui essas sources.
+      // Quando há linhas do Rel. CRD no escopo, o rematch abaixo substitui essas sources.
       if (hasRelCrdRows && isRelCrd) continue;
-      if (viewMode === "diario" && (source === "rel_crd" || source === "rel_crd_mensal")) continue;
-      if (viewMode === "mensal" && source === "rel_crd_diario") continue;
+      if (viewMode === "diario") {
+        if (source === "rel_crd" || source === "rel_crd_mensal") continue;
+        if (rowScope === "fechamento") continue;
+        if (source === "consumo_interno" && rowScope === "acompanhamento") {
+          const month = Number((row as any).month);
+          const week = Number((row as any).week_index) || 0;
+          if (week !== (latestConsumoWeekByMonth.get(month) ?? week)) continue;
+        }
+      } else {
+        if (source === "rel_crd_diario") continue;
+        if (rowScope === "acompanhamento") continue;
+      }
       addRealized(Number((row as any).crd_id), Number((row as any).month), (row as any).value);
     }
 
@@ -11225,26 +15058,11 @@ export function createApp() {
       }
 
       // Setores existentes (para criar CRDs faltantes mapeando pela coluna B).
-      const { data: sectorsData } = await supabase.from("sectors").select("id, name");
-      const sectorIdByName = new Map<string, number>();
-      for (const s of sectorsData ?? []) sectorIdByName.set(normalizeName((s as any).name), Number((s as any).id));
+      await sectorCache.reload(true);
 
       const resolveSectorId = async (groupHint: string): Promise<number | null> => {
-        const key = normalizeName(groupHint) || "sem grupo";
-        if (sectorIdByName.has(key)) return sectorIdByName.get(key)!;
-        // Cria o setor caso não exista (ex.: "Diretoria").
-        const niceName = (groupHint || "Sem grupo").trim();
-        const { data: created, error } = await supabase
-          .from("sectors")
-          .insert({ name: niceName, budget_limit: 0 })
-          .select("id")
-          .single();
-        if (error || !created) {
-          console.error("Falha ao criar setor:", niceName, error);
-          return sectorIdByName.get("sem grupo") ?? null;
-        }
-        sectorIdByName.set(key, Number(created.id));
-        return Number(created.id);
+        const resolved = await resolveSector(supabase, { name: groupHint, create: true }, sectorCache);
+        return resolved?.id ?? null;
       };
 
       const upsertRows: Array<{ crd_id: number; year: number; month: number; value: number }> = [];
