@@ -1,6 +1,6 @@
 /** Acesso confidencial a dados de empréstimos consignados (RH / financeiro). */
 
-import { hasPermission, type RolePermissionRow } from './permissionCatalog';
+import { hasPermission, type RolePermissionRow } from './permissionCatalog.js';
 
 export const EMPRESTIMOS_ACCESS_ROLES = ['admin', 'finance', 'controle'] as const;
 
