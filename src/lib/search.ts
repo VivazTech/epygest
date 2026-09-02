@@ -39,7 +39,7 @@ export function getSearchPlaceholder(activeTab: string): string {
     planejamento: 'Buscar períodos do planejamento...',
     notas: 'Buscar nota, fornecedor, setor ou CRD...',
     requisicoes: 'Buscar requisição, CRD ou descrição...',
-    'lancamentos-manuais': 'Buscar lançamento, setor, CRD ou descrição...',
+    'lancamentos-manuais': 'Buscar lançamento, fornecedor, setor ou CRD...',
     comandas: 'Buscar comanda, consumidor, local ou item...',
     importacao: 'Buscar importação ou dados da prévia...',
     cadastros: 'Buscar cadastro, código ou setor...',

@@ -2253,9 +2253,10 @@ export function createApp() {
   });
 
   app.post("/api/manual-entries", async (req, res) => {
-    const { sector_id, crd_id, description, amount, date, issue_date, file_path, file_name } = req.body;
-    if (!sector_id || amount == null || !date || !issue_date) {
-      return res.status(400).json({ error: "sector_id, amount, issue_date e date são obrigatórios" });
+    const { sector_id, crd_id, description, provider_name, amount, date, issue_date, file_path, file_name } = req.body;
+    const resolvedProviderName = String(provider_name || "").trim();
+    if (!sector_id || amount == null || !date || !issue_date || !resolvedProviderName) {
+      return res.status(400).json({ error: "setor, fornecedor, valor, data de emissão e data de lançamento são obrigatórios" });
     }
 
     const sectorId = Number(sector_id);
@@ -2302,6 +2303,7 @@ export function createApp() {
         crd_id: resolvedCrdId,
         user_id: req.user!.id,
         description: description || null,
+        provider_name: resolvedProviderName,
         amount,
         issue_date,
         date,
@@ -2620,7 +2622,7 @@ export function createApp() {
           sector_name: row.sectors?.name ?? null,
           crd_code: row.crds?.code ?? null,
           crd_name: row.crds?.name ?? null,
-          title: row.description || `Lançamento #${row.id}`,
+          title: row.provider_name || row.description || `Lançamento #${row.id}`,
           subtitle: row.users?.name ?? null,
           description: row.description ?? null,
           reference_date: String(row.date || row.issue_date || "").slice(0, 10),
@@ -2631,7 +2633,11 @@ export function createApp() {
           user_name: row.users?.name ?? null,
           file_path: row.file_path ?? null,
           file_name: row.file_name ?? null,
-          fornecedor: row.description ? String(row.description) : null,
+          fornecedor: row.provider_name
+            ? String(row.provider_name)
+            : row.description
+              ? String(row.description)
+              : null,
           vencimento: null,
         };
         if (!matchesSector(item.sector_id, item.type)) continue;

@@ -200,6 +200,7 @@ const manualEntriesInfo = db.prepare(`PRAGMA table_info(manual_entries)`).all() 
 const manualEntryHasColumn = (name: string) => manualEntriesInfo.some((column) => column.name === name);
 if (!manualEntryHasColumn('file_path')) db.exec(`ALTER TABLE manual_entries ADD COLUMN file_path TEXT`);
 if (!manualEntryHasColumn('file_name')) db.exec(`ALTER TABLE manual_entries ADD COLUMN file_name TEXT`);
+if (!manualEntryHasColumn('provider_name')) db.exec(`ALTER TABLE manual_entries ADD COLUMN provider_name TEXT`);
 
 const crdTableInfo = db.prepare(`PRAGMA table_info(crds)`).all() as Array<{ name: string }>;
 const crdHasColumn = (name: string) => crdTableInfo.some((column) => column.name === name);

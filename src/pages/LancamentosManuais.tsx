@@ -9,6 +9,19 @@ import { matchesSearch } from '../lib/search';
 import { isSharedCrdCode } from '../lib/sharedCrds';
 import { isDirectDocumentUrl } from '../lib/storagePath';
 import { confirmCancel, confirmDelete } from '../lib/confirmAction';
+import { SearchableSelect } from '../components/SearchableSelect';
+
+const EMPTY_FORM = {
+  sector_id: '',
+  crd_id: '',
+  provider_name: '',
+  issue_date: '',
+  date: '',
+  amount: '',
+  description: '',
+  file_path: '',
+  file_name: '',
+};
 
 export const LancamentosManuaisPage: React.FC = () => {
   const { query } = useSearch();
@@ -19,17 +32,9 @@ export const LancamentosManuaisPage: React.FC = () => {
   const [userRole, setUserRole] = useState<string>('viewer');
   const [allowedSectorIds, setAllowedSectorIds] = useState<string[]>([]);
   const [actingSector, setActingSector] = useState<'requester' | 'controle' | 'financeiro'>('requester');
-  const [form, setForm] = useState({
-    sector_id: '',
-    crd_id: '',
-    issue_date: '',
-    date: '',
-    amount: '',
-    description: '',
-    file_path: '',
-    file_name: '',
-  });
+  const [form, setForm] = useState({ ...EMPTY_FORM });
   const [uploadingFile, setUploadingFile] = useState(false);
+  const [showModal, setShowModal] = useState(false);
 
   const loadData = async () => {
     try {
@@ -118,8 +123,8 @@ export const LancamentosManuaisPage: React.FC = () => {
 
   const createEntry = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!form.sector_id || !form.issue_date || !form.date || !form.amount) {
-      alert('Preencha setor, data de emissão, data de lançamento e valor.');
+    if (!form.sector_id || !form.provider_name.trim() || !form.issue_date || !form.date || !form.amount) {
+      alert('Preencha setor, fornecedor, data de emissão, data de lançamento e valor.');
       return;
     }
 
@@ -129,6 +134,7 @@ export const LancamentosManuaisPage: React.FC = () => {
       body: JSON.stringify({
         sector_id: parseInt(form.sector_id, 10),
         crd_id: form.crd_id ? parseInt(form.crd_id, 10) : null,
+        provider_name: form.provider_name.trim(),
         issue_date: form.issue_date,
         date: form.date,
         amount: parseFloat(form.amount),
@@ -145,8 +151,13 @@ export const LancamentosManuaisPage: React.FC = () => {
     }
 
     showSuccess('Lançamento manual criado. Aguardando aprovação do Controle.');
-    setForm({ sector_id: '', crd_id: '', issue_date: '', date: '', amount: '', description: '', file_path: '', file_name: '' });
+    closeModal();
     loadData();
+  };
+
+  const closeModal = () => {
+    setShowModal(false);
+    setForm({ ...EMPTY_FORM });
   };
 
   const handleFileUpload = async (file: File) => {
@@ -236,6 +247,7 @@ export const LancamentosManuaisPage: React.FC = () => {
           entry.crd_code,
           entry.crd_name,
           entry.description,
+          entry.provider_name,
           entry.file_name,
           entry.user_name,
           entry.issue_date,
@@ -255,6 +267,16 @@ export const LancamentosManuaisPage: React.FC = () => {
     [scopedEntries]
   );
 
+  const crdSelectOptions = useMemo(
+    () =>
+      visibleCrds.map((c) => ({
+        value: String(c.id),
+        label: `${c.code} - ${c.name}`,
+        keywords: `${c.code} ${c.name}`,
+      })),
+    [visibleCrds]
+  );
+
   const statusMeta = (status: string) => {
     if (status === 'approved') return { label: 'Aprovado Controle', classes: 'bg-blue-100 text-blue-700' };
     if (status === 'posted') return { label: 'Baixado', classes: 'bg-emerald-100 text-emerald-700' };
@@ -271,18 +293,30 @@ export const LancamentosManuaisPage: React.FC = () => {
             Fluxo: Solicitante lança → Controle aprova → Financeiro baixa. Em aberto/aprovado compõem o orçamento do mês.
           </p>
         </div>
-        {canSwitchActingProfile && (
-          <select
-            value={actingSector}
-            onChange={(e) => setActingSector(e.target.value as 'requester' | 'controle' | 'financeiro')}
-            className="px-3 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-semibold text-slate-700 shadow-sm self-start"
-            title="Perfil de atuação no fluxo"
-          >
-            <option value="requester">Atuar como Solicitante</option>
-            <option value="controle">Atuar como Controle</option>
-            <option value="financeiro">Atuar como Financeiro</option>
-          </select>
-        )}
+        <div className="flex items-center gap-3 self-start">
+          {canSwitchActingProfile && (
+            <select
+              value={actingSector}
+              onChange={(e) => setActingSector(e.target.value as 'requester' | 'controle' | 'financeiro')}
+              className="px-3 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-semibold text-slate-700 shadow-sm"
+              title="Perfil de atuação no fluxo"
+            >
+              <option value="requester">Atuar como Solicitante</option>
+              <option value="controle">Atuar como Controle</option>
+              <option value="financeiro">Atuar como Financeiro</option>
+            </select>
+          )}
+          {canLaunch && (
+            <button
+              type="button"
+              onClick={() => setShowModal(true)}
+              className="flex items-center gap-2 bg-[#004D40] text-white px-4 py-2.5 rounded-xl shadow-lg shadow-emerald-900/10 hover:bg-[#003d33] transition-colors"
+            >
+              <Plus className="w-4 h-4" />
+              <span className="font-bold text-sm">Novo lançamento</span>
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 flex flex-wrap items-center gap-4">
@@ -299,128 +333,6 @@ export const LancamentosManuaisPage: React.FC = () => {
           Compromisso orçamentário usa a data de lançamento. Após a baixa pelo Financeiro, o valor deixa de contar no pendente.
         </p>
       </div>
-
-      {canLaunch && (
-        <form
-          onSubmit={createEntry}
-          className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5 grid grid-cols-1 md:grid-cols-6 gap-3"
-        >
-          <select
-            required
-            value={form.sector_id}
-            onChange={(e) => setForm((p) => ({ ...p, sector_id: e.target.value, crd_id: '' }))}
-            className="px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm"
-          >
-            <option value="">Setor</option>
-            {visibleSectors.map((s) => (
-              <option key={s.id} value={s.id}>{s.name}</option>
-            ))}
-          </select>
-
-          <select
-            value={form.crd_id}
-            onChange={(e) => setForm((p) => ({ ...p, crd_id: e.target.value }))}
-            disabled={!form.sector_id}
-            className="px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm disabled:opacity-50"
-          >
-            <option value="">CRD (opcional)</option>
-            {visibleCrds.map((c) => (
-              <option key={c.id} value={c.id}>{c.code} - {c.name}</option>
-            ))}
-          </select>
-
-          {visibleSectors.length === 0 && (
-            <p className="md:col-span-6 text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-xl px-3 py-2">
-              Nenhum setor disponível para os vínculos do seu usuário.
-            </p>
-          )}
-
-          <label className="flex flex-col gap-1 min-w-0">
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-1">Data de emissão</span>
-            <input
-              required
-              type="date"
-              value={form.issue_date}
-              onChange={(e) => setForm((p) => ({ ...p, issue_date: e.target.value }))}
-              className="px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm"
-            />
-          </label>
-
-          <label className="flex flex-col gap-1 min-w-0">
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-1">Data de lançamento</span>
-            <input
-              required
-              type="date"
-              value={form.date}
-              onChange={(e) => setForm((p) => ({ ...p, date: e.target.value }))}
-              className="px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm"
-            />
-          </label>
-
-          <input
-            required
-            type="number"
-            step="0.01"
-            min="0"
-            placeholder="Valor"
-            value={form.amount}
-            onChange={(e) => setForm((p) => ({ ...p, amount: e.target.value }))}
-            className="px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm self-end"
-          />
-
-          <input
-            placeholder="Descrição (opcional)"
-            value={form.description}
-            onChange={(e) => setForm((p) => ({ ...p, description: e.target.value }))}
-            className="px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm self-end"
-          />
-
-          <label
-            className={cn(
-              'md:col-span-5 flex items-center justify-center gap-2 w-full px-4 py-3 border border-dashed rounded-xl text-sm cursor-pointer transition-colors self-end',
-              uploadingFile
-                ? 'bg-slate-50 border-slate-300 text-slate-600'
-                : form.file_path
-                  ? 'bg-sky-50 border-sky-300 text-sky-800 hover:bg-sky-100'
-                  : 'bg-slate-50 border-slate-300 text-slate-600 hover:bg-slate-100'
-            )}
-            title={form.file_name || undefined}
-          >
-            {form.file_path && !uploadingFile ? (
-              <FileCheck className="w-4 h-4 shrink-0 text-sky-600" />
-            ) : (
-              <Upload className="w-4 h-4 shrink-0" />
-            )}
-            <span className="truncate">
-              {uploadingFile
-                ? 'Enviando arquivo...'
-                : form.file_name
-                  ? form.file_name
-                  : 'Anexar arquivo (PDF, imagem, Excel ou Word)'}
-            </span>
-            <input
-              type="file"
-              accept=".pdf,.jpg,.jpeg,.png,.webp,.xls,.xlsx,.doc,.docx,application/pdf,image/*"
-              className="hidden"
-              disabled={uploadingFile}
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (file) handleFileUpload(file);
-                e.target.value = '';
-              }}
-            />
-          </label>
-
-          <button
-            type="submit"
-            disabled={uploadingFile}
-            className="flex items-center justify-center gap-2 bg-[#004D40] text-white px-4 py-2.5 rounded-xl shadow-lg shadow-emerald-900/10 hover:bg-[#003d33] transition-colors self-end disabled:opacity-60 disabled:pointer-events-none"
-          >
-            <Plus className="w-4 h-4" />
-            <span className="font-bold text-sm">Lançar</span>
-          </button>
-        </form>
-      )}
 
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-x-auto">
         <table className="w-full text-left border-collapse">
@@ -460,7 +372,12 @@ export const LancamentosManuaisPage: React.FC = () => {
                       <span className="block text-[10px] font-normal text-slate-400 mt-0.5">por {entry.user_name}</span>
                     ) : null}
                   </td>
-                  <td className="px-6 py-4 text-sm text-slate-600">{entry.description || '—'}</td>
+                  <td className="px-6 py-4 text-sm text-slate-600">
+                    {entry.provider_name || entry.description || '—'}
+                    {entry.provider_name && entry.description ? (
+                      <span className="block text-xs font-normal text-slate-400 mt-0.5">{entry.description}</span>
+                    ) : null}
+                  </td>
                   <td className="px-6 py-4 text-sm text-slate-600">{entry.issue_date || '—'}</td>
                   <td className="px-6 py-4 text-sm text-slate-600">{entry.date}</td>
                   <td className="px-6 py-4 text-sm text-slate-400">—</td>
@@ -555,6 +472,170 @@ export const LancamentosManuaisPage: React.FC = () => {
           </tbody>
         </table>
       </div>
+
+      {showModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white w-full max-w-lg max-h-[calc(100dvh-2rem)] rounded-3xl shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="p-6 border-b border-slate-100 flex justify-between items-center shrink-0">
+              <h3 className="text-xl font-bold text-slate-900">Novo lançamento manual</h3>
+              <button type="button" onClick={closeModal} className="text-slate-400 hover:text-slate-600 transition-colors">
+                <Plus className="w-6 h-6 rotate-45" />
+              </button>
+            </div>
+
+            <form onSubmit={createEntry} className="flex flex-col min-h-0 flex-1">
+              <div className="p-6 space-y-4 overflow-y-auto flex-1 min-h-0">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Setor responsável</label>
+                  <select
+                    required
+                    value={form.sector_id}
+                    onChange={(e) => setForm((p) => ({ ...p, sector_id: e.target.value, crd_id: '' }))}
+                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+                  >
+                    <option value="">Selecione um setor</option>
+                    {visibleSectors.map((s) => (
+                      <option key={s.id} value={s.id}>{s.name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {visibleSectors.length === 0 && (
+                  <p className="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-xl px-3 py-2">
+                    Nenhum setor disponível para os vínculos do seu usuário.
+                  </p>
+                )}
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">CRD (opcional)</label>
+                  <SearchableSelect
+                    value={form.crd_id}
+                    onChange={(crd_id) => setForm((p) => ({ ...p, crd_id }))}
+                    options={crdSelectOptions}
+                    disabled={!form.sector_id}
+                    placeholder={form.sector_id ? 'Digite para buscar CRD...' : 'Selecione um setor primeiro'}
+                    emptyMessage={form.sector_id ? 'Nenhum CRD neste setor' : 'Selecione um setor primeiro'}
+                    noResultsMessage="Nenhum CRD encontrado"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Fornecedor</label>
+                  <input
+                    required
+                    value={form.provider_name}
+                    onChange={(e) => setForm((p) => ({ ...p, provider_name: e.target.value }))}
+                    placeholder="Nome do fornecedor"
+                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Data de emissão</label>
+                    <input
+                      required
+                      type="date"
+                      value={form.issue_date}
+                      onChange={(e) => setForm((p) => ({ ...p, issue_date: e.target.value }))}
+                      className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Data de lançamento</label>
+                    <input
+                      required
+                      type="date"
+                      value={form.date}
+                      onChange={(e) => setForm((p) => ({ ...p, date: e.target.value }))}
+                      className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Valor (R$)</label>
+                  <input
+                    required
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={form.amount}
+                    onChange={(e) => setForm((p) => ({ ...p, amount: e.target.value }))}
+                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Descrição (opcional)</label>
+                  <input
+                    value={form.description}
+                    onChange={(e) => setForm((p) => ({ ...p, description: e.target.value }))}
+                    placeholder="Observação do lançamento"
+                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Anexo</label>
+                  <label
+                    className={cn(
+                      'flex items-center justify-center gap-2 w-full px-4 py-3 border border-dashed rounded-xl text-sm cursor-pointer transition-colors',
+                      uploadingFile
+                        ? 'bg-slate-50 border-slate-300 text-slate-600'
+                        : form.file_path
+                          ? 'bg-sky-50 border-sky-300 text-sky-800 hover:bg-sky-100'
+                          : 'bg-slate-50 border-slate-300 text-slate-600 hover:bg-slate-100'
+                    )}
+                    title={form.file_name || undefined}
+                  >
+                    {form.file_path && !uploadingFile ? (
+                      <FileCheck className="w-4 h-4 shrink-0 text-sky-600" />
+                    ) : (
+                      <Upload className="w-4 h-4 shrink-0" />
+                    )}
+                    <span className="truncate">
+                      {uploadingFile
+                        ? 'Enviando arquivo...'
+                        : form.file_name
+                          ? form.file_name
+                          : 'Anexar arquivo (PDF, imagem, Excel ou Word)'}
+                    </span>
+                    <input
+                      type="file"
+                      accept=".pdf,.jpg,.jpeg,.png,.webp,.xls,.xlsx,.doc,.docx,application/pdf,image/*"
+                      className="hidden"
+                      disabled={uploadingFile}
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) handleFileUpload(file);
+                        e.target.value = '';
+                      }}
+                    />
+                  </label>
+                </div>
+              </div>
+
+              <div className="p-6 pt-4 border-t border-slate-100 flex gap-3 shrink-0 bg-white">
+                <button
+                  type="button"
+                  onClick={closeModal}
+                  className="flex-1 px-4 py-3 bg-slate-100 text-slate-600 font-bold rounded-xl hover:bg-slate-200 transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={uploadingFile}
+                  className="flex-1 px-4 py-3 bg-[#004D40] text-white font-bold rounded-xl hover:bg-[#003d33] shadow-lg shadow-emerald-900/10 transition-colors disabled:opacity-70"
+                >
+                  Lançar
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
