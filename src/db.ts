@@ -202,6 +202,16 @@ if (!manualEntryHasColumn('file_path')) db.exec(`ALTER TABLE manual_entries ADD 
 if (!manualEntryHasColumn('file_name')) db.exec(`ALTER TABLE manual_entries ADD COLUMN file_name TEXT`);
 if (!manualEntryHasColumn('provider_name')) db.exec(`ALTER TABLE manual_entries ADD COLUMN provider_name TEXT`);
 
+const requisitionsInfo = db.prepare(`PRAGMA table_info(requisitions)`).all() as Array<{ name: string }>;
+if (!requisitionsInfo.some((column) => column.name === 'provider_name')) {
+  db.exec(`ALTER TABLE requisitions ADD COLUMN provider_name TEXT`);
+}
+
+const comandasInfo = db.prepare(`PRAGMA table_info(comandas)`).all() as Array<{ name: string }>;
+if (!comandasInfo.some((column) => column.name === 'provider_name')) {
+  db.exec(`ALTER TABLE comandas ADD COLUMN provider_name TEXT`);
+}
+
 const crdTableInfo = db.prepare(`PRAGMA table_info(crds)`).all() as Array<{ name: string }>;
 const crdHasColumn = (name: string) => crdTableInfo.some((column) => column.name === name);
 if (!crdHasColumn('sector_id')) db.exec(`ALTER TABLE crds ADD COLUMN sector_id INTEGER`);

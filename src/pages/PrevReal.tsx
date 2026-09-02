@@ -134,17 +134,18 @@ export const PrevRealPage: React.FC<PrevRealPageProps> = ({ mode = 'diario' }) =
   const [usoConsumoSubgrupos, setUsoConsumoSubgrupos] = useState<UsoConsumoSubgrupo[]>([]);
   const [expandedSubgrupos, setExpandedSubgrupos] = useState<Set<number>>(new Set());
   const [allowedSectorNames, setAllowedSectorNames] = useState<string[]>([]);
-  /** Índices 0–11. Clique = só aquele mês; "Mostrar todos" volta aos 12. Só no modo mensal. */
+  /** Índices 0–11. Clique = só aquele mês; "Mostrar todos" volta aos 12. */
   const [selectedMonths, setSelectedMonths] = useState<number[]>(() =>
-    Array.from({ length: 12 }, (_, i) => i)
+    mode === 'diario'
+      ? [new Date().getMonth()]
+      : Array.from({ length: 12 }, (_, i) => i)
   );
 
   const visibleMonths = useMemo(() => {
-    if (mode !== 'mensal') return monthHeaders.map((_, i) => i);
     const set = new Set(selectedMonths);
     const months = monthHeaders.map((_, i) => i).filter((i) => set.has(i));
     return months.length ? months : monthHeaders.map((_, i) => i);
-  }, [mode, selectedMonths]);
+  }, [selectedMonths]);
   const allMonthsSelected = visibleMonths.length === 12;
   const selectMonth = (monthIndex: number) => setSelectedMonths([monthIndex]);
   const selectAllMonths = () => setSelectedMonths(Array.from({ length: 12 }, (_, i) => i));
@@ -411,7 +412,7 @@ export const PrevRealPage: React.FC<PrevRealPageProps> = ({ mode = 'diario' }) =
         <p className="text-sm text-slate-500">
           {mode === 'mensal'
             ? 'Comparativo mensal por CRD: Previsto, Realizado e Diferença ao longo do ano.'
-            : 'Visão por CRD com Previsto, Realizado e Diferença, agrupadas por setor.'}
+            : 'Visão por CRD com Previsto, Realizado e Diferença. Use o filtro de meses para acompanhar o período.'}
         </p>
       </div>
 
@@ -576,50 +577,48 @@ export const PrevRealPage: React.FC<PrevRealPageProps> = ({ mode = 'diario' }) =
         )}
       </div>
 
-      {mode === 'mensal' && (
-        <div className="rounded-2xl border border-slate-200 bg-white shadow-sm px-4 py-3 space-y-2">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
-              Filtrar meses
-              {!allMonthsSelected && (
-                <span className="ml-2 normal-case tracking-normal text-slate-500 font-semibold">
-                  · {visibleMonths.length} selecionado{visibleMonths.length === 1 ? '' : 's'}
-                </span>
-              )}
-            </p>
+      <div className="rounded-2xl border border-slate-200 bg-white shadow-sm px-4 py-3 space-y-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+            Filtrar meses
             {!allMonthsSelected && (
-              <button
-                type="button"
-                onClick={selectAllMonths}
-                className="text-xs font-bold text-[#004D40] hover:underline"
-              >
-                Mostrar todos
-              </button>
+              <span className="ml-2 normal-case tracking-normal text-slate-500 font-semibold">
+                · {visibleMonths.length} selecionado{visibleMonths.length === 1 ? '' : 's'}
+              </span>
             )}
-          </div>
-          <div className="flex flex-wrap gap-1.5">
-            {monthHeaders.map((mes, monthIndex) => {
-              const active = visibleMonths.includes(monthIndex);
-              return (
-                <button
-                  key={mes}
-                  type="button"
-                  onClick={() => selectMonth(monthIndex)}
-                  title="Clique para ver só este mês · Use Mostrar todos para voltar"
-                  className={cn(
-                    'px-2.5 py-1.5 rounded-lg text-xs font-bold transition-colors border',
-                    active
-                      ? 'bg-[#004D40] text-white border-[#004D40] shadow-sm'
-                      : 'bg-white text-slate-400 border-slate-200 hover:border-slate-300 hover:text-slate-600'
-                  )}
-                >
-                  {mes.slice(0, 3)}
-                </button>
-              );
-            })}
-          </div>
+          </p>
+          {!allMonthsSelected && (
+            <button
+              type="button"
+              onClick={selectAllMonths}
+              className="text-xs font-bold text-[#004D40] hover:underline"
+            >
+              Mostrar todos
+            </button>
+          )}
         </div>
-      )}
+        <div className="flex flex-wrap gap-1.5">
+          {monthHeaders.map((mes, monthIndex) => {
+            const active = visibleMonths.includes(monthIndex);
+            return (
+              <button
+                key={mes}
+                type="button"
+                onClick={() => selectMonth(monthIndex)}
+                title="Clique para ver só este mês · Use Mostrar todos para voltar"
+                className={cn(
+                  'px-2.5 py-1.5 rounded-lg text-xs font-bold transition-colors border',
+                  active
+                    ? 'bg-[#004D40] text-white border-[#004D40] shadow-sm'
+                    : 'bg-white text-slate-400 border-slate-200 hover:border-slate-300 hover:text-slate-600'
+                )}
+              >
+                {mes.slice(0, 3)}
+              </button>
+            );
+          })}
+        </div>
+      </div>
 
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
         <div className="divide-y divide-slate-100">

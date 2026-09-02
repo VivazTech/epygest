@@ -491,9 +491,7 @@ const getMonthDateRange = (year: number, month: number) => {
 };
 
 const applyProvisionDateRange = (query: any, dateFrom: string, dateTo: string) =>
-  query
-    .gte("created_at", `${dateFrom}T00:00:00`)
-    .lte("created_at", `${dateTo}T23:59:59.999`);
+  query.gte("due_date", dateFrom).lte("due_date", dateTo);
 
 // Diretório de upload: /tmp no Vercel (serverless), local no dev
 const uploadDir = process.env.VERCEL
@@ -2094,9 +2092,11 @@ export function createApp() {
   });
 
   app.post("/api/requisitions", async (req, res) => {
-    const { crd_id, description, amount, date } = req.body;
-    if (!crd_id || !amount || !date)
-      return res.status(400).json({ error: "crd_id, amount e date são obrigatórios" });
+    const { crd_id, description, provider_name, amount, date } = req.body;
+    const resolvedProviderName = String(provider_name || "").trim();
+    if (!crd_id || !amount || !date || !resolvedProviderName) {
+      return res.status(400).json({ error: "CRD, fornecedor, valor e data são obrigatórios" });
+    }
 
     const { data: crd, error: crdError } = await supabase
       .from("crds")
@@ -2130,6 +2130,7 @@ export function createApp() {
         crd_id: Number(crd_id),
         sector_id: Number(crd.sector_id),
         description: description || null,
+        provider_name: resolvedProviderName,
         amount,
         date,
         status: "open",
@@ -2655,7 +2656,7 @@ export function createApp() {
           sector_name: row.crds?.sectors?.name ?? row.sectors?.name ?? null,
           crd_code: row.crds?.code ?? null,
           crd_name: row.crds?.name ?? null,
-          title: row.description || `Requisição #${row.id}`,
+          title: row.provider_name || row.description || `Requisição #${row.id}`,
           subtitle: null,
           description: row.description ?? null,
           reference_date: String(row.date || "").slice(0, 10),
@@ -2666,7 +2667,11 @@ export function createApp() {
           user_name: null,
           file_path: null,
           file_name: null,
-          fornecedor: row.description ? String(row.description) : null,
+          fornecedor: row.provider_name
+            ? String(row.provider_name)
+            : row.description
+              ? String(row.description)
+              : null,
           vencimento: null,
         };
         if (!matchesSector(item.sector_id, item.type)) continue;
@@ -2751,7 +2756,7 @@ export function createApp() {
             file_path: null,
             file_name: null,
             items_count: comandaItemRows.length,
-            fornecedor: null,
+            fornecedor: row.provider_name ? String(row.provider_name) : null,
             vencimento: null,
           };
           if (!matchesSector(item.sector_id, item.type)) continue;
@@ -3000,18 +3005,21 @@ export function createApp() {
   });
 
   app.post("/api/comandas", async (req, res) => {
-    const { consumer_name, consumed_at, location, items } = req.body as {
+    const { consumer_name, consumed_at, location, provider_name, items } = req.body as {
       consumer_name?: string;
       consumed_at?: string;
       location?: string;
+      provider_name?: string;
       items?: ComandaItemInput[];
     };
 
     const name = String(consumer_name ?? "").trim();
     const consumedDate = String(consumed_at ?? "").trim();
     const consumedLocation = String(location ?? "").trim();
+    const resolvedProviderName = String(provider_name ?? "").trim();
 
     if (!name) return res.status(400).json({ error: "Nome do consumidor é obrigatório." });
+    if (!resolvedProviderName) return res.status(400).json({ error: "Fornecedor é obrigatório." });
     if (!consumedDate) return res.status(400).json({ error: "Data do consumo é obrigatória." });
     if (!consumedLocation) return res.status(400).json({ error: "Local do consumo é obrigatório." });
 
@@ -3034,6 +3042,7 @@ export function createApp() {
         consumer_name: name,
         consumed_at: consumedDate,
         location: String(pdvLocal.name),
+        provider_name: resolvedProviderName,
         user_id: req.user!.id,
         status: "open",
       })
@@ -3510,6 +3519,32 @@ export function createApp() {
       crd, payment_method, pix_key, currency,
     } = req.body;
 
+    const resolvedNumber = String(invoice_number || "").trim();
+    const resolvedProvider = String(provider_name || "").trim();
+    const resolvedAmount = Number(amount);
+    const resolvedIssue = String(issue_date || "").trim();
+    const resolvedDue = String(due_date || "").trim();
+    const resolvedSectorId = Number(sector_id);
+    const resolvedCrd = String(crd || "").trim();
+    const resolvedPayment = String(payment_method || "").trim();
+    const resolvedCurrency = String(currency || "BRL").trim().toUpperCase() || "BRL";
+
+    if (!resolvedNumber || !resolvedProvider || !Number.isFinite(resolvedAmount) || resolvedAmount < 0) {
+      return res.status(400).json({ error: "Número, fornecedor e valor são obrigatórios." });
+    }
+    if (!resolvedIssue || !resolvedDue) {
+      return res.status(400).json({ error: "Data de emissão e data de vencimento são obrigatórias." });
+    }
+    if (!Number.isFinite(resolvedSectorId) || resolvedSectorId <= 0) {
+      return res.status(400).json({ error: "Selecione o setor responsável." });
+    }
+    if (!resolvedCrd) {
+      return res.status(400).json({ error: "Selecione o CRD." });
+    }
+    if (!resolvedPayment) {
+      return res.status(400).json({ error: "Selecione a forma de pagamento." });
+    }
+
     const boletoPaths = collectBoletoPaths({
       boleto_file_path,
       boleto_file_paths,
@@ -3520,25 +3555,29 @@ export function createApp() {
     const { data, error } = await supabase
       .from("invoices")
       .insert({
-        invoice_number, provider_name, amount, issue_date, due_date,
-        sector_id,
+        invoice_number: resolvedNumber,
+        provider_name: resolvedProvider,
+        amount: resolvedAmount,
+        issue_date: resolvedIssue,
+        due_date: resolvedDue,
+        sector_id: resolvedSectorId,
         user_id: launchedByUserId,
-        file_path: file_path || null,
+        file_path: String(file_path || "").trim() || null,
         boleto_file_path: boletoPaths[0] || null,
         boleto_file_paths: boletoPaths,
         natureza: natureza || "O",
-        crd: crd || null,
-        payment_method: payment_method || null,
-        pix_key: pix_key || null,
-        currency: String(currency || "BRL").trim().toUpperCase() || "BRL",
+        crd: resolvedCrd,
+        payment_method: resolvedPayment,
+        pix_key: resolvedPayment === "pix" ? String(pix_key || "").trim() || null : null,
+        currency: resolvedCurrency,
         status: "received",
         flow_stage: "control_pending",
       })
-      .select("id")
+      .select("id, invoice_number, provider_name, amount, issue_date, due_date, sector_id, flow_stage, status, crd, created_at")
       .single();
 
     if (error) { console.error(error); return res.status(500).json({ error: "Erro interno ao processar a solicitação." }); }
-    res.json({ id: data.id });
+    res.json(data);
   });
 
   // Ações de fluxo (aprovar / reprovar / desaprovar / pagar / cancelar)

@@ -73,7 +73,7 @@ export const CadastrosPage: React.FC = () => {
     active: true,
   });
   const [isImportingCrd, setIsImportingCrd] = useState(false);
-  const [reqForm, setReqForm] = useState({ crd_id: '', date: '', amount: '', description: '' });
+  const [reqForm, setReqForm] = useState({ crd_id: '', provider_name: '', date: '', amount: '', description: '' });
   const [expandedGroups, setExpandedGroups] = useState<Set<number>>(new Set());
 
   const toggleGroup = (sectorId: number) => {
@@ -179,7 +179,7 @@ export const CadastrosPage: React.FC = () => {
   const filteredRequisitions = useMemo(
     () =>
       requisitions.filter((r) =>
-        matchesSearch(query, r.crd_code, r.crd_name, r.sector_name, r.description, r.date, r.amount, r.status)
+        matchesSearch(query, r.crd_code, r.crd_name, r.sector_name, r.description, r.provider_name, r.date, r.amount, r.status)
       ),
     [requisitions, query]
   );
@@ -299,8 +299,8 @@ export const CadastrosPage: React.FC = () => {
   };
 
   const createRequisition = async () => {
-    if (!reqForm.crd_id || !reqForm.date || !reqForm.amount) {
-      alert('Preencha CRD, data e valor.');
+    if (!reqForm.crd_id || !reqForm.provider_name.trim() || !reqForm.date || !reqForm.amount) {
+      alert('Preencha CRD, fornecedor, data e valor.');
       return;
     }
     const res = await fetch('/api/requisitions', {
@@ -308,6 +308,7 @@ export const CadastrosPage: React.FC = () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         crd_id: parseInt(reqForm.crd_id),
+        provider_name: reqForm.provider_name.trim(),
         date: reqForm.date,
         amount: parseFloat(reqForm.amount),
         description: reqForm.description || null
@@ -318,7 +319,7 @@ export const CadastrosPage: React.FC = () => {
       alert(data.error || 'Erro ao cadastrar requisição');
       return;
     }
-    setReqForm({ crd_id: '', date: '', amount: '', description: '' });
+    setReqForm({ crd_id: '', provider_name: '', date: '', amount: '', description: '' });
     fetch('/api/requisitions').then(res => res.json()).then(data => setRequisitions(data));
     refreshSectors();
   };
@@ -1706,6 +1707,12 @@ export const CadastrosPage: React.FC = () => {
                 ))}
               </select>
               <input
+                value={reqForm.provider_name}
+                onChange={(e) => setReqForm((p) => ({ ...p, provider_name: e.target.value }))}
+                placeholder="Fornecedor"
+                className="w-48 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+              />
+              <input
                 type="date"
                 value={reqForm.date}
                 onChange={(e) => setReqForm((p) => ({ ...p, date: e.target.value }))}
@@ -1824,7 +1831,10 @@ export const CadastrosPage: React.FC = () => {
                         {(r.crd_code || 'CRD')} - {(r.crd_name || 'Sem descrição')} • {r.date}
                       </p>
                       <p className="text-xs text-slate-500">{r.sector_name || 'Sem setor'}</p>
-                      <p className="text-xs text-slate-500">{r.description || '—'}</p>
+                      <p className="text-xs text-slate-500">{r.provider_name || r.description || '—'}</p>
+                      {r.provider_name && r.description ? (
+                        <p className="text-xs text-slate-400">{r.description}</p>
+                      ) : null}
                     </div>
                   </td>
                   <td className="px-6 py-4">

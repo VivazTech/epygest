@@ -25,6 +25,7 @@ import { confirmCancel, confirmDelete } from '../lib/confirmAction';
 
 export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'servico' }) => {
   const { query } = useSearch();
+  const [listQuery, setListQuery] = useState('');
   const isDanfe = mode === 'danfe';
   const pageTitle = isDanfe ? 'DANFE' : 'Notas de Serviço';
   const pageSubtitle = isDanfe
@@ -59,7 +60,6 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
   const [requesterSectorId, setRequesterSectorId] = useState<string>('');
   const [userRole, setUserRole] = useState<string>('viewer');
   const [allowedSectorIds, setAllowedSectorIds] = useState<string[]>([]);
-  const [selectedSectorIds, setSelectedSectorIds] = useState<string[]>([]);
   const [showModal, setShowModal] = useState(false);
   const [showReceiptModal, setShowReceiptModal] = useState(false);
   const [selectedInvoiceId, setSelectedInvoiceId] = useState<number | null>(null);
@@ -72,6 +72,8 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
   const [semBoleto, setSemBoleto] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
   const [showCompetencyWarning, setShowCompetencyWarning] = useState(false);
+  const [confirmModal, setConfirmModal] = useState<null | { kind: 'cancel' | 'delete'; invoice: any }>(null);
+  const [confirmBusy, setConfirmBusy] = useState(false);
   const [submittingInvoice, setSubmittingInvoice] = useState(false);
   const [exportingReport, setExportingReport] = useState<'csv' | 'pdf' | null>(null);
   const [reportFilters, setReportFilters] = useState({
@@ -180,14 +182,14 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
     fetch(`/api/crds?sector_id=${formData.sector_id}`).then(res => res.json()).then(setCrdOptions);
   }, [formData.sector_id]);
 
-  const fetchInvoices = () => {
+  const fetchInvoices = (month = selectedMonth, year = selectedYear, from = customDateFrom, to = customDateTo) => {
     const params = new URLSearchParams();
-    if (customDateFrom || customDateTo) {
-      if (customDateFrom) params.set('from', customDateFrom);
-      if (customDateTo) params.set('to', customDateTo);
+    if (from || to) {
+      if (from) params.set('from', from);
+      if (to) params.set('to', to);
     } else {
-      params.set('month', selectedMonth);
-      params.set('year', selectedYear);
+      params.set('month', month);
+      params.set('year', year);
     }
     fetch(`/api/invoices?${params.toString()}`)
       .then(res => res.json())
@@ -274,9 +276,13 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
         }),
       });
       if (response.ok) {
-        showSuccess('Nota fiscal lançada com sucesso.');
+        const created = await response.json().catch(() => ({}));
+        showSuccess('Nota lançada. Aguardando aprovação do Controle.');
         setShowCompetencyWarning(false);
         closeInvoiceModal();
+        const [dueYear, dueMonth] = String(formData.due_date).split('-');
+        const nextMonth = String(Number(dueMonth) || selectedMonth);
+        const nextYear = String(Number(dueYear) || selectedYear);
         setFormData({
           invoice_number: '',
           provider_name: '',
@@ -292,8 +298,16 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
           pix_key: '',
           currency: 'BRL',
         });
-        fetchInvoices();
-        fetchSectors();
+        setListQuery('');
+        setCustomDateFrom('');
+        setCustomDateTo('');
+        setSelectedMonth(nextMonth);
+        setSelectedYear(nextYear);
+        fetchInvoices(nextMonth, nextYear, '', '');
+        fetchSectors(nextMonth, nextYear);
+        if (created?.id) {
+          setInvoices((prev) => (prev.some((row) => Number(row.id) === Number(created.id)) ? prev : [created, ...prev]));
+        }
       } else {
         const data = await response.json().catch(() => ({}));
         alert(data.error || 'Não foi possível lançar a nota fiscal.');
@@ -319,6 +333,10 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
     }
     if (formData.payment_method === 'pix' && !formData.pix_key) {
       alert('Informe a chave Pix.');
+      return;
+    }
+    if (!formData.crd) {
+      alert('Selecione o CRD.');
       return;
     }
     if (!formData.due_date) {
@@ -421,31 +439,46 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
     if (!window.confirm('Desaprovar esta nota e devolvê-la para análise do setor solicitante?')) return;
     await runFlowAction(id, 'disapprove_control');
   };
-  const cancelRequest = async (id: number) => {
-    if (!confirmCancel('esta solicitação de nota')) return;
-    const reason = window.prompt('Motivo do cancelamento (opcional):') || '';
-    await runFlowAction(id, 'cancel_request', undefined, reason);
+  const cancelRequest = (invoice: any) => {
+    setConfirmModal({ kind: 'cancel', invoice });
   };
 
-  const deleteInvoice = async (invoice: any) => {
+  const deleteInvoice = (invoice: any) => {
     if (userRole !== 'admin') {
       alert('Apenas administradores podem excluir notas.');
       return;
     }
-    const label = invoice.invoice_number
-      ? `nota ${invoice.invoice_number}`
-      : `nota #${invoice.id}`;
-    if (!confirmDelete(label)) return;
+    setConfirmModal({ kind: 'delete', invoice });
+  };
 
-    const res = await fetch(`/api/invoices/${invoice.id}`, { method: 'DELETE' });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      alert(data.error || 'Não foi possível excluir a nota.');
-      return;
+  const closeConfirmModal = () => {
+    if (confirmBusy) return;
+    setConfirmModal(null);
+  };
+
+  const executeConfirmModal = async () => {
+    if (!confirmModal || confirmBusy) return;
+    const invoice = confirmModal.invoice;
+    setConfirmBusy(true);
+    try {
+      if (confirmModal.kind === 'cancel') {
+        const ok = await runFlowAction(invoice.id, 'cancel_request');
+        if (!ok) return;
+      } else {
+        const res = await fetch(`/api/invoices/${invoice.id}`, { method: 'DELETE' });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          alert(data.error || 'Não foi possível excluir a nota.');
+          return;
+        }
+        showSuccess('Nota excluída com sucesso.');
+        fetchInvoices();
+        fetchSectors();
+      }
+      setConfirmModal(null);
+    } finally {
+      setConfirmBusy(false);
     }
-    showSuccess('Nota excluída com sucesso.');
-    fetchInvoices();
-    fetchSectors();
   };
 
   const markAsPaid = (id: number) => {
@@ -581,13 +614,6 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
   const canCancelAsRequester =
     actingSector === 'requester' &&
     (userRole === 'manager' || userRole === 'admin' || userRole === 'viewer');
-  const toggleSectorSelection = (sectorId: string) => {
-    setSelectedSectorIds((prev) =>
-      prev.includes(sectorId)
-        ? prev.filter((id) => id !== sectorId)
-        : [...prev, sectorId]
-    );
-  };
   const budgetSectors = isManager
     ? sectors.filter((s) => allowedSectorIds.includes(String(s.id)))
     : sectors;
@@ -623,23 +649,23 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
     () => new Set(visibleSectorOptions.map((s) => String(s.id))),
     [visibleSectorOptions]
   );
-  const canFilterSectors = visibleSectorOptions.length > 1;
-  const selectedSectorSet = useMemo(
-    () => new Set(selectedSectorIds),
-    [selectedSectorIds]
-  );
   const matchesSectorVisibilityFilter = (sectorId?: number | string | null) => {
     const id = String(sectorId ?? '');
-    if (!id || !visibleSectorIdSet.has(id)) return false;
-    if (selectedSectorIds.length > 0 && !selectedSectorSet.has(id)) return false;
-    return true;
+    if (!id) return false;
+    if (hasGlobalSectorView) return true;
+    if (allowedSectorIds.length > 0) return allowedSectorIds.includes(id);
+    return requesterSectorId !== '' && id === requesterSectorId;
   };
+  const sectorVisibleInvoices = useMemo(
+    () => invoices.filter((invoice) => matchesSectorVisibilityFilter(invoice.sector_id)),
+    [invoices, allowedSectorIds, requesterSectorId, userRole]
+  );
+  const searchText = listQuery.trim() ? listQuery : query;
   const filteredInvoices = useMemo(
     () =>
-      invoices.filter((invoice) => {
-        if (!matchesSectorVisibilityFilter(invoice.sector_id)) return false;
-        return matchesSearch(
-          query,
+      sectorVisibleInvoices.filter((invoice) =>
+        matchesSearch(
+          searchText,
           invoice.invoice_number,
           invoice.provider_name,
           invoice.sector_name,
@@ -650,22 +676,15 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
           invoice.status,
           invoice.flow_stage,
           invoice.amount
-        );
-      }),
-    [invoices, visibleSectorIdSet, selectedSectorIds, selectedSectorSet, query]
+        )
+      ),
+    [sectorVisibleInvoices, searchText]
   );
   const filteredBudgetSectors = useMemo(
-    () =>
-      budgetSectors.filter((sector) => {
-        if (!matchesSectorVisibilityFilter(sector.id)) return false;
-        return matchesSearch(query, sector.name);
-      }),
-    [budgetSectors, visibleSectorIdSet, selectedSectorIds, selectedSectorSet, query]
+    () => budgetSectors.filter((sector) => matchesSectorVisibilityFilter(sector.id)),
+    [budgetSectors, visibleSectorIdSet]
   );
-  const scopedInvoices = useMemo(
-    () => filteredInvoices,
-    [filteredInvoices]
-  );
+  const scopedInvoices = sectorVisibleInvoices;
 
   const metrics = useMemo(() => {
     const withFlow = scopedInvoices.map((invoice) => ({
@@ -841,47 +860,11 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
           )}
           <span className="text-xs text-slate-400">
             {customDateFrom || customDateTo
-              ? 'Lista e indicadores filtram pela data de provisão (lançamento) no período informado.'
-              : 'Sem datas personalizadas, a lista usa a competência pela data de provisão (lançamento).'}
+              ? 'Lista filtra pela data de vencimento no período informado.'
+              : 'Sem datas personalizadas, a lista usa a competência pela data de vencimento.'}
           </span>
         </div>
       </div>
-
-      {canFilterSectors && (
-        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs font-bold uppercase tracking-wider text-slate-500">Setores visíveis</span>
-            {visibleSectorOptions.map((sector) => {
-              const id = String(sector.id);
-              const active = selectedSectorIds.length === 0 || selectedSectorSet.has(id);
-              return (
-                <button
-                  key={id}
-                  onClick={() => toggleSectorSelection(id)}
-                  className={cn(
-                    "px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors",
-                    active
-                      ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                      : "bg-white text-slate-500 border-slate-200 hover:bg-slate-50"
-                  )}
-                >
-                  {sector.name}
-                </button>
-              );
-            })}
-            <button
-              onClick={() => setSelectedSectorIds([])}
-              className="ml-auto px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 transition-colors"
-            >
-              Limpar seleção
-            </button>
-          </div>
-          <p className="mt-2 text-[11px] text-slate-400">
-            Com nenhum setor selecionado, o sistema mostra todos os setores do seu perfil no orçamento e na lista de notas.
-            Selecione um ou mais setores para filtrar cards e tabela.
-          </p>
-        </div>
-      )}
 
       {canSeeAnnualTotal && (
       <div className="bg-[#004D40] rounded-2xl border border-emerald-900/20 shadow-lg p-5 text-white">
@@ -1051,12 +1034,14 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
         ))}
       </div>}
 
-      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-        <div className="p-4 border-b border-slate-50 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm">
+        <div className="p-4 border-b border-slate-50 flex flex-col sm:flex-row sm:items-center justify-between gap-4 sticky top-20 z-30 bg-white rounded-t-2xl">
           <div className="relative flex-1 max-w-md">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
             <input 
-              type="text" 
+              type="text"
+              value={listQuery}
+              onChange={(e) => setListQuery(e.target.value)}
               placeholder="Buscar por fornecedor, número ou setor..."
               className="w-full pl-10 pr-4 py-2 bg-slate-50 border-none rounded-xl text-sm focus:ring-2 focus:ring-emerald-500/20 transition-all"
             />
@@ -1088,6 +1073,13 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50">
+              {filteredInvoices.length === 0 && (
+                <tr>
+                  <td colSpan={9} className="px-6 py-10 text-center text-sm text-slate-400">
+                    Nenhuma nota nesta competência. Confira mês/ano e a data de vencimento do lançamento.
+                  </td>
+                </tr>
+              )}
               {filteredInvoices.map((invoice) => (
                 <tr key={invoice.id} className="hover:bg-slate-50/50 transition-colors group">
                   <td className="px-6 py-4">
@@ -1229,7 +1221,7 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
                         (invoice.flow_stage || 'control_pending') !== 'cancelled' &&
                         invoice.status !== 'paid') && (
                         <button
-                          onClick={() => cancelRequest(invoice.id)}
+                          onClick={() => cancelRequest(invoice)}
                           className="inline-flex items-center px-3 py-1.5 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors"
                           title="Cancelar solicitação (para corrigir e lançar novamente)"
                         >
@@ -1419,7 +1411,7 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
                   className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
                 >
                   <option value="">Selecione um setor</option>
-                  {sectors.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  {visibleSectorOptions.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                 </select>
               </div>
 
@@ -1754,6 +1746,66 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
                   className="flex-1 px-4 py-3 bg-[#004D40] text-white font-bold rounded-xl hover:bg-[#003d33] shadow-lg shadow-emerald-900/10 transition-colors disabled:opacity-60"
                 >
                   {exportingReport === 'pdf' ? 'Exportando PDF...' : 'Exportar PDF'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {confirmModal && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="p-6 border-b border-slate-100 flex justify-between items-center">
+              <h3 className="text-xl font-bold text-slate-900">
+                {confirmModal.kind === 'cancel' ? 'Cancelar solicitação' : 'Excluir nota'}
+              </h3>
+              <button
+                type="button"
+                onClick={closeConfirmModal}
+                className="text-slate-400 hover:text-slate-600 transition-colors"
+              >
+                <Plus className="w-6 h-6 rotate-45" />
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div className="flex gap-3 items-start">
+                <AlertCircle className={`w-5 h-5 shrink-0 mt-0.5 ${confirmModal.kind === 'delete' ? 'text-red-500' : 'text-amber-500'}`} />
+                <p className="text-sm text-slate-600 leading-relaxed">
+                  Tem certeza que deseja {confirmModal.kind === 'cancel' ? 'cancelar' : 'excluir'}
+                  {confirmModal.invoice?.invoice_number ? (
+                    <>
+                      {' '}a nota{' '}
+                      <span className="font-semibold text-slate-800">#{confirmModal.invoice.invoice_number}</span>
+                    </>
+                  ) : null}
+                  ?
+                </p>
+              </div>
+              <div className="pt-2 flex gap-3">
+                <button
+                  type="button"
+                  disabled={confirmBusy}
+                  onClick={closeConfirmModal}
+                  className="flex-1 px-4 py-3 bg-slate-100 text-slate-600 font-bold rounded-xl hover:bg-slate-200 transition-colors disabled:opacity-70"
+                >
+                  Não
+                </button>
+                <button
+                  type="button"
+                  disabled={confirmBusy}
+                  onClick={executeConfirmModal}
+                  className={
+                    confirmModal.kind === 'delete'
+                      ? 'flex-1 px-4 py-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 shadow-lg shadow-red-900/10 transition-colors disabled:opacity-70'
+                      : 'flex-1 px-4 py-3 bg-[#004D40] text-white font-bold rounded-xl hover:bg-[#003d33] shadow-lg shadow-emerald-900/10 transition-colors disabled:opacity-70'
+                  }
+                >
+                  {confirmBusy
+                    ? 'Aguarde...'
+                    : confirmModal.kind === 'cancel'
+                      ? 'Sim, cancelar'
+                      : 'Sim, excluir'}
                 </button>
               </div>
             </div>
