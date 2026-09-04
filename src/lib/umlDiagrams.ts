@@ -324,6 +324,12 @@ sequenceDiagram
   SPA->>SPA: Sidebar + canAccessTab por papel
   U->>SPA: logout
   SPA->>API: POST /api/auth/logout (limpa cookie)
+  U->>SPA: esqueci senha
+  SPA->>API: POST /api/auth/forgot-password
+  API->>API: gera token (1h, uso único)
+  API->>API: Resend envia e-mail com link
+  U->>SPA: abre link e define nova senha
+  SPA->>API: POST /api/auth/reset-password
 `;
 
 export const FLUXO_IMPORT = `
@@ -411,6 +417,7 @@ const R = (method: string, path: string, roles = ''): ApiRoute => ({ method, pat
 export const API_REFERENCE: ApiGroup[] = [
   { group: 'Autenticação', routes: [
     R('POST', '/api/auth/login'), R('POST', '/api/auth/logout'), R('GET', '/api/auth/me'),
+    R('POST', '/api/auth/forgot-password'), R('GET', '/api/auth/reset-password'), R('POST', '/api/auth/reset-password'),
   ]},
   { group: 'Usuários & Permissões', routes: [
     R('GET', '/api/users', 'admin'), R('POST', '/api/users', 'admin'), R('PATCH', '/api/users/:id', 'admin'), R('DELETE', '/api/users/:id', 'admin'),

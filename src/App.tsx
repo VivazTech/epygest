@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Eye, EyeOff } from 'lucide-react';
+import { Eye, EyeOff, ArrowLeft } from 'lucide-react';
 import { Sidebar } from './components/Sidebar';
 import { Dashboard } from './pages/Dashboard';
 import { DashboardDiretoria } from './pages/DashboardDiretoria';
@@ -75,6 +75,28 @@ const writeStoredTab = (tab: string) => {
 
 const defaultTabForRole = (role?: string) => (role === 'finance' ? 'notas' : 'dashboard');
 
+const readResetTokenFromUrl = () => {
+  try {
+    return String(new URLSearchParams(window.location.search).get('reset_token') || '').trim();
+  } catch {
+    return '';
+  }
+};
+
+const clearResetTokenFromUrl = () => {
+  try {
+    const url = new URL(window.location.href);
+    if (!url.searchParams.has('reset_token')) return;
+    url.searchParams.delete('reset_token');
+    const next = `${url.pathname}${url.search}${url.hash}`;
+    window.history.replaceState({}, '', next || '/');
+  } catch {
+    // ignore
+  }
+};
+
+type AuthView = 'login' | 'forgot' | 'forgot-sent' | 'reset';
+
 export default function App() {
   const isSupabaseTestRoute = window.location.pathname === '/teste-supabase';
   const [user, setUser] = useState<any | null>(null);
@@ -86,6 +108,18 @@ export default function App() {
   const [loginLoading, setLoginLoading] = useState(false);
   const [loginError, setLoginError] = useState('');
   const [bootstrapping, setBootstrapping] = useState(true);
+  const [authView, setAuthView] = useState<AuthView>(() => (readResetTokenFromUrl() ? 'reset' : 'login'));
+  const [resetToken, setResetToken] = useState(readResetTokenFromUrl);
+  const [forgotEmail, setForgotEmail] = useState('');
+  const [forgotLoading, setForgotLoading] = useState(false);
+  const [forgotError, setForgotError] = useState('');
+  const [forgotSentMessage, setForgotSentMessage] = useState('');
+  const [resetForm, setResetForm] = useState({ password: '', confirm: '' });
+  const [showResetPassword, setShowResetPassword] = useState(false);
+  const [resetLoading, setResetLoading] = useState(false);
+  const [resetError, setResetError] = useState('');
+  const [resetInfo, setResetInfo] = useState('');
+  const [resetTokenValid, setResetTokenValid] = useState<boolean | null>(null);
 
   // Restaura a sessão a partir do cookie httpOnly validado pelo servidor (/api/auth/me),
   // não confiando no localStorage como fonte de verdade da autenticação.
@@ -179,6 +213,105 @@ export default function App() {
       setLoginLoading(false);
     }
   };
+
+  const goToLogin = () => {
+    setAuthView('login');
+    setForgotError('');
+    setForgotSentMessage('');
+    setResetError('');
+    setResetInfo('');
+    setResetForm({ password: '', confirm: '' });
+    clearResetTokenFromUrl();
+    setResetToken('');
+  };
+
+  const handleForgotPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!forgotEmail.trim()) {
+      setForgotError('Informe o e-mail da conta.');
+      return;
+    }
+    setForgotError('');
+    setForgotSentMessage('');
+    setForgotLoading(true);
+    try {
+      const res = await fetch('/api/auth/forgot-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: forgotEmail.trim() }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setForgotError(data.error || 'Não foi possível enviar o e-mail.');
+        return;
+      }
+      setForgotSentMessage(
+        data.message || `Usuário encontrado. Enviamos o link de redefinição para ${forgotEmail.trim()}.`
+      );
+      setAuthView('forgot-sent');
+    } finally {
+      setForgotLoading(false);
+    }
+  };
+
+  const handleResetPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!resetForm.password || !resetForm.confirm) {
+      setResetError('Preencha a nova senha e a confirmação.');
+      return;
+    }
+    if (resetForm.password !== resetForm.confirm) {
+      setResetError('As senhas não coincidem.');
+      return;
+    }
+    setResetError('');
+    setResetLoading(true);
+    try {
+      const res = await fetch('/api/auth/reset-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          token: resetToken,
+          password: resetForm.password,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setResetError(data.error || 'Não foi possível redefinir a senha.');
+        return;
+      }
+      setResetForm({ password: '', confirm: '' });
+      setAuthView('login');
+      setLoginError('');
+      setResetInfo(data.message || 'Senha redefinida. Faça login com a nova senha.');
+      clearResetTokenFromUrl();
+      setResetToken('');
+    } finally {
+      setResetLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (authView !== 'reset' || !resetToken) {
+      setResetTokenValid(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const res = await fetch(`/api/auth/reset-password?token=${encodeURIComponent(resetToken)}`);
+      if (cancelled) return;
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setResetTokenValid(false);
+        setResetError(data.error || 'Link inválido ou expirado.');
+        return;
+      }
+      setResetTokenValid(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [authView, resetToken]);
 
   const getWhatsappSupportLink = () => {
     const errorText = loginError?.trim() ? loginError.trim() : 'Mensagem de erro';
@@ -372,80 +505,179 @@ export default function App() {
   }
 
   if (!user) {
+    const inputClass = 'mt-1 w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm';
+    const primaryBtn =
+      'w-full px-4 py-2.5 rounded-xl bg-[#004D40] text-white text-sm font-bold hover:bg-[#003d33] disabled:opacity-60 transition-colors';
+    const errorBox =
+      'text-xs font-medium text-red-600 bg-red-50 border border-red-100 rounded-xl px-3 py-2';
+    const okBox =
+      'text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-xl px-3 py-2';
+
     return (
       <div className="min-h-screen bg-[#F8FAFC] font-sans text-slate-900 flex items-center justify-center p-6">
         <div className="w-full max-w-md">
           <div className="bg-white border border-slate-100 rounded-2xl shadow-sm p-6 space-y-5">
             <div className="text-center">
               <h1 className="text-2xl font-bold text-slate-900">Budget</h1>
-              <p className="text-sm text-slate-500 mt-1">Acesse sua conta para entrar no sistema.</p>
+              <p className="text-sm text-slate-500 mt-1">
+                {authView === 'login' && 'Acesse sua conta para entrar no sistema.'}
+                {authView === 'forgot' && 'Informe o e-mail da conta para receber o link de redefinição.'}
+                {authView === 'forgot-sent' && 'Confira sua caixa de entrada.'}
+                {authView === 'reset' && 'Defina uma nova senha para acessar o sistema.'}
+              </p>
             </div>
 
-            <form onSubmit={handleLogin} className="space-y-3">
-              <div>
-                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">E-mail</label>
-                <input
-                  type="email"
-                  value={loginForm.email}
-                  onChange={(e) => setLoginForm((p) => ({ ...p, email: e.target.value }))}
-                  className="mt-1 w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
-                  placeholder="seu@email.com"
-                />
-              </div>
-              <div>
-                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Senha</label>
-                <div className="relative mt-1">
+            {authView === 'login' && (
+              <form onSubmit={handleLogin} className="space-y-3">
+                <div>
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">E-mail</label>
                   <input
-                    type={showPassword ? 'text' : 'password'}
-                    value={loginForm.password}
-                    onChange={(e) => setLoginForm((p) => ({ ...p, password: e.target.value }))}
-                    className="w-full px-3 py-2 pr-10 bg-slate-50 border border-slate-200 rounded-xl text-sm"
-                    placeholder="••••••••"
+                    type="email"
+                    value={loginForm.email}
+                    onChange={(e) => setLoginForm((p) => ({ ...p, email: e.target.value }))}
+                    className={inputClass}
+                    placeholder="seu@email.com"
                   />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword((v) => !v)}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-slate-400 hover:text-slate-600 rounded-lg transition-colors"
-                    aria-label={showPassword ? 'Ocultar senha' : 'Mostrar senha'}
-                  >
-                    {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-                  </button>
                 </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Senha</label>
+                  <div className="relative mt-1">
+                    <input
+                      type={showPassword ? 'text' : 'password'}
+                      value={loginForm.password}
+                      onChange={(e) => setLoginForm((p) => ({ ...p, password: e.target.value }))}
+                      className="w-full px-3 py-2 pr-10 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+                      placeholder="••••••••"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword((v) => !v)}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-slate-400 hover:text-slate-600 rounded-lg transition-colors"
+                      aria-label={showPassword ? 'Ocultar senha' : 'Mostrar senha'}
+                    >
+                      {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
+                  </div>
+                </div>
+
+                {resetInfo && <div className={okBox}>{resetInfo}</div>}
+                {loginError && <div className={errorBox}>{loginError}</div>}
+
+                <button type="submit" disabled={loginLoading} className={primaryBtn}>
+                  {loginLoading ? 'Entrando...' : 'Entrar'}
+                </button>
+              </form>
+            )}
+
+            {authView === 'forgot' && (
+              <form onSubmit={handleForgotPassword} className="space-y-3">
+                <div>
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">E-mail</label>
+                  <input
+                    type="email"
+                    value={forgotEmail}
+                    onChange={(e) => setForgotEmail(e.target.value)}
+                    className={inputClass}
+                    placeholder="seu@email.com"
+                    autoFocus
+                  />
+                </div>
+                {forgotError && <div className={errorBox}>{forgotError}</div>}
+                <button type="submit" disabled={forgotLoading} className={primaryBtn}>
+                  {forgotLoading ? 'Enviando...' : 'Enviar link'}
+                </button>
+                <button
+                  type="button"
+                  onClick={goToLogin}
+                  className="w-full inline-flex items-center justify-center gap-1.5 text-sm font-semibold text-slate-500 hover:text-slate-700"
+                >
+                  <ArrowLeft size={14} /> Voltar ao login
+                </button>
+              </form>
+            )}
+
+            {authView === 'forgot-sent' && (
+              <div className="space-y-3">
+                <div className={okBox}>
+                  {forgotSentMessage || 'Enviamos o link de redefinição. O link vale por 1 hora.'}
+                </div>
+                <button type="button" onClick={goToLogin} className={primaryBtn}>
+                  Voltar ao login
+                </button>
               </div>
+            )}
 
-              {loginError && (
-                <div className="text-xs font-medium text-red-600 bg-red-50 border border-red-100 rounded-xl px-3 py-2">
-                  {loginError}
+            {authView === 'reset' && (
+              <form onSubmit={handleResetPassword} className="space-y-3">
+                <div>
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Nova senha</label>
+                  <div className="relative mt-1">
+                    <input
+                      type={showResetPassword ? 'text' : 'password'}
+                      value={resetForm.password}
+                      onChange={(e) => setResetForm((p) => ({ ...p, password: e.target.value }))}
+                      className="w-full px-3 py-2 pr-10 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+                      placeholder="Mínimo 10 caracteres, letras e números"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowResetPassword((v) => !v)}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-slate-400 hover:text-slate-600 rounded-lg transition-colors"
+                      aria-label={showResetPassword ? 'Ocultar senha' : 'Mostrar senha'}
+                    >
+                      {showResetPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
+                  </div>
                 </div>
-              )}
+                <div>
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Confirmar senha</label>
+                  <input
+                    type={showResetPassword ? 'text' : 'password'}
+                    value={resetForm.confirm}
+                    onChange={(e) => setResetForm((p) => ({ ...p, confirm: e.target.value }))}
+                    className={inputClass}
+                    placeholder="Repita a nova senha"
+                  />
+                </div>
+                {resetError && <div className={errorBox}>{resetError}</div>}
+                <button type="submit" disabled={resetLoading || resetTokenValid === false} className={primaryBtn}>
+                  {resetLoading ? 'Salvando...' : 'Salvar nova senha'}
+                </button>
+                <button
+                  type="button"
+                  onClick={goToLogin}
+                  className="w-full inline-flex items-center justify-center gap-1.5 text-sm font-semibold text-slate-500 hover:text-slate-700"
+                >
+                  <ArrowLeft size={14} /> Voltar ao login
+                </button>
+              </form>
+            )}
+          </div>
 
+          {authView === 'login' && (
+            <div className="mt-4 flex items-center justify-center gap-3">
               <button
-                type="submit"
-                disabled={loginLoading}
-                className="w-full px-4 py-2.5 rounded-xl bg-[#004D40] text-white text-sm font-bold hover:bg-[#003d33] disabled:opacity-60 transition-colors"
+                type="button"
+                className="px-4 py-2 text-sm font-semibold text-slate-600 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors"
+                onClick={() => {
+                  setForgotEmail(loginForm.email);
+                  setForgotError('');
+                  setResetInfo('');
+                  setAuthView('forgot');
+                }}
               >
-                {loginLoading ? 'Entrando...' : 'Entrar'}
+                Esqueci minha senha
               </button>
-            </form>
-          </div>
-
-          <div className="mt-4 flex items-center justify-center gap-3">
-            <button
-              type="button"
-              className="px-4 py-2 text-sm font-semibold text-slate-600 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors"
-              onClick={() => alert('Configuração de recuperação de senha será definida em breve.')}
-            >
-              Esqueci minha senha
-            </button>
-            <a
-              href={getWhatsappSupportLink()}
-              target="_blank"
-              rel="noreferrer"
-              className="px-4 py-2 text-sm font-semibold text-white bg-[#004D40] rounded-xl hover:bg-[#003d33] transition-colors"
-            >
-              Suporte
-            </a>
-          </div>
+              <a
+                href={getWhatsappSupportLink()}
+                target="_blank"
+                rel="noreferrer"
+                className="px-4 py-2 text-sm font-semibold text-white bg-[#004D40] rounded-xl hover:bg-[#003d33] transition-colors"
+              >
+                Suporte
+              </a>
+            </div>
+          )}
         </div>
       </div>
     );

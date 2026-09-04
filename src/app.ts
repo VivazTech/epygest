@@ -19,8 +19,12 @@ import {
   sessionCookieOptions,
   requireAuth,
   requireRole,
+  hashPasswordResetToken,
+  createPasswordResetToken,
+  RESET_TOKEN_TTL_SECONDS,
   type SessionUser,
 } from "./lib/auth.js";
+import { sendEmail } from "./lib/mail.js";
 import {
   PERMISSION_RESOURCES,
   PERMISSION_RESOURCE_KEYS,
@@ -693,6 +697,180 @@ export function createApp() {
       res.status(500).json({
         error: "Erro interno na autenticação. Verifique se JWT_SECRET está configurado no servidor.",
       });
+    }
+  });
+
+  const forgotLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 5,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: "Muitas tentativas. Tente novamente em alguns minutos." },
+  });
+
+  const resolveAppBaseUrl = (req: express.Request): string => {
+    const origin = String(req.headers.origin || "").replace(/\/$/, "");
+    if (origin && corsOrigins.includes(origin)) return origin;
+    const proto = String(req.headers["x-forwarded-proto"] || req.protocol || "http")
+      .split(",")[0]
+      .trim();
+    const host = String(req.headers["x-forwarded-host"] || req.headers.host || "localhost:3000")
+      .split(",")[0]
+      .trim();
+    return `${proto}://${host}`;
+  };
+
+  const findValidResetToken = async (rawToken: string) => {
+    if (!rawToken) return null;
+    const tokenHash = hashPasswordResetToken(rawToken);
+    const { data, error } = await supabase
+      .from("password_reset_tokens")
+      .select("id, user_id, expires_at, used_at")
+      .eq("token_hash", tokenHash)
+      .maybeSingle();
+    if (error || !data) return null;
+    if (data.used_at) return null;
+    if (new Date(data.expires_at).getTime() <= Date.now()) return null;
+    return data;
+  };
+
+  const buildResetEmailHtml = (name: string, accountEmail: string, resetUrl: string) => `
+    <div style="font-family:Arial,sans-serif;background:#F8FAFC;padding:32px 16px;">
+      <div style="max-width:480px;margin:0 auto;background:#ffffff;border:1px solid #e2e8f0;border-radius:16px;padding:28px;">
+        <p style="margin:0 0 4px;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:#64748b;font-weight:700;">Budget</p>
+        <h1 style="margin:0 0 16px;font-size:22px;color:#0f172a;">Redefinir senha</h1>
+        <p style="margin:0 0 12px;font-size:14px;line-height:1.6;color:#334155;">
+          Olá${name ? `, ${name}` : ""}. Recebemos um pedido para redefinir a senha da conta <strong>${accountEmail}</strong>.
+        </p>
+        <p style="margin:0 0 24px;font-size:14px;line-height:1.6;color:#334155;">
+          O link é válido por 1 hora e pode ser usado uma única vez.
+        </p>
+        <p style="margin:0 0 24px;">
+          <a href="${resetUrl}" style="display:inline-block;background:#004D40;color:#ffffff;text-decoration:none;font-size:14px;font-weight:700;padding:12px 18px;border-radius:12px;">
+            Escolher nova senha
+          </a>
+        </p>
+        <p style="margin:0;font-size:12px;line-height:1.5;color:#94a3b8;">
+          Se você não pediu essa alteração, ignore este e-mail. A senha atual continua válida.
+        </p>
+      </div>
+    </div>
+  `;
+
+  app.post("/api/auth/forgot-password", forgotLimiter, async (req, res) => {
+    const email = String(req.body?.email || "").trim().toLowerCase();
+    if (!email) {
+      return res.status(400).json({ error: "Informe o e-mail." });
+    }
+
+    try {
+      const { data: user } = await supabase
+        .from("users")
+        .select("id, name, email")
+        .eq("email", email)
+        .maybeSingle();
+
+      if (!user?.id) {
+        return res.status(404).json({
+          error: "Não há usuário cadastrado com este e-mail.",
+        });
+      }
+
+      const { raw, hash } = createPasswordResetToken();
+      const nowIso = new Date().toISOString();
+      const expiresAt = new Date(Date.now() + RESET_TOKEN_TTL_SECONDS * 1000).toISOString();
+
+      await supabase
+        .from("password_reset_tokens")
+        .update({ used_at: nowIso })
+        .eq("user_id", user.id)
+        .is("used_at", null);
+
+      const { error: insertError } = await supabase.from("password_reset_tokens").insert({
+        user_id: user.id,
+        token_hash: hash,
+        expires_at: expiresAt,
+      });
+
+      if (insertError) {
+        console.error("Erro ao gravar token de reset:", insertError);
+        return res.status(500).json({ error: "Não foi possível gerar o link de redefinição." });
+      }
+
+      const resetUrl = `${resolveAppBaseUrl(req)}/?reset_token=${encodeURIComponent(raw)}`;
+      try {
+        await sendEmail({
+          to: String(user.email),
+          subject: "Redefinir senha — Budget",
+          html: buildResetEmailHtml(String(user.name || ""), String(user.email), resetUrl),
+          text: `Olá${user.name ? `, ${user.name}` : ""}. Para redefinir a senha da conta ${user.email}, acesse: ${resetUrl}. O link vale por 1 hora.`,
+        });
+      } catch (err) {
+        console.error("Erro ao enviar e-mail de reset:", err);
+        const code = err instanceof Error ? err.message : "";
+        if (code === "RESEND_DOMAIN_REQUIRED") {
+          return res.status(502).json({
+            error:
+              "Usuário encontrado, mas o Resend só envia para este e-mail depois de verificar um domínio em resend.com/domains.",
+          });
+        }
+        return res.status(502).json({
+          error: "Usuário encontrado, mas o e-mail não pôde ser enviado. Tente novamente em alguns minutos.",
+        });
+      }
+
+      return res.json({
+        ok: true,
+        message: `Usuário encontrado. Enviamos o link de redefinição para ${user.email}.`,
+      });
+    } catch (err) {
+      console.error("Erro em forgot-password:", err);
+      return res.status(500).json({ error: "Não foi possível processar a recuperação de senha." });
+    }
+  });
+
+  app.get("/api/auth/reset-password", async (req, res) => {
+    const token = String(req.query.token || "");
+    const row = await findValidResetToken(token);
+    if (!row) {
+      return res.status(400).json({ error: "Link inválido ou expirado." });
+    }
+    return res.json({ ok: true });
+  });
+
+  app.post("/api/auth/reset-password", forgotLimiter, async (req, res) => {
+    const token = String(req.body?.token || "");
+    const password = String(req.body?.password || "");
+    const pwdError = validatePasswordStrength(password);
+    if (pwdError) {
+      return res.status(400).json({ error: pwdError });
+    }
+
+    const row = await findValidResetToken(token);
+    if (!row) {
+      return res.status(400).json({ error: "Link inválido ou expirado." });
+    }
+
+    try {
+      const hashed = await hashPassword(password);
+      const { error: updErr } = await supabase
+        .from("users")
+        .update({ password: hashed })
+        .eq("id", row.user_id);
+      if (updErr) {
+        console.error("Erro ao atualizar senha:", updErr);
+        return res.status(500).json({ error: "Não foi possível atualizar a senha." });
+      }
+
+      await supabase
+        .from("password_reset_tokens")
+        .update({ used_at: new Date().toISOString() })
+        .eq("id", row.id);
+
+      return res.json({ ok: true, message: "Senha redefinida. Faça login com a nova senha." });
+    } catch (err) {
+      console.error("Erro em reset-password:", err);
+      return res.status(500).json({ error: "Não foi possível atualizar a senha." });
     }
   });
 
