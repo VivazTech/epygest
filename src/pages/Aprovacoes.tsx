@@ -30,7 +30,7 @@ export const AprovacoesPage: React.FC = () => {
   const [sectors, setSectors] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [userRole, setUserRole] = useState('viewer');
-  const [actingSector, setActingSector] = useState<'controle' | 'financeiro'>('controle');
+  const [actingSector, setActingSector] = useState<'gestor' | 'controle' | 'financeiro'>('controle');
   const [typeFilter, setTypeFilter] = useState('all');
   const [sectorFilter, setSectorFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('pending');
@@ -45,6 +45,8 @@ export const AprovacoesPage: React.FC = () => {
     actingSector === 'controle' && (userRole === 'controle' || userRole === 'admin');
   const canPayFinance =
     actingSector === 'financeiro' && (userRole === 'finance' || userRole === 'admin');
+  const canApproveManager =
+    actingSector === 'gestor' && (userRole === 'manager' || userRole === 'admin');
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -80,6 +82,7 @@ export const AprovacoesPage: React.FC = () => {
         const role = String(user?.role || 'viewer');
         setUserRole(role);
         if (role === 'finance') setActingSector('financeiro');
+        else if (role === 'manager') setActingSector('gestor');
         else setActingSector('controle');
       } catch {
         // ignore
@@ -117,10 +120,14 @@ export const AprovacoesPage: React.FC = () => {
   );
 
   const metrics = useMemo(() => {
+    const pendingGestor = items.filter((i) => isPendingForRole(i, 'gestor')).length;
     const pendingControle = items.filter((i) => isPendingForRole(i, 'controle')).length;
     const pendingFinanceiro = items.filter((i) => isPendingForRole(i, 'financeiro')).length;
-    const totalValor = items.reduce((sum, i) => sum + (Number(i.amount) || 0), 0);
-    return { pendingControle, pendingFinanceiro, totalValor, total: items.length };
+    const totalValor = items.reduce((sum, i) => {
+      const value = Number(i.amount) || 0;
+      return sum + (i.type === 'estorno' ? -value : value);
+    }, 0);
+    return { pendingGestor, pendingControle, pendingFinanceiro, totalValor, total: items.length };
   }, [items]);
 
   const updateManualStatus = async (id: number, status: 'open' | 'approved' | 'posted' | 'cancelled') => {
@@ -135,7 +142,33 @@ export const AprovacoesPage: React.FC = () => {
       alert(data.error || 'Não foi possível atualizar o lançamento.');
       return;
     }
-    showSuccess('Lançamento manual atualizado.');
+    showSuccess(
+      status === 'open' && actingSector === 'gestor'
+        ? 'Lançamento aprovado pelo gestor e enviado ao Controle.'
+        : 'Lançamento manual atualizado.'
+    );
+    loadData();
+  };
+
+  const updateEstornoStatus = async (id: number, status: 'open' | 'approved' | 'posted' | 'cancelled') => {
+    if (status === 'cancelled' && !confirmCancel('este estorno')) return;
+    const res = await fetch(`/api/estornos/${id}/status`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      alert(data.error || 'Não foi possível atualizar o estorno.');
+      return;
+    }
+    const messages: Record<string, string> = {
+      approved: 'Estorno aprovado pelo Controle.',
+      posted: 'Estorno recebido pelo Financeiro.',
+      cancelled: 'Estorno cancelado.',
+      open: actingSector === 'gestor' ? 'Estorno aprovado pelo gestor e enviado ao Controle.' : 'Estorno devolvido para análise.',
+    };
+    showSuccess(messages[status] || 'Estorno atualizado.');
     loadData();
   };
 
@@ -167,7 +200,7 @@ export const AprovacoesPage: React.FC = () => {
       approved: 'Lançamento aprovado pelo Controle.',
       posted: 'Pagamento registrado pelo Financeiro.',
       cancelled: 'Lançamento cancelado.',
-      open: 'Lançamento devolvido para análise.',
+      open: actingSector === 'gestor' ? 'Aprovado pelo gestor e enviado ao Controle.' : 'Lançamento devolvido para análise.',
     };
     showSuccess(messages[status] || 'Lançamento atualizado.');
     loadData();
@@ -175,6 +208,24 @@ export const AprovacoesPage: React.FC = () => {
 
   const renderFlowActions = (type: 'comanda' | 'requisicao' | 'mensalidade', item: AprovacaoItem) => (
     <>
+      {canApproveManager && item.status === 'pending_manager' && (
+        <>
+          <button
+            onClick={() => updateFlowStatus(type, item.source_id, 'open')}
+            className="p-2 text-violet-600 hover:bg-violet-50 rounded-lg transition-colors"
+            title="Aprovar (Gestor do setor)"
+          >
+            <BadgeCheck className="w-4 h-4" />
+          </button>
+          <button
+            onClick={() => updateFlowStatus(type, item.source_id, 'cancelled')}
+            className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+            title="Reprovar"
+          >
+            <XCircle className="w-4 h-4" />
+          </button>
+        </>
+      )}
       {canApproveControl && item.status === 'open' && (
         <>
           <button
@@ -216,10 +267,12 @@ export const AprovacoesPage: React.FC = () => {
 
   const runInvoiceFlow = async (
     id: number,
-    action: 'approve_control' | 'reject_control' | 'disapprove_control' | 'mark_paid',
+    action: 'approve_manager' | 'reject_manager' | 'approve_control' | 'reject_control' | 'disapprove_control' | 'mark_paid',
     paymentReceiptPath?: string
   ) => {
-    if (action === 'reject_control' && !confirmCancel('esta nota (reprovação pelo Controle)')) return false;
+    if ((action === 'reject_control' || action === 'reject_manager') && !confirmCancel(
+      action === 'reject_manager' ? 'esta nota (reprovação pelo gestor)' : 'esta nota (reprovação pelo Controle)'
+    )) return false;
     if (action === 'disapprove_control' && !window.confirm('Desaprovar esta nota e devolvê-la para análise do setor solicitante?')) {
       return false;
     }
@@ -228,7 +281,8 @@ export const AprovacoesPage: React.FC = () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         action,
-        actorSector: actingSector === 'controle' ? 'CONTROLE' : 'FINANCEIRO',
+        actorSector:
+          actingSector === 'gestor' ? 'GESTOR' : actingSector === 'controle' ? 'CONTROLE' : 'FINANCEIRO',
         payment_receipt_path: paymentReceiptPath,
       }),
     });
@@ -241,14 +295,18 @@ export const AprovacoesPage: React.FC = () => {
     return true;
   };
 
-  const openManualDocument = async (item: AprovacaoItem) => {
+  const openAttachedDocument = async (item: AprovacaoItem) => {
     const storedPath = String(item.file_path || '');
     if (storedPath && isDirectDocumentUrl(storedPath)) {
       window.open(storedPath, '_blank', 'noopener');
       return;
     }
+    const endpoint =
+      item.type === 'estorno'
+        ? `/api/estornos/${item.source_id}/document-url`
+        : `/api/manual-entries/${item.source_id}/document-url`;
     try {
-      const res = await fetch(`/api/manual-entries/${item.source_id}/document-url`);
+      const res = await fetch(endpoint);
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data?.url) throw new Error(data?.error || 'Arquivo indisponível');
       window.open(data.url, '_blank', 'noopener');
@@ -258,18 +316,19 @@ export const AprovacoesPage: React.FC = () => {
   };
 
   const handlePayInvoice = async () => {
-    if (!receiptModal || !receiptFile) {
-      alert('Anexe o comprovante de pagamento.');
-      return;
-    }
+    if (!receiptModal) return;
     setUploadingReceipt(true);
     try {
-      const payload = new FormData();
-      payload.append('receipt_file', receiptFile);
-      const uploadRes = await fetch('/api/invoices/receipt', { method: 'POST', body: payload });
-      const uploadData = await uploadRes.json().catch(() => ({}));
-      if (!uploadRes.ok) throw new Error(uploadData.error || 'Falha ao enviar comprovante.');
-      const ok = await runInvoiceFlow(receiptModal.id, 'mark_paid', uploadData.file_path);
+      let receiptPath: string | undefined;
+      if (receiptFile) {
+        const payload = new FormData();
+        payload.append('receipt_file', receiptFile);
+        const uploadRes = await fetch('/api/invoices/receipt', { method: 'POST', body: payload });
+        const uploadData = await uploadRes.json().catch(() => ({}));
+        if (!uploadRes.ok) throw new Error(uploadData.error || 'Falha ao enviar comprovante.');
+        receiptPath = uploadData.file_path;
+      }
+      const ok = await runInvoiceFlow(receiptModal.id, 'mark_paid', receiptPath);
       if (ok) {
         setReceiptModal(null);
         setReceiptFile(null);
@@ -286,6 +345,24 @@ export const AprovacoesPage: React.FC = () => {
     if (item.type === 'manual') {
       return (
         <>
+          {canApproveManager && item.status === 'pending_manager' && (
+            <>
+              <button
+                onClick={() => updateManualStatus(item.source_id, 'open')}
+                className="p-2 text-violet-600 hover:bg-violet-50 rounded-lg transition-colors"
+                title="Aprovar (Gestor do setor)"
+              >
+                <BadgeCheck className="w-4 h-4" />
+              </button>
+              <button
+                onClick={() => updateManualStatus(item.source_id, 'cancelled')}
+                className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                title="Reprovar"
+              >
+                <XCircle className="w-4 h-4" />
+              </button>
+            </>
+          )}
           {canApproveControl && item.status === 'open' && (
             <>
               <button
@@ -326,10 +403,89 @@ export const AprovacoesPage: React.FC = () => {
       );
     }
 
+    if (item.type === 'estorno') {
+      return (
+        <>
+          {canApproveManager && item.status === 'pending_manager' && (
+            <>
+              <button
+                onClick={() => updateEstornoStatus(item.source_id, 'open')}
+                className="p-2 text-violet-600 hover:bg-violet-50 rounded-lg transition-colors"
+                title="Aprovar (Gestor do setor)"
+              >
+                <BadgeCheck className="w-4 h-4" />
+              </button>
+              <button
+                onClick={() => updateEstornoStatus(item.source_id, 'cancelled')}
+                className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                title="Reprovar"
+              >
+                <XCircle className="w-4 h-4" />
+              </button>
+            </>
+          )}
+          {canApproveControl && item.status === 'open' && (
+            <>
+              <button
+                onClick={() => updateEstornoStatus(item.source_id, 'approved')}
+                className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                title="Aprovar (Controle)"
+              >
+                <BadgeCheck className="w-4 h-4" />
+              </button>
+              <button
+                onClick={() => updateEstornoStatus(item.source_id, 'cancelled')}
+                className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                title="Reprovar"
+              >
+                <XCircle className="w-4 h-4" />
+              </button>
+            </>
+          )}
+          {canApproveControl && item.status === 'approved' && (
+            <button
+              onClick={() => updateEstornoStatus(item.source_id, 'open')}
+              className="p-2 text-amber-600 hover:bg-amber-50 rounded-lg transition-colors"
+              title="Desaprovar"
+            >
+              <RotateCcw className="w-4 h-4" />
+            </button>
+          )}
+          {canPayFinance && item.status === 'approved' && (
+            <button
+              onClick={() => updateEstornoStatus(item.source_id, 'posted')}
+              className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"
+              title="Receber (Financeiro)"
+            >
+              <Archive className="w-4 h-4" />
+            </button>
+          )}
+        </>
+      );
+    }
+
     if (item.type === 'nota' || item.type === 'danfe') {
       const flow = item.flow_stage || 'control_pending';
       return (
         <>
+          {canApproveManager && flow === 'manager_pending' && (
+            <>
+              <button
+                onClick={() => runInvoiceFlow(item.source_id, 'approve_manager').then((ok) => ok && loadData())}
+                className="p-2 text-violet-600 hover:bg-violet-50 rounded-lg transition-colors"
+                title="Aprovar (Gestor do setor)"
+              >
+                <BadgeCheck className="w-4 h-4" />
+              </button>
+              <button
+                onClick={() => runInvoiceFlow(item.source_id, 'reject_manager').then((ok) => ok && loadData())}
+                className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                title="Reprovar"
+              >
+                <XCircle className="w-4 h-4" />
+              </button>
+            </>
+          )}
           {canApproveControl && flow === 'control_pending' && (
             <>
               <button
@@ -388,22 +544,27 @@ export const AprovacoesPage: React.FC = () => {
         <div>
           <h2 className="text-2xl font-bold text-slate-900">Aprovações</h2>
           <p className="text-slate-500 text-sm">
-            Visão unificada de comandas, lançamentos manuais, requisições, notas, DANFE e mensalidades.
+            Visão unificada. Lançamentos de estagiário aguardam o gestor do setor antes do Controle.
           </p>
         </div>
         {canSwitchActingProfile && (
           <select
             value={actingSector}
-            onChange={(e) => setActingSector(e.target.value as 'controle' | 'financeiro')}
+            onChange={(e) => setActingSector(e.target.value as 'gestor' | 'controle' | 'financeiro')}
             className="px-3 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-semibold text-slate-700 shadow-sm self-start"
           >
+            <option value="gestor">Atuar como Gestor</option>
             <option value="controle">Atuar como Controle</option>
             <option value="financeiro">Atuar como Financeiro</option>
           </select>
         )}
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4">
+          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Pendentes Gestor</p>
+          <p className="text-2xl font-extrabold text-violet-700 mt-1">{metrics.pendingGestor}</p>
+        </div>
         <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4">
           <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Pendentes Controle</p>
           <p className="text-2xl font-extrabold text-orange-600 mt-1">{metrics.pendingControle}</p>
@@ -524,10 +685,10 @@ export const AprovacoesPage: React.FC = () => {
                       {item.user_name ? (
                         <span className="block text-[10px] text-slate-400 mt-0.5">por {item.user_name}</span>
                       ) : null}
-                      {item.type === 'manual' && item.file_path ? (
+                      {(item.type === 'manual' || item.type === 'estorno') && item.file_path ? (
                         <button
                           type="button"
-                          onClick={() => openManualDocument(item)}
+                          onClick={() => openAttachedDocument(item)}
                           className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-blue-700 bg-blue-50 px-2 py-1 rounded-lg hover:bg-blue-100"
                         >
                           <Paperclip className="w-3 h-3" />
@@ -556,8 +717,10 @@ export const AprovacoesPage: React.FC = () => {
                         <span className="block text-xs text-slate-400">Emissão: {item.issue_date}</span>
                       ) : null}
                     </td>
-                    <td className="px-6 py-4 text-sm font-bold text-slate-900">
-                      {item.amount != null ? formatCurrency(item.amount) : '—'}
+                    <td className={cn('px-6 py-4 text-sm font-bold', item.type === 'estorno' ? 'text-amber-700' : 'text-slate-900')}>
+                      {item.amount != null
+                        ? `${item.type === 'estorno' ? '−' : ''}${formatCurrency(item.amount)}`
+                        : '—'}
                     </td>
                     <td className="px-6 py-4">
                       <span
@@ -584,7 +747,7 @@ export const AprovacoesPage: React.FC = () => {
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 space-y-4">
             <h3 className="text-lg font-bold text-slate-900">Comprovante de pagamento</h3>
             <p className="text-sm text-slate-500">
-              Anexe o comprovante para registrar o pagamento da nota.
+              O comprovante é opcional. Você pode marcar como pago sem anexar arquivo.
             </p>
             <label
               className={cn(
@@ -593,7 +756,7 @@ export const AprovacoesPage: React.FC = () => {
               )}
             >
               {receiptFile ? <FileCheck className="w-4 h-4" /> : <Upload className="w-4 h-4" />}
-              <span className="truncate">{receiptFile ? receiptFile.name : 'Selecionar PDF ou imagem'}</span>
+              <span className="truncate">{receiptFile ? receiptFile.name : 'Selecionar PDF ou imagem (opcional)'}</span>
               <input
                 type="file"
                 accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/*"
@@ -614,7 +777,7 @@ export const AprovacoesPage: React.FC = () => {
               </button>
               <button
                 type="button"
-                disabled={uploadingReceipt || !receiptFile}
+                disabled={uploadingReceipt}
                 onClick={handlePayInvoice}
                 className="px-4 py-2 rounded-xl text-sm font-bold bg-[#004D40] text-white disabled:opacity-60"
               >

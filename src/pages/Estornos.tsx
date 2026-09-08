@@ -1,8 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Plus, Archive, XCircle, Trash2, BadgeCheck, RotateCcw, Upload, FileCheck, Paperclip } from 'lucide-react';
 import { cn, formatCurrency } from '../lib/utils';
-import { ValueTrace } from '../components/ValueTrace';
-import { valueTrace } from '../lib/valueTraceMeta';
 import { useSearch } from '../context/SearchContext';
 import { useToast } from '../context/ToastContext';
 import { matchesSearch } from '../lib/search';
@@ -24,7 +22,7 @@ const EMPTY_FORM = {
   file_name: '',
 };
 
-export const LancamentosManuaisPage: React.FC = () => {
+export const EstornosPage: React.FC = () => {
   const { query } = useSearch();
   const { showSuccess } = useToast();
   const [entries, setEntries] = useState<any[]>([]);
@@ -40,7 +38,7 @@ export const LancamentosManuaisPage: React.FC = () => {
   const loadData = async () => {
     try {
       const [entriesRes, sectorsRes, crdsRes] = await Promise.all([
-        fetch('/api/manual-entries'),
+        fetch('/api/estornos'),
         fetch('/api/sectors'),
         fetch('/api/crds'),
       ]);
@@ -114,7 +112,7 @@ export const LancamentosManuaisPage: React.FC = () => {
   }, [crds, form.sector_id]);
 
   const matchesUserSector = (sectorId?: number | string | null) => {
-    if (hasGlobalSectorView && allowedSectorIds.length === 0) return true;
+    if (hasGlobalSectorView) return true;
     if (allowedSectorIds.length === 0) return false;
     return allowedSectorIds.includes(String(sectorId ?? ''));
   };
@@ -131,7 +129,7 @@ export const LancamentosManuaisPage: React.FC = () => {
       return;
     }
 
-    const res = await fetch('/api/manual-entries', {
+    const res = await fetch('/api/estornos', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -149,11 +147,11 @@ export const LancamentosManuaisPage: React.FC = () => {
 
     if (!res.ok) {
       const data = await res.json();
-      alert(data.error || 'Não foi possível registrar o lançamento.');
+      alert(data.error || 'Não foi possível registrar o estorno.');
       return;
     }
 
-    showSuccess('Lançamento manual criado. Aguardando aprovação do Controle.');
+    showSuccess('Estorno criado. Aguardando aprovação do Controle.');
     closeModal();
     loadData();
   };
@@ -168,7 +166,7 @@ export const LancamentosManuaisPage: React.FC = () => {
     try {
       const payload = new FormData();
       payload.append('file', file);
-      const res = await fetch('/api/manual-entries/file', { method: 'POST', body: payload });
+      const res = await fetch('/api/estornos/file', { method: 'POST', body: payload });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || 'Não foi possível enviar o arquivo.');
       setForm((p) => ({
@@ -190,7 +188,7 @@ export const LancamentosManuaisPage: React.FC = () => {
       return;
     }
     try {
-      const res = await fetch(`/api/manual-entries/${entry.id}/document-url`);
+      const res = await fetch(`/api/estornos/${entry.id}/document-url`);
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data?.url) throw new Error(data?.error || 'Arquivo indisponível');
       window.open(data.url, '_blank', 'noopener');
@@ -200,22 +198,22 @@ export const LancamentosManuaisPage: React.FC = () => {
   };
 
   const updateStatus = async (id: number, status: 'open' | 'approved' | 'posted' | 'cancelled') => {
-    if (status === 'cancelled' && !confirmCancel('este lançamento manual')) return;
-    const res = await fetch(`/api/manual-entries/${id}/status`, {
+    if (status === 'cancelled' && !confirmCancel('este estorno')) return;
+    const res = await fetch(`/api/estornos/${id}/status`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status }),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
-      alert(data.error || 'Não foi possível atualizar o lançamento.');
+      alert(data.error || 'Não foi possível atualizar o estorno.');
       return;
     }
     const messages: Record<string, string> = {
-      approved: 'Lançamento aprovado pelo Controle.',
-      posted: 'Lançamento baixado pelo Financeiro.',
-      cancelled: 'Lançamento cancelado.',
-      open: userRole === 'manager' ? 'Aprovado pelo gestor e enviado ao Controle.' : 'Lançamento devolvido para análise.',
+      approved: 'Estorno aprovado pelo Controle.',
+      posted: 'Estorno recebido pelo Financeiro.',
+      cancelled: 'Estorno cancelado.',
+      open: userRole === 'manager' ? 'Estorno aprovado pelo gestor e enviado ao Controle.' : 'Estorno devolvido para análise.',
     };
     showSuccess(messages[status] || 'Status atualizado.');
     loadData();
@@ -223,21 +221,21 @@ export const LancamentosManuaisPage: React.FC = () => {
 
   const deleteEntry = async (entry: any) => {
     if (userRole !== 'admin') {
-      alert('Apenas administradores podem excluir lançamentos manuais.');
+      alert('Apenas administradores podem excluir estornos.');
       return;
     }
     const label = entry.description
       ? `"${entry.description}"`
-      : `lançamento #${entry.id}`;
+      : `estorno #${entry.id}`;
     if (!confirmDelete(label)) return;
 
-    const res = await fetch(`/api/manual-entries/${entry.id}`, { method: 'DELETE' });
+    const res = await fetch(`/api/estornos/${entry.id}`, { method: 'DELETE' });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
-      alert(data.error || 'Não foi possível excluir o lançamento.');
+      alert(data.error || 'Não foi possível excluir o estorno.');
       return;
     }
-    showSuccess('Lançamento manual excluído com sucesso.');
+    showSuccess('Estorno excluído com sucesso.');
     loadData();
   };
 
@@ -280,15 +278,15 @@ export const LancamentosManuaisPage: React.FC = () => {
     [visibleCrds]
   );
 
-  const statusMeta = (status: string) => launchStatusMeta(status, 'Baixado');
+  const statusMeta = (status: string) => launchStatusMeta(status, 'Recebido');
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-bold text-slate-900">Lançamentos Manuais</h2>
+          <h2 className="text-2xl font-bold text-slate-900">Estornos</h2>
           <p className="text-slate-500 text-sm">
-            Fluxo: Solicitante lança → Controle aprova → Financeiro baixa. Lançamentos de estagiário passam antes pelo gestor do setor.
+            Fluxo: Solicitante lança o estorno → Controle aprova → Financeiro recebe. Lançamentos de estagiário passam antes pelo gestor do setor.
           </p>
         </div>
         <div className="flex items-center gap-3 self-start">
@@ -311,7 +309,7 @@ export const LancamentosManuaisPage: React.FC = () => {
               className="flex items-center gap-2 bg-[#004D40] text-white px-4 py-2.5 rounded-xl shadow-lg shadow-emerald-900/10 hover:bg-[#003d33] transition-colors"
             >
               <Plus className="w-4 h-4" />
-              <span className="font-bold text-sm">Novo lançamento</span>
+              <span className="font-bold text-sm">Novo estorno</span>
             </button>
           )}
         </div>
@@ -319,16 +317,13 @@ export const LancamentosManuaisPage: React.FC = () => {
 
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 flex flex-wrap items-center gap-4">
         <div>
-          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Em aberto / aprovados (visíveis)</p>
-          <p className="text-xl font-extrabold text-slate-900 mt-1">
-            <ValueTrace
-              displayValue={formatCurrency(openTotal)}
-              meta={valueTrace.manualEntries.openTotal()}
-            />
+          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Estornos em aberto / aprovados</p>
+          <p className="text-xl font-extrabold text-amber-700 mt-1">
+            −{formatCurrency(openTotal)}
           </p>
         </div>
         <p className="text-xs text-slate-400 max-w-md">
-          Compromisso orçamentário usa a data de lançamento. Após a baixa pelo Financeiro, o valor deixa de contar no pendente.
+          O valor do estorno entra como crédito. Depois que o Financeiro recebe, o item sai da fila de pendentes.
         </p>
       </div>
 
@@ -351,7 +346,7 @@ export const LancamentosManuaisPage: React.FC = () => {
             {filteredEntries.length === 0 && (
               <tr>
                 <td colSpan={9} className="px-6 py-10 text-center text-sm text-slate-400">
-                  Nenhum lançamento manual encontrado.
+                  Nenhum estorno encontrado.
                 </td>
               </tr>
             )}
@@ -395,11 +390,7 @@ export const LancamentosManuaisPage: React.FC = () => {
                     )}
                   </td>
                   <td className="px-6 py-4">
-                    <ValueTrace
-                      className="text-sm font-bold text-slate-900"
-                      displayValue={formatCurrency(entry.amount)}
-                      meta={valueTrace.manualEntries.amount(entry.id)}
-                    />
+                    <span className="text-sm font-bold text-amber-700">−{formatCurrency(entry.amount)}</span>
                   </td>
                   <td className="px-6 py-4">
                     <span className={cn('text-[10px] font-bold px-2 py-1 rounded-lg uppercase tracking-wider', meta.classes)}>
@@ -457,7 +448,7 @@ export const LancamentosManuaisPage: React.FC = () => {
                         <button
                           onClick={() => updateStatus(entry.id, 'posted')}
                           className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"
-                          title="Baixar / pagar (Financeiro)"
+                          title="Receber (Financeiro)"
                         >
                           <Archive className="w-4 h-4" />
                         </button>
@@ -466,7 +457,7 @@ export const LancamentosManuaisPage: React.FC = () => {
                         <button
                           onClick={() => updateStatus(entry.id, 'cancelled')}
                           className="p-2 text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
-                          title="Cancelar lançamento"
+                          title="Cancelar estorno"
                         >
                           <XCircle className="w-4 h-4" />
                         </button>
@@ -475,7 +466,7 @@ export const LancamentosManuaisPage: React.FC = () => {
                         <button
                           onClick={() => deleteEntry(entry)}
                           className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                          title="Excluir lançamento definitivamente (apenas admin)"
+                          title="Excluir estorno definitivamente (apenas admin)"
                         >
                           <Trash2 className="w-4 h-4" />
                         </button>
@@ -493,7 +484,7 @@ export const LancamentosManuaisPage: React.FC = () => {
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-white w-full max-w-lg max-h-[calc(100dvh-2rem)] rounded-3xl shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
             <div className="p-6 border-b border-slate-100 flex justify-between items-center shrink-0">
-              <h3 className="text-xl font-bold text-slate-900">Novo lançamento manual</h3>
+              <h3 className="text-xl font-bold text-slate-900">Novo estorno</h3>
               <button type="button" onClick={closeModal} className="text-slate-400 hover:text-slate-600 transition-colors">
                 <Plus className="w-6 h-6 rotate-45" />
               </button>
@@ -587,7 +578,7 @@ export const LancamentosManuaisPage: React.FC = () => {
                   <input
                     value={form.description}
                     onChange={(e) => setForm((p) => ({ ...p, description: e.target.value }))}
-                    placeholder="Observação do lançamento"
+                    placeholder="Motivo do estorno"
                     className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
                   />
                 </div>
@@ -645,7 +636,7 @@ export const LancamentosManuaisPage: React.FC = () => {
                   disabled={uploadingFile}
                   className="flex-1 px-4 py-3 bg-[#004D40] text-white font-bold rounded-xl hover:bg-[#003d33] shadow-lg shadow-emerald-900/10 transition-colors disabled:opacity-70"
                 >
-                  Lançar
+                  Lançar estorno
                 </button>
               </div>
             </form>

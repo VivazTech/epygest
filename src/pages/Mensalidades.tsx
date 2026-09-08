@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, CalendarClock, Plus, RefreshCcw, Trash2, Pencil, X, Banknote } from 'lucide-react';
+import { AlertTriangle, CalendarClock, Plus, RefreshCcw, Trash2, Pencil, X, Banknote, BadgeCheck, XCircle } from 'lucide-react';
 import { cn, formatCurrency } from '../lib/utils';
 import { confirmDelete } from '../lib/confirmAction';
 import { SearchableSelect } from '../components/SearchableSelect';
@@ -69,6 +69,7 @@ type ContratoLancamento = {
 };
 
 const FLOW_STATUS_LABELS: Record<string, { label: string; classes: string }> = {
+  pending_manager: { label: 'Aguardando Gestor', classes: 'bg-violet-100 text-violet-700' },
   open: { label: 'Aguardando Controle', classes: 'bg-orange-100 text-orange-700' },
   approved: { label: 'Aprovado Controle', classes: 'bg-blue-100 text-blue-700' },
   posted: { label: 'Pago', classes: 'bg-emerald-100 text-emerald-700' },
@@ -90,6 +91,7 @@ export const MensalidadesPage: React.FC = () => {
   const [form, setForm] = useState(EMPTY_FORM);
   const [lancamentos, setLancamentos] = useState<ContratoLancamento[]>([]);
   const [solicitandoId, setSolicitandoId] = useState<number | null>(null);
+  const [userRole, setUserRole] = useState('viewer');
 
   const ALERT_DAYS = 30;
 
@@ -135,8 +137,35 @@ export const MensalidadesPage: React.FC = () => {
   };
 
   useEffect(() => {
+    const loadUser = async () => {
+      try {
+        const res = await fetch('/api/auth/me');
+        if (!res.ok) return;
+        const user = await res.json();
+        setUserRole(String(user?.role || 'viewer'));
+      } catch {
+        // ignore
+      }
+    };
+    loadUser();
     load();
   }, []);
+
+  const canApproveManager = userRole === 'manager' || userRole === 'admin';
+
+  const updateLancamentoStatus = async (id: number, status: 'open' | 'cancelled') => {
+    const res = await fetch(`/api/contrato-lancamentos/${id}/status`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      alert(data.error || 'Não foi possível atualizar o lançamento.');
+      return;
+    }
+    load();
+  };
 
   const sectorOptions = useMemo(
     () => sectors.map((s) => ({ value: String(s.id), label: s.name })),
@@ -267,7 +296,7 @@ export const MensalidadesPage: React.FC = () => {
       return;
     }
     const pending = lancamentoByContrato.get(row.id);
-    if (pending && (pending.status === 'open' || pending.status === 'approved')) {
+    if (pending && (pending.status === 'pending_manager' || pending.status === 'open' || pending.status === 'approved')) {
       alert('Já existe um pagamento pendente para este contrato.');
       return;
     }
@@ -465,9 +494,31 @@ export const MensalidadesPage: React.FC = () => {
                       if (!lanc) return <span className="text-xs text-slate-400">—</span>;
                       const meta = FLOW_STATUS_LABELS[lanc.status] || { label: lanc.status, classes: 'bg-slate-100 text-slate-700' };
                       return (
-                        <span className={cn('text-[10px] font-bold px-2 py-1 rounded-lg uppercase tracking-wider', meta.classes)}>
-                          {meta.label}
-                        </span>
+                        <div className="flex items-center gap-1">
+                          <span className={cn('text-[10px] font-bold px-2 py-1 rounded-lg uppercase tracking-wider', meta.classes)}>
+                            {meta.label}
+                          </span>
+                          {canApproveManager && lanc.status === 'pending_manager' && (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => updateLancamentoStatus(lanc.id, 'open')}
+                                className="p-1.5 text-violet-600 hover:bg-violet-50 rounded-lg"
+                                title="Aprovar (Gestor do setor)"
+                              >
+                                <BadgeCheck className="w-4 h-4" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => updateLancamentoStatus(lanc.id, 'cancelled')}
+                                className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg"
+                                title="Reprovar (Gestor)"
+                              >
+                                <XCircle className="w-4 h-4" />
+                              </button>
+                            </>
+                          )}
+                        </div>
                       );
                     })()}
                   </td>

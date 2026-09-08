@@ -40,7 +40,6 @@ export function getSearchPlaceholder(activeTab: string): string {
     notas: 'Buscar nota, fornecedor, setor ou CRD...',
     requisicoes: 'Buscar requisição, fornecedor, CRD ou descrição...',
     'lancamentos-manuais': 'Buscar lançamento, fornecedor, setor ou CRD...',
-    estornos: 'Buscar estorno, fornecedor, setor ou CRD...',
     comandas: 'Buscar comanda, fornecedor, consumidor, local ou item...',
     importacao: 'Buscar importação ou dados da prévia...',
     cadastros: 'Buscar cadastro, código ou setor...',

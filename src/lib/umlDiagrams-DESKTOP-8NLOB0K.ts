@@ -101,8 +101,6 @@ erDiagram
   crds ||--o{ invoices : "conta"
   sectors ||--o{ manual_entries : "setor"
   crds ||--o{ manual_entries : "conta"
-  sectors ||--o{ estornos : "setor"
-  crds ||--o{ estornos : "conta"
   comandas ||--o{ comanda_items : "contém"
   contratos ||--o{ contrato_lancamentos : "gera"
   requisitions {
@@ -118,11 +116,6 @@ erDiagram
     text flow_status
   }
   manual_entries {
-    int id
-    numeric valor
-    text status
-  }
-  estornos {
     int id
     numeric valor
     text status
@@ -222,7 +215,6 @@ flowchart LR
     P2["Requisicoes"]
     P3["Invoices (Notas/DANFE)"]
     P4["LancamentosManuais"]
-    P4b["Estornos"]
     P5["Mensalidades"]
     P6["Aprovacoes"]
   end
@@ -231,7 +223,6 @@ flowchart LR
     E2["/api/requisitions (+status)"]
     E3["/api/invoices (extract, receipt, boleto, flow)"]
     E4["/api/manual-entries (+file, +status)"]
-    E4b["/api/estornos (+file, +status)"]
     E5["/api/contratos • /api/contrato-lancamentos"]
     E6["/api/aprovacoes"]
   end
@@ -240,18 +231,16 @@ flowchart LR
     T2[("requisitions")]
     T3[("invoices")]
     T4[("manual_entries")]
-    T4b[("estornos")]
     T5[("contratos / contrato_lancamentos")]
   end
   P1-->E1-->T1
   P2-->E2-->T2
   P3-->E3-->T3
   P4-->E4-->T4
-  P4b-->E4b-->T4b
   P5-->E5-->T5
   E3 -.->|Google GenAI| G["extração de NF"]
   P6-->E6
-  E6 -.->|lê pendências| T2 & T3 & T4 & T4b & T5 & T1
+  E6 -.->|lê pendências| T2 & T3 & T4 & T5 & T1
 `;
 
 export const MOD_RESULTADOS = `
@@ -371,7 +360,7 @@ sequenceDiagram
   participant API as Express
   participant DB as Supabase
   AP->>API: GET /api/aprovacoes
-  API->>DB: agrega pendências (requisitions, invoices, manual_entries, estornos, contrato_lancamentos, comandas)
+  API->>DB: agrega pendências (requisitions, invoices, manual_entries, contrato_lancamentos, comandas)
   DB-->>API: itens pendentes
   API-->>AP: lista unificada
   G->>AP: aprova/reprova item
@@ -451,11 +440,9 @@ export const API_REFERENCE: ApiGroup[] = [
     R('GET', '/api/requisitions'), R('POST', '/api/requisitions'), R('PATCH', '/api/requisitions/:id/status'),
     R('GET', '/api/manual-entries'), R('POST', '/api/manual-entries'), R('PATCH', '/api/manual-entries/:id/status'),
     R('POST', '/api/manual-entries/file'), R('GET', '/api/manual-entries/:id/document-url'), R('DELETE', '/api/manual-entries/:id', 'admin'),
-    R('GET', '/api/estornos'), R('POST', '/api/estornos'), R('PATCH', '/api/estornos/:id/status'),
-    R('POST', '/api/estornos/file'), R('GET', '/api/estornos/:id/document-url'), R('DELETE', '/api/estornos/:id', 'admin'),
     R('GET', '/api/invoices'), R('GET', '/api/invoices/report'), R('POST', '/api/invoices/extract'), R('POST', '/api/invoices/receipt'),
-    R('POST', '/api/invoices/boleto'), R('GET', '/api/invoices/:id/document-url'), R('GET', '/api/invoices/:id/edits'), R('POST', '/api/invoices'),
-    R('PATCH', '/api/invoices/:id'), R('PATCH', '/api/invoices/:id/flow'), R('DELETE', '/api/invoices/:id', 'admin'),
+    R('POST', '/api/invoices/boleto'), R('GET', '/api/invoices/:id/document-url'), R('POST', '/api/invoices'),
+    R('PATCH', '/api/invoices/:id/flow'), R('DELETE', '/api/invoices/:id', 'admin'),
     R('GET', '/api/aprovacoes', 'admin,controle,finance'),
   ]},
   { group: 'Contratos & Mensalidades', routes: [

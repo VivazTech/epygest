@@ -39,6 +39,7 @@ import {
   UserX,
   UserRound,
   Clock,
+  Undo2,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { PLANILHAS_RESULTADOS, APURACAO_RECEITA_ITENS, BASE_ORCAMENTO_ITENS, isBaseOrcamentoTab, isRelCrdTab, isRelReqTab, isConsumoInternoTab, isCmvTab, isRdsTab, isApuracaoReceitaTab as checkApuracaoReceitaTab, isApuracaoResultadosTab as checkApuracaoResultadosTab } from '../lib/planilhas';
@@ -70,12 +71,13 @@ interface SidebarProps {
 }
 
 const lancamentosMenuItems = [
-  { id: 'comandas', label: 'Comandas', icon: ClipboardList, roles: ['admin', 'finance', 'controle', 'manager'] },
-  { id: 'lancamentos-manuais', label: 'Lançamentos Manuais', icon: Wallet, roles: ['admin', 'finance', 'controle', 'manager'] },
-  { id: 'requisicoes', label: 'Requisições', icon: Archive, roles: ['admin', 'finance', 'controle', 'manager'] },
-  { id: 'notas', label: 'Notas de Serviço', icon: Receipt, roles: ['admin', 'finance', 'controle', 'manager'] },
-  { id: 'danfe', label: 'DANFE', icon: FileText, roles: ['admin', 'finance', 'controle', 'manager'] },
-  { id: 'mensalidades', label: 'Mensalidades', icon: CalendarClock, roles: ['admin', 'finance', 'controle', 'manager', 'diretoria'] },
+  { id: 'comandas', label: 'Comandas', icon: ClipboardList, roles: ['admin', 'finance', 'controle', 'manager', 'estagiario'] },
+  { id: 'lancamentos-manuais', label: 'Lançamentos Manuais', icon: Wallet, roles: ['admin', 'finance', 'controle', 'manager', 'estagiario'] },
+  { id: 'estornos', label: 'Estornos', icon: Undo2, roles: ['admin', 'finance', 'controle', 'manager', 'estagiario'] },
+  { id: 'requisicoes', label: 'Requisições', icon: Archive, roles: ['admin', 'finance', 'controle', 'manager', 'estagiario'] },
+  { id: 'notas', label: 'Notas de Serviço', icon: Receipt, roles: ['admin', 'finance', 'controle', 'manager', 'estagiario'] },
+  { id: 'danfe', label: 'DANFE', icon: FileText, roles: ['admin', 'finance', 'controle', 'manager', 'estagiario'] },
+  { id: 'mensalidades', label: 'Mensalidades', icon: CalendarClock, roles: ['admin', 'finance', 'controle', 'manager', 'diretoria', 'estagiario'] },
 ];
 
 const menuItems = [
@@ -124,7 +126,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const showPlanilhas = canView('apuracao-resultados', ['admin', 'controle']);
   const showBaseOrcamento = canView('base-orcamento', ['admin', 'controle', 'manager']);
   const showLancamentos = lancamentosMenu.length > 0;
-  const showAprovacoes = canView('aprovacoes', ['admin', 'finance', 'controle']);
+  const showAprovacoes = canView('aprovacoes', ['admin', 'finance', 'controle', 'manager']);
   const showFolha = canView('folha', ['admin', 'controle']);
   const showEmprestimos = canView('emprestimos', ['admin', 'finance', 'controle']);
   const showFolhaGroup = showFolha || showEmprestimos;
@@ -1119,6 +1121,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                user?.role === 'finance' ? 'Financeiro' :
                user?.role === 'controle' ? 'Controle' :
                user?.role === 'manager' ? 'Gestor' :
+               user?.role === 'estagiario' ? 'Estagiário' :
                user?.role === 'viewer' ? 'Visualizador' :
                user?.role === 'diretoria' ? 'Diretoria' :
                String(user?.role || '')}

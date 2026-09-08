@@ -65,6 +65,7 @@ const FALLBACK_ROLE_LABEL: Record<string, string> = {
   finance: 'Financeiro',
   controle: 'Controle',
   manager: 'Gestor',
+  estagiario: 'Estagiário',
   viewer: 'Visualizador',
   diretoria: 'Diretoria',
 };
@@ -75,6 +76,7 @@ const roleBadgeClass = (role: string) => {
     finance: 'bg-sky-50 text-sky-800 border-sky-100',
     controle: 'bg-amber-50 text-amber-800 border-amber-100',
     manager: 'bg-violet-50 text-violet-800 border-violet-100',
+    estagiario: 'bg-fuchsia-50 text-fuchsia-800 border-fuchsia-100',
     viewer: 'bg-slate-50 text-slate-600 border-slate-200',
     diretoria: 'bg-cyan-50 text-cyan-800 border-cyan-100',
   };

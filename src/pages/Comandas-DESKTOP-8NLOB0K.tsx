@@ -5,7 +5,6 @@ import { confirmCancel } from '../lib/confirmAction';
 import { useSearch } from '../context/SearchContext';
 import { useToast } from '../context/ToastContext';
 import { matchesSearch } from '../lib/search';
-import { launchStatusMeta } from '../lib/launchFlow';
 
 type ComandaItemForm = {
   description: string;
@@ -91,12 +90,16 @@ export const ComandasPage: React.FC = () => {
   const canSwitchActingProfile = userRole === 'admin';
   const canApproveControl = actingSector === 'controle' && (userRole === 'controle' || userRole === 'admin');
   const canPayFinance = actingSector === 'financeiro' && (userRole === 'finance' || userRole === 'admin');
-  const canApproveManager = userRole === 'manager' || userRole === 'admin';
   const canCancelAsRequester =
     actingSector === 'requester' &&
-    (userRole === 'manager' || userRole === 'estagiario' || userRole === 'admin');
+    (userRole === 'manager' || userRole === 'admin');
 
-  const statusLabel = (status: string) => launchStatusMeta(status);
+  const statusLabel = (status: string) => {
+    if (status === 'approved') return { label: 'Aprovado Controle', classes: 'bg-blue-100 text-blue-700' };
+    if (status === 'posted') return { label: 'Pago', classes: 'bg-emerald-100 text-emerald-700' };
+    if (status === 'cancelled') return { label: 'Cancelado', classes: 'bg-slate-200 text-slate-700' };
+    return { label: 'Aguardando Controle', classes: 'bg-orange-100 text-orange-700' };
+  };
 
   const addItem = () => {
     setForm((prev) => ({ ...prev, items: [...prev.items, emptyItem()] }));
@@ -317,24 +320,6 @@ export const ComandasPage: React.FC = () => {
                   </td>
                   <td className="px-6 py-4">
                     <div className="flex justify-end gap-2">
-                      {canApproveManager && comanda.status === 'pending_manager' && (
-                        <>
-                          <button
-                            onClick={() => updateStatus(comanda.id, 'open')}
-                            className="p-2 text-violet-600 hover:bg-violet-50 rounded-lg transition-colors"
-                            title="Aprovar (Gestor do setor)"
-                          >
-                            <BadgeCheck className="w-4 h-4" />
-                          </button>
-                          <button
-                            onClick={() => updateStatus(comanda.id, 'cancelled')}
-                            className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                            title="Reprovar (Gestor)"
-                          >
-                            <XCircle className="w-4 h-4" />
-                          </button>
-                        </>
-                      )}
                       {canApproveControl && comanda.status === 'open' && (
                         <>
                           <button
@@ -371,7 +356,7 @@ export const ComandasPage: React.FC = () => {
                           <Archive className="w-4 h-4" />
                         </button>
                       )}
-                      {canCancelAsRequester && (comanda.status === 'pending_manager' || comanda.status === 'open' || comanda.status === 'approved') && (
+                      {canCancelAsRequester && (comanda.status === 'open' || comanda.status === 'approved') && (
                         <button
                           onClick={() => updateStatus(comanda.id, 'cancelled')}
                           className="p-2 text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"

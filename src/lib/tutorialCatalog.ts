@@ -1,6 +1,6 @@
 /** Catálogo do Tutorial guiado: espelha o menu lateral, com texto de cada aba. */
 
-export type TutorialRole = 'admin' | 'finance' | 'controle' | 'manager' | 'viewer' | 'diretoria';
+export type TutorialRole = 'admin' | 'finance' | 'controle' | 'manager' | 'estagiario' | 'viewer' | 'diretoria';
 
 export type TutorialGroupId =
   | 'em-construcao'
@@ -32,11 +32,11 @@ export type TutorialGroup = {
   items: TutorialItem[];
 };
 
-const ALL: TutorialRole[] = ['admin', 'finance', 'controle', 'manager', 'viewer', 'diretoria'];
+const ALL: TutorialRole[] = ['admin', 'finance', 'controle', 'manager', 'estagiario', 'viewer', 'diretoria'];
 const GESTAO: TutorialRole[] = ['admin', 'controle', 'manager'];
 const DRE: TutorialRole[] = ['admin', 'controle', 'diretoria'];
 const CONTROLE: TutorialRole[] = ['admin', 'controle'];
-const LANC: TutorialRole[] = ['admin', 'finance', 'controle', 'manager'];
+const LANC: TutorialRole[] = ['admin', 'finance', 'controle', 'manager', 'estagiario'];
 const PAINEL: TutorialRole[] = ['admin', 'controle', 'manager', 'diretoria'];
 
 export const TUTORIAL_GROUPS: TutorialGroup[] = [
@@ -78,7 +78,7 @@ export const TUTORIAL_GROUPS: TutorialGroup[] = [
     title: 'Lançamentos',
     blurb: 'Entrada operacional do dia a dia: notas, requisições, comandas e contratos recorrentes.',
     groupTour:
-      'Lançamentos é o cadastro do que acontece no hotel: notas, DANFE, requisições, comandas, lançamentos manuais e mensalidades. Tudo aqui alimenta o realizado dos setores.',
+      'Lançamentos é o cadastro do que acontece no hotel: notas, DANFE, requisições, comandas, lançamentos manuais, estornos e mensalidades. Tudo aqui alimenta o realizado dos setores. Lançamentos de estagiário passam pelo gestor do setor antes do Controle.',
     items: [
       {
         id: 'comandas',
@@ -94,6 +94,14 @@ export const TUTORIAL_GROUPS: TutorialGroup[] = [
         label: 'Lançamentos Manuais',
         summary: 'Lançamentos avulsos vinculados a setor e CRD.',
         tour: 'Lançamentos Manuais servem para valores que não vieram de nota nem de requisição. Informe setor, CRD, valor, data e, se quiser, um arquivo de comprovante — eles entram no realizado do mês.',
+        roles: LANC,
+      },
+      {
+        id: 'estornos',
+        tab: 'estornos',
+        label: 'Estornos',
+        summary: 'Créditos/estornos com o mesmo fluxo de aprovação dos lançamentos.',
+        tour: 'Em Estornos o solicitante lança um crédito (valor a estornar). O Controle aprova e o Financeiro recebe — o mesmo fluxo dos lançamentos manuais, com o valor exibido como crédito.',
         roles: LANC,
       },
       {
@@ -126,7 +134,7 @@ export const TUTORIAL_GROUPS: TutorialGroup[] = [
         label: 'Mensalidades',
         summary: 'Contratos recorrentes (aluguéis, sistemas, serviços mensais).',
         tour: 'Mensalidades guarda contratos que se repetem todo mês. Cadastre fornecedor, valor e setor para não perder vencimentos fixos.',
-        roles: ['admin', 'finance', 'controle', 'manager', 'diretoria'],
+        roles: ['admin', 'finance', 'controle', 'manager', 'diretoria', 'estagiario'],
       },
     ],
   },

@@ -9,6 +9,7 @@ import { useToast } from '../context/ToastContext';
 import { matchesSearch } from '../lib/search';
 import { isSharedCrdCode } from '../lib/sharedCrds';
 import { SearchableSelect } from '../components/SearchableSelect';
+import { launchStatusMeta } from '../lib/launchFlow';
 
 const EMPTY_FORM = {
   crd_id: '',
@@ -67,16 +68,12 @@ export const RequisicoesPage: React.FC = () => {
   const canSwitchActingProfile = userRole === 'admin';
   const canApproveControl = actingSector === 'controle' && (userRole === 'controle' || userRole === 'admin');
   const canPayFinance = actingSector === 'financeiro' && (userRole === 'finance' || userRole === 'admin');
+  const canApproveManager = userRole === 'manager' || userRole === 'admin';
   const canCancelAsRequester =
     actingSector === 'requester' &&
-    (userRole === 'manager' || userRole === 'admin');
+    (userRole === 'manager' || userRole === 'estagiario' || userRole === 'admin');
 
-  const statusLabel = (status: string) => {
-    if (status === 'approved') return { label: 'Aprovado Controle', classes: 'bg-blue-100 text-blue-700' };
-    if (status === 'posted') return { label: 'Pago', classes: 'bg-emerald-100 text-emerald-700' };
-    if (status === 'cancelled') return { label: 'Cancelado', classes: 'bg-slate-200 text-slate-700' };
-    return { label: 'Aguardando Controle', classes: 'bg-orange-100 text-orange-700' };
-  };
+  const statusLabel = (status: string) => launchStatusMeta(status);
 
   const visibleCrds = useMemo(() => {
     const active = crds.filter((c) => c.active !== false);
@@ -262,6 +259,24 @@ export const RequisicoesPage: React.FC = () => {
                   </td>
                   <td className="px-6 py-4">
                     <div className="flex justify-end gap-2">
+                      {canApproveManager && r.status === 'pending_manager' && (
+                        <>
+                          <button
+                            onClick={() => updateStatus(r.id, 'open')}
+                            className="p-2 text-violet-600 hover:bg-violet-50 rounded-lg transition-colors"
+                            title="Aprovar (Gestor do setor)"
+                          >
+                            <BadgeCheck className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => updateStatus(r.id, 'cancelled')}
+                            className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                            title="Reprovar (Gestor)"
+                          >
+                            <XCircle className="w-4 h-4" />
+                          </button>
+                        </>
+                      )}
                       {canApproveControl && r.status === 'open' && (
                         <>
                           <button
@@ -298,7 +313,7 @@ export const RequisicoesPage: React.FC = () => {
                           <Archive className="w-4 h-4" />
                         </button>
                       )}
-                      {canCancelAsRequester && (r.status === 'open' || r.status === 'approved') && (
+                      {canCancelAsRequester && (r.status === 'pending_manager' || r.status === 'open' || r.status === 'approved') && (
                         <button
                           onClick={() => updateStatus(r.id, 'cancelled')}
                           className="p-2 text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"

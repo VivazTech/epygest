@@ -10,7 +10,6 @@ import { isSharedCrdCode } from '../lib/sharedCrds';
 import { isDirectDocumentUrl } from '../lib/storagePath';
 import { confirmCancel, confirmDelete } from '../lib/confirmAction';
 import { SearchableSelect } from '../components/SearchableSelect';
-import { launchStatusMeta } from '../lib/launchFlow';
 
 const EMPTY_FORM = {
   sector_id: '',
@@ -90,14 +89,12 @@ export const LancamentosManuaisPage: React.FC = () => {
   const canSwitchActingProfile = userRole === 'admin';
   const canApproveControl = actingSector === 'controle' && (userRole === 'controle' || userRole === 'admin');
   const canPayFinance = actingSector === 'financeiro' && (userRole === 'finance' || userRole === 'admin');
-  const canApproveManager = userRole === 'manager' || userRole === 'admin';
   const canLaunch =
     userRole === 'manager' ||
-    userRole === 'estagiario' ||
     (userRole === 'admin' && actingSector === 'requester');
   const canCancelAsRequester =
     actingSector === 'requester' &&
-    (userRole === 'manager' || userRole === 'estagiario' || userRole === 'admin');
+    (userRole === 'manager' || userRole === 'admin');
 
   const visibleSectors = useMemo(() => {
     if (hasGlobalSectorView && allowedSectorIds.length === 0) return sectors;
@@ -215,7 +212,7 @@ export const LancamentosManuaisPage: React.FC = () => {
       approved: 'Lançamento aprovado pelo Controle.',
       posted: 'Lançamento baixado pelo Financeiro.',
       cancelled: 'Lançamento cancelado.',
-      open: userRole === 'manager' ? 'Aprovado pelo gestor e enviado ao Controle.' : 'Lançamento devolvido para análise.',
+      open: 'Lançamento devolvido para análise.',
     };
     showSuccess(messages[status] || 'Status atualizado.');
     loadData();
@@ -265,7 +262,7 @@ export const LancamentosManuaisPage: React.FC = () => {
   const openTotal = useMemo(
     () =>
       scopedEntries
-        .filter((e) => e.status === 'pending_manager' || e.status === 'open' || e.status === 'approved')
+        .filter((e) => e.status === 'open' || e.status === 'approved')
         .reduce((sum, e) => sum + Number(e.amount || 0), 0),
     [scopedEntries]
   );
@@ -280,7 +277,12 @@ export const LancamentosManuaisPage: React.FC = () => {
     [visibleCrds]
   );
 
-  const statusMeta = (status: string) => launchStatusMeta(status, 'Baixado');
+  const statusMeta = (status: string) => {
+    if (status === 'approved') return { label: 'Aprovado Controle', classes: 'bg-blue-100 text-blue-700' };
+    if (status === 'posted') return { label: 'Baixado', classes: 'bg-emerald-100 text-emerald-700' };
+    if (status === 'cancelled') return { label: 'Cancelado', classes: 'bg-slate-200 text-slate-700' };
+    return { label: 'Aguardando Controle', classes: 'bg-orange-100 text-orange-700' };
+  };
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
@@ -288,7 +290,7 @@ export const LancamentosManuaisPage: React.FC = () => {
         <div>
           <h2 className="text-2xl font-bold text-slate-900">Lançamentos Manuais</h2>
           <p className="text-slate-500 text-sm">
-            Fluxo: Solicitante lança → Controle aprova → Financeiro baixa. Lançamentos de estagiário passam antes pelo gestor do setor.
+            Fluxo: Solicitante lança → Controle aprova → Financeiro baixa. Em aberto/aprovado compõem o orçamento do mês.
           </p>
         </div>
         <div className="flex items-center gap-3 self-start">
@@ -408,24 +410,6 @@ export const LancamentosManuaisPage: React.FC = () => {
                   </td>
                   <td className="px-6 py-4">
                     <div className="flex justify-end gap-2">
-                      {canApproveManager && entry.status === 'pending_manager' && (
-                        <>
-                          <button
-                            onClick={() => updateStatus(entry.id, 'open')}
-                            className="p-2 text-violet-600 hover:bg-violet-50 rounded-lg transition-colors"
-                            title="Aprovar (Gestor do setor)"
-                          >
-                            <BadgeCheck className="w-4 h-4" />
-                          </button>
-                          <button
-                            onClick={() => updateStatus(entry.id, 'cancelled')}
-                            className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                            title="Reprovar (Gestor)"
-                          >
-                            <XCircle className="w-4 h-4" />
-                          </button>
-                        </>
-                      )}
                       {canApproveControl && entry.status === 'open' && (
                         <>
                           <button
@@ -462,7 +446,7 @@ export const LancamentosManuaisPage: React.FC = () => {
                           <Archive className="w-4 h-4" />
                         </button>
                       )}
-                      {canCancelAsRequester && (entry.status === 'pending_manager' || entry.status === 'open' || entry.status === 'approved') && (
+                      {canCancelAsRequester && (entry.status === 'open' || entry.status === 'approved') && (
                         <button
                           onClick={() => updateStatus(entry.id, 'cancelled')}
                           className="p-2 text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"

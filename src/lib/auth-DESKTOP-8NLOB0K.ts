@@ -12,7 +12,6 @@ export const USER_ROLES: UserRole[] = [
   "finance",
   "controle",
   "manager",
-  "estagiario",
   "viewer",
   "diretoria",
 ];

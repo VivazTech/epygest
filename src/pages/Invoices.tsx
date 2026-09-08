@@ -11,7 +11,10 @@ import {
   BadgeCheck,
   XCircle,
   Trash2,
-  FileCheck
+  FileCheck,
+  Pencil,
+  History,
+  UserRound
 } from 'lucide-react';
 import { cn, formatCurrency, formatCurrencyInput, formatDate, getCurrencyMeta, parseCurrencyInputDigits } from '../lib/utils';
 import { ValueTrace } from '../components/ValueTrace';
@@ -23,14 +26,30 @@ import { matchesSearch } from '../lib/search';
 import { isDirectDocumentUrl, collectBoletoPaths, type StorageDocumentField } from '../lib/storagePath';
 import { confirmCancel, confirmDelete } from '../lib/confirmAction';
 
+const EMPTY_INVOICE_FORM = {
+  invoice_number: '',
+  provider_name: '',
+  amount: '',
+  issue_date: '',
+  due_date: '',
+  sector_id: '',
+  file_path: '',
+  boleto_file_path: '',
+  natureza: 'O',
+  crd: '',
+  payment_method: '',
+  pix_key: '',
+  currency: 'BRL',
+};
+
 export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'servico' }) => {
   const { query } = useSearch();
   const [listQuery, setListQuery] = useState('');
   const isDanfe = mode === 'danfe';
   const pageTitle = isDanfe ? 'DANFE' : 'Notas de Serviço';
   const pageSubtitle = isDanfe
-    ? 'Fluxo DANFE: Setor solicitante importa → Controle aprova → Financeiro paga e anexa comprovante.'
-    : 'Fluxo: Setor solicitante importa → Controle aprova → Financeiro paga e anexa comprovante.';
+    ? 'Fluxo DANFE: Setor solicita → (estagiário: gestor do setor) → Controle aprova → Financeiro paga.'
+    : 'Fluxo: Setor solicita → (estagiário: gestor do setor) → Controle aprova → Financeiro paga.';
   const { showSuccess } = useToast();
   const now = new Date();
   const initialMonth = (() => {
@@ -81,21 +100,11 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
     to: '',
     payment_method: ''
   });
-  const [formData, setFormData] = useState({
-    invoice_number: '',
-    provider_name: '',
-    amount: '',
-    issue_date: '',
-    due_date: '',
-    sector_id: '',
-    file_path: '',
-    boleto_file_path: '',
-    natureza: 'O',
-    crd: '',
-    payment_method: '',
-    pix_key: '',
-    currency: 'BRL',
-  });
+  const [formData, setFormData] = useState({ ...EMPTY_INVOICE_FORM });
+  const [editingInvoice, setEditingInvoice] = useState<any | null>(null);
+  const [historyInvoice, setHistoryInvoice] = useState<any | null>(null);
+  const [historyRows, setHistoryRows] = useState<any[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
 
   useEffect(() => {
     fetchInvoices();
@@ -246,10 +255,68 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
 
   const closeInvoiceModal = () => {
     setShowModal(false);
+    setEditingInvoice(null);
     setSemBoleto(false);
     setInvoicePdfName('');
     setBoletos([{ path: '', name: '' }]);
     setUploadingBoletoIndex(null);
+    setFormData({ ...EMPTY_INVOICE_FORM });
+  };
+
+  const openNewInvoiceModal = () => {
+    setEditingInvoice(null);
+    setFormData({ ...EMPTY_INVOICE_FORM });
+    setSemBoleto(false);
+    setInvoicePdfName('');
+    setBoletos([{ path: '', name: '' }]);
+    setShowModal(true);
+  };
+
+  const openEditInvoice = (invoice: any) => {
+    const flow = invoice.flow_stage || (invoice.status === 'paid' ? 'paid' : 'control_pending');
+    if (flow === 'cancelled') {
+      alert('Não é possível editar uma nota cancelada.');
+      return;
+    }
+    const paths = collectBoletoPaths(invoice);
+    setEditingInvoice(invoice);
+    setFormData({
+      invoice_number: String(invoice.invoice_number || ''),
+      provider_name: String(invoice.provider_name || ''),
+      amount: invoice.amount == null || invoice.amount === '' ? '' : String(invoice.amount),
+      issue_date: String(invoice.issue_date || '').slice(0, 10),
+      due_date: String(invoice.due_date || '').slice(0, 10),
+      sector_id: String(invoice.sector_id || ''),
+      file_path: String(invoice.file_path || ''),
+      boleto_file_path: String(invoice.boleto_file_path || paths[0] || ''),
+      natureza: String(invoice.natureza || 'O'),
+      crd: String(invoice.crd || ''),
+      payment_method: String(invoice.payment_method || ''),
+      pix_key: String(invoice.pix_key || ''),
+      currency: String(invoice.currency || 'BRL'),
+    });
+    setInvoicePdfName(invoice.file_path ? 'PDF anexado' : '');
+    setBoletos(paths.length ? paths.map((path, index) => ({ path, name: `Boleto ${index + 1}` })) : [{ path: '', name: '' }]);
+    setSemBoleto(paths.length === 0);
+    setShowModal(true);
+  };
+
+  const openEditHistory = async (invoice: any) => {
+    setHistoryInvoice(invoice);
+    setHistoryRows([]);
+    setHistoryLoading(true);
+    try {
+      const res = await fetch(`/api/invoices/${invoice.id}/edits`);
+      const data = await res.json().catch(() => []);
+      if (!res.ok) {
+        alert(data.error || 'Não foi possível carregar o histórico.');
+        setHistoryInvoice(null);
+        return;
+      }
+      setHistoryRows(Array.isArray(data) ? data : []);
+    } finally {
+      setHistoryLoading(false);
+    }
   };
 
   const isDueDateInSelectedCompetency = () => {
@@ -263,9 +330,10 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
   const submitInvoice = async () => {
     const boletoPaths = semBoleto ? [] : boletos.map((b) => b.path).filter(Boolean);
     setSubmittingInvoice(true);
+    const isEdit = Boolean(editingInvoice?.id);
     try {
-      const response = await fetch('/api/invoices', {
-        method: 'POST',
+      const response = await fetch(isEdit ? `/api/invoices/${editingInvoice.id}` : '/api/invoices', {
+        method: isEdit ? 'PATCH' : 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           ...formData,
@@ -276,28 +344,13 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
         }),
       });
       if (response.ok) {
-        const created = await response.json().catch(() => ({}));
-        showSuccess('Nota lançada. Aguardando aprovação do Controle.');
+        const saved = await response.json().catch(() => ({}));
+        showSuccess(isEdit ? 'Lançamento atualizado. O histórico da edição foi registrado.' : 'Nota lançada. Aguardando aprovação do Controle.');
         setShowCompetencyWarning(false);
         closeInvoiceModal();
         const [dueYear, dueMonth] = String(formData.due_date).split('-');
         const nextMonth = String(Number(dueMonth) || selectedMonth);
         const nextYear = String(Number(dueYear) || selectedYear);
-        setFormData({
-          invoice_number: '',
-          provider_name: '',
-          amount: '',
-          issue_date: '',
-          due_date: '',
-          sector_id: '',
-          file_path: '',
-          boleto_file_path: '',
-          natureza: 'O',
-          crd: '',
-          payment_method: '',
-          pix_key: '',
-          currency: 'BRL',
-        });
         setListQuery('');
         setCustomDateFrom('');
         setCustomDateTo('');
@@ -305,12 +358,12 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
         setSelectedYear(nextYear);
         fetchInvoices(nextMonth, nextYear, '', '');
         fetchSectors(nextMonth, nextYear);
-        if (created?.id) {
-          setInvoices((prev) => (prev.some((row) => Number(row.id) === Number(created.id)) ? prev : [created, ...prev]));
+        if (!isEdit && saved?.id) {
+          setInvoices((prev) => (prev.some((row) => Number(row.id) === Number(saved.id)) ? prev : [saved, ...prev]));
         }
       } else {
         const data = await response.json().catch(() => ({}));
-        alert(data.error || 'Não foi possível lançar a nota fiscal.');
+        alert(data.error || (isEdit ? 'Não foi possível salvar a edição.' : 'Não foi possível lançar a nota fiscal.'));
       }
     } finally {
       setSubmittingInvoice(false);
@@ -391,9 +444,17 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
   };
 
   const flowSuccessMessages: Record<
-    'approve_control' | 'reject_control' | 'disapprove_control' | 'mark_paid' | 'cancel_request',
+    | 'approve_manager'
+    | 'reject_manager'
+    | 'approve_control'
+    | 'reject_control'
+    | 'disapprove_control'
+    | 'mark_paid'
+    | 'cancel_request',
     string
   > = {
+    approve_manager: 'Nota aprovada pelo gestor do setor.',
+    reject_manager: 'Nota reprovada pelo gestor do setor.',
     approve_control: 'Nota aprovada pelo Controle.',
     reject_control: 'Nota reprovada pelo Controle.',
     disapprove_control: 'Nota devolvida para análise do setor.',
@@ -403,7 +464,14 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
 
   const runFlowAction = async (
     id: number,
-    action: 'approve_control' | 'reject_control' | 'disapprove_control' | 'mark_paid' | 'cancel_request',
+    action:
+      | 'approve_manager'
+      | 'reject_manager'
+      | 'approve_control'
+      | 'reject_control'
+      | 'disapprove_control'
+      | 'mark_paid'
+      | 'cancel_request',
     payment_receipt_path?: string,
     cancel_reason?: string
   ) => {
@@ -412,7 +480,10 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         action,
-        actorSector: actingSector.toUpperCase(),
+        actorSector:
+          action === 'approve_manager' || action === 'reject_manager'
+            ? 'GESTOR'
+            : actingSector.toUpperCase(),
         payment_receipt_path,
         cancel_reason
       })
@@ -429,6 +500,11 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
   };
 
   const approveByControl = (id: number) => runFlowAction(id, 'approve_control');
+  const approveByManager = (id: number) => runFlowAction(id, 'approve_manager');
+  const rejectByManager = async (id: number) => {
+    if (!confirmCancel('esta nota (reprovação pelo gestor do setor)')) return;
+    await runFlowAction(id, 'reject_manager', undefined, 'Reprovada pelo gestor do setor');
+  };
   const rejectByControl = async (id: number) => {
     if (!confirmCancel('esta nota (reprovação pelo Controle)')) return;
     const reason = window.prompt('Motivo da reprovação pelo Controle (opcional):');
@@ -515,25 +591,25 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
   const submitReceiptAndPay = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedInvoiceId) return;
-    if (!receiptFile) {
-      alert('Selecione o arquivo do comprovante.');
-      return;
-    }
 
     setUploadingReceipt(true);
     try {
-      const payload = new FormData();
-      payload.append('receipt_file', receiptFile);
-      const uploadRes = await fetch('/api/invoices/receipt', {
-        method: 'POST',
-        body: payload
-      });
-      const uploadData = await uploadRes.json();
-      if (!uploadRes.ok) {
-        throw new Error(uploadData.error || 'Falha ao enviar comprovante');
+      let receiptPath: string | undefined;
+      if (receiptFile) {
+        const payload = new FormData();
+        payload.append('receipt_file', receiptFile);
+        const uploadRes = await fetch('/api/invoices/receipt', {
+          method: 'POST',
+          body: payload
+        });
+        const uploadData = await uploadRes.json();
+        if (!uploadRes.ok) {
+          throw new Error(uploadData.error || 'Falha ao enviar comprovante');
+        }
+        receiptPath = uploadData.file_path;
       }
 
-      const ok = await runFlowAction(selectedInvoiceId, 'mark_paid', uploadData.file_path);
+      const ok = await runFlowAction(selectedInvoiceId, 'mark_paid', receiptPath);
       if (ok) {
         setShowReceiptModal(false);
         setSelectedInvoiceId(null);
@@ -554,12 +630,15 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
       return { label: 'Cancelado', icon: XCircle, classes: 'bg-slate-200 text-slate-700' };
     }
     if (flowStage === 'control_approved') {
-      return { label: 'Aprovado Controle', icon: BadgeCheck, classes: 'bg-blue-100 text-blue-700' };
+      return { label: 'Aprovado', icon: BadgeCheck, classes: 'bg-blue-100 text-blue-700' };
+    }
+    if (flowStage === 'manager_pending') {
+      return { label: 'Aguardando Gestor', icon: UserRound, classes: 'bg-violet-100 text-violet-700' };
     }
     if (status === 'overdue') {
       return { label: 'Atrasado', icon: AlertCircle, classes: 'bg-red-100 text-red-700' };
     }
-    return { label: 'Aguardando Controle', icon: Clock, classes: 'bg-orange-100 text-orange-700' };
+    return { label: 'Aguardando', icon: Clock, classes: 'bg-orange-100 text-orange-700' };
   };
 
   const downloadInvoiceReport = async (format: 'csv' | 'pdf') => {
@@ -608,12 +687,14 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
   const canSwitchActingProfile = userRole === 'admin';
   const canApproveControl = actingSector === 'controle' && (userRole === 'controle' || userRole === 'admin');
   const canPayFinance = actingSector === 'financeiro' && (userRole === 'finance' || userRole === 'admin');
+  const canApproveManager = userRole === 'manager' || userRole === 'admin';
   const showImportButton =
     userRole === 'manager' ||
+    userRole === 'estagiario' ||
     (userRole === 'admin' && actingSector === 'requester');
   const canCancelAsRequester =
     actingSector === 'requester' &&
-    (userRole === 'manager' || userRole === 'admin' || userRole === 'viewer');
+    (userRole === 'manager' || userRole === 'estagiario' || userRole === 'admin' || userRole === 'viewer');
   const budgetSectors = isManager
     ? sectors.filter((s) => allowedSectorIds.includes(String(s.id)))
     : sectors;
@@ -764,7 +845,7 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
           )}
           {showImportButton && (
             <button
-              onClick={() => setShowModal(true)}
+              onClick={openNewInvoiceModal}
               className="flex items-center gap-2 bg-[#004D40] text-white px-4 py-2.5 rounded-xl shadow-lg shadow-emerald-900/10 hover:bg-[#003d33] transition-colors"
             >
               <Plus className="w-4 h-4" />
@@ -1067,7 +1148,7 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Lançado por</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Valor</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Vencimento</th>
-                <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Status</th>
+                <th className="px-3 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest w-28">Status</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Comprovante</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Ações</th>
               </tr>
@@ -1120,18 +1201,46 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
                   <td className="px-6 py-4">
                     <p className="text-sm text-slate-600">{formatDate(invoice.due_date)}</p>
                   </td>
-                  <td className="px-6 py-4">
+                  <td className="px-3 py-4">
                     {(() => {
                       const flowStage = invoice.flow_stage || (invoice.status === 'paid' ? 'paid' : 'control_pending');
                       const statusUI = getStatusUI(flowStage, invoice.status);
                       const StatusIcon = statusUI.icon;
+                      const edited = Number(invoice.edit_count || 0) > 0;
                       return (
-                        <div className={cn(
-                          "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider",
-                          statusUI.classes
-                        )}>
-                          <StatusIcon className="w-3 h-3" />
-                          {statusUI.label}
+                        <div className="flex flex-col items-start gap-1 min-w-0">
+                          {edited && (
+                            <button
+                              type="button"
+                              onClick={() => openEditHistory(invoice)}
+                              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[9px] font-bold uppercase tracking-wider bg-amber-100 text-amber-800 hover:bg-amber-200 transition-colors"
+                              title="Ver histórico de edições"
+                            >
+                              <History className="w-3 h-3" />
+                              Editado
+                            </button>
+                          )}
+                          <div
+                            title={
+                              flowStage === 'paid' || invoice.status === 'paid'
+                                ? 'Pago'
+                                : flowStage === 'cancelled'
+                                  ? 'Cancelado'
+                                  : flowStage === 'control_approved'
+                                    ? 'Aprovado Controle'
+                                    : flowStage === 'manager_pending'
+                                      ? 'Aguardando Gestor'
+                                      : invoice.status === 'overdue'
+                                      ? 'Atrasado'
+                                      : 'Aguardando Controle'
+                            }
+                            className={cn(
+                            "inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[9px] font-bold uppercase tracking-wider whitespace-nowrap",
+                            statusUI.classes
+                          )}>
+                            <StatusIcon className="w-3 h-3 shrink-0" />
+                            {statusUI.label}
+                          </div>
                         </div>
                       );
                     })()}
@@ -1171,6 +1280,16 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
                   </td>
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-2">
+                      {(invoice.flow_stage || (invoice.status === 'paid' ? 'paid' : 'control_pending')) !== 'cancelled' && (
+                        <button
+                          onClick={() => openEditInvoice(invoice)}
+                          className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors"
+                          title="Editar lançamento"
+                        >
+                          <Pencil className="w-3.5 h-3.5" />
+                          Editar
+                        </button>
+                      )}
                       {(invoice.file_path && (actingSector === 'controle' || actingSector === 'financeiro')) && (
                         <button
                           onClick={() => openInvoiceDocument(invoice.id, 'file_path', invoice.file_path)}
@@ -1179,6 +1298,24 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
                         >
                           Ver Nota Fiscal
                         </button>
+                      )}
+                      {(canApproveManager && (invoice.flow_stage || '') === 'manager_pending') && (
+                        <>
+                          <button
+                            onClick={() => approveByManager(invoice.id)}
+                            className="inline-flex items-center px-3 py-1.5 text-xs font-semibold text-violet-700 bg-violet-50 hover:bg-violet-100 rounded-lg transition-colors"
+                            title="Aprovar no gestor do setor"
+                          >
+                            Aprovar (Gestor)
+                          </button>
+                          <button
+                            onClick={() => rejectByManager(invoice.id)}
+                            className="inline-flex items-center px-3 py-1.5 text-xs font-semibold text-red-700 bg-red-50 hover:bg-red-100 rounded-lg transition-colors"
+                            title="Reprovar nota (gestor do setor)"
+                          >
+                            Reprovar (Gestor)
+                          </button>
+                        </>
                       )}
                       {(canApproveControl && (invoice.flow_stage || 'control_pending') === 'control_pending') && (
                         <>
@@ -1240,6 +1377,8 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
                       )}
                       {!(
                         userRole === 'admin' ||
+                        (invoice.flow_stage || (invoice.status === 'paid' ? 'paid' : 'control_pending')) !== 'cancelled' ||
+                        (canApproveManager && (invoice.flow_stage || '') === 'manager_pending') ||
                         (canApproveControl && (invoice.flow_stage || 'control_pending') === 'control_pending') ||
                         (canApproveControl && (invoice.flow_stage || 'control_pending') === 'control_approved') ||
                         (canPayFinance && (invoice.flow_stage || 'control_pending') === 'control_approved') ||
@@ -1260,7 +1399,9 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-white w-full max-w-lg max-h-[calc(100dvh-2rem)] rounded-3xl shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
             <div className="p-6 border-b border-slate-100 flex justify-between items-center shrink-0">
-              <h3 className="text-xl font-bold text-slate-900">Lançar Nota Fiscal</h3>
+              <h3 className="text-xl font-bold text-slate-900">
+                {editingInvoice ? `Editar lançamento #${editingInvoice.invoice_number}` : 'Lançar Nota Fiscal'}
+              </h3>
               <button onClick={closeInvoiceModal} className="text-slate-400 hover:text-slate-600 transition-colors">
                 <Plus className="w-6 h-6 rotate-45" />
               </button>
@@ -1563,9 +1704,10 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
                 </button>
                 <button 
                   type="submit"
-                  className="flex-1 px-4 py-3 bg-[#004D40] text-white font-bold rounded-xl hover:bg-[#003d33] shadow-lg shadow-emerald-900/10 transition-colors"
+                  disabled={submittingInvoice}
+                  className="flex-1 px-4 py-3 bg-[#004D40] text-white font-bold rounded-xl hover:bg-[#003d33] shadow-lg shadow-emerald-900/10 transition-colors disabled:opacity-70"
                 >
-                  Salvar Nota
+                  {submittingInvoice ? 'Salvando...' : editingInvoice ? 'Salvar edição' : 'Salvar Nota'}
                 </button>
               </div>
             </form>
@@ -1638,12 +1780,11 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
             <form onSubmit={submitReceiptAndPay} className="p-6 space-y-4">
               <div className="space-y-1.5">
                 <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">
-                  Arquivo do comprovante (PDF, PNG ou JPG)
+                  Arquivo do comprovante (PDF, PNG ou JPG) — opcional
                 </label>
                 <input
                   type="file"
                   accept="application/pdf,image/png,image/jpeg"
-                  required
                   onChange={(e) => setReceiptFile(e.target.files?.[0] || null)}
                   className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm"
                 />
@@ -1665,10 +1806,77 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
                   disabled={uploadingReceipt}
                   className="flex-1 px-4 py-3 bg-[#004D40] text-white font-bold rounded-xl hover:bg-[#003d33] shadow-lg shadow-emerald-900/10 transition-colors disabled:opacity-70"
                 >
-                  {uploadingReceipt ? 'Enviando...' : 'Salvar e marcar como pago'}
+                  {uploadingReceipt
+                    ? (receiptFile ? 'Enviando...' : 'Salvando...')
+                    : 'Salvar e marcar como pago'}
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {historyInvoice && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white w-full max-w-lg max-h-[calc(100dvh-2rem)] rounded-3xl shadow-2xl overflow-hidden flex flex-col animate-in zoom-in-95 duration-200">
+            <div className="p-6 border-b border-slate-100 flex justify-between items-center shrink-0">
+              <div>
+                <h3 className="text-xl font-bold text-slate-900">Histórico de edições</h3>
+                <p className="text-sm text-slate-500 mt-0.5">Nota #{historyInvoice.invoice_number}</p>
+              </div>
+              <button
+                onClick={() => setHistoryInvoice(null)}
+                className="text-slate-400 hover:text-slate-600 transition-colors"
+              >
+                <Plus className="w-6 h-6 rotate-45" />
+              </button>
+            </div>
+            <div className="p-6 space-y-4 overflow-y-auto flex-1 min-h-0">
+              {historyLoading && <p className="text-sm text-slate-400">Carregando histórico...</p>}
+              {!historyLoading && historyRows.length === 0 && (
+                <p className="text-sm text-slate-400">Nenhuma edição registrada nesta nota.</p>
+              )}
+              {!historyLoading && historyRows.map((row) => (
+                <div key={row.id} className="border border-slate-100 rounded-2xl p-4 space-y-2">
+                  <div className="flex items-start justify-between gap-3">
+                    <p className="text-sm font-bold text-slate-800">{row.editor_name || 'Usuário'}</p>
+                    <p className="text-[11px] text-slate-400 whitespace-nowrap">
+                      {row.created_at
+                        ? new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(row.created_at))
+                        : ''}
+                    </p>
+                  </div>
+                  <ul className="space-y-1.5">
+                    {(Array.isArray(row.changes) ? row.changes : []).map((change: any, idx: number) => {
+                      const label = String(change.label || change.field || 'Campo');
+                      const formatVal = (raw: unknown) => {
+                        const value = String(raw ?? '').trim();
+                        if (!value) return '—';
+                        if (label === 'Valor') {
+                          const n = Number(value);
+                          return Number.isFinite(n) ? formatCurrency(n) : value;
+                        }
+                        if (label === 'Emissão' || label === 'Vencimento') {
+                          try { return formatDate(value); } catch { return value; }
+                        }
+                        if (label === 'Forma de pagamento') {
+                          return paymentMethods.find((pm) => pm.key === value)?.name || value;
+                        }
+                        return value;
+                      };
+                      return (
+                        <li key={`${row.id}-${idx}`} className="text-xs text-slate-600">
+                          <span className="font-bold text-slate-700">{label}:</span>{' '}
+                          <span className="text-slate-400 line-through">{formatVal(change.from)}</span>
+                          {' → '}
+                          <span className="font-semibold text-slate-800">{formatVal(change.to)}</span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       )}
