@@ -8,6 +8,8 @@ import { isSharedCrdCode } from '../lib/sharedCrds';
 import { isDirectDocumentUrl } from '../lib/storagePath';
 import { confirmCancel, confirmDelete } from '../lib/confirmAction';
 import { SearchableSelect } from '../components/SearchableSelect';
+import { CrdListFilter } from '../components/CrdListFilter';
+import { buildCrdFilterOptions, matchesCrdCodeFilter } from '../lib/crdFilter';
 import { launchStatusMeta } from '../lib/launchFlow';
 
 const EMPTY_FORM = {
@@ -28,6 +30,7 @@ export const EstornosPage: React.FC = () => {
   const [entries, setEntries] = useState<any[]>([]);
   const [sectors, setSectors] = useState<any[]>([]);
   const [crds, setCrds] = useState<any[]>([]);
+  const [crdFilter, setCrdFilter] = useState('');
   const [userRole, setUserRole] = useState<string>('viewer');
   const [allowedSectorIds, setAllowedSectorIds] = useState<string[]>([]);
   const [actingSector, setActingSector] = useState<'requester' | 'controle' | 'financeiro'>('requester');
@@ -151,7 +154,12 @@ export const EstornosPage: React.FC = () => {
       return;
     }
 
-    showSuccess('Estorno criado. Aguardando aprovação do Controle.');
+    const created = await res.json().catch(() => ({}));
+    showSuccess(
+      created?.protocol
+        ? `Estorno ${created.protocol} criado. Aguardando aprovação do Controle.`
+        : 'Estorno criado. Aguardando aprovação do Controle.'
+    );
     closeModal();
     loadData();
   };
@@ -241,9 +249,11 @@ export const EstornosPage: React.FC = () => {
 
   const filteredEntries = useMemo(
     () =>
-      scopedEntries.filter((entry) =>
-        matchesSearch(
+      scopedEntries.filter((entry) => {
+        if (!matchesCrdCodeFilter(crdFilter, entry.crd_code, entry.crd_name)) return false;
+        return matchesSearch(
           query,
+          entry.protocol,
           entry.sector_name,
           entry.crd_code,
           entry.crd_name,
@@ -255,9 +265,9 @@ export const EstornosPage: React.FC = () => {
           entry.date,
           entry.amount,
           entry.status
-        )
-      ),
-    [scopedEntries, query]
+        );
+      }),
+    [scopedEntries, query, crdFilter]
   );
 
   const openTotal = useMemo(
@@ -277,6 +287,8 @@ export const EstornosPage: React.FC = () => {
       })),
     [visibleCrds]
   );
+
+  const crdFilterOptions = useMemo(() => buildCrdFilterOptions(crds), [crds]);
 
   const statusMeta = (status: string) => launchStatusMeta(status, 'Recebido');
 
@@ -315,7 +327,7 @@ export const EstornosPage: React.FC = () => {
         </div>
       </div>
 
-      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 flex flex-wrap items-center gap-4">
+      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 flex flex-wrap items-end gap-4">
         <div>
           <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Estornos em aberto / aprovados</p>
           <p className="text-xl font-extrabold text-amber-700 mt-1">
@@ -325,12 +337,14 @@ export const EstornosPage: React.FC = () => {
         <p className="text-xs text-slate-400 max-w-md">
           O valor do estorno entra como crédito. Depois que o Financeiro recebe, o item sai da fila de pendentes.
         </p>
+        <CrdListFilter value={crdFilter} onChange={setCrdFilter} options={crdFilterOptions} className="ml-auto" />
       </div>
 
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-x-auto">
         <table className="w-full text-left border-collapse">
           <thead>
             <tr className="bg-slate-50/50">
+              <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Protocolo</th>
               <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Setor / CRD</th>
               <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Fornecedor</th>
               <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Emissão</th>
@@ -345,8 +359,8 @@ export const EstornosPage: React.FC = () => {
           <tbody className="divide-y divide-slate-50">
             {filteredEntries.length === 0 && (
               <tr>
-                <td colSpan={9} className="px-6 py-10 text-center text-sm text-slate-400">
-                  Nenhum estorno encontrado.
+                <td colSpan={10} className="px-6 py-10 text-center text-sm text-slate-400">
+                  {crdFilter ? `Nenhum estorno com CRD ${crdFilter}.` : 'Nenhum estorno encontrado.'}
                 </td>
               </tr>
             )}
@@ -354,6 +368,7 @@ export const EstornosPage: React.FC = () => {
               const meta = statusMeta(entry.status);
               return (
                 <tr key={entry.id} className="hover:bg-slate-50/50 transition-colors">
+                  <td className="px-6 py-4 text-xs font-mono font-bold text-emerald-800">{entry.protocol || '—'}</td>
                   <td className="px-6 py-4 text-sm font-medium text-slate-700">
                     {entry.sector_name || 'Sem setor'}
                     {entry.crd_code ? (

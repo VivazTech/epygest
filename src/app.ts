@@ -36,6 +36,7 @@ import {
   type RolePermissionRow,
 } from "./lib/permissionCatalog.js";
 import { logImportHistory } from "./lib/importHistory.js";
+import { PROTOCOL_PREFIX, invoiceProtocolPrefix } from "./lib/launchProtocol.js";
 import { buildPeriodKey, parseImportPeriodInput, type ImportScope } from "./lib/importPeriod.js";
 import { computeCmv, toCmvInputs } from "./lib/cmv.js";
 import { parseCmvApuracaoPeriod } from "./lib/cmvHistorico.js";
@@ -336,6 +337,18 @@ const getAncestors = (code: string): string[] => {
 const sanitizeMonthBudget = (value: any) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
+};
+
+/** Gera protocolo diário atômico via RPC (ex.: REQ-20260916-0042). */
+const allocateLaunchProtocol = async (prefix: string): Promise<string | null> => {
+  const { data, error } = await supabase.rpc("allocate_document_protocol", {
+    p_prefix: String(prefix || "").trim().toUpperCase(),
+  });
+  if (error || !data) {
+    console.error("Falha ao gerar protocolo:", error);
+    return null;
+  }
+  return String(data);
 };
 
 const parseDesbravadorPdfLines = (rawText: string) => {
@@ -2319,6 +2332,8 @@ export function createApp() {
       }
     }
 
+    const protocol = await allocateLaunchProtocol(PROTOCOL_PREFIX.requisicao);
+    if (!protocol) return res.status(500).json({ error: "Não foi possível gerar o protocolo da requisição." });
     const { data, error } = await supabase
       .from("requisitions")
       .insert({
@@ -2329,12 +2344,13 @@ export function createApp() {
         amount,
         date,
         status: initialLaunchStatus(req.user?.role),
+        protocol,
       })
-      .select("id")
+      .select("id, protocol")
       .single();
 
     if (error) { console.error(error); return res.status(500).json({ error: "Erro interno ao processar a solicitação." }); }
-    res.json({ id: data.id });
+    res.json({ id: data.id, protocol: data.protocol });
   });
 
   app.patch("/api/requisitions/:id/status", async (req, res) => {
@@ -2419,10 +2435,31 @@ export function createApp() {
   });
 
   app.post("/api/manual-entries", async (req, res) => {
-    const { sector_id, crd_id, description, provider_name, amount, date, issue_date, file_path, file_name } = req.body;
+    const {
+      sector_id, crd_id, description, provider_name, amount, date, issue_date, due_date,
+      file_path, file_name, payment_method, pix_key, currency,
+    } = req.body;
     const resolvedProviderName = String(provider_name || "").trim();
-    if (!sector_id || amount == null || !date || !issue_date || !resolvedProviderName) {
-      return res.status(400).json({ error: "setor, fornecedor, valor, data de emissão e data de lançamento são obrigatórios" });
+    const resolvedDueDate = String(due_date || "").trim().slice(0, 10);
+    const resolvedPayment = String(payment_method || "").trim();
+    const resolvedCurrency = String(currency || "BRL").trim().toUpperCase() || "BRL";
+    const resolvedAmount = Number(amount);
+    if (
+      !sector_id ||
+      !Number.isFinite(resolvedAmount) ||
+      resolvedAmount < 0 ||
+      !date ||
+      !issue_date ||
+      !resolvedDueDate ||
+      !resolvedProviderName ||
+      !resolvedPayment
+    ) {
+      return res.status(400).json({
+        error: "setor, fornecedor, forma de pagamento, valor, data de emissão, data de lançamento e data de vencimento são obrigatórios",
+      });
+    }
+    if (resolvedPayment === "pix" && !String(pix_key || "").trim()) {
+      return res.status(400).json({ error: "Informe a chave Pix." });
     }
 
     const sectorId = Number(sector_id);
@@ -2462,6 +2499,8 @@ export function createApp() {
       resolvedFileName = originalName || null;
     }
 
+    const protocol = await allocateLaunchProtocol(PROTOCOL_PREFIX.manual);
+    if (!protocol) return res.status(500).json({ error: "Não foi possível gerar o protocolo do lançamento." });
     const { data, error } = await supabase
       .from("manual_entries")
       .insert({
@@ -2470,21 +2509,26 @@ export function createApp() {
         user_id: req.user!.id,
         description: description || null,
         provider_name: resolvedProviderName,
-        amount,
+        amount: resolvedAmount,
         issue_date,
         date,
+        due_date: resolvedDueDate,
+        payment_method: resolvedPayment,
+        currency: resolvedCurrency,
+        pix_key: resolvedPayment === "pix" ? String(pix_key || "").trim() || null : null,
         status: initialLaunchStatus(req.user?.role),
         file_path: resolvedFilePath,
         file_name: resolvedFileName,
+        protocol,
       })
-      .select("id")
+      .select("id, protocol")
       .single();
 
     if (error) {
       console.error(error);
       return res.status(500).json({ error: "Erro interno ao processar a solicitação." });
     }
-    res.json({ id: data.id });
+    res.json({ id: data.id, protocol: data.protocol });
   });
 
   app.patch("/api/manual-entries/:id/status", async (req, res) => {
@@ -2690,6 +2734,8 @@ export function createApp() {
       resolvedFileName = originalName || null;
     }
 
+    const protocol = await allocateLaunchProtocol(PROTOCOL_PREFIX.estorno);
+    if (!protocol) return res.status(500).json({ error: "Não foi possível gerar o protocolo do estorno." });
     const { data, error } = await supabase
       .from("estornos")
       .insert({
@@ -2704,15 +2750,16 @@ export function createApp() {
         status: initialLaunchStatus(req.user?.role),
         file_path: resolvedFilePath,
         file_name: resolvedFileName,
+        protocol,
       })
-      .select("id")
+      .select("id, protocol")
       .single();
 
     if (error) {
       console.error(error);
       return res.status(500).json({ error: "Não foi possível registrar o estorno." });
     }
-    res.json({ id: data.id });
+    res.json({ id: data.id, protocol: data.protocol });
   });
 
   app.patch("/api/estornos/:id/status", async (req, res) => {
@@ -2976,8 +3023,9 @@ export function createApp() {
           crd_code: row.crds?.code ?? null,
           crd_name: row.crds?.name ?? null,
           title: row.provider_name || row.description || `Lançamento #${row.id}`,
-          subtitle: row.users?.name ?? null,
+          subtitle: row.protocol || row.users?.name || null,
           description: row.description ?? null,
+          protocol: row.protocol ?? null,
           reference_date: String(row.date || row.issue_date || "").slice(0, 10),
           issue_date: row.issue_date ? String(row.issue_date).slice(0, 10) : null,
           amount: Number(row.amount) || 0,
@@ -2991,7 +3039,7 @@ export function createApp() {
             : row.description
               ? String(row.description)
               : null,
-          vencimento: null,
+          vencimento: row.due_date ? String(row.due_date).slice(0, 10) : null,
         };
         if (!matchesSector(item.sector_id, item.type)) continue;
         if (!inDateRange(item.reference_date)) continue;
@@ -3009,8 +3057,9 @@ export function createApp() {
           crd_code: row.crds?.code ?? null,
           crd_name: row.crds?.name ?? null,
           title: row.provider_name || row.description || `Estorno #${row.id}`,
-          subtitle: row.users?.name ?? null,
+          subtitle: row.protocol || row.users?.name || null,
           description: row.description ?? null,
+          protocol: row.protocol ?? null,
           reference_date: String(row.date || row.issue_date || "").slice(0, 10),
           issue_date: row.issue_date ? String(row.issue_date).slice(0, 10) : null,
           amount: Number(row.amount) || 0,
@@ -3024,7 +3073,7 @@ export function createApp() {
             : row.description
               ? String(row.description)
               : null,
-          vencimento: null,
+          vencimento: row.due_date ? String(row.due_date).slice(0, 10) : null,
         };
         if (!matchesSector(item.sector_id, item.type)) continue;
         if (!inDateRange(item.reference_date)) continue;
@@ -3042,8 +3091,9 @@ export function createApp() {
           crd_code: row.crds?.code ?? null,
           crd_name: row.crds?.name ?? null,
           title: row.provider_name || row.description || `Requisição #${row.id}`,
-          subtitle: null,
+          subtitle: row.protocol || null,
           description: row.description ?? null,
+          protocol: row.protocol ?? null,
           reference_date: String(row.date || "").slice(0, 10),
           issue_date: null,
           amount: Number(row.amount) || 0,
@@ -3077,8 +3127,9 @@ export function createApp() {
           crd_code: row.crd ?? null,
           crd_name: null,
           title: row.provider_name || `Nota #${row.id}`,
-          subtitle: row.invoice_number ? `Nº ${row.invoice_number}` : null,
+          subtitle: [row.protocol, row.invoice_number ? `Nº ${row.invoice_number}` : null].filter(Boolean).join(" · ") || null,
           description: row.provider_name ?? null,
+          protocol: row.protocol ?? null,
           reference_date: String(row.due_date || row.issue_date || "").slice(0, 10),
           issue_date: row.issue_date ? String(row.issue_date).slice(0, 10) : null,
           amount: Number(row.amount) || 0,
@@ -3130,8 +3181,9 @@ export function createApp() {
             crd_code: null,
             crd_name: null,
             title: row.consumer_name || `Comanda #${row.id}`,
-            subtitle: row.location ?? null,
+            subtitle: [row.protocol, row.location].filter(Boolean).join(" · ") || null,
             description: itemsSummary || null,
+            protocol: row.protocol ?? null,
             reference_date: String(row.consumed_at || row.created_at || "").slice(0, 10),
             issue_date: null,
             amount: null,
@@ -3164,8 +3216,9 @@ export function createApp() {
           crd_code: crd?.code ?? null,
           crd_name: crd?.name ?? null,
           title: String(contrato?.fornecedor || `Mensalidade #${row.id}`),
-          subtitle: String(contrato?.periodicidade || "mensal"),
+          subtitle: [row.protocol, String(contrato?.periodicidade || "mensal")].filter(Boolean).join(" · "),
           description: row.observacao ?? contrato?.observacoes ?? null,
+          protocol: row.protocol ?? null,
           reference_date: String(row.competencia || "").slice(0, 10),
           issue_date: null,
           amount: Number(row.valor) || 0,
@@ -3432,6 +3485,8 @@ export function createApp() {
     const parsedItems = normalizeComandaItems(items ?? []);
     if (!parsedItems.ok) return res.status(400).json({ error: parsedItems.error });
 
+    const protocol = await allocateLaunchProtocol(PROTOCOL_PREFIX.comanda);
+    if (!protocol) return res.status(500).json({ error: "Não foi possível gerar o protocolo da comanda." });
     const { data: comanda, error: comandaError } = await supabase
       .from("comandas")
       .insert({
@@ -3441,8 +3496,9 @@ export function createApp() {
         provider_name: resolvedProviderName,
         user_id: req.user!.id,
         status: initialLaunchStatus(req.user?.role),
+        protocol,
       })
-      .select("id")
+      .select("id, protocol")
       .single();
 
     if (comandaError || !comanda) {
@@ -3462,7 +3518,7 @@ export function createApp() {
       return res.status(500).json({ error: "Não foi possível salvar os itens da comanda." });
     }
 
-    res.json({ id: comanda.id });
+    res.json({ id: comanda.id, protocol: comanda.protocol });
   });
 
   app.patch("/api/comandas/:id/status", async (req, res) => {
@@ -3969,6 +4025,9 @@ export function createApp() {
     });
 
     const launchedByUserId = req.user?.id ?? null;
+    const protocolPrefix = invoiceProtocolPrefix(resolvedNumber);
+    const protocol = await allocateLaunchProtocol(protocolPrefix);
+    if (!protocol) return res.status(500).json({ error: "Não foi possível gerar o protocolo da nota." });
 
     const { data, error } = await supabase
       .from("invoices")
@@ -3990,8 +4049,9 @@ export function createApp() {
         currency: resolvedCurrency,
         status: "received",
         flow_stage: initialInvoiceFlowStage(req.user?.role),
+        protocol,
       })
-      .select("id, invoice_number, provider_name, amount, issue_date, due_date, sector_id, flow_stage, status, crd, created_at")
+      .select("id, invoice_number, protocol, provider_name, amount, issue_date, due_date, sector_id, flow_stage, status, crd, created_at")
       .single();
 
     if (error) { console.error(error); return res.status(500).json({ error: "Erro interno ao processar a solicitação." }); }
@@ -13807,6 +13867,7 @@ export function createApp() {
           valor: Number(row.valor) || 0,
           observacao: row.observacao ?? null,
           status: String(row.status || "open"),
+          protocol: row.protocol ?? null,
           user_name: row.users?.name ?? null,
           fornecedor: contrato?.fornecedor ?? null,
           sector_id: contrato?.sector_id != null ? Number(contrato.sector_id) : null,
@@ -13856,6 +13917,8 @@ export function createApp() {
       return res.status(400).json({ error: "valor inválido." });
     }
 
+    const protocol = await allocateLaunchProtocol(PROTOCOL_PREFIX.mensalidade);
+    if (!protocol) return res.status(500).json({ error: "Não foi possível gerar o protocolo da mensalidade." });
     const { data, error } = await supabase
       .from("contrato_lancamentos")
       .insert({
@@ -13865,14 +13928,15 @@ export function createApp() {
         valor,
         observacao: req.body?.observacao ? String(req.body.observacao).trim() : null,
         status: initialLaunchStatus(req.user?.role),
+        protocol,
       })
-      .select("id")
+      .select("id, protocol")
       .single();
     if (error) {
       console.error("Erro ao criar lançamento de contrato:", error);
       return res.status(500).json({ error: "Não foi possível solicitar o pagamento." });
     }
-    res.json({ id: data.id });
+    res.json({ id: data.id, protocol: data.protocol });
   });
 
   app.patch("/api/contrato-lancamentos/:id/status", requireRole("admin", "controle", "manager", "finance", "estagiario"), async (req, res) => {

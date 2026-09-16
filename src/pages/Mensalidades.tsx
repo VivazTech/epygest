@@ -3,6 +3,8 @@ import { AlertTriangle, CalendarClock, Plus, RefreshCcw, Trash2, Pencil, X, Bank
 import { cn, formatCurrency } from '../lib/utils';
 import { confirmDelete } from '../lib/confirmAction';
 import { SearchableSelect } from '../components/SearchableSelect';
+import { CrdListFilter } from '../components/CrdListFilter';
+import { buildCrdFilterOptions, matchesCrdCodeFilter } from '../lib/crdFilter';
 import { useSearch } from '../context/SearchContext';
 import { matchesSearch } from '../lib/search';
 
@@ -63,6 +65,7 @@ type ContratoLancamento = {
   competencia: string;
   valor: number;
   status: string;
+  protocol?: string | null;
   fornecedor: string | null;
   sector_name: string | null;
   vencimento: string | null;
@@ -85,6 +88,7 @@ export const MensalidadesPage: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [sectorFilter, setSectorFilter] = useState('');
+  const [crdFilter, setCrdFilter] = useState('');
   const [onlyAlerts, setOnlyAlerts] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -183,11 +187,15 @@ export const MensalidadesPage: React.FC = () => {
       }));
   }, [crds, form.sector_id]);
 
+  const crdFilterOptions = useMemo(() => buildCrdFilterOptions(crds), [crds]);
+
   const filtered = useMemo(() => {
     return rows.filter((r) => {
       if (statusFilter !== 'all' && r.status !== statusFilter) return false;
       if (sectorFilter && String(r.sector_id) !== sectorFilter) return false;
       if (onlyAlerts && !r.alerta_vencimento) return false;
+      const crdCode = crds.find((c) => c.id === r.crd_id)?.code;
+      if (!matchesCrdCodeFilter(crdFilter, crdCode, r.crd_label)) return false;
       return matchesSearch(
         query,
         r.fornecedor,
@@ -199,7 +207,7 @@ export const MensalidadesPage: React.FC = () => {
         r.valor
       );
     });
-  }, [rows, statusFilter, sectorFilter, onlyAlerts, query]);
+  }, [rows, statusFilter, sectorFilter, onlyAlerts, query, crdFilter, crds]);
 
   const counts = useMemo(() => {
     const base = {
@@ -381,28 +389,35 @@ export const MensalidadesPage: React.FC = () => {
       )}
 
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-        <div className="p-4 border-b border-slate-50 flex flex-wrap items-center gap-2">
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
-          >
-            <option value="all">Todos os status</option>
-            {(Object.keys(STATUS_LABELS) as ContratoStatus[]).map((s) => (
-              <option key={s} value={s}>{STATUS_LABELS[s]}</option>
-            ))}
-          </select>
-          <select
-            value={sectorFilter}
-            onChange={(e) => setSectorFilter(e.target.value)}
-            className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
-          >
-            <option value="">Todos os setores</option>
-            {sectors.map((s) => (
-              <option key={s.id} value={String(s.id)}>{s.name}</option>
-            ))}
-          </select>
-          <label className="inline-flex items-center gap-2 text-xs font-semibold text-slate-600 cursor-pointer select-none px-2">
+        <div className="p-4 border-b border-slate-50 flex flex-wrap items-end gap-2">
+          <div>
+            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 block">Status</label>
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              className="px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+            >
+              <option value="all">Todos os status</option>
+              {(Object.keys(STATUS_LABELS) as ContratoStatus[]).map((s) => (
+                <option key={s} value={s}>{STATUS_LABELS[s]}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 block">Setor</label>
+            <select
+              value={sectorFilter}
+              onChange={(e) => setSectorFilter(e.target.value)}
+              className="px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+            >
+              <option value="">Todos os setores</option>
+              {sectors.map((s) => (
+                <option key={s.id} value={String(s.id)}>{s.name}</option>
+              ))}
+            </select>
+          </div>
+          <CrdListFilter value={crdFilter} onChange={setCrdFilter} options={crdFilterOptions} />
+          <label className="inline-flex items-center gap-2 text-xs font-semibold text-slate-600 cursor-pointer select-none px-2 pb-2.5">
             <input
               type="checkbox"
               checked={onlyAlerts}
@@ -561,6 +576,7 @@ export const MensalidadesPage: React.FC = () => {
             <table className="w-full text-left border-collapse min-w-[800px]">
               <thead>
                 <tr className="bg-slate-50/50">
+                  <th className="px-4 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Protocolo</th>
                   <th className="px-4 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Fornecedor</th>
                   <th className="px-4 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Competência</th>
                   <th className="px-4 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-right">Valor</th>
@@ -572,6 +588,7 @@ export const MensalidadesPage: React.FC = () => {
                   const meta = FLOW_STATUS_LABELS[l.status] || { label: l.status, classes: 'bg-slate-100 text-slate-700' };
                   return (
                     <tr key={l.id} className="hover:bg-slate-50/60">
+                      <td className="px-4 py-3 text-xs font-mono font-bold text-emerald-800">{l.protocol || '—'}</td>
                       <td className="px-4 py-3 text-sm text-slate-800">{l.fornecedor || '—'}</td>
                       <td className="px-4 py-3 text-sm text-slate-600">{l.competencia}</td>
                       <td className="px-4 py-3 text-sm text-right font-semibold tabular-nums">{formatCurrency(l.valor)}</td>

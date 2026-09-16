@@ -307,6 +307,20 @@ export const UsuariosPage: React.FC = () => {
     });
   };
 
+  const allSectorIds = useMemo(() => sectors.map((s) => String(s.id)), [sectors]);
+  const allSectorsSelected =
+    allSectorIds.length > 0 && allSectorIds.every((id) => editForm?.sector_ids.includes(id));
+
+  const toggleAllSectors = () => {
+    setEditForm((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        sector_ids: allSectorsSelected ? [] : [...allSectorIds],
+      };
+    });
+  };
+
   const saveCreate = async () => {
     if (!editForm) return;
     if (!editForm.name.trim() || !editForm.email.trim() || !editForm.password) {
@@ -959,20 +973,30 @@ export const UsuariosPage: React.FC = () => {
                   {sectors.length === 0 ? (
                     <p className="text-xs text-slate-400">Nenhum setor cadastrado.</p>
                   ) : (
-                    sectors.map((sector) => {
-                      const sectorId = String(sector.id);
-                      const checked = editForm.sector_ids.includes(sectorId);
-                      return (
-                        <label key={sector.id} className="flex items-center gap-2 text-sm text-slate-700">
-                          <input
-                            type="checkbox"
-                            checked={checked}
-                            onChange={() => toggleSector(sectorId)}
-                          />
-                          <span>{sector.name}</span>
-                        </label>
-                      );
-                    })
+                    <>
+                      <label className="flex items-center gap-2 text-sm font-semibold text-slate-800 border-b border-slate-200 pb-2 sticky top-0 bg-slate-50">
+                        <input
+                          type="checkbox"
+                          checked={allSectorsSelected}
+                          onChange={toggleAllSectors}
+                        />
+                        <span>Selecionar todos</span>
+                      </label>
+                      {sectors.map((sector) => {
+                        const sectorId = String(sector.id);
+                        const checked = editForm.sector_ids.includes(sectorId);
+                        return (
+                          <label key={sector.id} className="flex items-center gap-2 text-sm text-slate-700">
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => toggleSector(sectorId)}
+                            />
+                            <span>{sector.name}</span>
+                          </label>
+                        );
+                      })}
+                    </>
                   )}
                 </div>
               </div>

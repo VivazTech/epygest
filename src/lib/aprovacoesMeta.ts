@@ -18,6 +18,7 @@ export type AprovacaoItem = {
   title: string;
   subtitle: string | null;
   description: string | null;
+  protocol?: string | null;
   reference_date: string;
   issue_date: string | null;
   amount: number | null;

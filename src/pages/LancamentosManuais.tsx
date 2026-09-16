@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Plus, Archive, XCircle, Trash2, BadgeCheck, RotateCcw, Upload, FileCheck, Paperclip } from 'lucide-react';
-import { cn, formatCurrency } from '../lib/utils';
+import { cn, formatCurrency, formatCurrencyInput, getCurrencyMeta, parseCurrencyInputDigits } from '../lib/utils';
 import { ValueTrace } from '../components/ValueTrace';
 import { valueTrace } from '../lib/valueTraceMeta';
 import { useSearch } from '../context/SearchContext';
@@ -10,19 +10,32 @@ import { isSharedCrdCode } from '../lib/sharedCrds';
 import { isDirectDocumentUrl } from '../lib/storagePath';
 import { confirmCancel, confirmDelete } from '../lib/confirmAction';
 import { SearchableSelect } from '../components/SearchableSelect';
+import { CrdListFilter } from '../components/CrdListFilter';
+import { buildCrdFilterOptions, matchesCrdCodeFilter } from '../lib/crdFilter';
 import { launchStatusMeta } from '../lib/launchFlow';
 
 const EMPTY_FORM = {
   sector_id: '',
   crd_id: '',
   provider_name: '',
+  payment_method: '',
+  currency: 'BRL',
+  pix_key: '',
   issue_date: '',
   date: '',
+  due_date: '',
   amount: '',
   description: '',
   file_path: '',
   file_name: '',
 };
+
+const FALLBACK_PAYMENT_METHODS = [
+  { id: 'pix', key: 'pix', name: 'Pix', active: true },
+  { id: 'boleto', key: 'boleto', name: 'Boleto', active: true },
+  { id: 'cartao_credito', key: 'cartao_credito', name: 'Cartão de crédito', active: true },
+  { id: 'dinheiro', key: 'dinheiro', name: 'Dinheiro', active: true },
+];
 
 export const LancamentosManuaisPage: React.FC = () => {
   const { query } = useSearch();
@@ -30,6 +43,9 @@ export const LancamentosManuaisPage: React.FC = () => {
   const [entries, setEntries] = useState<any[]>([]);
   const [sectors, setSectors] = useState<any[]>([]);
   const [crds, setCrds] = useState<any[]>([]);
+  const [paymentMethods, setPaymentMethods] = useState<any[]>([]);
+  const [currencies, setCurrencies] = useState<any[]>([]);
+  const [crdFilter, setCrdFilter] = useState('');
   const [userRole, setUserRole] = useState<string>('viewer');
   const [allowedSectorIds, setAllowedSectorIds] = useState<string[]>([]);
   const [actingSector, setActingSector] = useState<'requester' | 'controle' | 'financeiro'>('requester');
@@ -37,23 +53,44 @@ export const LancamentosManuaisPage: React.FC = () => {
   const [uploadingFile, setUploadingFile] = useState(false);
   const [showModal, setShowModal] = useState(false);
 
+  const currencyMeta = useMemo(
+    () => getCurrencyMeta(form.currency || 'BRL'),
+    [form.currency]
+  );
+
+  const activePaymentMethods = useMemo(
+    () => {
+      const source = paymentMethods.length > 0 ? paymentMethods : FALLBACK_PAYMENT_METHODS;
+      return source.filter((pm) => pm.active !== false);
+    },
+    [paymentMethods]
+  );
+
   const loadData = async () => {
     try {
-      const [entriesRes, sectorsRes, crdsRes] = await Promise.all([
+      const [entriesRes, sectorsRes, crdsRes, pmRes, curRes] = await Promise.all([
         fetch('/api/manual-entries'),
         fetch('/api/sectors'),
         fetch('/api/crds'),
+        fetch('/api/payment-methods'),
+        fetch('/api/currencies'),
       ]);
       const entriesData = await entriesRes.json().catch(() => null);
       const sectorsData = await sectorsRes.json().catch(() => null);
       const crdsData = await crdsRes.json().catch(() => null);
+      const pmData = await pmRes.json().catch(() => null);
+      const curData = await curRes.json().catch(() => null);
       setEntries(Array.isArray(entriesData) ? entriesData : []);
       setSectors(Array.isArray(sectorsData) ? sectorsData : []);
       setCrds(Array.isArray(crdsData) ? crdsData : []);
+      setPaymentMethods(Array.isArray(pmData) ? pmData : []);
+      setCurrencies(Array.isArray(curData) ? curData : []);
     } catch {
       setEntries([]);
       setSectors([]);
       setCrds([]);
+      setPaymentMethods([]);
+      setCurrencies([]);
     }
   };
 
@@ -126,8 +163,27 @@ export const LancamentosManuaisPage: React.FC = () => {
 
   const createEntry = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!form.sector_id || !form.provider_name.trim() || !form.issue_date || !form.date || !form.amount) {
-      alert('Preencha setor, fornecedor, data de emissão, data de lançamento e valor.');
+    if (
+      !form.sector_id ||
+      !form.provider_name.trim() ||
+      !form.payment_method ||
+      !form.currency ||
+      !form.issue_date ||
+      !form.date ||
+      !form.due_date ||
+      form.amount === ''
+    ) {
+      alert('Preencha setor, fornecedor, forma de pagamento, moeda, datas e valor.');
+      return;
+    }
+    if (form.payment_method === 'pix' && !form.pix_key.trim()) {
+      alert('Informe a chave Pix.');
+      return;
+    }
+
+    const amount = Number(form.amount);
+    if (!Number.isFinite(amount) || amount < 0) {
+      alert('Informe um valor válido.');
       return;
     }
 
@@ -138,9 +194,13 @@ export const LancamentosManuaisPage: React.FC = () => {
         sector_id: parseInt(form.sector_id, 10),
         crd_id: form.crd_id ? parseInt(form.crd_id, 10) : null,
         provider_name: form.provider_name.trim(),
+        payment_method: form.payment_method,
+        currency: form.currency,
+        pix_key: form.payment_method === 'pix' ? form.pix_key.trim() : null,
         issue_date: form.issue_date,
         date: form.date,
-        amount: parseFloat(form.amount),
+        due_date: form.due_date,
+        amount,
         description: form.description || null,
         file_path: form.file_path || null,
         file_name: form.file_name || null,
@@ -153,7 +213,12 @@ export const LancamentosManuaisPage: React.FC = () => {
       return;
     }
 
-    showSuccess('Lançamento manual criado. Aguardando aprovação do Controle.');
+    const created = await res.json().catch(() => ({}));
+    showSuccess(
+      created?.protocol
+        ? `Lançamento ${created.protocol} criado. Aguardando aprovação do Controle.`
+        : 'Lançamento manual criado. Aguardando aprovação do Controle.'
+    );
     closeModal();
     loadData();
   };
@@ -243,23 +308,29 @@ export const LancamentosManuaisPage: React.FC = () => {
 
   const filteredEntries = useMemo(
     () =>
-      scopedEntries.filter((entry) =>
-        matchesSearch(
+      scopedEntries.filter((entry) => {
+        if (!matchesCrdCodeFilter(crdFilter, entry.crd_code, entry.crd_name)) return false;
+        return matchesSearch(
           query,
+          entry.protocol,
           entry.sector_name,
           entry.crd_code,
           entry.crd_name,
           entry.description,
           entry.provider_name,
+          entry.payment_method,
+          entry.currency,
+          entry.pix_key,
           entry.file_name,
           entry.user_name,
           entry.issue_date,
           entry.date,
+          entry.due_date,
           entry.amount,
           entry.status
-        )
-      ),
-    [scopedEntries, query]
+        );
+      }),
+    [scopedEntries, query, crdFilter]
   );
 
   const openTotal = useMemo(
@@ -279,6 +350,8 @@ export const LancamentosManuaisPage: React.FC = () => {
       })),
     [visibleCrds]
   );
+
+  const crdFilterOptions = useMemo(() => buildCrdFilterOptions(crds), [crds]);
 
   const statusMeta = (status: string) => launchStatusMeta(status, 'Baixado');
 
@@ -317,7 +390,7 @@ export const LancamentosManuaisPage: React.FC = () => {
         </div>
       </div>
 
-      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 flex flex-wrap items-center gap-4">
+      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 flex flex-wrap items-end gap-4">
         <div>
           <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Em aberto / aprovados (visíveis)</p>
           <p className="text-xl font-extrabold text-slate-900 mt-1">
@@ -330,14 +403,17 @@ export const LancamentosManuaisPage: React.FC = () => {
         <p className="text-xs text-slate-400 max-w-md">
           Compromisso orçamentário usa a data de lançamento. Após a baixa pelo Financeiro, o valor deixa de contar no pendente.
         </p>
+        <CrdListFilter value={crdFilter} onChange={setCrdFilter} options={crdFilterOptions} className="ml-auto" />
       </div>
 
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-x-auto">
         <table className="w-full text-left border-collapse">
           <thead>
             <tr className="bg-slate-50/50">
+              <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Protocolo</th>
               <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Setor / CRD</th>
               <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Fornecedor</th>
+              <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Pagamento</th>
               <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Emissão</th>
               <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Lançamento</th>
               <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Vencimento</th>
@@ -350,8 +426,8 @@ export const LancamentosManuaisPage: React.FC = () => {
           <tbody className="divide-y divide-slate-50">
             {filteredEntries.length === 0 && (
               <tr>
-                <td colSpan={9} className="px-6 py-10 text-center text-sm text-slate-400">
-                  Nenhum lançamento manual encontrado.
+                <td colSpan={11} className="px-6 py-10 text-center text-sm text-slate-400">
+                  {crdFilter ? `Nenhum lançamento com CRD ${crdFilter}.` : 'Nenhum lançamento manual encontrado.'}
                 </td>
               </tr>
             )}
@@ -359,6 +435,7 @@ export const LancamentosManuaisPage: React.FC = () => {
               const meta = statusMeta(entry.status);
               return (
                 <tr key={entry.id} className="hover:bg-slate-50/50 transition-colors">
+                  <td className="px-6 py-4 text-xs font-mono font-bold text-emerald-800">{entry.protocol || '—'}</td>
                   <td className="px-6 py-4 text-sm font-medium text-slate-700">
                     {entry.sector_name || 'Sem setor'}
                     {entry.crd_code ? (
@@ -376,9 +453,20 @@ export const LancamentosManuaisPage: React.FC = () => {
                       <span className="block text-xs font-normal text-slate-400 mt-0.5">{entry.description}</span>
                     ) : null}
                   </td>
+                  <td className="px-6 py-4 text-sm text-slate-600">
+                    {paymentMethods.find((pm) => pm.key === entry.payment_method)?.name
+                      || FALLBACK_PAYMENT_METHODS.find((pm) => pm.key === entry.payment_method)?.name
+                      || entry.payment_method
+                      || '—'}
+                    {entry.payment_method === 'pix' && entry.pix_key ? (
+                      <span className="block text-xs font-normal text-slate-400 mt-0.5 truncate max-w-[140px]" title={entry.pix_key}>
+                        {entry.pix_key}
+                      </span>
+                    ) : null}
+                  </td>
                   <td className="px-6 py-4 text-sm text-slate-600">{entry.issue_date || '—'}</td>
                   <td className="px-6 py-4 text-sm text-slate-600">{entry.date}</td>
-                  <td className="px-6 py-4 text-sm text-slate-400">—</td>
+                  <td className="px-6 py-4 text-sm text-slate-600">{entry.due_date || '—'}</td>
                   <td className="px-6 py-4">
                     {entry.file_path ? (
                       <button
@@ -397,7 +485,7 @@ export const LancamentosManuaisPage: React.FC = () => {
                   <td className="px-6 py-4">
                     <ValueTrace
                       className="text-sm font-bold text-slate-900"
-                      displayValue={formatCurrency(entry.amount)}
+                      displayValue={formatCurrency(entry.amount, entry.currency || 'BRL')}
                       meta={valueTrace.manualEntries.amount(entry.id)}
                     />
                   </td>
@@ -548,6 +636,56 @@ export const LancamentosManuaisPage: React.FC = () => {
 
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1.5">
+                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Forma de pagamento</label>
+                    <select
+                      required
+                      value={form.payment_method}
+                      onChange={(e) =>
+                        setForm((p) => ({
+                          ...p,
+                          payment_method: e.target.value,
+                          pix_key: e.target.value === 'pix' ? p.pix_key : '',
+                        }))
+                      }
+                      className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+                    >
+                      <option value="">Selecione</option>
+                      {activePaymentMethods.map((pm) => (
+                        <option key={pm.id} value={pm.key}>{pm.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Moeda</label>
+                    <select
+                      required
+                      value={form.currency}
+                      onChange={(e) => setForm((p) => ({ ...p, currency: e.target.value }))}
+                      className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+                    >
+                      <option value="">Selecione</option>
+                      {currencies.filter((c) => c.active !== false).map((c) => (
+                        <option key={c.id} value={c.key}>{c.key} — {c.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                {form.payment_method === 'pix' && (
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Chave Pix</label>
+                    <input
+                      required
+                      value={form.pix_key}
+                      onChange={(e) => setForm((p) => ({ ...p, pix_key: e.target.value }))}
+                      placeholder="CPF/CNPJ, e-mail, telefone ou chave aleatória"
+                      className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+                    />
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <div className="space-y-1.5">
                     <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Data de emissão</label>
                     <input
                       required
@@ -567,19 +705,41 @@ export const LancamentosManuaisPage: React.FC = () => {
                       className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
                     />
                   </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Data de vencimento</label>
+                    <input
+                      required
+                      type="date"
+                      value={form.due_date}
+                      onChange={(e) => setForm((p) => ({ ...p, due_date: e.target.value }))}
+                      className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+                    />
+                  </div>
                 </div>
 
                 <div className="space-y-1.5">
-                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Valor (R$)</label>
-                  <input
-                    required
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={form.amount}
-                    onChange={(e) => setForm((p) => ({ ...p, amount: e.target.value }))}
-                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
-                  />
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+                    Valor ({currencyMeta.symbol})
+                  </label>
+                  <div className="flex">
+                    <span className="shrink-0 inline-flex items-center px-3 rounded-l-xl border border-r-0 border-slate-200 bg-slate-100 text-sm font-bold text-slate-600">
+                      {currencyMeta.symbol}
+                    </span>
+                    <input
+                      required
+                      type="text"
+                      inputMode="decimal"
+                      value={formatCurrencyInput(form.amount, form.currency)}
+                      onChange={(e) =>
+                        setForm((p) => ({
+                          ...p,
+                          amount: parseCurrencyInputDigits(e.target.value, p.currency),
+                        }))
+                      }
+                      placeholder={formatCurrencyInput(0, form.currency)}
+                      className="w-full min-w-0 px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-r-xl text-sm focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+                    />
+                  </div>
                 </div>
 
                 <div className="space-y-1.5">

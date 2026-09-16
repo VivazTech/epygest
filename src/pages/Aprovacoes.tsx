@@ -103,6 +103,7 @@ export const AprovacoesPage: React.FC = () => {
           tipoLabel(item.type),
           item.title,
           item.subtitle,
+          item.protocol,
           item.description,
           item.sector_name,
           item.crd_code,

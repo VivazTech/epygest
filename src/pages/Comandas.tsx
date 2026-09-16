@@ -172,7 +172,12 @@ export const ComandasPage: React.FC = () => {
         return;
       }
 
-      showSuccess('Comanda registrada. Aguardando aprovação do Controle.');
+      const created = await res.json().catch(() => ({}));
+      showSuccess(
+        created?.protocol
+          ? `Comanda ${created.protocol} registrada. Aguardando aprovação do Controle.`
+          : 'Comanda registrada. Aguardando aprovação do Controle.'
+      );
       closeModal();
       loadData();
     } finally {
@@ -200,6 +205,7 @@ export const ComandasPage: React.FC = () => {
       comandas.filter((comanda) =>
         matchesSearch(
           query,
+          comanda.protocol,
           comanda.consumer_name,
           comanda.provider_name,
           comanda.location,
@@ -260,6 +266,7 @@ export const ComandasPage: React.FC = () => {
         <table className="w-full text-left border-collapse">
           <thead>
             <tr className="bg-slate-50/50">
+              <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Protocolo</th>
               <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Consumidor</th>
               <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Fornecedor</th>
               <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Data / Local</th>
@@ -272,7 +279,7 @@ export const ComandasPage: React.FC = () => {
           <tbody className="divide-y divide-slate-50">
             {filteredComandas.length === 0 && (
               <tr>
-                <td colSpan={7} className="px-6 py-10 text-center text-sm text-slate-400">
+                <td colSpan={8} className="px-6 py-10 text-center text-sm text-slate-400">
                   Nenhuma comanda registrada.
                 </td>
               </tr>
@@ -281,6 +288,7 @@ export const ComandasPage: React.FC = () => {
               const meta = statusLabel(comanda.status);
               return (
                 <tr key={comanda.id} className="hover:bg-slate-50/50 transition-colors align-top">
+                  <td className="px-6 py-4 text-xs font-mono font-bold text-emerald-800">{comanda.protocol || '—'}</td>
                   <td className="px-6 py-4 text-sm font-medium text-slate-800">
                     {comanda.consumer_name}
                     {comanda.user_name ? (

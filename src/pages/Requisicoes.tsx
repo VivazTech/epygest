@@ -9,6 +9,8 @@ import { useToast } from '../context/ToastContext';
 import { matchesSearch } from '../lib/search';
 import { isSharedCrdCode } from '../lib/sharedCrds';
 import { SearchableSelect } from '../components/SearchableSelect';
+import { CrdListFilter } from '../components/CrdListFilter';
+import { buildCrdFilterOptions, matchesCrdCodeFilter } from '../lib/crdFilter';
 import { launchStatusMeta } from '../lib/launchFlow';
 
 const EMPTY_FORM = {
@@ -24,6 +26,7 @@ export const RequisicoesPage: React.FC = () => {
   const { showSuccess } = useToast();
   const [requisitions, setRequisitions] = useState<any[]>([]);
   const [crds, setCrds] = useState<any[]>([]);
+  const [crdFilter, setCrdFilter] = useState('');
   const [userRole, setUserRole] = useState<string>('viewer');
   const [allowedSectorIds, setAllowedSectorIds] = useState<string[]>([]);
   const [actingSector, setActingSector] = useState<'requester' | 'controle' | 'financeiro'>('requester');
@@ -135,7 +138,12 @@ export const RequisicoesPage: React.FC = () => {
       return;
     }
 
-    showSuccess('Requisição lançada. Aguardando aprovação do Controle.');
+    const created = await res.json().catch(() => ({}));
+    showSuccess(
+      created?.protocol
+        ? `Requisição ${created.protocol} lançada. Aguardando aprovação do Controle.`
+        : 'Requisição lançada. Aguardando aprovação do Controle.'
+    );
     closeModal();
     loadData();
   };
@@ -157,9 +165,11 @@ export const RequisicoesPage: React.FC = () => {
 
   const filteredRequisitions = useMemo(
     () =>
-      scopedRequisitions.filter((r) =>
-        matchesSearch(
+      scopedRequisitions.filter((r) => {
+        if (!matchesCrdCodeFilter(crdFilter, r.crd_code, r.crd_name)) return false;
+        return matchesSearch(
           query,
+          r.protocol,
           r.crd_code,
           r.crd_name,
           r.sector_name,
@@ -168,10 +178,12 @@ export const RequisicoesPage: React.FC = () => {
           r.date,
           r.amount,
           r.status
-        )
-      ),
-    [scopedRequisitions, query]
+        );
+      }),
+    [scopedRequisitions, query, crdFilter]
   );
+
+  const crdFilterOptions = useMemo(() => buildCrdFilterOptions(crds), [crds]);
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
@@ -205,10 +217,15 @@ export const RequisicoesPage: React.FC = () => {
         </div>
       </div>
 
+      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4">
+        <CrdListFilter value={crdFilter} onChange={setCrdFilter} options={crdFilterOptions} />
+      </div>
+
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-x-auto">
         <table className="w-full text-left border-collapse">
           <thead>
             <tr className="bg-slate-50/50">
+              <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Protocolo</th>
               <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">CRD</th>
               <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Fornecedor</th>
               <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Data</th>
@@ -221,8 +238,8 @@ export const RequisicoesPage: React.FC = () => {
           <tbody className="divide-y divide-slate-50">
             {filteredRequisitions.length === 0 && (
               <tr>
-                <td colSpan={7} className="px-6 py-10 text-center text-sm text-slate-400">
-                  Nenhuma requisição encontrada.
+                <td colSpan={8} className="px-6 py-10 text-center text-sm text-slate-400">
+                  {crdFilter ? `Nenhuma requisição com CRD ${crdFilter}.` : 'Nenhuma requisição encontrada.'}
                 </td>
               </tr>
             )}
@@ -230,6 +247,7 @@ export const RequisicoesPage: React.FC = () => {
               const meta = statusLabel(r.status);
               return (
                 <tr key={r.id} className="hover:bg-slate-50/50 transition-colors">
+                  <td className="px-6 py-4 text-xs font-mono font-bold text-emerald-800">{r.protocol || '—'}</td>
                   <td className="px-6 py-4 text-sm font-medium text-slate-700">
                     {(r.crd_code || 'CRD')} - {r.crd_name || 'Sem descrição'}
                     <span className="block text-xs font-normal text-slate-500">{r.sector_name || 'Sem setor'}</span>

@@ -19,6 +19,8 @@ import {
 import { cn, formatCurrency, formatCurrencyInput, formatDate, getCurrencyMeta, parseCurrencyInputDigits } from '../lib/utils';
 import { ValueTrace } from '../components/ValueTrace';
 import { SearchableSelect } from '../components/SearchableSelect';
+import { CrdListFilter } from '../components/CrdListFilter';
+import { buildCrdFilterOptions, matchesCrdCodeFilter } from '../lib/crdFilter';
 import { valueTrace } from '../lib/valueTraceMeta';
 import { useSearch } from '../context/SearchContext';
 import { useToast } from '../context/ToastContext';
@@ -75,6 +77,8 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
   const [paymentMethods, setPaymentMethods] = useState<any[]>([]);
   const [currencies, setCurrencies] = useState<any[]>([]);
   const [crdOptions, setCrdOptions] = useState<any[]>([]);
+  const [crdCatalog, setCrdCatalog] = useState<any[]>([]);
+  const [crdFilter, setCrdFilter] = useState('');
   const [actingSector, setActingSector] = useState<'requester' | 'controle' | 'financeiro'>('requester');
   const [requesterSectorId, setRequesterSectorId] = useState<string>('');
   const [userRole, setUserRole] = useState<string>('viewer');
@@ -121,7 +125,11 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
   useEffect(() => {
     fetch('/api/payment-methods').then(res => res.json()).then(setPaymentMethods);
     fetch('/api/currencies').then(res => res.json()).then((data) => setCurrencies(Array.isArray(data) ? data : []));
-    fetch('/api/crds').then(res => res.json()).then(setCrdOptions);
+    fetch('/api/crds').then(res => res.json()).then((data) => {
+      const list = Array.isArray(data) ? data : [];
+      setCrdOptions(list);
+      setCrdCatalog(list);
+    });
   }, []);
 
   useEffect(() => {
@@ -345,7 +353,13 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
       });
       if (response.ok) {
         const saved = await response.json().catch(() => ({}));
-        showSuccess(isEdit ? 'Lançamento atualizado. O histórico da edição foi registrado.' : 'Nota lançada. Aguardando aprovação do Controle.');
+        showSuccess(
+          isEdit
+            ? 'Lançamento atualizado. O histórico da edição foi registrado.'
+            : saved?.protocol
+              ? `Nota ${saved.protocol} lançada. Aguardando aprovação do Controle.`
+              : 'Nota lançada. Aguardando aprovação do Controle.'
+        );
         setShowCompetencyWarning(false);
         closeInvoiceModal();
         const [dueYear, dueMonth] = String(formData.due_date).split('-');
@@ -718,6 +732,16 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
         })),
     [crdOptions]
   );
+  const crdFilterOptions = useMemo(() => buildCrdFilterOptions(crdCatalog), [crdCatalog]);
+  const crdNameByCode = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const c of crdCatalog) {
+      const code = String(c.code || '').trim();
+      if (!code) continue;
+      map.set(code.toLowerCase(), String(c.name || '').trim());
+    }
+    return map;
+  }, [crdCatalog]);
   const currencyMeta = useMemo(
     () => getCurrencyMeta(formData.currency || 'BRL'),
     [formData.currency]
@@ -744,10 +768,12 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
   const searchText = listQuery.trim() ? listQuery : query;
   const filteredInvoices = useMemo(
     () =>
-      sectorVisibleInvoices.filter((invoice) =>
-        matchesSearch(
+      sectorVisibleInvoices.filter((invoice) => {
+        if (!matchesCrdCodeFilter(crdFilter, invoice.crd)) return false;
+        return matchesSearch(
           searchText,
           invoice.invoice_number,
+          invoice.protocol,
           invoice.provider_name,
           invoice.sector_name,
           invoice.user_name,
@@ -757,9 +783,9 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
           invoice.status,
           invoice.flow_stage,
           invoice.amount
-        )
-      ),
-    [sectorVisibleInvoices, searchText]
+        );
+      }),
+    [sectorVisibleInvoices, searchText, crdFilter]
   );
   const filteredBudgetSectors = useMemo(
     () => budgetSectors.filter((sector) => matchesSectorVisibilityFilter(sector.id)),
@@ -1116,18 +1142,22 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
       </div>}
 
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm">
-        <div className="p-4 border-b border-slate-50 flex flex-col sm:flex-row sm:items-center justify-between gap-4 sticky top-20 z-30 bg-white rounded-t-2xl">
+        <div className="p-4 border-b border-slate-50 flex flex-col lg:flex-row lg:items-end justify-between gap-4 sticky top-20 z-30 bg-white rounded-t-2xl">
           <div className="relative flex-1 max-w-md">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 block">
+              Busca
+            </label>
+            <Search className="absolute left-3 bottom-2.5 w-4 h-4 text-slate-400" />
             <input 
               type="text"
               value={listQuery}
               onChange={(e) => setListQuery(e.target.value)}
               placeholder="Buscar por fornecedor, número ou setor..."
-              className="w-full pl-10 pr-4 py-2 bg-slate-50 border-none rounded-xl text-sm focus:ring-2 focus:ring-emerald-500/20 transition-all"
+              className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500/20 transition-all"
             />
           </div>
-          <div className="flex items-center gap-2">
+          <CrdListFilter value={crdFilter} onChange={setCrdFilter} options={crdFilterOptions} />
+          <div className="flex items-center gap-2 pb-0.5">
             <button
               onClick={() => setShowReportModal(true)}
               className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 rounded-lg transition-colors"
@@ -1142,9 +1172,11 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-slate-50/50">
+                <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Protocolo</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Nota</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Fornecedor</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Setor</th>
+                <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">CRD</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Lançado por</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Valor</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Vencimento</th>
@@ -1156,13 +1188,16 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
             <tbody className="divide-y divide-slate-50">
               {filteredInvoices.length === 0 && (
                 <tr>
-                  <td colSpan={9} className="px-6 py-10 text-center text-sm text-slate-400">
-                    Nenhuma nota nesta competência. Confira mês/ano e a data de vencimento do lançamento.
+                  <td colSpan={11} className="px-6 py-10 text-center text-sm text-slate-400">
+                    {crdFilter
+                      ? `Nenhuma nota com CRD ${crdFilter} nesta competência.`
+                      : 'Nenhuma nota nesta competência. Confira mês/ano e a data de vencimento do lançamento.'}
                   </td>
                 </tr>
               )}
               {filteredInvoices.map((invoice) => (
                 <tr key={invoice.id} className="hover:bg-slate-50/50 transition-colors group">
+                  <td className="px-6 py-4 text-xs font-mono font-bold text-emerald-800">{invoice.protocol || '—'}</td>
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-3">
                       <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center text-slate-500">
@@ -1180,6 +1215,20 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
                     <span className="text-xs font-medium text-slate-600 bg-slate-100 px-2 py-1 rounded-lg">
                       {invoice.sector_name}
                     </span>
+                  </td>
+                  <td className="px-6 py-4">
+                    {invoice.crd ? (
+                      <div>
+                        <p className="text-sm font-bold text-slate-800">{invoice.crd}</p>
+                        {crdNameByCode.get(String(invoice.crd).trim().toLowerCase()) && (
+                          <p className="text-[10px] text-slate-400 mt-0.5 max-w-[160px] truncate">
+                            {crdNameByCode.get(String(invoice.crd).trim().toLowerCase())}
+                          </p>
+                        )}
+                      </div>
+                    ) : (
+                      <span className="text-xs text-slate-400">—</span>
+                    )}
                   </td>
                   <td className="px-6 py-4">
                     <p className="text-sm font-medium text-slate-700">{invoice.user_name || '—'}</p>
