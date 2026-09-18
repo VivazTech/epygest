@@ -84,6 +84,7 @@ export const AjustesLive: React.FC = () => {
   }, [displayRows]);
 
   const startEdit = (account: string, monthIndex: number, value: number) => {
+    if (userRole !== 'admin') return;
     setEditingCell({ account, monthIndex });
     setEditingValue(String(value ?? 0));
   };
@@ -243,7 +244,7 @@ export const AjustesLive: React.FC = () => {
                           }}
                           className="w-24 px-2 py-1 text-right bg-white border border-emerald-300 rounded-md"
                         />
-                      ) : (
+                      ) : userRole === 'admin' ? (
                         <button
                           onClick={() => startEdit(row.account_name, index, value)}
                           className={`min-w-20 px-2 py-1 rounded hover:bg-emerald-50 transition-colors ${value < 0 ? 'text-red-600' : 'text-slate-900'}`}
@@ -251,6 +252,10 @@ export const AjustesLive: React.FC = () => {
                         >
                           {formatCurrency(value)}
                         </button>
+                      ) : (
+                        <span className={`min-w-20 px-2 py-1 inline-block ${value < 0 ? 'text-red-600' : 'text-slate-900'}`}>
+                          {formatCurrency(value)}
+                        </span>
                       )}
                     </td>
                   );

@@ -214,6 +214,7 @@ export const PrevRealPage: React.FC<PrevRealPageProps> = ({ mode = 'diario' }) =
 
   const canConfigureView =
     userRole === 'admin' || userRole === 'finance' || userRole === 'controle';
+  const canEditPrevisto = userRole === 'admin';
 
   const toggleSelection = (value: string, selected: string[], setter: (next: string[]) => void) => {
     setter(
@@ -363,6 +364,7 @@ export const PrevRealPage: React.FC<PrevRealPageProps> = ({ mode = 'diario' }) =
   };
 
   const startCellEdit = (rowId: number, monthIndex: number, value: number) => {
+    if (!canEditPrevisto) return;
     setEditingCell({ rowId, monthIndex });
     setEditingValue(String(value ?? 0));
   };
@@ -371,7 +373,7 @@ export const PrevRealPage: React.FC<PrevRealPageProps> = ({ mode = 'diario' }) =
     row: PrevRealApiResponse['rows'][number],
     monthIndex: number
   ) => {
-    if (savingCell) return;
+    if (!canEditPrevisto || savingCell) return;
     const parsedValue = Number(String(editingValue).replace(',', '.'));
     if (!Number.isFinite(parsedValue)) {
       alert('Digite um valor numérico válido.');
@@ -724,7 +726,7 @@ export const PrevRealPage: React.FC<PrevRealPageProps> = ({ mode = 'diario' }) =
                                       }}
                                       className="w-24 px-2 py-1 text-right bg-white border border-emerald-300 rounded-md"
                                     />
-                                  ) : (
+                                  ) : canEditPrevisto ? (
                                     <button
                                       onClick={() => startCellEdit(row.id, idx, m.previsto || 0)}
                                       className="px-2 py-1 rounded hover:bg-emerald-50 transition-colors"
@@ -736,6 +738,12 @@ export const PrevRealPage: React.FC<PrevRealPageProps> = ({ mode = 'diario' }) =
                                         meta={valueTrace.prevReal.previsto(row.grupo, row.detalhado, idx + 1, traceYear, occPct)}
                                       />
                                     </button>
+                                  ) : (
+                                    <ValueTrace
+                                      className="text-xs text-slate-700"
+                                      displayValue={formatCurrency(m.previsto || 0)}
+                                      meta={valueTrace.prevReal.previsto(row.grupo, row.detalhado, idx + 1, traceYear, occPct)}
+                                    />
                                   )}
                                 </td>
                                 <td className="px-3 py-2 text-xs text-right text-slate-700">

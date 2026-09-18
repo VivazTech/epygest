@@ -13865,7 +13865,7 @@ export function createApp() {
     res.json({ success: true, edit: data });
   });
 
-  app.patch("/api/sintase/cell", async (req, res) => {
+  app.patch("/api/sintase/cell", requireRole("admin"), async (req, res) => {
     const { crd_id, month, year, value, occupancy_percent } = req.body as {
       crd_id?: number;
       month?: number;
@@ -13940,7 +13940,7 @@ export function createApp() {
     res.json({ year: selectedYear, occupancy_percent: occupancyPercent });
   });
 
-  app.patch("/api/sintase/occupancy", async (req, res) => {
+  app.patch("/api/sintase/occupancy", requireRole("admin"), async (req, res) => {
     const { year, occupancy_percent } = req.body as { year?: number | string; occupancy_percent?: number | string };
     if (!Number.isFinite(Number(year))) {
       return res.status(400).json({ error: "year inválido" });
@@ -16288,7 +16288,7 @@ export function createApp() {
     });
   });
 
-  app.patch("/api/orcamento/cell", async (req, res) => {
+  app.patch("/api/orcamento/cell", requireRole("admin"), async (req, res) => {
     const { crd_id, month, year, value } = req.body as {
       crd_id?: number;
       month?: number;
@@ -16571,7 +16571,7 @@ export function createApp() {
     });
   });
 
-  app.patch("/api/ajustes/cell", async (req, res) => {
+  app.patch("/api/ajustes/cell", requireRole("admin"), async (req, res) => {
     const { account_name, month, year, value } = req.body as {
       account_name?: string;
       month?: number;
