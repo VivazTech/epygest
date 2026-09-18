@@ -34,6 +34,7 @@ import { EmprestimosPage } from './pages/Emprestimos';
 import { RelatorioCrdPage, RelatorioCrdMesPage, MESES_REL_CRD } from './pages/RelatorioCrd';
 import { RelatorioRequisicoesPage, RelatorioRequisicoesMesPage, MESES_REL_REQ } from './pages/RelatorioRequisicoes';
 import { ConsumoInternoPage, ConsumoInternoMesPage, MESES_CONSUMO } from './pages/ConsumoInterno';
+import { VendasPdvsPage } from './pages/VendasPdvs';
 import { CmvPage, CmvMesPage } from './pages/Cmv';
 import { CmvTarifasPage } from './pages/CmvTarifas';
 import { MESES_CMV } from './lib/cmv';
@@ -487,6 +488,7 @@ export default function App() {
       case 'configuracoes': return <Configuracoes />;
       case 'tutorial': return <Tutorial />;
       case 'compras-ordem': return <ComprasPage />;
+      case 'vendas-pdvs': return <VendasPdvsPage />;
       case 'mensalidades':
       case 'compras-mensalidades': // compatibilidade com atalho antigo
         return <MensalidadesPage />;

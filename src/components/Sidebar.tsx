@@ -40,6 +40,7 @@ import {
   UserRound,
   Clock,
   Undo2,
+  Store,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useCompany } from '../context/CompanyContext';
@@ -135,6 +136,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const showCompras = canView('compras-ordem', ['admin', 'controle', 'manager']);
   const comprasIds = ['compras-ordem'];
   const [comprasExpanded, setComprasExpanded] = React.useState(comprasIds.includes(activeTab));
+  const vendasIds = ['vendas-pdvs'];
+  const [vendasExpanded, setVendasExpanded] = React.useState(vendasIds.includes(activeTab));
   const showApuracaoReceita = canView('apuracao-receita', ['admin', 'controle']);
   const showTutorial = canView('tutorial', [
     'admin',
@@ -170,6 +173,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [companyMenuOpen, setCompanyMenuOpen] = React.useState(false);
   const companyMenuRef = React.useRef<HTMLDivElement | null>(null);
   const { company, companies, companyKey, setCompanyKey } = useCompany();
+  const showVendas =
+    companyKey === 'aqua' && canView('vendas-pdvs', ['admin', 'finance', 'controle', 'manager', 'diretoria']);
 
   React.useEffect(() => {
     if (!companyMenuOpen) return;
@@ -198,6 +203,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const menuExpandSetters = React.useMemo<ExpandSetter[]>(
     () => [
       setComprasExpanded,
+      setVendasExpanded,
       setConstructionExpanded,
       setLancamentosExpanded,
       setPlanilhasExpanded,
@@ -217,6 +223,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     const isFolhaTab = isFolhaRhNavTab(activeTab);
     const expandRules: Array<[boolean, ExpandSetter[]]> = [
       [comprasIds.includes(activeTab), [setComprasExpanded]],
+      [vendasIds.includes(activeTab), [setVendasExpanded]],
       [constructionMenu.some((item) => item.id === activeTab), [setConstructionExpanded]],
       [lancamentosGroupIds.includes(activeTab), [setLancamentosExpanded]],
       [isApuracaoResultadosTab, [setPlanilhasExpanded]],
@@ -464,6 +471,48 @@ export const Sidebar: React.FC<SidebarProps> = ({
               >
                 <FileCheck className="w-4 h-4 min-w-4 min-h-4 shrink-0" />
                 <span className="font-medium text-xs truncate text-left">Ordem de Compra</span>
+              </button>
+            )}
+          </div>
+        )}
+
+        {showVendas && (
+          <div className="space-y-1">
+            <button
+              onClick={() => setVendasExpanded((prev) => !prev)}
+              data-tour="group-vendas"
+              className={cn(
+                "w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group",
+                vendasIds.includes(activeTab)
+                  ? "text-white bg-white/10"
+                  : "text-white/80 hover:bg-white/5 hover:text-white"
+              )}
+            >
+              <Store className="w-5 h-5 min-w-5 min-h-5 shrink-0 transition-transform duration-200 group-hover:scale-110" />
+              <span className={cn("font-medium text-sm flex-1 text-left", collapsed && "hidden")}>
+                Vendas
+              </span>
+              <ChevronDown
+                className={cn(
+                  "w-4 h-4 transition-transform duration-200",
+                  vendasExpanded && "rotate-180",
+                  collapsed && "hidden"
+                )}
+              />
+            </button>
+            {!collapsed && vendasExpanded && (
+              <button
+                onClick={() => setActiveTab('vendas-pdvs')}
+                data-tour="nav-vendas-pdvs"
+                className={cn(
+                  "w-full flex items-center gap-3 pl-11 pr-4 py-2 rounded-xl transition-all duration-200 group",
+                  activeTab === 'vendas-pdvs'
+                    ? company.navActiveClass
+                    : "text-white/70 hover:bg-white/5 hover:text-white"
+                )}
+              >
+                <Store className="w-4 h-4 min-w-4 min-h-4 shrink-0" />
+                <span className="font-medium text-xs truncate text-left">PDVs</span>
               </button>
             )}
           </div>

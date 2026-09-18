@@ -88,6 +88,7 @@ export const EMPRESA_SCOPED_TABLES = new Set([
   "tangerino_importacoes",
   "tangerino_colaborador_vinculo",
   "tangerino_ponto_mensal",
+  "vendas_ambiente_rows",
 ]);
 
 export const readEmpresaKeyFromRequest = (req: Request): CompanyKey => {

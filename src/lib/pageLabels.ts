@@ -42,6 +42,7 @@ const STATIC_LABELS: Record<string, string> = {
   mensalidades: 'Mensalidades',
   aprovacoes: 'Aprovações',
   'compras-ordem': 'Compras / Ordem de Compra',
+  'vendas-pdvs': 'Vendas / PDVs',
   'folha-apuracao': 'Apuração da Folha',
   'painel-rh': 'Orçado × Realizado — Folha',
   absenteismo: 'Absenteísmo',

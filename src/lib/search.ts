@@ -52,6 +52,7 @@ export function getSearchPlaceholder(activeTab: string): string {
     mensalidades: 'Buscar protocolo, fornecedor, setor, CRD ou contrato...',
     aprovacoes: 'Buscar protocolo, lançamento, setor, fornecedor ou tipo...',
     'compras-mensalidades': 'Buscar fornecedor, setor ou contrato...',
+    'vendas-pdvs': 'Buscar ambiente, PDV ou faturamento...',
     investimentos: 'Buscar investimento, setor ou CRD...',
     tutorial: 'Buscar aba ou seção do tutorial...',
   };

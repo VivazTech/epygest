@@ -56,6 +56,7 @@ import { PROTOCOL_PREFIX, invoiceProtocolPrefix } from "./lib/launchProtocol.js"
 import { buildPeriodKey, parseImportPeriodInput, type ImportScope } from "./lib/importPeriod.js";
 import { computeCmv, toCmvInputs } from "./lib/cmv.js";
 import { parseCmvApuracaoPeriod } from "./lib/cmvHistorico.js";
+import { parseVendasAmbienteGrid, parseVendasAmbientePdf } from "./lib/vendasAmbiente.js";
 import {
   applyFieldCorrection,
   isImportCorrectionField,
@@ -6453,6 +6454,304 @@ export function createApp() {
       if (req.file?.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
     }
   });
+
+  // ====================================================
+  // VENDAS POR AMBIENTE (Aquamania · PDVs — Desbravador MesAno)
+  // ====================================================
+  const parseVendasAmbienteFile = async (filePath: string, originalName = "") => {
+    const name = originalName || path.basename(filePath);
+    if (/\.pdf$/i.test(name) || /\.pdf$/i.test(filePath)) {
+      const buffer = fs.readFileSync(filePath);
+      const rows = await extractPdfRowsByPosition(buffer);
+      return parseVendasAmbientePdf(rows, name);
+    }
+    const workbook = xlsx.readFile(filePath);
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    const rows = xlsx.utils.sheet_to_json(sheet, { header: 1, defval: "", raw: true }) as any[][];
+    return parseVendasAmbienteGrid(rows, name);
+  };
+
+  const MONTH_SHORT_PT = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
+
+  app.post("/api/import/vendas-ambiente/preview", upload.single("vendas_file"), async (req, res) => {
+    if (!req.file) return res.status(400).json({ error: "Arquivo não enviado" });
+    if (!/\.(xlsx|xls|pdf)$/i.test(req.file.originalname || "")) {
+      if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+      return res.status(400).json({ error: "Envie o relatório em PDF ou Excel (.pdf, .xls ou .xlsx)." });
+    }
+    try {
+      const parsed = await parseVendasAmbienteFile(req.file.path, req.file.originalname);
+      if (!parsed.lines.length) {
+        return res.status(422).json({
+          success: false,
+          error:
+            "O arquivo foi lido, mas nenhum ambiente/PDV foi reconhecido. Confira se este é o relatório 'Vendas por Ambiente MesAno' do Desbravador.",
+        });
+      }
+      const bodyMonth = Number((req.body as any)?.month);
+      const bodyYear = Number((req.body as any)?.year);
+      const period =
+        parsed.period ||
+        (bodyMonth >= 1 && bodyMonth <= 12 && bodyYear >= 2000
+          ? { month: bodyMonth, year: bodyYear }
+          : null);
+      res.json({
+        success: true,
+        report_name: req.file.originalname || "vendas-ambiente.pdf",
+        period,
+        summary: parsed.summary,
+        total_geral_reported: parsed.total_geral_reported ?? null,
+        lines: parsed.lines,
+      });
+    } catch (error: any) {
+      console.error("Erro ao processar Vendas por Ambiente:", error);
+      res.status(500).json({
+        success: false,
+        error: "Falha ao processar o relatório de Vendas por Ambiente.",
+        detail: error?.message ? String(error.message).slice(0, 300) : undefined,
+      });
+    } finally {
+      if (req.file?.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+    }
+  });
+
+  app.post(
+    "/api/import/vendas-ambiente/commit",
+    requireRole("admin", "finance", "controle"),
+    upload.single("vendas_file"),
+    async (req, res) => {
+      if (!req.file) return res.status(400).json({ error: "Arquivo não enviado" });
+      if (!/\.(xlsx|xls|pdf)$/i.test(req.file.originalname || "")) {
+        if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+        return res.status(400).json({ error: "Envie o relatório em PDF ou Excel (.pdf, .xls ou .xlsx)." });
+      }
+      try {
+        const parsed = await parseVendasAmbienteFile(req.file.path, req.file.originalname);
+        if (!parsed.lines.length) {
+          return res.status(422).json({
+            error:
+              "Nenhum ambiente/PDV reconhecido no arquivo. Confira o layout do relatório 'Vendas por Ambiente MesAno'.",
+          });
+        }
+        const month = Number((req.body as any)?.month) || parsed.period?.month;
+        const year = Number((req.body as any)?.year) || parsed.period?.year;
+        if (!month || !year || month < 1 || month > 12) {
+          return res.status(400).json({
+            error: "Não foi possível determinar o mês do relatório. Informe mês e ano.",
+          });
+        }
+
+        const historyId = await logImportHistory({
+          source_type: "vendas_ambiente",
+          file_name: req.file.originalname,
+          status: "success",
+          year,
+          month,
+          records_count: parsed.lines.length,
+          total_amount: parsed.summary.total_liquido,
+          user: req.user,
+          summary: {
+            ambientes_count: parsed.summary.ambientes_count,
+            total_liquido: parsed.summary.total_liquido,
+            total_quantidade: parsed.summary.total_quantidade,
+          },
+        });
+
+        const { error: delErr } = await supabase
+          .from("vendas_ambiente_rows")
+          .delete()
+          .eq("year", year)
+          .eq("month", month);
+        if (delErr) {
+          console.error("vendas_ambiente_rows delete:", delErr);
+          return res.status(500).json({
+            error: "Tabela vendas_ambiente_rows indisponível. Execute sql/69_vendas_ambiente.sql no Supabase.",
+          });
+        }
+
+        const detailRows = parsed.lines.map((l) =>
+          withEmpresaKey(
+            {
+              year,
+              month,
+              ambiente: l.ambiente,
+              ambiente_codigo: l.ambiente_codigo,
+              quantidade: l.quantidade,
+              valor_bruto: l.valor_bruto,
+              valor_desconto: l.valor_desconto,
+              valor_liquido: l.valor_liquido,
+              ticket_medio: l.ticket_medio,
+              import_history_id: historyId,
+            },
+            req
+          )
+        );
+
+        const { error: insErr } = await supabase.from("vendas_ambiente_rows").insert(detailRows);
+        if (insErr) {
+          console.error("vendas_ambiente_rows insert:", insErr);
+          return res.status(500).json({ error: "Não foi possível gravar as linhas do relatório." });
+        }
+
+        res.json({
+          success: true,
+          period: { month, year },
+          summary: parsed.summary,
+        });
+      } catch (error: any) {
+        console.error("Erro no commit de Vendas por Ambiente:", error);
+        await logImportHistory({
+          source_type: "vendas_ambiente",
+          file_name: req.file?.originalname,
+          status: "error",
+          user: req.user,
+          error_message: String(error?.message || "Falha na importação.").slice(0, 500),
+        });
+        res.status(500).json({ error: "Não foi possível importar o relatório de Vendas por Ambiente." });
+      } finally {
+        if (req.file?.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+      }
+    }
+  );
+
+  app.get(
+    "/api/vendas-ambiente",
+    requireRole("admin", "finance", "controle", "manager", "diretoria"),
+    async (req, res) => {
+      const now = new Date();
+      const year = Number((req.query as { year?: string }).year) || now.getFullYear();
+      const month = Number((req.query as { month?: string }).month) || now.getMonth() + 1;
+      if (month < 1 || month > 12) {
+        return res.status(400).json({ error: "Mês inválido." });
+      }
+
+      const { data: monthRows, error } = await supabase
+        .from("vendas_ambiente_rows")
+        .select("ambiente, ambiente_codigo, quantidade, valor_bruto, valor_desconto, valor_liquido, ticket_medio")
+        .eq("year", year)
+        .eq("month", month)
+        .order("valor_liquido", { ascending: false });
+      if (error) {
+        console.error(error);
+        return res.status(500).json({
+          error: "Não foi possível carregar vendas. Execute sql/69_vendas_ambiente.sql se ainda não rodou.",
+        });
+      }
+
+      const rows = monthRows ?? [];
+      const total_liquido = rows.reduce((s, r) => s + (Number((r as any).valor_liquido) || 0), 0);
+      const total_bruto = rows.reduce((s, r) => s + (Number((r as any).valor_bruto) || 0), 0);
+      const total_desconto = rows.reduce((s, r) => s + (Number((r as any).valor_desconto) || 0), 0);
+      const total_quantidade = rows.reduce((s, r) => s + (Number((r as any).quantidade) || 0), 0);
+
+      const by_ambiente = rows.map((r: any) => {
+        const valor_liquido = Number(r.valor_liquido) || 0;
+        const quantidade = Number(r.quantidade) || 0;
+        return {
+          ambiente: String(r.ambiente || ""),
+          ambiente_codigo: r.ambiente_codigo != null ? String(r.ambiente_codigo) : null,
+          quantidade,
+          valor_bruto: Number(r.valor_bruto) || 0,
+          valor_desconto: Number(r.valor_desconto) || 0,
+          valor_liquido,
+          ticket_medio: quantidade > 0 ? valor_liquido / quantidade : Number(r.ticket_medio) || 0,
+          share: total_liquido > 0 ? (valor_liquido / total_liquido) * 100 : 0,
+        };
+      });
+
+      const { data: yearRows } = await supabase
+        .from("vendas_ambiente_rows")
+        .select("month, ambiente, valor_liquido, quantidade")
+        .eq("year", year);
+
+      const serieMap = new Map<number, { total: number; quantidade: number }>();
+      for (let m = 1; m <= 12; m++) serieMap.set(m, { total: 0, quantidade: 0 });
+
+      // Matriz ambiente × mês (líquido no ano)
+      const ambienteMonth = new Map<string, Map<number, number>>();
+      const ambienteTotais = new Map<string, number>();
+      for (const r of yearRows ?? []) {
+        const m = Number((r as any).month);
+        const valor = Number((r as any).valor_liquido) || 0;
+        const qtd = Number((r as any).quantidade) || 0;
+        const ambiente = String((r as any).ambiente || "").trim();
+        const agg = serieMap.get(m);
+        if (agg) {
+          agg.total += valor;
+          agg.quantidade += qtd;
+        }
+        if (!ambiente) continue;
+        if (!ambienteMonth.has(ambiente)) ambienteMonth.set(ambiente, new Map());
+        const monthMap = ambienteMonth.get(ambiente)!;
+        monthMap.set(m, (monthMap.get(m) || 0) + valor);
+        ambienteTotais.set(ambiente, (ambienteTotais.get(ambiente) || 0) + valor);
+      }
+
+      const ambientesOrdenados = Array.from(ambienteTotais.entries())
+        .sort((a, b) => b[1] - a[1])
+        .map(([nome]) => nome);
+
+      const comparativo_mensal = {
+        ambientes: ambientesOrdenados,
+        series: ambientesOrdenados.map((ambiente) => {
+          const monthMap = ambienteMonth.get(ambiente) || new Map();
+          const months = Array.from({ length: 12 }, (_, i) => monthMap.get(i + 1) || 0);
+          return {
+            ambiente,
+            months,
+            total: ambienteTotais.get(ambiente) || 0,
+          };
+        }),
+        chart: Array.from({ length: 12 }, (_, i) => {
+          const m = i + 1;
+          const point: Record<string, string | number> = {
+            month: m,
+            name: MONTH_SHORT_PT[i],
+            name_full: [
+              "Janeiro",
+              "Fevereiro",
+              "Março",
+              "Abril",
+              "Maio",
+              "Junho",
+              "Julho",
+              "Agosto",
+              "Setembro",
+              "Outubro",
+              "Novembro",
+              "Dezembro",
+            ][i],
+          };
+          for (const ambiente of ambientesOrdenados) {
+            point[ambiente] = ambienteMonth.get(ambiente)?.get(m) || 0;
+          }
+          return point;
+        }),
+      };
+
+      res.json({
+        year,
+        month,
+        summary: {
+          total_liquido,
+          total_bruto,
+          total_desconto,
+          total_quantidade,
+          ambientes_count: by_ambiente.length,
+          ticket_medio_geral: total_quantidade > 0 ? total_liquido / total_quantidade : 0,
+          has_data: by_ambiente.length > 0 || ambientesOrdenados.length > 0,
+        },
+        by_ambiente,
+        serie_anual: Array.from(serieMap.entries()).map(([m, agg]) => ({
+          month: m,
+          name: MONTH_SHORT_PT[m - 1],
+          total: agg.total,
+          quantidade: agg.quantidade,
+        })),
+        comparativo_mensal,
+      });
+    }
+  );
 
   // ====================================================
   // CONSUMO INTERNO (Apuração de Resultados — consulta por competência)

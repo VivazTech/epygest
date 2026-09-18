@@ -44,6 +44,14 @@ export const PERMISSION_RESOURCES: PermissionResource[] = [
 
   { key: 'compras-ordem', label: 'Ordem de Compra', group: 'Compras', actions: ['view', 'create', 'edit'] },
 
+  {
+    key: 'vendas-pdvs',
+    label: 'Vendas / PDVs',
+    group: 'Vendas',
+    actions: ['view', 'create'],
+    description: 'Aquamania: importação Vendas por Ambiente e métricas de PDVs.',
+  },
+
   { key: 'painel-operacional', label: 'Painel Operacional', group: 'Painéis setoriais', actions: ['view', 'edit'] },
   { key: 'painel-ab', label: 'Painel A&B', group: 'Painéis setoriais', actions: ['view', 'edit'] },
   { key: 'painel-spa', label: 'Painel SPA', group: 'Painéis setoriais', actions: ['view', 'edit'] },
@@ -110,6 +118,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, Partial<Record<string, Per
     notas: ['view', 'create', 'edit'],
     danfe: ['view', 'create', 'edit'],
     mensalidades: ['view', 'create', 'edit'],
+    'vendas-pdvs': ['view', 'create'],
     tutorial: ['view'],
   },
   controle: Object.fromEntries(
@@ -132,6 +141,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, Partial<Record<string, Per
     danfe: ['view', 'create', 'edit'],
     mensalidades: ['view', 'create', 'edit'],
     'compras-ordem': ['view', 'create', 'edit'],
+    'vendas-pdvs': ['view', 'create'],
     'painel-operacional': ['view', 'edit'],
     'painel-ab': ['view', 'edit'],
     'painel-spa': ['view', 'edit'],
@@ -169,6 +179,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, Partial<Record<string, Per
     'painel-hospedagem': ['view'],
     'painel-nutricionista': ['view'],
     'painel-controladoria': ['view'],
+    'vendas-pdvs': ['view'],
     tutorial: ['view'],
   },
 };

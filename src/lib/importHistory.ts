@@ -11,7 +11,8 @@ export type ImportHistorySource =
   | "ajustes"
   | "rel_crd"
   | "requisicoes_sintetica"
-  | "rds";
+  | "rds"
+  | "vendas_ambiente";
 
 export const IMPORT_SOURCE_LABELS: Record<ImportHistorySource, string> = {
   consumo_interno: "Consumo interno",
@@ -22,6 +23,7 @@ export const IMPORT_SOURCE_LABELS: Record<ImportHistorySource, string> = {
   rel_crd: "Rel. CRD",
   requisicoes_sintetica: "Requisições Sintética",
   rds: "Relatório Diário de Situação",
+  vendas_ambiente: "Vendas por Ambiente",
 };
 
 export type ImportHistoryLogInput = {
