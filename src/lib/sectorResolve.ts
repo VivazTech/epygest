@@ -1,4 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import type { CompanyKey } from "./companies.js";
+import { DEFAULT_COMPANY_KEY } from "./companies.js";
+import { filterByEmpresaKey, withEmpresaKeyValue } from "./empresaScope.js";
 
 export type SectorRow = {
   id: number;
@@ -6,6 +9,7 @@ export type SectorRow = {
   code: string | null;
   active?: boolean;
   budget_limit?: number;
+  empresa_key?: string;
 };
 
 export type ResolvedSector = {
@@ -20,6 +24,7 @@ export type SectorResolveInput = {
   /** Cria setor quando não encontrado (padrão: true em imports). */
   create?: boolean;
   budget_limit?: number;
+  empresa_key?: CompanyKey;
 };
 
 /** Normaliza nome para comparação (sem acentos, minúsculas). */
@@ -80,14 +85,28 @@ export class SectorCache {
   private byCode = new Map<string, SectorRow>();
   private byName = new Map<string, SectorRow>();
   private loadedAt = 0;
+  private empresaKey: CompanyKey;
 
-  constructor(private readonly supabase: SupabaseClient) {}
+  constructor(
+    private readonly supabase: SupabaseClient,
+    empresaKey: CompanyKey = DEFAULT_COMPANY_KEY
+  ) {
+    this.empresaKey = empresaKey;
+  }
+
+  getEmpresaKey(): CompanyKey {
+    return this.empresaKey;
+  }
 
   async reload(force = false): Promise<void> {
     const staleMs = 30_000;
     if (!force && this.loadedAt && Date.now() - this.loadedAt < staleMs) return;
 
-    const { data, error } = await this.supabase.from("sectors").select("id, name, code, active, budget_limit");
+    const { data, error } = await filterByEmpresaKey(
+      this.supabase.from("sectors").select("id, name, code, active, budget_limit, empresa_key"),
+      this.empresaKey,
+      "sectors"
+    );
     if (error) throw error;
 
     this.byCode.clear();
@@ -99,6 +118,7 @@ export class SectorCache {
         code: normalizeSectorCode((row as any).code),
         active: (row as any).active !== false,
         budget_limit: Number((row as any).budget_limit) || 0,
+        empresa_key: String((row as any).empresa_key || this.empresaKey),
       };
       if (!sector.id || !sector.name) continue;
       this.byName.set(normalizeSectorName(sector.name), sector);
@@ -123,11 +143,19 @@ export class SectorCache {
   }
 }
 
-let sharedCache: SectorCache | null = null;
+const cachesByEmpresa = new Map<CompanyKey, SectorCache>();
 
-export function getSectorCache(supabase: SupabaseClient): SectorCache {
-  if (!sharedCache) sharedCache = new SectorCache(supabase);
-  return sharedCache;
+export function getSectorCache(
+  supabase: SupabaseClient,
+  empresaKey: CompanyKey = DEFAULT_COMPANY_KEY
+): SectorCache {
+  const key = empresaKey || DEFAULT_COMPANY_KEY;
+  let cache = cachesByEmpresa.get(key);
+  if (!cache) {
+    cache = new SectorCache(supabase, key);
+    cachesByEmpresa.set(key, cache);
+  }
+  return cache;
 }
 
 /** Resolve (ou cria) setor priorizando código; nome é fallback e rótulo exibível. */
@@ -136,7 +164,10 @@ export async function resolveSector(
   input: SectorResolveInput,
   cache?: SectorCache
 ): Promise<ResolvedSector | null> {
-  const sectorCache = cache ?? getSectorCache(supabase);
+  const empresaKey = (input.empresa_key || cache?.getEmpresaKey() || DEFAULT_COMPANY_KEY) as CompanyKey;
+  const sectorCache = cache && cache.getEmpresaKey() === empresaKey
+    ? cache
+    : getSectorCache(supabase, empresaKey);
   await sectorCache.reload();
 
   const explicitCode = normalizeSectorCode(input.code);
@@ -157,7 +188,11 @@ export async function resolveSector(
     if (byName) {
       const resolvedCode = byName.code ?? code ?? slugSectorCodeFromName(displayName);
       if (!byName.code && resolvedCode) {
-        await supabase.from("sectors").update({ code: resolvedCode }).eq("id", byName.id);
+        await filterByEmpresaKey(
+          supabase.from("sectors").update({ code: resolvedCode }).eq("id", byName.id),
+          empresaKey,
+          "sectors"
+        );
         sectorCache.remember({ ...byName, code: resolvedCode });
       }
       return { id: byName.id, code: resolvedCode, name: byName.name };
@@ -174,16 +209,22 @@ export async function resolveSector(
 
   const { data: created, error } = await supabase
     .from("sectors")
-    .insert({ name: finalName, code: finalCode, budget_limit: budget, active: true })
+    .insert(
+      withEmpresaKeyValue(
+        { name: finalName, code: finalCode, budget_limit: budget, active: true },
+        empresaKey
+      )
+    )
     .select("id, name, code")
     .single();
 
   if (error) {
     if (String(error.message || "").toLowerCase().includes("unique") && finalCode) {
+      await sectorCache.reload(true);
       const retry = sectorCache.getByCode(finalCode);
       if (retry) return { id: retry.id, code: retry.code!, name: retry.name };
     }
-    console.error("Falha ao criar setor:", finalName, finalCode, error);
+    console.error("Falha ao criar setor:", finalName, finalCode, empresaKey, error);
     return null;
   }
 
@@ -191,6 +232,7 @@ export async function resolveSector(
     id: Number(created.id),
     name: String(created.name),
     code: normalizeSectorCode(created.code) ?? finalCode,
+    empresa_key: empresaKey,
   };
   sectorCache.remember(sector);
   return { id: sector.id, code: sector.code!, name: sector.name };
@@ -201,16 +243,18 @@ export async function resolveSectorByCode(
   supabase: SupabaseClient,
   code: string | number,
   name?: string | null,
-  cache?: SectorCache
+  cache?: SectorCache,
+  empresaKey?: CompanyKey
 ): Promise<ResolvedSector | null> {
-  return resolveSector(supabase, { code, name, create: true }, cache);
+  return resolveSector(supabase, { code, name, create: true, empresa_key: empresaKey }, cache);
 }
 
 /** Atalho: resolve setor por nome (fallback legado). */
 export async function resolveSectorByName(
   supabase: SupabaseClient,
   name: string,
-  cache?: SectorCache
+  cache?: SectorCache,
+  empresaKey?: CompanyKey
 ): Promise<ResolvedSector | null> {
-  return resolveSector(supabase, { name, create: true }, cache);
+  return resolveSector(supabase, { name, create: true, empresa_key: empresaKey }, cache);
 }

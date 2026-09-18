@@ -42,9 +42,11 @@ import {
   Undo2,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { useCompany } from '../context/CompanyContext';
 import { PLANILHAS_RESULTADOS, APURACAO_RECEITA_ITENS, BASE_ORCAMENTO_ITENS, isBaseOrcamentoTab, isRelCrdTab, isRelReqTab, isConsumoInternoTab, isCmvTab, isRdsTab, isApuracaoReceitaTab as checkApuracaoReceitaTab, isApuracaoResultadosTab as checkApuracaoResultadosTab } from '../lib/planilhas';
 import { hasPermission, type RolePermissionRow } from '../lib/permissionCatalog';
 import logoIcon from '../../logoicon2.svg';
+import type { CompanyKey } from '../lib/companies';
 
 const FOLHA_MESES = [
   'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
@@ -165,6 +167,32 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [cmvExpanded, setCmvExpanded] = React.useState(isCmvActive);
   const [rdsExpanded, setRdsExpanded] = React.useState(isRdsActive);
   const [folhaExpanded, setFolhaExpanded] = React.useState(isFolhaRhNavTab(activeTab));
+  const [companyMenuOpen, setCompanyMenuOpen] = React.useState(false);
+  const companyMenuRef = React.useRef<HTMLDivElement | null>(null);
+  const { company, companies, companyKey, setCompanyKey } = useCompany();
+
+  React.useEffect(() => {
+    if (!companyMenuOpen) return;
+    const onPointerDown = (event: MouseEvent) => {
+      if (!companyMenuRef.current?.contains(event.target as Node)) {
+        setCompanyMenuOpen(false);
+      }
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setCompanyMenuOpen(false);
+    };
+    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [companyMenuOpen]);
+
+  const selectCompany = (key: CompanyKey) => {
+    setCompanyKey(key);
+    setCompanyMenuOpen(false);
+  };
 
   type ExpandSetter = React.Dispatch<React.SetStateAction<boolean>>;
   const menuExpandSetters = React.useMemo<ExpandSetter[]>(
@@ -214,18 +242,77 @@ export const Sidebar: React.FC<SidebarProps> = ({
   }, [menuExpandSetters]);
 
   return (
-    <div className={cn(
-      "bg-[#004D40] text-white h-screen flex flex-col fixed left-0 top-0 z-50 transition-all duration-200",
-      collapsed ? "w-20" : "w-64"
-    )}>
-      <div className="p-6 flex items-center gap-3 border-b border-white/10">
-        <div className="w-10 h-10 bg-white rounded-lg flex items-center justify-center">
-          <img src={logoIcon} alt="Vivaz Cataratas" className="h-6 w-auto" />
-        </div>
-        <div className={cn(collapsed && "hidden")}>
-          <h1 className="font-bold text-lg leading-tight">Budget Vivaz</h1>
-          <p className="text-[10px] opacity-60 uppercase tracking-widest">Vivaz Cataratas</p>
-        </div>
+    <div
+      className={cn(
+        "text-white h-screen flex flex-col fixed left-0 top-0 z-50 transition-all duration-200",
+        collapsed ? "w-20" : "w-64"
+      )}
+      style={{ backgroundColor: company.sidebarBg }}
+    >
+      <div ref={companyMenuRef} className="relative border-b border-white/10">
+        <button
+          type="button"
+          onClick={() => setCompanyMenuOpen((open) => !open)}
+          className={cn(
+            "w-full p-6 flex items-center gap-3 text-left hover:bg-white/5 transition-colors",
+            collapsed && "justify-center px-3"
+          )}
+          title="Trocar de empresa"
+          aria-haspopup="listbox"
+          aria-expanded={companyMenuOpen}
+        >
+          <div className="w-10 h-10 bg-white rounded-lg flex items-center justify-center shrink-0">
+            <img src={logoIcon} alt={company.subtitle} className="h-6 w-auto" />
+          </div>
+          <div className={cn("min-w-0 flex-1", collapsed && "hidden")}>
+            <h1 className="font-bold text-lg leading-tight truncate">{company.budgetTitle}</h1>
+            <p className="text-[10px] opacity-60 uppercase tracking-widest truncate">{company.subtitle}</p>
+          </div>
+          <ChevronDown
+            className={cn(
+              "w-4 h-4 shrink-0 opacity-70 transition-transform",
+              companyMenuOpen && "rotate-180",
+              collapsed && "hidden"
+            )}
+          />
+        </button>
+
+        {companyMenuOpen && (
+          <div
+            role="listbox"
+            aria-label="Trocar de empresa"
+            className={cn(
+              "absolute z-[60] mt-1 rounded-xl border border-white/15 bg-[#0f2f2a] shadow-xl overflow-hidden",
+              collapsed ? "left-2 right-2 top-full" : "left-3 right-3 top-full"
+            )}
+            style={{ backgroundColor: companyKey === 'aqua' ? '#9A3412' : '#005a7d' }}
+          >
+            <p className="px-3 pt-2.5 pb-1 text-[10px] font-bold uppercase tracking-wider text-white/45">
+              Trocar de empresa
+            </p>
+            {companies.map((item) => {
+              const selected = item.key === companyKey;
+              return (
+                <button
+                  key={item.key}
+                  type="button"
+                  role="option"
+                  aria-selected={selected}
+                  onClick={() => selectCompany(item.key)}
+                  className={cn(
+                    "w-full px-3 py-2.5 text-left text-sm transition-colors flex items-center justify-between gap-2",
+                    selected ? "bg-white/15 text-white" : "text-white/80 hover:bg-white/10 hover:text-white"
+                  )}
+                >
+                  <span className="font-medium truncate">{item.shortName}</span>
+                  {selected ? (
+                    <span className="text-[10px] uppercase tracking-wider text-emerald-300 shrink-0">Atual</span>
+                  ) : null}
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       <nav data-tour="sidebar-nav" className="flex-1 py-6 px-3 space-y-1 overflow-y-auto no-scrollbar">
@@ -259,7 +346,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 className={cn(
                   "w-full flex items-center gap-3 pl-11 pr-4 py-2.5 rounded-xl transition-all duration-200 group",
                   activeTab === item.id 
-                    ? "bg-emerald-500 text-white shadow-lg shadow-emerald-900/20" 
+                    ? company.navActiveClass 
                     : "text-white/80 hover:bg-white/5 hover:text-white"
                 )}
               >
@@ -306,7 +393,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 className={cn(
                   "w-full flex items-center gap-3 pl-11 pr-4 py-2 rounded-xl transition-all duration-200 group",
                   activeTab === item.id
-                    ? "bg-emerald-500 text-white shadow-lg shadow-emerald-900/20"
+                    ? company.navActiveClass
                     : "text-white/70 hover:bg-white/5 hover:text-white"
                 )}
                 title={item.label}
@@ -328,7 +415,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             className={cn(
               "w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group",
               activeTab === 'aprovacoes'
-                ? "bg-emerald-500 text-white shadow-lg shadow-emerald-900/20"
+                ? company.navActiveClass
                 : "text-white/80 hover:bg-white/5 hover:text-white"
             )}
           >
@@ -371,7 +458,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 className={cn(
                   "w-full flex items-center gap-3 pl-11 pr-4 py-2 rounded-xl transition-all duration-200 group",
                   activeTab === 'compras-ordem'
-                    ? "bg-emerald-500 text-white shadow-lg shadow-emerald-900/20"
+                    ? company.navActiveClass
                     : "text-white/70 hover:bg-white/5 hover:text-white"
                 )}
               >
@@ -390,7 +477,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             className={cn(
               "w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group",
               activeTab === item.id
-                ? "bg-emerald-500 text-white shadow-lg shadow-emerald-900/20"
+                ? company.navActiveClass
                 : "text-white/80 hover:bg-white/5 hover:text-white"
             )}
           >
@@ -437,7 +524,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 className={cn(
                   "w-full flex items-center gap-3 pl-11 pr-4 py-2 rounded-xl transition-all duration-200 group",
                   activeTab === item.tabId
-                    ? "bg-emerald-500 text-white shadow-lg shadow-emerald-900/20"
+                    ? company.navActiveClass
                     : "text-white/70 hover:bg-white/5 hover:text-white"
                 )}
                 title={item.nome}
@@ -489,7 +576,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       className={cn(
                         "w-full flex items-center gap-3 pl-11 pr-4 py-2 rounded-xl transition-all duration-200 group",
                         activeTab === tabId
-                          ? "bg-emerald-500 text-white shadow-lg shadow-emerald-900/20"
+                          ? company.navActiveClass
                           : "text-white/70 hover:bg-white/5 hover:text-white"
                       )}
                       title={planilha.nome}
@@ -533,7 +620,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       className={cn(
                         "w-full flex items-center gap-3 pl-14 pr-4 py-2 rounded-xl transition-all duration-200 group",
                         activeTab === 'rel-crd'
-                          ? "bg-emerald-500 text-white shadow-lg shadow-emerald-900/20"
+                          ? company.navActiveClass
                           : "text-white/70 hover:bg-white/5 hover:text-white"
                       )}
                     >
@@ -552,7 +639,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                           className={cn(
                             "w-full flex items-center gap-3 pl-14 pr-4 py-1.5 rounded-xl transition-all duration-200 group",
                             activeTab === tabId
-                              ? "bg-emerald-500 text-white shadow-lg shadow-emerald-900/20"
+                              ? company.navActiveClass
                               : "text-white/60 hover:bg-white/5 hover:text-white"
                           )}
                         >
@@ -599,7 +686,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       className={cn(
                         "w-full flex items-center gap-3 pl-14 pr-4 py-2 rounded-xl transition-all duration-200 group",
                         activeTab === 'rel-req'
-                          ? "bg-emerald-500 text-white shadow-lg shadow-emerald-900/20"
+                          ? company.navActiveClass
                           : "text-white/70 hover:bg-white/5 hover:text-white"
                       )}
                     >
@@ -618,7 +705,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                           className={cn(
                             "w-full flex items-center gap-3 pl-14 pr-4 py-1.5 rounded-xl transition-all duration-200 group",
                             activeTab === tabId
-                              ? "bg-emerald-500 text-white shadow-lg shadow-emerald-900/20"
+                              ? company.navActiveClass
                               : "text-white/60 hover:bg-white/5 hover:text-white"
                           )}
                         >
@@ -665,7 +752,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       className={cn(
                         "w-full flex items-center gap-3 pl-14 pr-4 py-2 rounded-xl transition-all duration-200 group",
                         activeTab === 'rel-consumo'
-                          ? "bg-emerald-500 text-white shadow-lg shadow-emerald-900/20"
+                          ? company.navActiveClass
                           : "text-white/70 hover:bg-white/5 hover:text-white"
                       )}
                     >
@@ -684,7 +771,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                           className={cn(
                             "w-full flex items-center gap-3 pl-14 pr-4 py-1.5 rounded-xl transition-all duration-200 group",
                             activeTab === tabId
-                              ? "bg-emerald-500 text-white shadow-lg shadow-emerald-900/20"
+                              ? company.navActiveClass
                               : "text-white/60 hover:bg-white/5 hover:text-white"
                           )}
                         >
@@ -731,7 +818,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       className={cn(
                         "w-full flex items-center gap-3 pl-14 pr-4 py-2 rounded-xl transition-all duration-200 group",
                         activeTab === 'cmv'
-                          ? "bg-emerald-500 text-white shadow-lg shadow-emerald-900/20"
+                          ? company.navActiveClass
                           : "text-white/70 hover:bg-white/5 hover:text-white"
                       )}
                     >
@@ -746,7 +833,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       className={cn(
                         "w-full flex items-center gap-3 pl-14 pr-4 py-2 rounded-xl transition-all duration-200 group",
                         activeTab === 'cmv-tarifas'
-                          ? "bg-emerald-500 text-white shadow-lg shadow-emerald-900/20"
+                          ? company.navActiveClass
                           : "text-white/70 hover:bg-white/5 hover:text-white"
                       )}
                     >
@@ -765,7 +852,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                           className={cn(
                             "w-full flex items-center gap-3 pl-14 pr-4 py-1.5 rounded-xl transition-all duration-200 group",
                             activeTab === tabId
-                              ? "bg-emerald-500 text-white shadow-lg shadow-emerald-900/20"
+                              ? company.navActiveClass
                               : "text-white/60 hover:bg-white/5 hover:text-white"
                           )}
                         >
@@ -823,7 +910,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       className={cn(
                         "w-full flex items-center gap-3 pl-11 pr-4 py-2 rounded-xl transition-all duration-200 group",
                         activeTab === tabId
-                          ? "bg-emerald-500 text-white shadow-lg shadow-emerald-900/20"
+                          ? company.navActiveClass
                           : "text-white/70 hover:bg-white/5 hover:text-white"
                       )}
                       title={item.nome}
@@ -867,7 +954,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       className={cn(
                         "w-full flex items-center gap-3 pl-14 pr-4 py-2 rounded-xl transition-all duration-200 group",
                         activeTab === 'rel-rds'
-                          ? "bg-emerald-500 text-white shadow-lg shadow-emerald-900/20"
+                          ? company.navActiveClass
                           : "text-white/70 hover:bg-white/5 hover:text-white"
                       )}
                     >
@@ -886,7 +973,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                           className={cn(
                             "w-full flex items-center gap-3 pl-14 pr-4 py-1.5 rounded-xl transition-all duration-200 group",
                             activeTab === tabId
-                              ? "bg-emerald-500 text-white shadow-lg shadow-emerald-900/20"
+                              ? company.navActiveClass
                               : "text-white/60 hover:bg-white/5 hover:text-white"
                           )}
                         >
@@ -938,7 +1025,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 className={cn(
                   "w-full flex items-center gap-3 pl-11 pr-4 py-2 rounded-xl transition-all duration-200 group",
                   activeTab === 'tangerino-ponto'
-                    ? "bg-emerald-500 text-white shadow-lg shadow-emerald-900/20"
+                    ? company.navActiveClass
                     : "text-white/70 hover:bg-white/5 hover:text-white"
                 )}
               >
@@ -956,7 +1043,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 className={cn(
                   "w-full flex items-center gap-3 pl-11 pr-4 py-2 rounded-xl transition-all duration-200 group",
                   activeTab === 'turnover'
-                    ? "bg-emerald-500 text-white shadow-lg shadow-emerald-900/20"
+                    ? company.navActiveClass
                     : "text-white/70 hover:bg-white/5 hover:text-white"
                 )}
               >
@@ -974,7 +1061,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 className={cn(
                   "w-full flex items-center gap-3 pl-11 pr-4 py-2 rounded-xl transition-all duration-200 group",
                   activeTab === 'absenteismo'
-                    ? "bg-emerald-500 text-white shadow-lg shadow-emerald-900/20"
+                    ? company.navActiveClass
                     : "text-white/70 hover:bg-white/5 hover:text-white"
                 )}
               >
@@ -992,7 +1079,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 className={cn(
                   "w-full flex items-center gap-3 pl-11 pr-4 py-2 rounded-xl transition-all duration-200 group",
                   activeTab === 'emprestimos'
-                    ? "bg-emerald-500 text-white shadow-lg shadow-emerald-900/20"
+                    ? company.navActiveClass
                     : "text-white/70 hover:bg-white/5 hover:text-white"
                 )}
               >
@@ -1010,7 +1097,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 className={cn(
                   "w-full flex items-center gap-3 pl-11 pr-4 py-2 rounded-xl transition-all duration-200 group",
                   activeTab === 'painel-rh'
-                    ? "bg-emerald-500 text-white shadow-lg shadow-emerald-900/20"
+                    ? company.navActiveClass
                     : "text-white/70 hover:bg-white/5 hover:text-white"
                 )}
               >
@@ -1029,7 +1116,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 className={cn(
                   "w-full flex items-center gap-3 pl-11 pr-4 py-2 rounded-xl transition-all duration-200 group",
                   activeTab === 'folha-apuracao'
-                    ? "bg-emerald-500 text-white shadow-lg shadow-emerald-900/20"
+                    ? company.navActiveClass
                     : "text-white/70 hover:bg-white/5 hover:text-white"
                 )}
               >
@@ -1050,7 +1137,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   className={cn(
                     "w-full flex items-center gap-3 pl-11 pr-4 py-2 rounded-xl transition-all duration-200 group",
                     activeTab === tabId
-                      ? "bg-emerald-500 text-white shadow-lg shadow-emerald-900/20"
+                      ? company.navActiveClass
                       : "text-white/70 hover:bg-white/5 hover:text-white"
                   )}
                   title={mes}
@@ -1076,7 +1163,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             className={cn(
               "w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group",
               activeTab === item.id
-                ? "bg-emerald-500 text-white shadow-lg shadow-emerald-900/20"
+                ? company.navActiveClass
                 : "text-white/80 hover:bg-white/5 hover:text-white"
             )}
           >
@@ -1096,7 +1183,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           className={cn(
             "w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group",
             activeTab === 'tutorial'
-              ? "bg-emerald-500 text-white shadow-lg shadow-emerald-900/20"
+              ? company.navActiveClass
               : "text-white/80 hover:bg-white/5 hover:text-white"
           )}
         >

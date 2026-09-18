@@ -47,6 +47,7 @@ import { PainelSetorial } from './pages/PainelSetorial';
 import { getPainelByTab, isPainelSetorialTab } from './lib/paineisSetoriais';
 import { SearchProvider, useSearch } from './context/SearchContext';
 import { ToastProvider } from './context/ToastContext';
+import { CompanyProvider, useCompany } from './context/CompanyContext';
 import { SearchBar } from './components/SearchBar';
 import { getSearchPlaceholder } from './lib/search';
 import { TutorialPage as Tutorial } from './pages/Tutorial';
@@ -695,17 +696,19 @@ export default function App() {
   }
 
   return (
-    <SearchProvider>
-      <AppShell
-        activeTab={activeTab}
-        setActiveTab={handleSetActiveTab}
-        user={user}
-        onLogout={handleLogout}
-        sidebarCollapsed={sidebarCollapsed}
-        onToggleCollapsed={() => setSidebarCollapsed((prev) => !prev)}
-        renderContent={renderContent}
-      />
-    </SearchProvider>
+    <CompanyProvider allowedKeys={['vivaz', 'aqua']}>
+      <SearchProvider>
+        <AppShell
+          activeTab={activeTab}
+          setActiveTab={handleSetActiveTab}
+          user={user}
+          onLogout={handleLogout}
+          sidebarCollapsed={sidebarCollapsed}
+          onToggleCollapsed={() => setSidebarCollapsed((prev) => !prev)}
+          renderContent={renderContent}
+        />
+      </SearchProvider>
+    </CompanyProvider>
   );
 }
 
@@ -727,10 +730,11 @@ function AppShell({
   renderContent: () => React.ReactNode;
 }) {
   const { query, setQuery } = useSearch();
+  const { companyKey, company } = useCompany();
 
   React.useEffect(() => {
     setQuery('');
-  }, [activeTab, setQuery]);
+  }, [activeTab, companyKey, setQuery]);
 
   const prepareSidebar = React.useCallback(() => {
     if (sidebarCollapsed) onToggleCollapsed();
@@ -757,7 +761,7 @@ function AppShell({
           <main className={sidebarCollapsed ? 'pl-20 min-h-screen' : 'pl-64 min-h-screen'}>
         <header className="h-20 bg-white/80 backdrop-blur-md border-b border-slate-100 flex items-center gap-4 px-8 sticky top-0 z-40">
           <div className="flex items-center gap-2 min-w-0 shrink-0">
-            <span className="text-slate-400 text-sm font-medium">Budget</span>
+            <span className="text-slate-400 text-sm font-medium">{company.budgetTitle}</span>
             <span className="text-slate-300">/</span>
             <span className="text-slate-900 text-sm font-bold capitalize truncate">
               {isBaseOrcamentoTab(activeTab)
@@ -858,6 +862,7 @@ function AppShell({
         </div>
 
         <div
+          key={companyKey}
           data-tour="page-content"
           className={activeTab === 'notas' || activeTab === 'danfe' || activeTab === 'comandas' || activeTab === 'lancamentos-manuais' || activeTab === 'estornos' || activeTab === 'requisicoes' || activeTab === 'mensalidades' || activeTab === 'aprovacoes' || activeTab === 'compras-mensalidades' || activeTab === 'cadastros' || activeTab === 'sintase' || activeTab === 'prev-real' || activeTab === 'indicadores' || activeTab === 'dre' || activeTab === 'rel-crd' || activeTab.startsWith('rel-crd-') || activeTab === 'rel-req' || activeTab.startsWith('rel-req-') || activeTab === 'rel-consumo' || activeTab.startsWith('rel-consumo-') || activeTab === 'rel-rds' || activeTab.startsWith('rel-rds-') || activeTab.startsWith('planilha-') || activeTab.startsWith('folha-') || activeTab === 'painel-rh' || activeTab === 'absenteismo' || activeTab === 'turnover' || activeTab === 'tangerino-ponto' || activeTab === 'folha-apuracao' || activeTab === 'compras-ordem' || activeTab === 'investimentos' || activeTab === 'tutorial' || activeTab === 'sugestoes' || isPainelSetorialTab(activeTab) ? 'p-8 pt-4 md:pt-8 w-full max-w-none' : 'p-8 pt-4 md:pt-8 max-w-7xl mx-auto'}
         >

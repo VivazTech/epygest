@@ -30,6 +30,8 @@ declare global {
   namespace Express {
     interface Request {
       user?: SessionUser;
+      /** Empresa ativa (Vivaz / Aquamania), vinda do header X-Empresa-Key. */
+      empresaKey?: "vivaz" | "aqua";
     }
   }
 }

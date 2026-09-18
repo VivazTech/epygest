@@ -24,6 +24,22 @@ import {
   RESET_TOKEN_TTL_SECONDS,
   type SessionUser,
 } from "./lib/auth.js";
+import {
+  filterByEmpresa,
+  filterByEmpresaKey,
+  readEmpresaKeyFromRequest,
+  withEmpresaKey,
+  withEmpresaKeyValue,
+  scopeByEmpresa,
+  empresaKeyOf,
+  protocolPrefixForEmpresa,
+  rowBelongsToEmpresa,
+} from "./lib/empresaScope.js";
+import { empresaAls, installEmpresaScopedSupabase } from "./lib/empresaScopedSupabase.js";
+import { COMPANY_HEADER, DEFAULT_COMPANY_KEY, type CompanyKey } from "./lib/companies.js";
+
+// Garante isolamento multi-tenant em todo supabase.from() do processo
+installEmpresaScopedSupabase(supabase);
 import { sendEmail } from "./lib/mail.js";
 import {
   PERMISSION_RESOURCES,
@@ -281,17 +297,21 @@ const normalizeCrdFilterText = (value: string) =>
     .replace(/^crd\s+/, "")
     .trim();
 
-const fetchMonthlyValuesByYear = async (year: number) => {
+const fetchMonthlyValuesByYear = async (year: number, empresaKey?: CompanyKey) => {
   const pageSize = 1000;
   let from = 0;
   const rows: CrdMonthlyValueRow[] = [];
 
   while (true) {
     const to = from + pageSize - 1;
-    const { data, error } = await supabase
+    let query = supabase
       .from("crd_monthly_values")
       .select("crd_id, year, month, value")
-      .eq("year", year)
+      .eq("year", year);
+    if (empresaKey) {
+      query = filterByEmpresaKey(query, empresaKey, "crd_monthly_values");
+    }
+    const { data, error } = await query
       .order("crd_id", { ascending: true })
       .range(from, to);
 
@@ -339,10 +359,12 @@ const sanitizeMonthBudget = (value: any) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
-/** Gera protocolo diário atômico via RPC (ex.: REQ-20260916-0042). */
-const allocateLaunchProtocol = async (prefix: string): Promise<string | null> => {
+/** Gera protocolo diário atômico via RPC (ex.: REQ-20260916-0042). Aqua usa prefixo A-*. */
+const allocateLaunchProtocol = async (prefix: string, req?: express.Request): Promise<string | null> => {
+  const empresa = req ? empresaKeyOf(req) : "vivaz";
+  const scopedPrefix = protocolPrefixForEmpresa(prefix, empresa);
   const { data, error } = await supabase.rpc("allocate_document_protocol", {
-    p_prefix: String(prefix || "").trim().toUpperCase(),
+    p_prefix: String(scopedPrefix || "").trim().toUpperCase(),
   });
   if (error || !data) {
     console.error("Falha ao gerar protocolo:", error);
@@ -524,7 +546,10 @@ const uploadDir = process.env.VERCEL
 
 export function createApp() {
   const app = express();
-  const sectorCache = getSectorCache(supabase);
+  const sectorCacheFor = (empresaKey?: CompanyKey) =>
+    getSectorCache(supabase, empresaKey || DEFAULT_COMPANY_KEY);
+  /** @deprecated use sectorCacheFor(empresaKeyOf(req)) — default Vivaz for imports legado */
+  const sectorCache = sectorCacheFor(DEFAULT_COMPANY_KEY);
 
   if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
   // Limite de tamanho para evitar DoS/esgotamento de disco. Excel/PDF grandes cabem em 20MB.
@@ -579,7 +604,7 @@ export function createApp() {
       res.setHeader("Access-Control-Allow-Credentials", "true");
       res.setHeader("Vary", "Origin");
       res.setHeader("Access-Control-Allow-Methods", "GET,POST,PATCH,PUT,DELETE,OPTIONS");
-      res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+      res.setHeader("Access-Control-Allow-Headers", `Content-Type, ${COMPANY_HEADER}`);
     }
     if (req.method === "OPTIONS") return res.sendStatus(204);
     next();
@@ -587,6 +612,11 @@ export function createApp() {
 
   app.use(express.json());
   app.use(cookieParser());
+  app.use((req, _res, next) => {
+    const key = readEmpresaKeyFromRequest(req);
+    req.empresaKey = key;
+    empresaAls.run(key, () => next());
+  });
   app.use("/uploads", express.static(uploadDir));
 
   // Helper para montar os setores do usuário (usado em login e /me).
@@ -636,13 +666,44 @@ export function createApp() {
     return Boolean(data?.slug);
   };
 
-  const buildUserSession = async (user: any) => {
+  const ensureUserHasBothEmpresas = async (userId: number | string) => {
+    const rows = [
+      { user_id: Number(userId), empresa_key: "vivaz" as const },
+      { user_id: Number(userId), empresa_key: "aqua" as const },
+    ];
+    const { error } = await supabase
+      .from("user_empresas")
+      .upsert(rows, { onConflict: "user_id,empresa_key", ignoreDuplicates: true });
+    if (error) console.error("Falha ao vincular empresas do usuário:", error);
+  };
+
+  const buildUserSession = async (user: any, empresaKey?: CompanyKey) => {
+    const activeEmpresa = empresaKey || DEFAULT_COMPANY_KEY;
+
+    // Todo login deve ter Vivaz e Aqua
+    await ensureUserHasBothEmpresas(user.id);
+
+    const { data: empresaLinks } = await supabase
+      .from("user_empresas")
+      .select("empresa_key")
+      .eq("user_id", user.id);
+    let empresaKeys = Array.from(
+      new Set(
+        (empresaLinks ?? [])
+          .map((row: any) => String(row.empresa_key || "").trim())
+          .filter((k): k is CompanyKey => k === "vivaz" || k === "aqua")
+      )
+    );
+    if (!empresaKeys.includes("vivaz") || !empresaKeys.includes("aqua")) {
+      empresaKeys = ["vivaz", "aqua"];
+    }
+
     const { data: userSectorLinks } = await supabase
       .from("user_sectors")
       .select("sector_id")
       .eq("user_id", user.id);
 
-    const sectorIds = Array.from(
+    const linkedIds = Array.from(
       new Set(
         (userSectorLinks ?? [])
           .map((link: any) => Number(link.sector_id))
@@ -650,21 +711,31 @@ export function createApp() {
       )
     );
 
-    const fallbackSectorIds = sectorIds.length
-      ? sectorIds
+    const fallbackIds = linkedIds.length
+      ? linkedIds
       : (Number.isFinite(Number(user.sector_id)) ? [Number(user.sector_id)] : []);
 
-    const { data: sectorRows } = fallbackSectorIds.length
-      ? await supabase.from("sectors").select("id, name").in("id", fallbackSectorIds)
-      : { data: [] as any[] };
+    // Só setores da empresa ativa (evita vazar setores Vivaz no Aqua)
+    let sectorIds: number[] = [];
+    let sectorNames: string[] = [];
+    if (fallbackIds.length) {
+      const { data: sectorRows } = await filterByEmpresaKey(
+        supabase.from("sectors").select("id, name").in("id", fallbackIds),
+        activeEmpresa,
+        "sectors"
+      );
+      sectorIds = (sectorRows ?? []).map((row: any) => Number(row.id)).filter((id) => Number.isFinite(id));
+      sectorNames = (sectorRows ?? []).map((row: any) => String(row.name || ""));
+    }
 
-    const sectorNames = (sectorRows ?? []).map((row: any) => String(row.name || ""));
     const { password: _pwd, ...userWithoutPassword } = user;
     const permissions = await loadRolePermissions(String(user.role || ""));
     return {
       ...userWithoutPassword,
-      sector_ids: fallbackSectorIds,
+      sector_ids: sectorIds,
       sector_names: sectorNames,
+      empresa_keys: empresaKeys,
+      empresa_key: activeEmpresa,
       permissions,
     };
   };
@@ -719,7 +790,7 @@ export function createApp() {
         }
       }
 
-      const sessionData = await buildUserSession(user);
+      const sessionData = await buildUserSession(user, empresaKeyOf(req));
       res.cookie(SESSION_COOKIE, token, sessionCookieOptions());
       res.json(sessionData);
     } catch (err) {
@@ -916,13 +987,37 @@ export function createApp() {
       .eq("id", req.user!.id)
       .single();
     if (error || !user) return res.status(401).json({ error: "Sessão inválida" });
-    res.json(await buildUserSession(user));
+    res.json(await buildUserSession(user, empresaKeyOf(req)));
   });
 
   // ====================================================
   // A partir daqui, TODAS as rotas exigem autenticação.
   // ====================================================
   app.use("/api", requireAuth);
+  app.use("/api", async (req, res, next) => {
+    if (!req.user?.id) return next();
+    try {
+      const { data } = await supabase
+        .from("user_empresas")
+        .select("empresa_key")
+        .eq("user_id", req.user.id)
+        .eq("empresa_key", empresaKeyOf(req))
+        .maybeSingle();
+      if (!data) {
+        const { count } = await supabase
+          .from("user_empresas")
+          .select("empresa_key", { count: "exact", head: true })
+          .eq("user_id", req.user.id);
+        if ((count ?? 0) > 0) {
+          return res.status(403).json({ error: "Sem acesso a esta empresa." });
+        }
+      }
+      return next();
+    } catch (err) {
+      console.error("Falha ao validar empresa do usuário:", err);
+      return next();
+    }
+  });
 
   // ====================================================
   // PLANILHAS (Extracao_Planilhas)
@@ -1124,6 +1219,8 @@ export function createApp() {
         });
       }
     }
+
+    await ensureUserHasBothEmpresas(data.id);
 
     res.json({ id: data.id });
   });
@@ -1946,11 +2043,12 @@ export function createApp() {
   // ====================================================
   // FINANCIAL RECORDS
   // ====================================================
-  app.get("/api/financial/records", async (_req, res) => {
-    const { data, error } = await supabase
-      .from("financial_records")
-      .select("*, categories(name), sectors(name)")
-      .order("date", { ascending: false });
+  app.get("/api/financial/records", async (req, res) => {
+    const { data, error } = await filterByEmpresa(
+      supabase.from("financial_records").select("*, categories(name), sectors(name)"),
+      req,
+      "financial_records"
+    ).order("date", { ascending: false });
 
     if (error) { console.error(error); return res.status(500).json({ error: "Erro interno ao processar a solicitação." }); }
 
@@ -1974,29 +2072,33 @@ export function createApp() {
     const selectedYear = Number(year) || now.getFullYear();
     const { dateFrom, dateTo } = getMonthDateRange(selectedYear, selectedMonth);
 
-    const { data: sectors, error } = await supabase
-      .from("sectors")
-      .select("*")
-      .order("name");
+    const { data: sectors, error } = await filterByEmpresa(
+      supabase.from("sectors").select("*"),
+      req,
+      "sectors"
+    ).order("name");
 
     if (error) { console.error(error); return res.status(500).json({ error: "Erro interno ao processar a solicitação." }); }
 
-    const { data: crdData, error: crdError } = await supabase
-      .from("crds")
-      .select("id, code, sector_id, previsto_mes")
-      .eq("active", true);
+    const { data: crdData, error: crdError } = await filterByEmpresa(
+      supabase.from("crds").select("id, code, sector_id, previsto_mes").eq("active", true),
+      req,
+      "crds"
+    );
     if (crdError) return res.status(500).json({ error: crdError.message });
 
-    const { data: allCrds } = await supabase
-      .from("crds")
-      .select("id, code, sector_id");
+    const { data: allCrds } = await filterByEmpresa(
+      supabase.from("crds").select("id, code, sector_id"),
+      req,
+      "crds"
+    );
 
     let occupancyPercent = 100;
-    const { data: occupancyRows, error: occupancyError } = await supabase
-      .from("sintase_occupancy")
-      .select("occupancy_percent")
-      .eq("year", selectedYear)
-      .limit(1);
+    const { data: occupancyRows, error: occupancyError } = await filterByEmpresa(
+      supabase.from("sintase_occupancy").select("occupancy_percent").eq("year", selectedYear),
+      req,
+      "sintase_occupancy"
+    ).limit(1);
     if (!occupancyError && occupancyRows?.length) {
       occupancyPercent = getNormalizedOccupancyPercent((occupancyRows[0] as any).occupancy_percent);
     }
@@ -2017,7 +2119,10 @@ export function createApp() {
     const allowedCrdIds = new Set(crdIds);
 
     if (crdIds.length) {
-      const { rows, error: monthlyError } = await fetchMonthlyValuesByYear(selectedYear);
+      const { rows, error: monthlyError } = await fetchMonthlyValuesByYear(
+        selectedYear,
+        empresaKeyOf(req)
+      );
       monthlyValues = rows ?? [];
 
       if (monthlyError) {
@@ -2072,24 +2177,36 @@ export function createApp() {
     const yearDateFrom = `${selectedYear}-01-01`;
     const yearDateTo = `${selectedYear}-12-31`;
     const [{ data: yearInvoices }, { data: yearReqs }, { data: yearManual }] = await Promise.all([
-      supabase
-        .from("invoices")
-        .select("sector_id, amount")
-        .gte("due_date", yearDateFrom)
-        .lte("due_date", yearDateTo)
-        .or("flow_stage.is.null,flow_stage.neq.cancelled"),
-      supabase
-        .from("requisitions")
-        .select("sector_id, amount")
-        .in("status", ["pending_manager", "open", "approved"])
-        .gte("date", yearDateFrom)
-        .lte("date", yearDateTo),
-      supabase
-        .from("manual_entries")
-        .select("sector_id, amount")
-        .in("status", ["pending_manager", "open", "approved"])
-        .gte("date", yearDateFrom)
-        .lte("date", yearDateTo),
+      filterByEmpresa(
+        supabase
+          .from("invoices")
+          .select("sector_id, amount")
+          .gte("due_date", yearDateFrom)
+          .lte("due_date", yearDateTo)
+          .or("flow_stage.is.null,flow_stage.neq.cancelled"),
+        req,
+        "invoices"
+      ),
+      filterByEmpresa(
+        supabase
+          .from("requisitions")
+          .select("sector_id, amount")
+          .in("status", ["pending_manager", "open", "approved"])
+          .gte("date", yearDateFrom)
+          .lte("date", yearDateTo),
+        req,
+        "requisitions"
+      ),
+      filterByEmpresa(
+        supabase
+          .from("manual_entries")
+          .select("sector_id, amount")
+          .in("status", ["pending_manager", "open", "approved"])
+          .gte("date", yearDateFrom)
+          .lte("date", yearDateTo),
+        req,
+        "manual_entries"
+      ),
     ]);
 
     const annualInvoicesBySector = new Map<number, number>();
@@ -2123,27 +2240,39 @@ export function createApp() {
     const enriched = await Promise.all(
       (sectors ?? []).map(async (sector: any) => {
         const [{ data: pendingInvoices }, { data: pendingReqs }, { data: pendingManual }] = await Promise.all([
-          supabase
-            .from("invoices")
-            .select("amount")
-            .eq("sector_id", sector.id)
-            .gte("due_date", dateFrom)
-            .lte("due_date", dateTo)
-            .or("flow_stage.is.null,flow_stage.neq.cancelled"),
-          supabase
-            .from("requisitions")
-            .select("amount")
-            .eq("sector_id", sector.id)
-            .in("status", ["pending_manager", "open", "approved"])
-            .gte("date", dateFrom)
-            .lte("date", dateTo),
-          supabase
-            .from("manual_entries")
-            .select("amount")
-            .eq("sector_id", sector.id)
-            .in("status", ["pending_manager", "open", "approved"])
-            .gte("date", dateFrom)
-            .lte("date", dateTo),
+          filterByEmpresa(
+            supabase
+              .from("invoices")
+              .select("amount")
+              .eq("sector_id", sector.id)
+              .gte("due_date", dateFrom)
+              .lte("due_date", dateTo)
+              .or("flow_stage.is.null,flow_stage.neq.cancelled"),
+            req,
+            "invoices"
+          ),
+          filterByEmpresa(
+            supabase
+              .from("requisitions")
+              .select("amount")
+              .eq("sector_id", sector.id)
+              .in("status", ["pending_manager", "open", "approved"])
+              .gte("date", dateFrom)
+              .lte("date", dateTo),
+            req,
+            "requisitions"
+          ),
+          filterByEmpresa(
+            supabase
+              .from("manual_entries")
+              .select("amount")
+              .eq("sector_id", sector.id)
+              .in("status", ["pending_manager", "open", "approved"])
+              .gte("date", dateFrom)
+              .lte("date", dateTo),
+            req,
+            "manual_entries"
+          ),
         ]);
 
         const pending_invoices = (pendingInvoices ?? []).reduce(
@@ -2191,12 +2320,12 @@ export function createApp() {
     const budget_limit = Number(req.body?.budget_limit);
     const { data, error } = await supabase
       .from("sectors")
-      .insert({
+      .insert(withEmpresaKey({
         name,
         code,
         active: true,
         budget_limit: Number.isFinite(budget_limit) ? budget_limit : 0,
-      })
+      }, req))
       .select("id, name, code, budget_limit, active, created_at")
       .single();
     if (error) {
@@ -2207,7 +2336,7 @@ export function createApp() {
       }
       return res.status(500).json({ error: "Não foi possível criar o setor." });
     }
-    await sectorCache.reload(true);
+    await sectorCacheFor(empresaKeyOf(req)).reload(true);
     res.json(data);
   });
 
@@ -2258,7 +2387,7 @@ export function createApp() {
         .update({ ccusto_descricao: patch.name, updated_at: new Date().toISOString() })
         .eq("ccusto_descricao", previousName);
     }
-    await sectorCache.reload(true);
+    await sectorCacheFor(empresaKeyOf(req)).reload(true);
     res.json(data ?? { success: true });
   });
 
@@ -2279,11 +2408,12 @@ export function createApp() {
   // ====================================================
   // REQUISIÇÕES
   // ====================================================
-  app.get("/api/requisitions", async (_req, res) => {
-    const { data, error } = await supabase
-      .from("requisitions")
-      .select("*, sectors(name), crds(id, code, name, sector_id, sectors(name))")
-      .order("date", { ascending: false });
+  app.get("/api/requisitions", async (req, res) => {
+    const { data, error } = await filterByEmpresa(
+      supabase.from("requisitions").select("*, sectors(name), crds(id, code, name, sector_id, sectors(name))"),
+      req,
+      "requisitions"
+    ).order("date", { ascending: false });
 
     if (error) { console.error(error); return res.status(500).json({ error: "Erro interno ao processar a solicitação." }); }
 
@@ -2306,18 +2436,17 @@ export function createApp() {
       return res.status(400).json({ error: "CRD, fornecedor, valor e data são obrigatórios" });
     }
 
-    const { data: crd, error: crdError } = await supabase
-      .from("crds")
-      .select("id, sector_id, code")
-      .eq("id", Number(crd_id))
-      .single();
+    const { data: crd, error: crdError } = await scopeByEmpresa(
+      supabase.from("crds").select("id, sector_id, code").eq("id", Number(crd_id)),
+      req
+    ).single();
     if (crdError || !crd) {
       return res.status(400).json({ error: "CRD inválido para a requisição" });
     }
 
     const { data: userRow } = await supabase.from("users").select("*").eq("id", req.user!.id).single();
     if (userRow) {
-      const session = await buildUserSession(userRow);
+      const session = await buildUserSession(userRow, empresaKeyOf(req));
       const allowedSectorIds = session.sector_ids ?? [];
       const isGlobal = ["admin", "finance", "controle"].includes(String(userRow.role || ""));
       const shared = isSharedCrdCode((crd as any).code);
@@ -2332,11 +2461,11 @@ export function createApp() {
       }
     }
 
-    const protocol = await allocateLaunchProtocol(PROTOCOL_PREFIX.requisicao);
+    const protocol = await allocateLaunchProtocol(PROTOCOL_PREFIX.requisicao, req);
     if (!protocol) return res.status(500).json({ error: "Não foi possível gerar o protocolo da requisição." });
     const { data, error } = await supabase
       .from("requisitions")
-      .insert({
+      .insert(withEmpresaKey({
         crd_id: Number(crd_id),
         sector_id: Number(crd.sector_id),
         description: description || null,
@@ -2345,7 +2474,7 @@ export function createApp() {
         date,
         status: initialLaunchStatus(req.user?.role),
         protocol,
-      })
+      }, req))
       .select("id, protocol")
       .single();
 
@@ -2360,11 +2489,10 @@ export function createApp() {
       return res.status(400).json({ error: "Status inválido" });
     }
 
-    const { data: existing, error: fetchError } = await supabase
-      .from("requisitions")
-      .select("id, sector_id, status")
-      .eq("id", id)
-      .single();
+    const { data: existing, error: fetchError } = await scopeByEmpresa(
+      supabase.from("requisitions").select("id, sector_id, status").eq("id", id),
+      req
+    ).single();
     if (fetchError || !existing) {
       return res.status(404).json({ error: "Requisição não encontrada" });
     }
@@ -2377,7 +2505,10 @@ export function createApp() {
     const validation = validateLaunchFlowStatus(role, current, status);
     if (validation.ok === false) return res.status(validation.status).json({ error: validation.error });
 
-    const { error } = await supabase.from("requisitions").update({ status }).eq("id", id);
+    const { error } = await scopeByEmpresa(
+      supabase.from("requisitions").update({ status }).eq("id", id),
+      req
+    );
     if (error) {
       console.error(error);
       return res.status(500).json({ error: "Erro interno ao processar a solicitação." });
@@ -2392,7 +2523,7 @@ export function createApp() {
     const { data: userRow } = await supabase.from("users").select("*").eq("id", req.user!.id).single();
     if (!userRow) return { ok: true as const };
 
-    const session = await buildUserSession(userRow);
+    const session = await buildUserSession(userRow, empresaKeyOf(req));
     const allowedSectorIds = session.sector_ids ?? [];
     const isGlobal = ["admin", "finance", "controle"].includes(String(userRow.role || ""));
 
@@ -2409,11 +2540,12 @@ export function createApp() {
     return { ok: true as const };
   };
 
-  app.get("/api/manual-entries", async (_req, res) => {
-    const { data, error } = await supabase
-      .from("manual_entries")
-      .select("*, sectors(name), crds(id, code, name), users(id, name)")
-      .order("date", { ascending: false });
+  app.get("/api/manual-entries", async (req, res) => {
+    const { data, error } = await filterByEmpresa(
+      supabase.from("manual_entries").select("*, sectors(name), crds(id, code, name), users(id, name)"),
+      req,
+      "manual_entries"
+    ).order("date", { ascending: false });
 
     if (error) {
       console.error(error);
@@ -2472,11 +2604,10 @@ export function createApp() {
 
     let resolvedCrdId: number | null = null;
     if (crd_id) {
-      const { data: crd, error: crdError } = await supabase
-        .from("crds")
-        .select("id, sector_id, code")
-        .eq("id", Number(crd_id))
-        .single();
+      const { data: crd, error: crdError } = await scopeByEmpresa(
+        supabase.from("crds").select("id, sector_id, code").eq("id", Number(crd_id)),
+        req
+      ).single();
       if (crdError || !crd) {
         return res.status(400).json({ error: "CRD inválido para o lançamento" });
       }
@@ -2499,11 +2630,11 @@ export function createApp() {
       resolvedFileName = originalName || null;
     }
 
-    const protocol = await allocateLaunchProtocol(PROTOCOL_PREFIX.manual);
+    const protocol = await allocateLaunchProtocol(PROTOCOL_PREFIX.manual, req);
     if (!protocol) return res.status(500).json({ error: "Não foi possível gerar o protocolo do lançamento." });
     const { data, error } = await supabase
       .from("manual_entries")
-      .insert({
+      .insert(withEmpresaKey({
         sector_id: sectorId,
         crd_id: resolvedCrdId,
         user_id: req.user!.id,
@@ -2520,7 +2651,7 @@ export function createApp() {
         file_path: resolvedFilePath,
         file_name: resolvedFileName,
         protocol,
-      })
+      }, req))
       .select("id, protocol")
       .single();
 
@@ -2538,11 +2669,10 @@ export function createApp() {
       return res.status(400).json({ error: "Status inválido" });
     }
 
-    const { data: existing, error: fetchError } = await supabase
-      .from("manual_entries")
-      .select("id, sector_id, status")
-      .eq("id", id)
-      .single();
+    const { data: existing, error: fetchError } = await scopeByEmpresa(
+      supabase.from("manual_entries").select("id, sector_id, status").eq("id", id),
+      req
+    ).single();
     if (fetchError || !existing) {
       return res.status(404).json({ error: "Lançamento não encontrado" });
     }
@@ -2555,7 +2685,10 @@ export function createApp() {
     const validation = validateLaunchFlowStatus(role, current, status);
     if (validation.ok === false) return res.status(validation.status).json({ error: validation.error });
 
-    const { error } = await supabase.from("manual_entries").update({ status }).eq("id", id);
+    const { error } = await scopeByEmpresa(
+      supabase.from("manual_entries").update({ status }).eq("id", id),
+      req
+    );
     if (error) {
       console.error(error);
       return res.status(500).json({ error: "Erro interno ao processar a solicitação." });
@@ -2643,18 +2776,20 @@ export function createApp() {
   // Exclusão definitiva de lançamento manual (apenas admin)
   app.delete("/api/manual-entries/:id", requireRole("admin"), async (req, res) => {
     const { id } = req.params;
-    const { data: existing, error: fetchError } = await supabase
-      .from("manual_entries")
-      .select("id")
-      .eq("id", id)
-      .maybeSingle();
+    const { data: existing, error: fetchError } = await scopeByEmpresa(
+      supabase.from("manual_entries").select("id").eq("id", id),
+      req
+    ).maybeSingle();
     if (fetchError) {
       console.error(fetchError);
       return res.status(500).json({ error: "Erro interno ao processar a solicitação." });
     }
     if (!existing) return res.status(404).json({ error: "Lançamento não encontrado" });
 
-    const { error } = await supabase.from("manual_entries").delete().eq("id", id);
+    const { error } = await scopeByEmpresa(
+      supabase.from("manual_entries").delete().eq("id", id),
+      req
+    );
     if (error) {
       console.error(error);
       return res.status(500).json({ error: "Não foi possível excluir o lançamento." });
@@ -2665,11 +2800,12 @@ export function createApp() {
   // ====================================================
   // ESTORNOS
   // ====================================================
-  app.get("/api/estornos", async (_req, res) => {
-    const { data, error } = await supabase
-      .from("estornos")
-      .select("*, sectors(name), crds(id, code, name), users(id, name)")
-      .order("date", { ascending: false });
+  app.get("/api/estornos", async (req, res) => {
+    const { data, error } = await filterByEmpresa(
+      supabase.from("estornos").select("*, sectors(name), crds(id, code, name), users(id, name)"),
+      req,
+      "estornos"
+    ).order("date", { ascending: false });
 
     if (error) {
       console.error(error);
@@ -2707,11 +2843,10 @@ export function createApp() {
 
     let resolvedCrdId: number | null = null;
     if (crd_id) {
-      const { data: crd, error: crdError } = await supabase
-        .from("crds")
-        .select("id, sector_id, code")
-        .eq("id", Number(crd_id))
-        .single();
+      const { data: crd, error: crdError } = await scopeByEmpresa(
+        supabase.from("crds").select("id, sector_id, code").eq("id", Number(crd_id)),
+        req
+      ).single();
       if (crdError || !crd) {
         return res.status(400).json({ error: "CRD inválido para o estorno" });
       }
@@ -2734,11 +2869,11 @@ export function createApp() {
       resolvedFileName = originalName || null;
     }
 
-    const protocol = await allocateLaunchProtocol(PROTOCOL_PREFIX.estorno);
+    const protocol = await allocateLaunchProtocol(PROTOCOL_PREFIX.estorno, req);
     if (!protocol) return res.status(500).json({ error: "Não foi possível gerar o protocolo do estorno." });
     const { data, error } = await supabase
       .from("estornos")
-      .insert({
+      .insert(withEmpresaKey({
         sector_id: sectorId,
         crd_id: resolvedCrdId,
         user_id: req.user!.id,
@@ -2751,7 +2886,7 @@ export function createApp() {
         file_path: resolvedFilePath,
         file_name: resolvedFileName,
         protocol,
-      })
+      }, req))
       .select("id, protocol")
       .single();
 
@@ -2769,11 +2904,10 @@ export function createApp() {
       return res.status(400).json({ error: "Status inválido" });
     }
 
-    const { data: existing, error: fetchError } = await supabase
-      .from("estornos")
-      .select("id, sector_id, status")
-      .eq("id", id)
-      .single();
+    const { data: existing, error: fetchError } = await scopeByEmpresa(
+      supabase.from("estornos").select("id, sector_id, status").eq("id", id),
+      req
+    ).single();
     if (fetchError || !existing) {
       return res.status(404).json({ error: "Estorno não encontrado" });
     }
@@ -2786,7 +2920,10 @@ export function createApp() {
     const validation = validateLaunchFlowStatus(role, current, status);
     if (validation.ok === false) return res.status(validation.status).json({ error: validation.error });
 
-    const { error } = await supabase.from("estornos").update({ status }).eq("id", id);
+    const { error } = await scopeByEmpresa(
+      supabase.from("estornos").update({ status }).eq("id", id),
+      req
+    );
     if (error) {
       console.error(error);
       return res.status(500).json({ error: "Erro interno ao processar a solicitação." });
@@ -2849,18 +2986,20 @@ export function createApp() {
 
   app.delete("/api/estornos/:id", requireRole("admin"), async (req, res) => {
     const { id } = req.params;
-    const { data: existing, error: fetchError } = await supabase
-      .from("estornos")
-      .select("id")
-      .eq("id", id)
-      .maybeSingle();
+    const { data: existing, error: fetchError } = await scopeByEmpresa(
+      supabase.from("estornos").select("id").eq("id", id),
+      req
+    ).maybeSingle();
     if (fetchError) {
       console.error(fetchError);
       return res.status(500).json({ error: "Erro interno ao processar a solicitação." });
     }
     if (!existing) return res.status(404).json({ error: "Estorno não encontrado" });
 
-    const { error } = await supabase.from("estornos").delete().eq("id", id);
+    const { error } = await scopeByEmpresa(
+      supabase.from("estornos").delete().eq("id", id),
+      req
+    );
     if (error) {
       console.error(error);
       return res.status(500).json({ error: "Não foi possível excluir o estorno." });
@@ -2967,40 +3106,48 @@ export function createApp() {
         contratoRes,
       ] = await Promise.all([
         includeType("manual")
-          ? supabase
-              .from("manual_entries")
-              .select("*, sectors(name), crds(id, code, name), users(id, name)")
-              .order("date", { ascending: false })
+          ? filterByEmpresa(
+              supabase.from("manual_entries").select("*, sectors(name), crds(id, code, name), users(id, name)"),
+              req,
+              "manual_entries"
+            ).order("date", { ascending: false })
           : Promise.resolve({ data: [], error: null }),
         includeType("estorno")
-          ? supabase
-              .from("estornos")
-              .select("*, sectors(name), crds(id, code, name), users(id, name)")
-              .order("date", { ascending: false })
+          ? filterByEmpresa(
+              supabase.from("estornos").select("*, sectors(name), crds(id, code, name), users(id, name)"),
+              req,
+              "estornos"
+            ).order("date", { ascending: false })
           : Promise.resolve({ data: [], error: null }),
         includeType("requisicao")
-          ? supabase
-              .from("requisitions")
-              .select("*, sectors(name), crds(id, code, name, sector_id, sectors(name))")
-              .order("date", { ascending: false })
+          ? filterByEmpresa(
+              supabase.from("requisitions").select("*, sectors(name), crds(id, code, name, sector_id, sectors(name))"),
+              req,
+              "requisitions"
+            ).order("date", { ascending: false })
           : Promise.resolve({ data: [], error: null }),
         includeType("nota") || includeType("danfe")
-          ? supabase
-              .from("invoices")
-              .select("*, sectors(name), users(id, name)")
-              .order("due_date", { ascending: false })
+          ? filterByEmpresa(
+              supabase.from("invoices").select("*, sectors(name), users(id, name)"),
+              req,
+              "invoices"
+            ).order("due_date", { ascending: false })
           : Promise.resolve({ data: [], error: null }),
         includeType("comanda")
-          ? supabase
-              .from("comandas")
-              .select("*, users(id, name)")
-              .order("consumed_at", { ascending: false })
+          ? filterByEmpresa(
+              supabase.from("comandas").select("*, users(id, name)"),
+              req,
+              "comandas"
+            ).order("consumed_at", { ascending: false })
           : Promise.resolve({ data: [], error: null }),
         includeType("mensalidade")
-          ? supabase
-              .from("contrato_lancamentos")
-              .select("*, contratos(fornecedor, sector_id, vencimento, periodicidade, responsavel, sectors(name), crds(id, code, name)), users(id, name)")
-              .order("competencia", { ascending: false })
+          ? filterByEmpresa(
+              supabase
+                .from("contrato_lancamentos")
+                .select("*, contratos(fornecedor, sector_id, vencimento, periodicidade, responsavel, sectors(name), crds(id, code, name)), users(id, name)"),
+              req,
+              "contrato_lancamentos"
+            ).order("competencia", { ascending: false })
           : Promise.resolve({ data: [], error: null }),
       ]);
 
@@ -3243,7 +3390,7 @@ export function createApp() {
       if (String(req.user?.role || "") === "manager") {
         const { data: userRow } = await supabase.from("users").select("*").eq("id", req.user!.id).single();
         if (userRow) {
-          const session = await buildUserSession(userRow);
+          const session = await buildUserSession(userRow, empresaKeyOf(req));
           const allowed = new Set((session.sector_ids ?? []).map((id: number) => Number(id)));
           items = items.filter(
             (i) => i.type === "comanda" || (i.sector_id != null && allowed.has(Number(i.sector_id)))
@@ -3272,9 +3419,11 @@ export function createApp() {
   // ====================================================
   app.get("/api/pdv-locais", async (req, res) => {
     const includeInactive = String(req.query.all || "") === "1";
-    let query = supabase
-      .from("pdv_locais")
-      .select("*")
+    let query = filterByEmpresa(
+      supabase.from("pdv_locais").select("*"),
+      req,
+      "pdv_locais"
+    )
       .order("sort_order", { ascending: true })
       .order("name", { ascending: true });
     if (!includeInactive) query = query.eq("active", true);
@@ -3291,24 +3440,23 @@ export function createApp() {
     const name = String(req.body?.name ?? "").trim();
     if (!name) return res.status(400).json({ error: "Nome do local é obrigatório." });
 
-    const { data: existing } = await supabase
-      .from("pdv_locais")
-      .select("id")
-      .ilike("name", name)
-      .maybeSingle();
+    const { data: existing } = await filterByEmpresa(
+      supabase.from("pdv_locais").select("id").ilike("name", name),
+      req,
+      "pdv_locais"
+    ).maybeSingle();
     if (existing) return res.status(400).json({ error: "Já existe um local com este nome." });
 
-    const { data: last } = await supabase
-      .from("pdv_locais")
-      .select("sort_order")
-      .order("sort_order", { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    const { data: last } = await filterByEmpresa(
+      supabase.from("pdv_locais").select("sort_order").order("sort_order", { ascending: false }).limit(1),
+      req,
+      "pdv_locais"
+    ).maybeSingle();
     const sortOrder = Number((last as any)?.sort_order ?? 0) + 1;
 
     const { data, error } = await supabase
       .from("pdv_locais")
-      .insert({ name, active: true, sort_order: sortOrder })
+      .insert(withEmpresaKey({ name, active: true, sort_order: sortOrder }, req))
       .select("id, name, active, sort_order")
       .single();
 
@@ -3334,7 +3482,10 @@ export function createApp() {
       return res.status(400).json({ error: "Nenhum campo para atualizar." });
     }
 
-    const { error } = await supabase.from("pdv_locais").update(patch).eq("id", id);
+    const { error } = await scopeByEmpresa(
+      supabase.from("pdv_locais").update(patch).eq("id", id),
+      req
+    );
     if (error) {
       console.error(error);
       return res.status(500).json({ error: "Erro interno ao processar a solicitação." });
@@ -3344,7 +3495,10 @@ export function createApp() {
 
   app.delete("/api/pdv-locais/:id", requireRole("admin"), async (req, res) => {
     const { id } = req.params;
-    const { error } = await supabase.from("pdv_locais").delete().eq("id", id);
+    const { error } = await scopeByEmpresa(
+      supabase.from("pdv_locais").delete().eq("id", id),
+      req
+    );
     if (error) {
       console.error(error);
       return res.status(500).json({ error: "Erro interno ao processar a solicitação." });
@@ -3424,10 +3578,12 @@ export function createApp() {
     });
   };
 
-  app.get("/api/comandas", async (_req, res) => {
-    const { data: comandas, error } = await supabase
-      .from("comandas")
-      .select("*, users(id, name)")
+  app.get("/api/comandas", async (req, res) => {
+    const { data: comandas, error } = await filterByEmpresa(
+      supabase.from("comandas").select("*, users(id, name)"),
+      req,
+      "comandas"
+    )
       .order("consumed_at", { ascending: false })
       .order("created_at", { ascending: false });
 
@@ -3472,12 +3628,11 @@ export function createApp() {
     if (!consumedDate) return res.status(400).json({ error: "Data do consumo é obrigatória." });
     if (!consumedLocation) return res.status(400).json({ error: "Local do consumo é obrigatório." });
 
-    const { data: pdvLocal } = await supabase
-      .from("pdv_locais")
-      .select("id, name")
-      .eq("active", true)
-      .ilike("name", consumedLocation)
-      .maybeSingle();
+    const { data: pdvLocal } = await filterByEmpresa(
+      supabase.from("pdv_locais").select("id, name").eq("active", true).ilike("name", consumedLocation),
+      req,
+      "pdv_locais"
+    ).maybeSingle();
     if (!pdvLocal) {
       return res.status(400).json({ error: "Selecione um local PDV válido cadastrado em Configurações." });
     }
@@ -3485,11 +3640,11 @@ export function createApp() {
     const parsedItems = normalizeComandaItems(items ?? []);
     if (!parsedItems.ok) return res.status(400).json({ error: parsedItems.error });
 
-    const protocol = await allocateLaunchProtocol(PROTOCOL_PREFIX.comanda);
+    const protocol = await allocateLaunchProtocol(PROTOCOL_PREFIX.comanda, req);
     if (!protocol) return res.status(500).json({ error: "Não foi possível gerar o protocolo da comanda." });
     const { data: comanda, error: comandaError } = await supabase
       .from("comandas")
-      .insert({
+      .insert(withEmpresaKey({
         consumer_name: name,
         consumed_at: consumedDate,
         location: String(pdvLocal.name),
@@ -3497,7 +3652,7 @@ export function createApp() {
         user_id: req.user!.id,
         status: initialLaunchStatus(req.user?.role),
         protocol,
-      })
+      }, req))
       .select("id, protocol")
       .single();
 
@@ -3528,11 +3683,10 @@ export function createApp() {
       return res.status(400).json({ error: "Status inválido" });
     }
 
-    const { data: existing, error: fetchError } = await supabase
-      .from("comandas")
-      .select("id, status")
-      .eq("id", id)
-      .single();
+    const { data: existing, error: fetchError } = await scopeByEmpresa(
+      supabase.from("comandas").select("id, status").eq("id", id),
+      req
+    ).single();
     if (fetchError || !existing) {
       return res.status(404).json({ error: "Comanda não encontrada" });
     }
@@ -3542,7 +3696,10 @@ export function createApp() {
     const validation = validateLaunchFlowStatus(role, current, status);
     if (validation.ok === false) return res.status(validation.status).json({ error: validation.error });
 
-    const { error } = await supabase.from("comandas").update({ status }).eq("id", id);
+    const { error } = await scopeByEmpresa(
+      supabase.from("comandas").update({ status }).eq("id", id),
+      req
+    );
     if (error) {
       console.error(error);
       return res.status(500).json({ error: "Erro interno ao processar a solicitação." });
@@ -3562,10 +3719,11 @@ export function createApp() {
     };
     const now = new Date();
 
-    let query = supabase
-      .from("invoices")
-      .select("*, sectors(name), users(name)")
-      .order("created_at", { ascending: false });
+    let query = filterByEmpresa(
+      supabase.from("invoices").select("*, sectors(name), users(name)"),
+      req,
+      "invoices"
+    ).order("created_at", { ascending: false });
 
     if (from || to) {
       const dateFrom = from || to!;
@@ -3613,14 +3771,19 @@ export function createApp() {
     return amount.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
   };
 
-  const fetchInvoiceReportRows = async (filters: {
-    from?: string;
-    to?: string;
-    payment_method?: string;
-  }) => {
-    let query = supabase
-      .from("invoices")
-      .select("*, sectors(name), users(name)")
+  const fetchInvoiceReportRows = async (
+    filters: {
+      from?: string;
+      to?: string;
+      payment_method?: string;
+    },
+    req: express.Request
+  ) => {
+    let query = filterByEmpresa(
+      supabase.from("invoices").select("*, sectors(name), users(name)"),
+      req,
+      "invoices"
+    )
       .neq("flow_stage", "cancelled")
       .order("due_date", { ascending: true });
 
@@ -3763,7 +3926,7 @@ export function createApp() {
     const exportFormat = String(format || "csv").toLowerCase();
 
     try {
-      const rows = await fetchInvoiceReportRows({ from, to, payment_method });
+      const rows = await fetchInvoiceReportRows({ from, to, payment_method }, req);
       const stamp = new Date().toISOString().slice(0, 10);
 
       if (exportFormat === "pdf") {
@@ -4026,12 +4189,12 @@ export function createApp() {
 
     const launchedByUserId = req.user?.id ?? null;
     const protocolPrefix = invoiceProtocolPrefix(resolvedNumber);
-    const protocol = await allocateLaunchProtocol(protocolPrefix);
+    const protocol = await allocateLaunchProtocol(protocolPrefix, req);
     if (!protocol) return res.status(500).json({ error: "Não foi possível gerar o protocolo da nota." });
 
     const { data, error } = await supabase
       .from("invoices")
-      .insert({
+      .insert(withEmpresaKey({
         invoice_number: resolvedNumber,
         provider_name: resolvedProvider,
         amount: resolvedAmount,
@@ -4050,7 +4213,7 @@ export function createApp() {
         status: "received",
         flow_stage: initialInvoiceFlowStage(req.user?.role),
         protocol,
-      })
+      }, req))
       .select("id, invoice_number, protocol, provider_name, amount, issue_date, due_date, sector_id, flow_stage, status, crd, created_at")
       .single();
 
@@ -4064,11 +4227,10 @@ export function createApp() {
       return res.status(400).json({ error: "Nota inválida." });
     }
 
-    const { data: invoice, error: fetchErr } = await supabase
-      .from("invoices")
-      .select("*")
-      .eq("id", invoiceId)
-      .single();
+    const { data: invoice, error: fetchErr } = await scopeByEmpresa(
+      supabase.from("invoices").select("*").eq("id", invoiceId),
+      req
+    ).single();
     if (fetchErr || !invoice) {
       return res.status(404).json({ error: "Nota não encontrada" });
     }
@@ -4163,27 +4325,30 @@ export function createApp() {
     }
 
     const nowIso = new Date().toISOString();
-    const { data, error } = await supabase
-      .from("invoices")
-      .update({
-        invoice_number: resolvedNumber,
-        provider_name: resolvedProvider,
-        amount: resolvedAmount,
-        issue_date: resolvedIssue,
-        due_date: resolvedDue,
-        sector_id: resolvedSectorId,
-        file_path: resolvedFile,
-        boleto_file_path: boletoPaths[0] || null,
-        boleto_file_paths: boletoPaths,
-        natureza: resolvedNatureza,
-        crd: resolvedCrd,
-        payment_method: resolvedPayment,
-        pix_key: resolvedPix,
-        currency: resolvedCurrency,
-        edit_count: Number(invoice.edit_count || 0) + 1,
-        last_edited_at: nowIso,
-      })
-      .eq("id", invoiceId)
+    const { data, error } = await scopeByEmpresa(
+      supabase
+        .from("invoices")
+        .update({
+          invoice_number: resolvedNumber,
+          provider_name: resolvedProvider,
+          amount: resolvedAmount,
+          issue_date: resolvedIssue,
+          due_date: resolvedDue,
+          sector_id: resolvedSectorId,
+          file_path: resolvedFile,
+          boleto_file_path: boletoPaths[0] || null,
+          boleto_file_paths: boletoPaths,
+          natureza: resolvedNatureza,
+          crd: resolvedCrd,
+          payment_method: resolvedPayment,
+          pix_key: resolvedPix,
+          currency: resolvedCurrency,
+          edit_count: Number(invoice.edit_count || 0) + 1,
+          last_edited_at: nowIso,
+        })
+        .eq("id", invoiceId),
+      req
+    )
       .select("id, invoice_number, provider_name, amount, issue_date, due_date, sector_id, flow_stage, status, crd, edit_count, last_edited_at")
       .single();
 
@@ -4238,11 +4403,10 @@ export function createApp() {
       return res.status(403).json({ error: "Apenas Financeiro (ou admin) pode marcar como pago." });
     }
 
-    const { data: invoice, error: fetchErr } = await supabase
-      .from("invoices")
-      .select("*")
-      .eq("id", id)
-      .single();
+    const { data: invoice, error: fetchErr } = await scopeByEmpresa(
+      supabase.from("invoices").select("*").eq("id", id),
+      req
+    ).single();
 
     if (fetchErr || !invoice) return res.status(404).json({ error: "Nota não encontrada" });
 
@@ -4256,19 +4420,25 @@ export function createApp() {
         return res.status(400).json({ error: "A nota não está aguardando aprovação do gestor." });
       }
       if (action === "approve_manager") {
-        const { error } = await supabase.from("invoices").update({
-          flow_stage: "control_pending",
-          approved_by_sector: actorSector || "GESTOR",
-        }).eq("id", id);
+        const { error } = await scopeByEmpresa(
+          supabase.from("invoices").update({
+            flow_stage: "control_pending",
+            approved_by_sector: actorSector || "GESTOR",
+          }).eq("id", id),
+          req
+        );
         if (error) { console.error(error); return res.status(500).json({ error: "Erro interno ao processar a solicitação." }); }
         return res.json({ success: true });
       }
-      const { error } = await supabase.from("invoices").update({
-        flow_stage: "cancelled",
-        cancelled_at: new Date().toISOString(),
-        cancelled_by_sector: actorSector || "GESTOR",
-        cancel_reason: cancel_reason || "Reprovada pelo gestor do setor",
-      }).eq("id", id);
+      const { error } = await scopeByEmpresa(
+        supabase.from("invoices").update({
+          flow_stage: "cancelled",
+          cancelled_at: new Date().toISOString(),
+          cancelled_by_sector: actorSector || "GESTOR",
+          cancel_reason: cancel_reason || "Reprovada pelo gestor do setor",
+        }).eq("id", id),
+        req
+      );
       if (error) { console.error(error); return res.status(500).json({ error: "Erro interno ao processar a solicitação." }); }
       return res.json({ success: true });
     }
@@ -4276,11 +4446,14 @@ export function createApp() {
     if (action === "approve_control") {
       if ((invoice.flow_stage || "control_pending") !== "control_pending")
         return res.status(400).json({ error: "A nota não está aguardando aprovação do Controle" });
-      const { error } = await supabase.from("invoices").update({
-        flow_stage: "control_approved",
-        approved_at: new Date().toISOString(),
-        approved_by_sector: actorSector || "CONTROLE",
-      }).eq("id", id);
+      const { error } = await scopeByEmpresa(
+        supabase.from("invoices").update({
+          flow_stage: "control_approved",
+          approved_at: new Date().toISOString(),
+          approved_by_sector: actorSector || "CONTROLE",
+        }).eq("id", id),
+        req
+      );
       if (error) { console.error(error); return res.status(500).json({ error: "Erro interno ao processar a solicitação." }); }
       return res.json({ success: true });
     }
@@ -4288,12 +4461,15 @@ export function createApp() {
     if (action === "reject_control") {
       if ((invoice.flow_stage || "control_pending") !== "control_pending")
         return res.status(400).json({ error: "Só é possível reprovar notas aguardando o Controle" });
-      const { error } = await supabase.from("invoices").update({
-        flow_stage: "cancelled",
-        cancelled_at: new Date().toISOString(),
-        cancelled_by_sector: actorSector || "CONTROLE",
-        cancel_reason: cancel_reason || "Reprovada pelo Controle",
-      }).eq("id", id);
+      const { error } = await scopeByEmpresa(
+        supabase.from("invoices").update({
+          flow_stage: "cancelled",
+          cancelled_at: new Date().toISOString(),
+          cancelled_by_sector: actorSector || "CONTROLE",
+          cancel_reason: cancel_reason || "Reprovada pelo Controle",
+        }).eq("id", id),
+        req
+      );
       if (error) { console.error(error); return res.status(500).json({ error: "Erro interno ao processar a solicitação." }); }
       return res.json({ success: true });
     }
@@ -4301,11 +4477,14 @@ export function createApp() {
     if (action === "disapprove_control") {
       if ((invoice.flow_stage || "control_pending") !== "control_approved")
         return res.status(400).json({ error: "Só é possível desaprovar notas já aprovadas pelo Controle" });
-      const { error } = await supabase.from("invoices").update({
-        flow_stage: "control_pending",
-        approved_at: null,
-        approved_by_sector: null,
-      }).eq("id", id);
+      const { error } = await scopeByEmpresa(
+        supabase.from("invoices").update({
+          flow_stage: "control_pending",
+          approved_at: null,
+          approved_by_sector: null,
+        }).eq("id", id),
+        req
+      );
       if (error) { console.error(error); return res.status(500).json({ error: "Erro interno ao processar a solicitação." }); }
       return res.json({ success: true });
     }
@@ -4313,13 +4492,16 @@ export function createApp() {
     if (action === "mark_paid") {
       if ((invoice.flow_stage || "control_pending") !== "control_approved")
         return res.status(400).json({ error: "A nota precisa ser aprovada pelo Controle antes do pagamento" });
-      const { error } = await supabase.from("invoices").update({
-        status: "paid",
-        flow_stage: "paid",
-        paid_at: new Date().toISOString(),
-        paid_by_sector: actorSector || "FINANCEIRO",
-        payment_receipt_path: payment_receipt_path || null,
-      }).eq("id", id);
+      const { error } = await scopeByEmpresa(
+        supabase.from("invoices").update({
+          status: "paid",
+          flow_stage: "paid",
+          paid_at: new Date().toISOString(),
+          paid_by_sector: actorSector || "FINANCEIRO",
+          payment_receipt_path: payment_receipt_path || null,
+        }).eq("id", id),
+        req
+      );
       if (error) { console.error(error); return res.status(500).json({ error: "Erro interno ao processar a solicitação." }); }
       return res.json({ success: true });
     }
@@ -4329,12 +4511,15 @@ export function createApp() {
         return res.status(400).json({ error: "Não é possível cancelar uma nota já paga" });
       if (invoice.flow_stage === "cancelled")
         return res.status(400).json({ error: "Esta nota já está cancelada" });
-      const { error } = await supabase.from("invoices").update({
-        flow_stage: "cancelled",
-        cancelled_at: new Date().toISOString(),
-        cancelled_by_sector: actorSector || "SOLICITANTE",
-        cancel_reason: cancel_reason || null,
-      }).eq("id", id);
+      const { error } = await scopeByEmpresa(
+        supabase.from("invoices").update({
+          flow_stage: "cancelled",
+          cancelled_at: new Date().toISOString(),
+          cancelled_by_sector: actorSector || "SOLICITANTE",
+          cancel_reason: cancel_reason || null,
+        }).eq("id", id),
+        req
+      );
       if (error) { console.error(error); return res.status(500).json({ error: "Erro interno ao processar a solicitação." }); }
       return res.json({ success: true });
     }
@@ -4345,18 +4530,20 @@ export function createApp() {
   // Exclusão definitiva de nota (apenas admin)
   app.delete("/api/invoices/:id", requireRole("admin"), async (req, res) => {
     const { id } = req.params;
-    const { data: existing, error: fetchError } = await supabase
-      .from("invoices")
-      .select("id")
-      .eq("id", id)
-      .maybeSingle();
+    const { data: existing, error: fetchError } = await scopeByEmpresa(
+      supabase.from("invoices").select("id").eq("id", id),
+      req
+    ).maybeSingle();
     if (fetchError) {
       console.error(fetchError);
       return res.status(500).json({ error: "Erro interno ao processar a solicitação." });
     }
     if (!existing) return res.status(404).json({ error: "Nota não encontrada" });
 
-    const { error } = await supabase.from("invoices").delete().eq("id", id);
+    const { error } = await scopeByEmpresa(
+      supabase.from("invoices").delete().eq("id", id),
+      req
+    );
     if (error) {
       console.error(error);
       return res.status(500).json({ error: "Não foi possível excluir a nota." });
@@ -4367,8 +4554,12 @@ export function createApp() {
   // ====================================================
   // CATEGORIES
   // ====================================================
-  app.get("/api/categories", async (_req, res) => {
-    const { data, error } = await supabase.from("categories").select("*");
+  app.get("/api/categories", async (req, res) => {
+    const { data, error } = await filterByEmpresa(
+      supabase.from("categories").select("*"),
+      req,
+      "categories"
+    );
     if (error) { console.error(error); return res.status(500).json({ error: "Erro interno ao processar a solicitação." }); }
     res.json(data);
   });
@@ -4432,10 +4623,11 @@ export function createApp() {
   // ====================================================
   app.get("/api/cargos", async (req, res) => {
     const activeOnly = String((req.query as any)?.active ?? "") === "1" || String((req.query as any)?.active ?? "") === "true";
-    let query = supabase
-      .from("cargos")
-      .select("id, name, sector_id, active, created_at, sectors(name)")
-      .order("name");
+    let query = filterByEmpresa(
+      supabase.from("cargos").select("id, name, sector_id, active, created_at, sectors(name)"),
+      req,
+      "cargos"
+    ).order("name");
     if (activeOnly) query = query.eq("active", true);
     const { data, error } = await query;
     if (error) {
@@ -4465,12 +4657,16 @@ export function createApp() {
     if (!name || !Number.isFinite(sectorId)) {
       return res.status(400).json({ error: "name e sector_id são obrigatórios." });
     }
-    const { data: sector } = await supabase.from("sectors").select("id").eq("id", sectorId).maybeSingle();
+    const { data: sector } = await filterByEmpresa(
+      supabase.from("sectors").select("id").eq("id", sectorId),
+      req,
+      "sectors"
+    ).maybeSingle();
     if (!sector) return res.status(400).json({ error: "Setor inválido." });
 
     const { data, error } = await supabase
       .from("cargos")
-      .insert({ name, sector_id: sectorId, active: true })
+      .insert(withEmpresaKey({ name, sector_id: sectorId, active: true }, req))
       .select("id")
       .single();
     if (error) {
@@ -4504,7 +4700,10 @@ export function createApp() {
     }
     if (req.body?.active != null) patch.active = Boolean(req.body.active);
 
-    const { error } = await supabase.from("cargos").update(patch).eq("id", id);
+    const { error } = await scopeByEmpresa(
+      supabase.from("cargos").update(patch).eq("id", id),
+      req
+    );
     if (error) {
       console.error("Erro ao atualizar cargo:", error);
       return res.status(500).json({ error: "Não foi possível atualizar o cargo." });
@@ -4515,7 +4714,10 @@ export function createApp() {
   app.delete("/api/cargos/:id", requireRole("admin", "controle"), async (req, res) => {
     const id = Number(req.params.id);
     if (!Number.isFinite(id)) return res.status(400).json({ error: "id inválido." });
-    const { error } = await supabase.from("cargos").delete().eq("id", id);
+    const { error } = await scopeByEmpresa(
+      supabase.from("cargos").delete().eq("id", id),
+      req
+    );
     if (error) {
       console.error("Erro ao excluir cargo:", error);
       return res.status(500).json({ error: "Não foi possível excluir o cargo." });
@@ -4748,10 +4950,11 @@ export function createApp() {
     const activeOnly =
       String((req.query as any)?.active ?? "") === "1" ||
       String((req.query as any)?.active ?? "") === "true";
-    let query = supabase
-      .from("colaboradores")
-      .select(
-        `id, nome, nome_oficial, empresa_key, empresa_nome, codigo_funcionario,
+    let query = filterByEmpresa(
+      supabase
+        .from("colaboradores")
+        .select(
+          `id, nome, nome_oficial, empresa_key, empresa_nome, codigo_funcionario,
          cargo_descricao, ccusto_descricao, sector_id, salario_base, adicionais_fixos,
          adicional_quebra_caixa, adicional_idioma, outros_adicionais, observacao,
          active, created_at,
@@ -4761,22 +4964,27 @@ export function createApp() {
            cargo_id,
            cargos ( id, name, sector_id, sectors(name) )
          )`
-      )
-      .order("nome");
+        ),
+      req,
+      "colaboradores"
+    ).order("nome");
     if (activeOnly) query = query.eq("active", true);
     let { data, error } = await query;
 
     // Fallback se a junction ainda não existir no PostgREST cache
     if (error && colaboradorFuncoesMissing(error)) {
-      let fbQuery = supabase
-        .from("colaboradores")
-        .select(
-          `id, nome, nome_oficial, empresa_key, empresa_nome, codigo_funcionario,
+      let fbQuery = filterByEmpresa(
+        supabase
+          .from("colaboradores")
+          .select(
+            `id, nome, nome_oficial, empresa_key, empresa_nome, codigo_funcionario,
            cargo_descricao, ccusto_descricao, sector_id, salario_base, adicionais_fixos,
            adicional_quebra_caixa, adicional_idioma, outros_adicionais, observacao,
            active, created_at, sectors ( name, code )`
-        )
-        .order("nome");
+          ),
+        req,
+        "colaboradores"
+      ).order("nome");
       if (activeOnly) fbQuery = fbQuery.eq("active", true);
       const fb = await fbQuery;
       data = (fb.data ?? []).map((row: any) => ({ ...row, colaborador_funcoes: [] }));
@@ -5139,17 +5347,21 @@ export function createApp() {
   app.get("/api/crds", async (req, res) => {
     const { sector_id } = req.query as { sector_id?: string };
 
-    let query = supabase
-      .from("crds")
-      .select("*, sectors(name)")
+    let query = filterByEmpresa(
+      supabase.from("crds").select("*, sectors(name)"),
+      req,
+      "crds"
+    )
       .order("active", { ascending: false })
       .order("code");
 
     // Filtro por setor: inclui também CRDs compartilhados (ex.: 326).
     if (sector_id && Number.isFinite(Number(sector_id))) {
-      const { data, error } = await supabase
-        .from("crds")
-        .select("*, sectors(name)")
+      const { data, error } = await filterByEmpresa(
+        supabase.from("crds").select("*, sectors(name)"),
+        req,
+        "crds"
+      )
         .order("active", { ascending: false })
         .order("code");
       if (error) { console.error(error); return res.status(500).json({ error: "Erro interno ao processar a solicitação." }); }
@@ -5196,7 +5408,7 @@ export function createApp() {
       return res.status(400).json({ error: "natureza, code, name e sector_id são obrigatórios" });
     const { data, error } = await supabase
       .from("crds")
-      .insert({
+      .insert(withEmpresaKey({
         natureza: String(natureza).trim().toUpperCase(),
         code,
         name,
@@ -5207,7 +5419,7 @@ export function createApp() {
         realizado_mes: toNumberOrZero(realizado_mes),
         saldo: toNumberOrZero(saldo),
         active: active !== false,
-      })
+      }, req))
       .select("id")
       .single();
     if (error)
@@ -5294,11 +5506,12 @@ export function createApp() {
       }));
 
       const uniqueGroupNames = [...new Set(groupedCrdRows.map((r) => r.groupName.trim()).filter(Boolean))];
-      await sectorCache.reload(true);
+      const empresaSectorCache = sectorCacheFor(empresaKeyOf(req));
+      await empresaSectorCache.reload(true);
 
       const sectorIdByGroup = new Map<string, number>();
       for (const groupName of uniqueGroupNames) {
-        const resolved = await resolveSector(supabase, { name: groupName, create: true }, sectorCache);
+        const resolved = await resolveSector(supabase, { name: groupName, create: true }, empresaSectorCache);
         if (resolved) sectorIdByGroup.set(groupName.toUpperCase(), resolved.id);
       }
 
@@ -6847,7 +7060,7 @@ export function createApp() {
       for (const c of crdMeta ?? []) {
         previstoByCrdId.set(Number((c as any).id), sanitizeMonthBudget((c as any).previsto_mes));
       }
-      const { rows: monthlyRows } = await fetchMonthlyValuesByYear(year);
+      const { rows: monthlyRows } = await fetchMonthlyValuesByYear(year, empresaKeyOf(req));
       for (const mv of monthlyRows ?? []) {
         if (Number(mv.month) !== month) continue;
         const crdId = Number(mv.crd_id);
@@ -12856,27 +13069,29 @@ export function createApp() {
     const crdFilter = normalizeCrdFilterText(crd || "");
 
     let occupancyPercent = 100;
-    const { data: occupancyRows, error: occupancyError } = await supabase
-      .from("sintase_occupancy")
-      .select("occupancy_percent")
-      .eq("year", selectedYear)
-      .limit(1);
+    const { data: occupancyRows, error: occupancyError } = await filterByEmpresa(
+      supabase.from("sintase_occupancy").select("occupancy_percent").eq("year", selectedYear),
+      req,
+      "sintase_occupancy"
+    ).limit(1);
     if (!occupancyError && occupancyRows?.length) {
       occupancyPercent = getNormalizedOccupancyPercent((occupancyRows[0] as any).occupancy_percent);
     }
     const occupancyFactor = occupancyPercent / 100;
 
-    const { data: crdData, error } = await supabase
-      .from("crds")
-      .select("id, code, name, sector_id, previsto_mes, sectors(name)")
-      .eq("active", true)
-      .order("code");
+    const { data: crdData, error } = await filterByEmpresa(
+      supabase.from("crds").select("id, code, name, sector_id, previsto_mes, sectors(name)").eq("active", true),
+      req,
+      "crds"
+    ).order("code");
 
     if (error) { console.error(error); return res.status(500).json({ error: "Erro interno ao processar a solicitação." }); }
 
-    const { data: allCrds } = await supabase
-      .from("crds")
-      .select("id, code, sector_id");
+    const { data: allCrds } = await filterByEmpresa(
+      supabase.from("crds").select("id, code, sector_id"),
+      req,
+      "crds"
+    );
 
     const crdIds = (crdData ?? []).map((item: any) => Number(item.id)).filter((id) => Number.isFinite(id));
     const monthValueByKey = new Map<string, number>();
@@ -12892,7 +13107,10 @@ export function createApp() {
 
     if (crdIds.length) {
       const allowedCrdIds = new Set(crdIds);
-      const { rows: monthlyRows, error: monthlyError } = await fetchMonthlyValuesByYear(selectedYear);
+      const { rows: monthlyRows, error: monthlyError } = await fetchMonthlyValuesByYear(
+        selectedYear,
+        empresaKeyOf(req)
+      );
 
       if (!monthlyError) {
         for (const row of (monthlyRows ?? []) as CrdMonthlyValueRow[]) {
@@ -13112,11 +13330,11 @@ export function createApp() {
   app.get("/api/dre/realizado-rds", requireRole("admin", "controle", "diretoria"), async (req, res) => {
     const year = Number((req.query as { year?: string }).year) || new Date().getFullYear();
 
-    const { data, error } = await supabase
-      .from("rds_snapshots")
-      .select("month, sections, report_date")
-      .eq("year", year)
-      .order("month", { ascending: true });
+    const { data, error } = await filterByEmpresa(
+      supabase.from("rds_snapshots").select("month, sections, report_date").eq("year", year),
+      req,
+      "rds_snapshots"
+    ).order("month", { ascending: true });
 
     if (error) {
       console.error("dre realizado-rds:", error);
@@ -13167,10 +13385,11 @@ export function createApp() {
   app.get("/api/dre/realizado-crd", requireRole("admin", "controle", "diretoria"), async (req, res) => {
     const year = Number((req.query as { year?: string }).year) || new Date().getFullYear();
 
-    const { data, error } = await supabase
-      .from("rel_crd_rows")
-      .select("id, month, nivel, codigo, nome, saldo_lanc")
-      .eq("year", year);
+    const { data, error } = await filterByEmpresa(
+      supabase.from("rel_crd_rows").select("id, month, nivel, codigo, nome, saldo_lanc").eq("year", year),
+      req,
+      "rel_crd_rows"
+    );
 
     if (error) {
       console.error("dre realizado-crd:", error);
@@ -13219,10 +13438,14 @@ export function createApp() {
 
   app.get("/api/dre/edits", requireRole("admin", "controle", "diretoria"), async (req, res) => {
     const year = Number((req.query as { year?: string }).year) || new Date().getFullYear();
-    const { data, error } = await supabase
-      .from("dre_cell_edits")
-      .select("row_key, month, field, value, previous_value, motivo, user_name, user_email, updated_at")
-      .eq("year", year);
+    const { data, error } = await filterByEmpresa(
+      supabase
+        .from("dre_cell_edits")
+        .select("row_key, month, field, value, previous_value, motivo, user_name, user_email, updated_at")
+        .eq("year", year),
+      req,
+      "dre_cell_edits"
+    );
     if (error) {
       console.error("dre_cell_edits select (execute sql/15_dre_cell_edits.sql + sql/26_dre_ajustes.sql):", error);
       return res.status(500).json({
@@ -13234,10 +13457,14 @@ export function createApp() {
 
   app.get("/api/dre/ajustes", requireRole("admin", "controle", "diretoria"), async (req, res) => {
     const year = Number((req.query as { year?: string }).year) || new Date().getFullYear();
-    const { data, error } = await supabase
-      .from("dre_cell_edit_history")
-      .select("id, year, row_key, row_label, month, field, previous_value, new_value, motivo, user_name, user_email, created_at")
-      .eq("year", year)
+    const { data, error } = await filterByEmpresa(
+      supabase
+        .from("dre_cell_edit_history")
+        .select("id, year, row_key, row_label, month, field, previous_value, new_value, motivo, user_name, user_email, created_at")
+        .eq("year", year),
+      req,
+      "dre_cell_edit_history"
+    )
       .order("created_at", { ascending: false })
       .limit(500);
     if (error) {
@@ -13284,19 +13511,22 @@ export function createApp() {
 
     const user = (req as any).user;
     const nowIso = new Date().toISOString();
-    const record = {
-      year: Number(year),
-      row_key: Number(row_key),
-      row_label: String(row_label ?? "").slice(0, 200) || null,
-      month: Number(month),
-      field,
-      value: numValue,
-      previous_value: numPrevious,
-      motivo: motivoText.slice(0, 2000),
-      user_name: user?.name ?? null,
-      user_email: user?.email ?? null,
-      updated_at: nowIso,
-    };
+    const record = withEmpresaKey(
+      {
+        year: Number(year),
+        row_key: Number(row_key),
+        row_label: String(row_label ?? "").slice(0, 200) || null,
+        month: Number(month),
+        field,
+        value: numValue,
+        previous_value: numPrevious,
+        motivo: motivoText.slice(0, 2000),
+        user_name: user?.name ?? null,
+        user_email: user?.email ?? null,
+        updated_at: nowIso,
+      },
+      req
+    );
 
     const { data, error } = await supabase
       .from("dre_cell_edits")
@@ -13310,19 +13540,24 @@ export function createApp() {
       });
     }
 
-    const { error: histError } = await supabase.from("dre_cell_edit_history").insert({
-      year: record.year,
-      row_key: record.row_key,
-      row_label: record.row_label,
-      month: record.month,
-      field: record.field,
-      previous_value: record.previous_value,
-      new_value: record.value,
-      motivo: record.motivo,
-      user_name: record.user_name,
-      user_email: record.user_email,
-      created_at: nowIso,
-    });
+    const { error: histError } = await supabase.from("dre_cell_edit_history").insert(
+      withEmpresaKey(
+        {
+          year: record.year,
+          row_key: record.row_key,
+          row_label: record.row_label,
+          month: record.month,
+          field: record.field,
+          previous_value: record.previous_value,
+          new_value: record.value,
+          motivo: record.motivo,
+          user_name: record.user_name,
+          user_email: record.user_email,
+          created_at: nowIso,
+        },
+        req
+      )
+    );
     if (histError) {
       console.error("dre_cell_edit_history insert:", histError);
       // Célula já foi salva; histórico é complementar.
@@ -13357,12 +13592,15 @@ export function createApp() {
     const { error } = await supabase
       .from("crd_monthly_values")
       .upsert(
-        {
-          crd_id: Number(crd_id),
-          year: Number(year),
-          month: Number(month),
-          value: sanitizedValue,
-        },
+        withEmpresaKey(
+          {
+            crd_id: Number(crd_id),
+            year: Number(year),
+            month: Number(month),
+            value: sanitizedValue,
+          },
+          req
+        ),
         { onConflict: "crd_id,year,month" }
       );
 
@@ -13391,11 +13629,11 @@ export function createApp() {
   app.get("/api/sintase/occupancy", async (req, res) => {
     const { year } = req.query as { year?: string };
     const selectedYear = Number(year) || new Date().getFullYear();
-    const { data, error } = await supabase
-      .from("sintase_occupancy")
-      .select("year, occupancy_percent")
-      .eq("year", selectedYear)
-      .limit(1);
+    const { data, error } = await filterByEmpresa(
+      supabase.from("sintase_occupancy").select("year, occupancy_percent").eq("year", selectedYear),
+      req,
+      "sintase_occupancy"
+    ).limit(1);
     if (error) { console.error(error); return res.status(500).json({ error: "Erro interno ao processar a solicitação." }); }
     const occupancyPercent = data?.length
       ? getNormalizedOccupancyPercent((data[0] as any).occupancy_percent)
@@ -13412,10 +13650,13 @@ export function createApp() {
     const { error } = await supabase
       .from("sintase_occupancy")
       .upsert(
-        {
-          year: Number(year),
-          occupancy_percent: occupancyPercent,
-        },
+        withEmpresaKey(
+          {
+            year: Number(year),
+            occupancy_percent: occupancyPercent,
+          },
+          req
+        ),
         { onConflict: "year" }
       );
     if (error) { console.error(error); return res.status(500).json({ error: "Erro interno ao processar a solicitação." }); }
@@ -13724,10 +13965,11 @@ export function createApp() {
   app.get("/api/contratos", requireRole("admin", "controle", "manager", "finance", "diretoria", "estagiario"), async (req, res) => {
     const status = String((req.query as any)?.status || "");
     const sectorId = (req.query as any)?.sector_id;
-    let query = supabase
-      .from("contratos")
-      .select("*, sectors(name), crds(id, code, name)")
-      .order("vencimento", { ascending: true, nullsFirst: false });
+    let query = filterByEmpresa(
+      supabase.from("contratos").select("*, sectors(name), crds(id, code, name)"),
+      req,
+      "contratos"
+    ).order("vencimento", { ascending: true, nullsFirst: false });
     if (status && CONTRATO_STATUSES.has(status)) query = query.eq("status", status);
     if (sectorId != null && sectorId !== "" && Number.isFinite(Number(sectorId))) {
       query = query.eq("sector_id", Number(sectorId));
@@ -13760,19 +14002,24 @@ export function createApp() {
 
     const { data, error } = await supabase
       .from("contratos")
-      .insert({
-        fornecedor,
-        valor: Number(req.body?.valor) || 0,
-        status,
-        ativo: req.body?.ativo != null ? Boolean(req.body.ativo) : true,
-        assinado,
-        sector_id: req.body?.sector_id != null && req.body.sector_id !== "" ? Number(req.body.sector_id) : null,
-        crd_id: req.body?.crd_id != null && req.body.crd_id !== "" ? Number(req.body.crd_id) : null,
-        vencimento,
-        periodicidade,
-        responsavel: String(req.body?.responsavel ?? "").trim() || null,
-        observacoes: String(req.body?.observacoes ?? "").trim() || null,
-      })
+      .insert(
+        withEmpresaKey(
+          {
+            fornecedor,
+            valor: Number(req.body?.valor) || 0,
+            status,
+            ativo: req.body?.ativo != null ? Boolean(req.body.ativo) : true,
+            assinado,
+            sector_id: req.body?.sector_id != null && req.body.sector_id !== "" ? Number(req.body.sector_id) : null,
+            crd_id: req.body?.crd_id != null && req.body.crd_id !== "" ? Number(req.body.crd_id) : null,
+            vencimento,
+            periodicidade,
+            responsavel: String(req.body?.responsavel ?? "").trim() || null,
+            observacoes: String(req.body?.observacoes ?? "").trim() || null,
+          },
+          req
+        )
+      )
       .select("id")
       .single();
     if (error) {
@@ -13823,7 +14070,10 @@ export function createApp() {
       patch.status = status;
     }
 
-    const { error } = await supabase.from("contratos").update(patch).eq("id", id);
+    const { error } = await scopeByEmpresa(
+      supabase.from("contratos").update(patch).eq("id", id),
+      req
+    );
     if (error) {
       console.error("Erro ao atualizar contrato:", error);
       return res.status(500).json({ error: "Não foi possível atualizar o contrato." });
@@ -13834,7 +14084,10 @@ export function createApp() {
   app.delete("/api/contratos/:id", requireRole("admin", "controle"), async (req, res) => {
     const id = Number(req.params.id);
     if (!Number.isFinite(id)) return res.status(400).json({ error: "id inválido." });
-    const { error } = await supabase.from("contratos").delete().eq("id", id);
+    const { error } = await scopeByEmpresa(
+      supabase.from("contratos").delete().eq("id", id),
+      req
+    );
     if (error) {
       console.error("Erro ao excluir contrato:", error);
       return res.status(500).json({ error: "Não foi possível excluir o contrato." });
@@ -13842,11 +14095,14 @@ export function createApp() {
     res.json({ success: true });
   });
 
-  app.get("/api/contrato-lancamentos", requireRole("admin", "controle", "manager", "finance", "diretoria", "estagiario"), async (_req, res) => {
-    const { data, error } = await supabase
-      .from("contrato_lancamentos")
-      .select("*, contratos(fornecedor, sector_id, vencimento, periodicidade, sectors(name), crds(id, code, name)), users(id, name)")
-      .order("competencia", { ascending: false });
+  app.get("/api/contrato-lancamentos", requireRole("admin", "controle", "manager", "finance", "diretoria", "estagiario"), async (req, res) => {
+    const { data, error } = await filterByEmpresa(
+      supabase
+        .from("contrato_lancamentos")
+        .select("*, contratos(fornecedor, sector_id, vencimento, periodicidade, sectors(name), crds(id, code, name)), users(id, name)"),
+      req,
+      "contrato_lancamentos"
+    ).order("competencia", { ascending: false });
     if (error) {
       console.error("Erro ao listar lançamentos de contrato:", error);
       if (String(error.message || "").includes("contrato_lancamentos") || error.code === "42P01" || error.code === "PGRST205") {
@@ -13885,11 +14141,10 @@ export function createApp() {
     const contratoId = Number(req.params.id);
     if (!Number.isFinite(contratoId)) return res.status(400).json({ error: "id inválido." });
 
-    const { data: contrato, error: contratoError } = await supabase
-      .from("contratos")
-      .select("id, sector_id, valor, status, ativo")
-      .eq("id", contratoId)
-      .single();
+    const { data: contrato, error: contratoError } = await scopeByEmpresa(
+      supabase.from("contratos").select("id, sector_id, valor, status, ativo").eq("id", contratoId),
+      req
+    ).single();
     if (contratoError || !contrato) return res.status(404).json({ error: "Contrato não encontrado." });
     if (contrato.ativo === false || contrato.status === "encerrado") {
       return res.status(400).json({ error: "Contrato inativo ou encerrado." });
@@ -13901,12 +14156,16 @@ export function createApp() {
       if (!access.ok) return res.status(access.status).json({ error: access.error });
     }
 
-    const { data: pending } = await supabase
-      .from("contrato_lancamentos")
-      .select("id")
-      .eq("contrato_id", contratoId)
-      .in("status", ["pending_manager", "open", "approved"])
-      .limit(1);
+    const { data: pending } = await filterByEmpresa(
+      supabase
+        .from("contrato_lancamentos")
+        .select("id")
+        .eq("contrato_id", contratoId)
+        .in("status", ["pending_manager", "open", "approved"])
+        .limit(1),
+      req,
+      "contrato_lancamentos"
+    );
     if ((pending ?? []).length > 0) {
       return res.status(400).json({ error: "Já existe um lançamento pendente para este contrato." });
     }
@@ -13917,11 +14176,11 @@ export function createApp() {
       return res.status(400).json({ error: "valor inválido." });
     }
 
-    const protocol = await allocateLaunchProtocol(PROTOCOL_PREFIX.mensalidade);
+    const protocol = await allocateLaunchProtocol(PROTOCOL_PREFIX.mensalidade, req);
     if (!protocol) return res.status(500).json({ error: "Não foi possível gerar o protocolo da mensalidade." });
     const { data, error } = await supabase
       .from("contrato_lancamentos")
-      .insert({
+      .insert(withEmpresaKey({
         contrato_id: contratoId,
         user_id: req.user!.id,
         competencia,
@@ -13929,7 +14188,7 @@ export function createApp() {
         observacao: req.body?.observacao ? String(req.body.observacao).trim() : null,
         status: initialLaunchStatus(req.user?.role),
         protocol,
-      })
+      }, req))
       .select("id, protocol")
       .single();
     if (error) {
@@ -13947,11 +14206,13 @@ export function createApp() {
       return res.status(400).json({ error: "Status inválido" });
     }
 
-    const { data: existing, error: fetchError } = await supabase
-      .from("contrato_lancamentos")
-      .select("id, status, contrato_id, contratos(sector_id)")
-      .eq("id", id)
-      .single();
+    const { data: existing, error: fetchError } = await scopeByEmpresa(
+      supabase
+        .from("contrato_lancamentos")
+        .select("id, status, contrato_id, contratos(sector_id)")
+        .eq("id", id),
+      req
+    ).single();
     if (fetchError || !existing) {
       return res.status(404).json({ error: "Lançamento não encontrado" });
     }
@@ -13967,7 +14228,10 @@ export function createApp() {
     const validation = validateLaunchFlowStatus(role, current, status);
     if (validation.ok === false) return res.status(validation.status).json({ error: validation.error });
 
-    const { error } = await supabase.from("contrato_lancamentos").update({ status }).eq("id", id);
+    const { error } = await scopeByEmpresa(
+      supabase.from("contrato_lancamentos").update({ status }).eq("id", id),
+      req
+    );
     if (error) {
       console.error(error);
       return res.status(500).json({ error: "Erro interno ao processar a solicitação." });
@@ -14020,10 +14284,11 @@ export function createApp() {
     async (req, res) => {
       const status = String((req.query as any)?.status || "");
       const sectorId = (req.query as any)?.sector_id;
-      let query = supabase
-        .from("investimentos")
-        .select("*, sectors(name), crds(id, code, name)")
-        .order("updated_at", { ascending: false });
+      let query = filterByEmpresa(
+        supabase.from("investimentos").select("*, sectors(name), crds(id, code, name)"),
+        req,
+        "investimentos"
+      ).order("updated_at", { ascending: false });
       if (status && INVESTIMENTO_STATUSES.has(status)) query = query.eq("status", status);
       if (sectorId != null && sectorId !== "" && Number.isFinite(Number(sectorId))) {
         query = query.eq("sector_id", Number(sectorId));
@@ -14054,7 +14319,7 @@ export function createApp() {
 
     const { data, error } = await supabase
       .from("investimentos")
-      .insert({
+      .insert(withEmpresaKey({
         nome,
         valor_previsto: Number(req.body?.valor_previsto) || 0,
         valor_lancado: Number(req.body?.valor_lancado) || 0,
@@ -14068,7 +14333,7 @@ export function createApp() {
           req.body?.crd_id != null && req.body.crd_id !== "" ? Number(req.body.crd_id) : null,
         responsavel: String(req.body?.responsavel ?? "").trim() || null,
         observacoes: String(req.body?.observacoes ?? "").trim() || null,
-      })
+      }, req))
       .select("id")
       .single();
     if (error) {
@@ -14109,7 +14374,10 @@ export function createApp() {
     if (req.body?.observacoes !== undefined) {
       patch.observacoes = String(req.body.observacoes ?? "").trim() || null;
     }
-    const { error } = await supabase.from("investimentos").update(patch).eq("id", id);
+    const { error } = await scopeByEmpresa(
+      supabase.from("investimentos").update(patch).eq("id", id),
+      req
+    );
     if (error) {
       console.error("Erro ao atualizar investimento:", error);
       return res.status(500).json({ error: "Não foi possível atualizar o investimento." });
@@ -14120,7 +14388,10 @@ export function createApp() {
   app.delete("/api/investimentos/:id", requireRole("admin", "controle"), async (req, res) => {
     const id = Number(req.params.id);
     if (!Number.isFinite(id)) return res.status(400).json({ error: "id inválido." });
-    const { error } = await supabase.from("investimentos").delete().eq("id", id);
+    const { error } = await scopeByEmpresa(
+      supabase.from("investimentos").delete().eq("id", id),
+      req
+    );
     if (error) {
       console.error("Erro ao excluir investimento:", error);
       return res.status(500).json({ error: "Não foi possível excluir o investimento." });
@@ -14292,7 +14563,7 @@ export function createApp() {
       }
 
       const crdIds = crds.map((c) => Number(c.id)).filter((id) => Number.isFinite(id));
-      const { rows: monthlyRows } = await fetchMonthlyValuesByYear(year);
+      const { rows: monthlyRows } = await fetchMonthlyValuesByYear(year, empresaKeyOf(req));
 
       const previstoByCrdMonth = new Map<string, number>();
       for (const row of monthlyRows ?? []) {
@@ -14644,26 +14915,28 @@ export function createApp() {
     const dateTo = `${selectedYear}-12-31`;
 
     let occupancyPercent = 100;
-    const { data: occupancyRows, error: occupancyError } = await supabase
-      .from("sintase_occupancy")
-      .select("occupancy_percent")
-      .eq("year", selectedYear)
-      .limit(1);
+    const { data: occupancyRows, error: occupancyError } = await filterByEmpresa(
+      supabase.from("sintase_occupancy").select("occupancy_percent").eq("year", selectedYear),
+      req,
+      "sintase_occupancy"
+    ).limit(1);
     if (!occupancyError && occupancyRows?.length) {
       occupancyPercent = getNormalizedOccupancyPercent((occupancyRows[0] as any).occupancy_percent);
     }
     const occupancyFactor = occupancyPercent / 100;
 
-    const { data: crdData, error: crdError } = await supabase
-      .from("crds")
-      .select("id, code, name, previsto_mes, sector_id, sectors(name)")
-      .eq("active", true)
-      .order("code");
+    const { data: crdData, error: crdError } = await filterByEmpresa(
+      supabase.from("crds").select("id, code, name, previsto_mes, sector_id, sectors(name)").eq("active", true),
+      req,
+      "crds"
+    ).order("code");
     if (crdError) return res.status(500).json({ error: crdError.message });
 
-    const { data: allCrds } = await supabase
-      .from("crds")
-      .select("id, code, sector_id");
+    const { data: allCrds } = await filterByEmpresa(
+      supabase.from("crds").select("id, code, sector_id"),
+      req,
+      "crds"
+    );
 
     const crdIds = (crdData ?? []).map((item: any) => Number(item.id)).filter((id) => Number.isFinite(id));
     const monthValueByKey = new Map<string, number>();
@@ -14679,7 +14952,10 @@ export function createApp() {
 
     if (crdIds.length) {
       const allowedCrdIds = new Set(crdIds);
-      const { rows: monthlyRows, error: monthlyError } = await fetchMonthlyValuesByYear(selectedYear);
+      const { rows: monthlyRows, error: monthlyError } = await fetchMonthlyValuesByYear(
+        selectedYear,
+        empresaKeyOf(req)
+      );
 
       if (!monthlyError) {
         for (const row of (monthlyRows ?? []) as CrdMonthlyValueRow[]) {
@@ -14709,12 +14985,16 @@ export function createApp() {
       realizedByKey.set(key, (realizedByKey.get(key) || 0) + sanitizeMonthBudget(amount));
     };
 
-    const { data: invoiceData, error: invoiceError } = await supabase
-      .from("invoices")
-      .select("amount, due_date, sector_id, crd, status, flow_stage")
-      .gte("due_date", dateFrom)
-      .lte("due_date", dateTo)
-      .neq("flow_stage", "cancelled");
+    const { data: invoiceData, error: invoiceError } = await filterByEmpresa(
+      supabase
+        .from("invoices")
+        .select("amount, due_date, sector_id, crd, status, flow_stage")
+        .gte("due_date", dateFrom)
+        .lte("due_date", dateTo)
+        .neq("flow_stage", "cancelled"),
+      req,
+      "invoices"
+    );
     if (invoiceError) return res.status(500).json({ error: invoiceError.message });
 
     for (const invoice of invoiceData ?? []) {
@@ -14729,12 +15009,16 @@ export function createApp() {
       addRealized(crdId, month, (invoice as any).amount);
     }
 
-    const { data: reqData, error: reqError } = await supabase
-      .from("requisitions")
-      .select("amount, date, status, crd_id")
-      .neq("status", "cancelled")
-      .gte("date", dateFrom)
-      .lte("date", dateTo);
+    const { data: reqData, error: reqError } = await filterByEmpresa(
+      supabase
+        .from("requisitions")
+        .select("amount, date, status, crd_id")
+        .neq("status", "cancelled")
+        .gte("date", dateFrom)
+        .lte("date", dateTo),
+      req,
+      "requisitions"
+    );
     if (reqError) return res.status(500).json({ error: reqError.message });
 
     for (const reqRow of reqData ?? []) {
@@ -14750,10 +15034,14 @@ export function createApp() {
     // para o SALDO LANÇ alimentar o setor competente mesmo em imports antigos.
     const relCrdScope = viewMode === "diario" ? "acompanhamento" : "fechamento";
 
-    const { data: realizadoImport } = await supabase
-      .from("crd_realizado")
-      .select("crd_id, month, value, source, import_scope, period_key, week_index")
-      .eq("year", selectedYear);
+    const { data: realizadoImport } = await filterByEmpresa(
+      supabase
+        .from("crd_realizado")
+        .select("crd_id, month, value, source, import_scope, period_key, week_index")
+        .eq("year", selectedYear),
+      req,
+      "crd_realizado"
+    );
 
     const latestConsumoWeekByMonth = new Map<number, number>();
     if (viewMode === "diario") {
@@ -14767,11 +15055,15 @@ export function createApp() {
       }
     }
 
-    const { data: relCrdRowsRaw } = await supabase
-      .from("rel_crd_rows")
-      .select("month, nivel, codigo, saldo_lanc, import_scope, week_index, period_key")
-      .eq("year", selectedYear)
-      .eq("import_scope", relCrdScope);
+    const { data: relCrdRowsRaw } = await filterByEmpresa(
+      supabase
+        .from("rel_crd_rows")
+        .select("month, nivel, codigo, saldo_lanc, import_scope, week_index, period_key")
+        .eq("year", selectedYear)
+        .eq("import_scope", relCrdScope),
+      req,
+      "rel_crd_rows"
+    );
 
     // Acompanhamento: usa a semana mais recente de cada mês (evita somar S1+S2+…).
     let relCrdRows = relCrdRowsRaw ?? [];
@@ -15078,22 +15370,23 @@ export function createApp() {
     return { months, total };
   };
 
-  const getIndicadorUhs = async (year: number) => {
-    const { data } = await supabase
-      .from("indicadores_parametros")
-      .select("uhs")
-      .eq("year", year)
-      .limit(1);
+  const getIndicadorUhs = async (year: number, empresaKey?: CompanyKey) => {
+    let query = supabase.from("indicadores_parametros").select("uhs").eq("year", year);
+    if (empresaKey) {
+      query = filterByEmpresaKey(query, empresaKey, "indicadores_parametros");
+    }
+    const { data } = await query.limit(1);
     return data?.length ? Number((data[0] as any).uhs) || 172 : 172;
   };
 
   // GET /api/indicadores?year=YYYY  -> realizado + meta (inputs e calculados) + total
   app.get("/api/indicadores", async (req, res) => {
     const year = Number((req.query as any).year) || new Date().getFullYear();
-    const { data, error } = await supabase
-      .from("indicadores_mensais")
-      .select("*")
-      .eq("year", year);
+    const { data, error } = await filterByEmpresa(
+      supabase.from("indicadores_mensais").select("*").eq("year", year),
+      req,
+      "indicadores_mensais"
+    );
     if (error) {
       if (error.message?.toLowerCase().includes("indicadores_mensais")) {
         return res.status(500).json({
@@ -15103,7 +15396,7 @@ export function createApp() {
       console.error("Erro ao carregar indicadores:", error);
       return res.status(500).json({ error: "Erro interno ao carregar indicadores." });
     }
-    const uhs = await getIndicadorUhs(year);
+    const uhs = await getIndicadorUhs(year, empresaKeyOf(req));
     res.json({
       year,
       uhs,
@@ -15159,11 +15452,20 @@ export function createApp() {
         .replace(/\p{Diacritic}/gu, "");
 
     try {
+      const empresaKey = empresaKeyOf(req);
       const [{ data: indYear }, { data: indPrev }, uhs, uhsPrev] = await Promise.all([
-        supabase.from("indicadores_mensais").select("*").eq("year", selectedYear),
-        supabase.from("indicadores_mensais").select("*").eq("year", prevYear),
-        getIndicadorUhs(selectedYear),
-        getIndicadorUhs(prevYear),
+        filterByEmpresa(
+          supabase.from("indicadores_mensais").select("*").eq("year", selectedYear),
+          req,
+          "indicadores_mensais"
+        ),
+        filterByEmpresa(
+          supabase.from("indicadores_mensais").select("*").eq("year", prevYear),
+          req,
+          "indicadores_mensais"
+        ),
+        getIndicadorUhs(selectedYear, empresaKey),
+        getIndicadorUhs(prevYear, empresaKey),
       ]);
 
       const realizado = buildIndicadorEscopo(indYear ?? [], "realizado", selectedYear, uhs);
@@ -15337,16 +15639,22 @@ export function createApp() {
         { key: "spa", label: "SPA", tabId: "painel-spa", sectorNames: [] as string[], keywords: ["SPA"] },
       ];
 
-      const { data: allSectors } = await supabase.from("sectors").select("id, name");
-      const { data: allCrds } = await supabase
-        .from("crds")
-        .select("id, code, name, sector_id, previsto_mes")
-        .eq("active", true);
-      const { rows: monthlyRows } = await fetchMonthlyValuesByYear(selectedYear);
-      const { data: realizadoRows } = await supabase
-        .from("crd_realizado")
-        .select("crd_id, month, value")
-        .eq("year", selectedYear);
+      const { data: allSectors } = await filterByEmpresa(
+        supabase.from("sectors").select("id, name"),
+        req,
+        "sectors"
+      );
+      const { data: allCrds } = await filterByEmpresa(
+        supabase.from("crds").select("id, code, name, sector_id, previsto_mes").eq("active", true),
+        req,
+        "crds"
+      );
+      const { rows: monthlyRows } = await fetchMonthlyValuesByYear(selectedYear, empresaKeyOf(req));
+      const { data: realizadoRows } = await filterByEmpresa(
+        supabase.from("crd_realizado").select("crd_id, month, value").eq("year", selectedYear),
+        req,
+        "crd_realizado"
+      );
 
       const setores = sectorDefs.map((def) => {
         const sectorIds = new Set<number>();
@@ -15478,15 +15786,19 @@ export function createApp() {
   });
 
   // GET /api/indicadores/anos  -> anos disponíveis (para o seletor)
-  app.get("/api/indicadores/anos", async (_req, res) => {
-    const { data, error } = await supabase
-      .from("indicadores_mensais")
-      .select("year");
+  app.get("/api/indicadores/anos", async (req, res) => {
+    const { data, error } = await filterByEmpresa(
+      supabase.from("indicadores_mensais").select("year"),
+      req,
+      "indicadores_mensais"
+    );
     if (error) {
       console.error(error);
       return res.status(500).json({ error: "Erro interno ao processar a solicitação." });
     }
-    const years = Array.from(new Set((data ?? []).map((r: any) => Number(r.year)))).sort((a, b) => a - b);
+    const years = Array.from(new Set((data ?? []).map((r: any) => Number(r.year)))).sort(
+      (a: number, b: number) => a - b
+    );
     res.json({ years });
   });
 
@@ -15505,9 +15817,12 @@ export function createApp() {
     const parsed = Number(String(value).replace(",", "."));
     if (!Number.isFinite(parsed)) return res.status(400).json({ error: "valor numérico inválido." });
 
-    const payload: Record<string, any> = {
-      escopo, year: Number(year), month: Number(month), [field]: parsed,
-    };
+    const payload = withEmpresaKey(
+      {
+        escopo, year: Number(year), month: Number(month), [field]: parsed,
+      } as Record<string, any>,
+      req
+    );
     const { error } = await supabase
       .from("indicadores_mensais")
       .upsert(payload, { onConflict: "escopo,year,month" });
@@ -15534,9 +15849,10 @@ export function createApp() {
       const v = Number(String(raw ?? 0).replace(",", "."));
       payload[f] = Number.isFinite(v) ? v : 0;
     }
+    const stamped = withEmpresaKey(payload, req);
     const { error } = await supabase
       .from("indicadores_mensais")
-      .upsert(payload, { onConflict: "escopo,year,month" });
+      .upsert(stamped, { onConflict: "escopo,year,month" });
     if (error) {
       console.error("Erro ao salvar mês de indicadores:", error);
       return res.status(500).json({ error: "Não foi possível salvar o mês." });
@@ -15553,7 +15869,7 @@ export function createApp() {
       return res.status(400).json({ error: "uhs deve ser um inteiro positivo." });
     const { error } = await supabase
       .from("indicadores_parametros")
-      .upsert({ year: Number(year), uhs: uhsNum }, { onConflict: "year" });
+      .upsert(withEmpresaKey({ year: Number(year), uhs: uhsNum }, req), { onConflict: "year" });
     if (error) {
       console.error("Erro ao salvar parâmetro de indicadores:", error);
       return res.status(500).json({ error: "Não foi possível salvar o parâmetro." });
@@ -15571,13 +15887,18 @@ export function createApp() {
     const realizado: Record<string, any> = {};
     const meta: Record<string, any> = {};
     const uhsByYear: Record<string, number> = {};
+    const empresaKey = empresaKeyOf(req);
     for (const y of anos) {
-      const { data, error } = await supabase.from("indicadores_mensais").select("*").eq("year", y);
+      const { data, error } = await filterByEmpresa(
+        supabase.from("indicadores_mensais").select("*").eq("year", y),
+        req,
+        "indicadores_mensais"
+      );
       if (error) {
         console.error("Erro no comparativo de indicadores:", error);
         return res.status(500).json({ error: "Erro ao carregar comparativo." });
       }
-      const uhs = await getIndicadorUhs(y);
+      const uhs = await getIndicadorUhs(y, empresaKey);
       uhsByYear[y] = uhs;
       realizado[y] = buildIndicadorEscopo(data ?? [], "realizado", y, uhs).total;
       meta[y] = buildIndicadorEscopo(data ?? [], "meta", y, uhs).total;
@@ -15603,7 +15924,7 @@ export function createApp() {
 
     // Orçado do ano (editável) a partir de crd_monthly_values, com fallback em previsto_mes.
     const orcadoByKey = new Map<string, number>();
-    const { rows: monthlyRows } = await fetchMonthlyValuesByYear(selectedYear);
+    const { rows: monthlyRows } = await fetchMonthlyValuesByYear(selectedYear, empresaKeyOf(req));
     for (const row of (monthlyRows ?? []) as CrdMonthlyValueRow[]) {
       orcadoByKey.set(`${row.crd_id}:${row.month}`, sanitizeMonthBudget(row.value));
     }
@@ -15770,10 +16091,11 @@ export function createApp() {
       }
 
       // Setores existentes (para criar CRDs faltantes mapeando pela coluna B).
-      await sectorCache.reload(true);
+      const empresaSectorCache = sectorCacheFor(empresaKeyOf(req));
+      await empresaSectorCache.reload(true);
 
       const resolveSectorId = async (groupHint: string): Promise<number | null> => {
-        const resolved = await resolveSector(supabase, { name: groupHint, create: true }, sectorCache);
+        const resolved = await resolveSector(supabase, { name: groupHint, create: true }, empresaSectorCache);
         return resolved?.id ?? null;
       };
 
@@ -15914,10 +16236,11 @@ export function createApp() {
 
   app.get("/api/ajustes", async (req, res) => {
     const year = Number((req.query as any)?.year) || 2026;
-    const { data, error } = await supabase
-      .from("orcamento_ajustes")
-      .select("account_name, month, value")
-      .eq("year", year);
+    const { data, error } = await filterByEmpresa(
+      supabase.from("orcamento_ajustes").select("account_name, month, value").eq("year", year),
+      req,
+      "orcamento_ajustes"
+    );
     if (error) {
       console.error("Erro ao carregar ajustes:", error);
       return res.status(500).json({ error: "Erro interno ao processar a solicitação." });
@@ -15967,7 +16290,10 @@ export function createApp() {
     const { error } = await supabase
       .from("orcamento_ajustes")
       .upsert(
-        { account_name: name, year: Number(year), month: Number(month), value: sanitizedValue },
+        withEmpresaKey(
+          { account_name: name, year: Number(year), month: Number(month), value: sanitizedValue },
+          req
+        ),
         { onConflict: "account_name,year,month" }
       );
     if (error) {
@@ -16000,9 +16326,13 @@ export function createApp() {
         months.forEach((v, i) => (acc[i] += v));
       }
 
-      const upsertRows: Array<{ account_name: string; year: number; month: number; value: number }> = [];
+      const upsertRows: Array<{ account_name: string; year: number; month: number; value: number; empresa_key: string }> = [];
       for (const [account_name, months] of merged.entries()) {
-        months.forEach((value, i) => upsertRows.push({ account_name, year, month: i + 1, value }));
+        months.forEach((value, i) =>
+          upsertRows.push(
+            withEmpresaKey({ account_name, year, month: i + 1, value }, req)
+          )
+        );
       }
 
       let written = 0;
