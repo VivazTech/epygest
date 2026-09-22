@@ -1248,7 +1248,7 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
                     )}
                   </td>
                   <td className="px-6 py-4">
-                    <p className="text-sm text-slate-600">{formatDate(invoice.due_date)}</p>
+                    <p className="text-sm text-slate-600">{invoice.due_date ? formatDate(invoice.due_date) : '—'}</p>
                   </td>
                   <td className="px-3 py-4">
                     {(() => {
@@ -1890,9 +1890,7 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
                   <div className="flex items-start justify-between gap-3">
                     <p className="text-sm font-bold text-slate-800">{row.editor_name || 'Usuário'}</p>
                     <p className="text-[11px] text-slate-400 whitespace-nowrap">
-                      {row.created_at
-                        ? new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(row.created_at))
-                        : ''}
+                      {row.created_at ? formatDate(row.created_at) : ''}
                     </p>
                   </div>
                   <ul className="space-y-1.5">

@@ -59,6 +59,43 @@ import { getPageLabel } from './lib/pageLabels';
 
 const ACTIVE_TAB_KEY = 'app:activeTab';
 
+/** Evita tela branca total se uma aba lançar erro de render (ex.: data inválida). */
+class PageErrorBoundary extends React.Component<
+  { children: React.ReactNode; resetKey: string },
+  { error: Error | null }
+> {
+  state: { error: Error | null } = { error: null };
+
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+
+  componentDidUpdate(prevProps: { resetKey: string }) {
+    if (prevProps.resetKey !== this.props.resetKey && this.state.error) {
+      this.setState({ error: null });
+    }
+  }
+
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="bg-white border border-red-100 rounded-2xl p-8 text-center space-y-3">
+          <p className="text-sm font-bold text-red-700">Não foi possível carregar esta tela.</p>
+          <p className="text-xs text-slate-500 break-words">{this.state.error.message}</p>
+          <button
+            type="button"
+            onClick={() => this.setState({ error: null })}
+            className="px-4 py-2 rounded-xl bg-slate-900 text-white text-sm font-semibold"
+          >
+            Tentar novamente
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 const readStoredTab = () => {
   try {
     const saved = String(localStorage.getItem(ACTIVE_TAB_KEY) || '').trim();
@@ -868,7 +905,9 @@ function AppShell({
           data-tour="page-content"
           className={activeTab === 'notas' || activeTab === 'danfe' || activeTab === 'comandas' || activeTab === 'lancamentos-manuais' || activeTab === 'estornos' || activeTab === 'requisicoes' || activeTab === 'mensalidades' || activeTab === 'aprovacoes' || activeTab === 'compras-mensalidades' || activeTab === 'cadastros' || activeTab === 'sintase' || activeTab === 'prev-real' || activeTab === 'indicadores' || activeTab === 'dre' || activeTab === 'rel-crd' || activeTab.startsWith('rel-crd-') || activeTab === 'rel-req' || activeTab.startsWith('rel-req-') || activeTab === 'rel-consumo' || activeTab.startsWith('rel-consumo-') || activeTab === 'rel-rds' || activeTab.startsWith('rel-rds-') || activeTab.startsWith('planilha-') || activeTab.startsWith('folha-') || activeTab === 'painel-rh' || activeTab === 'absenteismo' || activeTab === 'turnover' || activeTab === 'tangerino-ponto' || activeTab === 'folha-apuracao' || activeTab === 'compras-ordem' || activeTab === 'investimentos' || activeTab === 'tutorial' || activeTab === 'sugestoes' || isPainelSetorialTab(activeTab) ? 'p-8 pt-4 md:pt-8 w-full max-w-none' : 'p-8 pt-4 md:pt-8 max-w-7xl mx-auto'}
         >
-          {renderContent()}
+          <PageErrorBoundary resetKey={`${companyKey}:${activeTab}`}>
+            {renderContent()}
+          </PageErrorBoundary>
         </div>
       </main>
         <SuggestionFab activeTab={activeTab} />

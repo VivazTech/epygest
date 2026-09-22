@@ -65,8 +65,15 @@ export const formatPercent = (value: number) => {
   }).format(value / 100);
 };
 
-export const formatDate = (date: string | Date) => {
-  return new Intl.DateTimeFormat('pt-BR').format(new Date(date));
+export const formatDate = (date: string | Date | null | undefined) => {
+  if (date == null || date === '') return '—';
+  const parsed = date instanceof Date ? date : new Date(date);
+  if (Number.isNaN(parsed.getTime())) return '—';
+  try {
+    return new Intl.DateTimeFormat('pt-BR').format(parsed);
+  } catch {
+    return '—';
+  }
 };
 
 // Monta uma mensagem de erro clara a partir da resposta da API (erro + detalhe técnico, se houver).
