@@ -33,6 +33,7 @@ export const EstornosPage: React.FC = () => {
   const [crdFilter, setCrdFilter] = useState('');
   const [userRole, setUserRole] = useState<string>('viewer');
   const [allowedSectorIds, setAllowedSectorIds] = useState<string[]>([]);
+  const [grantedCrdIds, setGrantedCrdIds] = useState<string[]>([]);
   const [actingSector, setActingSector] = useState<'requester' | 'controle' | 'financeiro'>('requester');
   const [form, setForm] = useState({ ...EMPTY_FORM });
   const [uploadingFile, setUploadingFile] = useState(false);
@@ -77,6 +78,15 @@ export const EstornosPage: React.FC = () => {
           )
         );
         setAllowedSectorIds(ids);
+        setGrantedCrdIds(
+          Array.from(
+            new Set<string>(
+              (Array.isArray(user?.crd_ids) ? user.crd_ids : [])
+                .map((id: unknown) => String(id ?? '').trim())
+                .filter((id: string) => id !== '')
+            )
+          )
+        );
       } catch {
         // mantém escopo vazio
       }
@@ -110,9 +120,12 @@ export const EstornosPage: React.FC = () => {
     const active = crds.filter((c) => c.active !== false);
     if (!form.sector_id) return [];
     return active.filter(
-      (c) => String(c.sector_id) === form.sector_id || isSharedCrdCode(c.code)
+      (c) =>
+        String(c.sector_id) === form.sector_id ||
+        isSharedCrdCode(c.code) ||
+        grantedCrdIds.includes(String(c.id))
     );
-  }, [crds, form.sector_id]);
+  }, [crds, form.sector_id, grantedCrdIds]);
 
   const matchesUserSector = (sectorId?: number | string | null) => {
     if (hasGlobalSectorView) return true;

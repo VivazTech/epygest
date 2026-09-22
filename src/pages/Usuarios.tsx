@@ -36,12 +36,22 @@ type UserRow = {
   sector_ids?: number[];
   sector_names?: string[];
   sector_name?: string | null;
+  crd_ids?: number[];
   created_at?: string;
 };
 
 type SectorRow = {
   id: number | string;
   name: string;
+};
+
+type CrdRow = {
+  id: number | string;
+  code: string;
+  name: string;
+  sector_id?: number | null;
+  sector_name?: string | null;
+  active?: boolean;
 };
 
 type AppRole = {
@@ -57,6 +67,7 @@ type EditForm = {
   email: string;
   role: UserRole;
   sector_ids: string[];
+  crd_ids: string[];
   password: string;
 };
 
@@ -112,6 +123,9 @@ export const UsuariosPage: React.FC = () => {
   const [pageTab, setPageTab] = useState<'usuarios' | 'permissoes'>('usuarios');
   const [users, setUsers] = useState<UserRow[]>([]);
   const [sectors, setSectors] = useState<SectorRow[]>([]);
+  const [crds, setCrds] = useState<CrdRow[]>([]);
+  const [crdSearch, setCrdSearch] = useState('');
+  const [sectorSearch, setSectorSearch] = useState('');
   const [roles, setRoles] = useState<AppRole[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
@@ -161,13 +175,15 @@ export const UsuariosPage: React.FC = () => {
     setLoading(true);
     setLoadError('');
     try {
-      const [usersRes, sectorsRes, rolesList] = await Promise.all([
+      const [usersRes, sectorsRes, crdsRes, rolesList] = await Promise.all([
         fetch('/api/users'),
         fetch('/api/sectors'),
+        fetch('/api/crds'),
         loadRoles(),
       ]);
       const usersData = await usersRes.json().catch(() => null);
       const sectorsData = await sectorsRes.json().catch(() => null);
+      const crdsData = await crdsRes.json().catch(() => null);
 
       if (!usersRes.ok) {
         throw new Error(usersData?.error || 'Não foi possível carregar os usuários.');
@@ -175,6 +191,7 @@ export const UsuariosPage: React.FC = () => {
 
       setUsers(Array.isArray(usersData) ? usersData : []);
       setSectors(Array.isArray(sectorsData) ? sectorsData : []);
+      setCrds(Array.isArray(crdsData) ? crdsData.filter((c: CrdRow) => c.active !== false) : []);
       if (rolesList.length && !rolesList.some((r) => r.slug === selectedRoleSlug)) {
         setSelectedRoleSlug(rolesList[0].slug);
       }
@@ -266,6 +283,7 @@ export const UsuariosPage: React.FC = () => {
     email: '',
     role: roles.find((r) => r.slug === 'viewer')?.slug || roles[0]?.slug || 'viewer',
     sector_ids: [],
+    crd_ids: [],
     password: '',
   });
 
@@ -273,6 +291,8 @@ export const UsuariosPage: React.FC = () => {
     setCreating(true);
     setEditingUser(null);
     setSaveError('');
+    setCrdSearch('');
+    setSectorSearch('');
     setEditForm(emptyForm());
   };
 
@@ -280,11 +300,14 @@ export const UsuariosPage: React.FC = () => {
     setCreating(false);
     setEditingUser(user);
     setSaveError('');
+    setCrdSearch('');
+    setSectorSearch('');
     setEditForm({
       name: user.name,
       email: user.email,
       role: user.role,
       sector_ids: (user.sector_ids ?? (user.sector_id ? [Number(user.sector_id)] : [])).map(String),
+      crd_ids: (user.crd_ids ?? []).map(String),
       password: '',
     });
   };
@@ -295,6 +318,8 @@ export const UsuariosPage: React.FC = () => {
     setEditingUser(null);
     setEditForm(null);
     setSaveError('');
+    setCrdSearch('');
+    setSectorSearch('');
   };
 
   const toggleSector = (sectorId: string) => {
@@ -307,13 +332,127 @@ export const UsuariosPage: React.FC = () => {
     });
   };
 
+  const toggleCrd = (crdId: string) => {
+    setEditForm((prev) => {
+      if (!prev) return prev;
+      const next = prev.crd_ids.includes(crdId)
+        ? prev.crd_ids.filter((id) => id !== crdId)
+        : [...prev.crd_ids, crdId];
+      return { ...prev, crd_ids: next };
+    });
+  };
+
+  const activeCrds = useMemo(() => crds.filter((c) => c.active !== false), [crds]);
+
+  const crdGroups = useMemo(() => {
+    const map = new Map<
+      string,
+      { key: string; sectorId: string | null; name: string; items: CrdRow[] }
+    >();
+    for (const c of activeCrds) {
+      const sectorId = c.sector_id != null ? String(c.sector_id) : null;
+      const key = sectorId ?? `name:${c.sector_name || 'Sem grupo'}`;
+      const name = c.sector_name || 'Sem grupo';
+      const existing = map.get(key);
+      if (existing) {
+        existing.items.push(c);
+      } else {
+        map.set(key, { key, sectorId, name, items: [c] });
+      }
+    }
+    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
+  }, [activeCrds]);
+
+  const filteredCrdGroups = useMemo(() => {
+    const q = crdSearch.trim();
+    if (!q) return crdGroups;
+    return crdGroups.filter(
+      (g) =>
+        matchesSearch(q, g.name) ||
+        g.items.some((c) => matchesSearch(q, c.code, c.name, c.sector_name))
+    );
+  }, [crdGroups, crdSearch]);
+
+  const toggleCrdGroup = (groupKey: string) => {
+    const group = crdGroups.find((g) => g.key === groupKey);
+    if (!group) return;
+    const ids = group.items.map((c) => String(c.id));
+    setEditForm((prev) => {
+      if (!prev) return prev;
+      const selected = new Set(prev.crd_ids);
+      const allSelected = ids.length > 0 && ids.every((id) => selected.has(id));
+      if (allSelected) {
+        ids.forEach((id) => selected.delete(id));
+      } else {
+        ids.forEach((id) => selected.add(id));
+      }
+      return { ...prev, crd_ids: Array.from(selected) };
+    });
+  };
+
+  const isCrdGroupSelected = (groupKey: string) => {
+    if (!editForm) return false;
+    const group = crdGroups.find((g) => g.key === groupKey);
+    if (!group || group.items.length === 0) return false;
+    return group.items.every((c) => editForm.crd_ids.includes(String(c.id)));
+  };
+
+  const filteredCrdOptions = useMemo(() => {
+    const q = crdSearch.trim();
+    if (!q) return activeCrds;
+    return activeCrds.filter((c) => matchesSearch(q, c.code, c.name, c.sector_name));
+  }, [activeCrds, crdSearch]);
+
+  const selectedCrdChips = useMemo(() => {
+    if (!editForm) return { groups: [] as typeof crdGroups, singles: [] as CrdRow[] };
+    const selected = new Set(editForm.crd_ids);
+    const fullySelectedGroups = crdGroups.filter(
+      (g) => g.items.length > 0 && g.items.every((c) => selected.has(String(c.id)))
+    );
+    const covered = new Set(
+      fullySelectedGroups.flatMap((g) => g.items.map((c) => String(c.id)))
+    );
+    const singles = activeCrds.filter(
+      (c) => selected.has(String(c.id)) && !covered.has(String(c.id))
+    );
+    return { groups: fullySelectedGroups, singles };
+  }, [editForm, crdGroups, activeCrds]);
+
+  const filteredSectorOptions = useMemo(() => {
+    const q = sectorSearch.trim();
+    if (!q) return sectors;
+    return sectors.filter((s) => matchesSearch(q, s.name, (s as any).code));
+  }, [sectors, sectorSearch]);
+
+  const selectedSectors = useMemo(() => {
+    if (!editForm) return [];
+    const selected = new Set(editForm.sector_ids);
+    return sectors.filter((s) => selected.has(String(s.id)));
+  }, [sectors, editForm]);
+
   const allSectorIds = useMemo(() => sectors.map((s) => String(s.id)), [sectors]);
+  const filteredSectorIds = useMemo(
+    () => filteredSectorOptions.map((s) => String(s.id)),
+    [filteredSectorOptions]
+  );
   const allSectorsSelected =
     allSectorIds.length > 0 && allSectorIds.every((id) => editForm?.sector_ids.includes(id));
+  const filteredSectorsSelected =
+    filteredSectorIds.length > 0 &&
+    filteredSectorIds.every((id) => editForm?.sector_ids.includes(id));
 
   const toggleAllSectors = () => {
     setEditForm((prev) => {
       if (!prev) return prev;
+      if (sectorSearch.trim()) {
+        if (filteredSectorsSelected) {
+          const remove = new Set(filteredSectorIds);
+          return { ...prev, sector_ids: prev.sector_ids.filter((id) => !remove.has(id)) };
+        }
+        const next = new Set(prev.sector_ids);
+        filteredSectorIds.forEach((id) => next.add(id));
+        return { ...prev, sector_ids: Array.from(next) };
+      }
       return {
         ...prev,
         sector_ids: allSectorsSelected ? [] : [...allSectorIds],
@@ -340,6 +479,7 @@ export const UsuariosPage: React.FC = () => {
           password: editForm.password,
           role: editForm.role,
           sector_ids: editForm.sector_ids.map(Number).filter((id) => Number.isFinite(id)),
+          crd_ids: editForm.crd_ids.map(Number).filter((id) => Number.isFinite(id)),
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -374,6 +514,7 @@ export const UsuariosPage: React.FC = () => {
           email: editForm.email.trim(),
           role: editForm.role,
           sector_ids: editForm.sector_ids.map(Number).filter((id) => Number.isFinite(id)),
+          crd_ids: editForm.crd_ids.map(Number).filter((id) => Number.isFinite(id)),
           password: editForm.password || undefined,
         }),
       });
@@ -662,6 +803,16 @@ export const UsuariosPage: React.FC = () => {
                       >
                         {roleLabel(user.role)}
                       </span>
+                      {(user.crd_ids?.length ?? 0) > 0 && (
+                        <span
+                          className="inline-flex px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider border bg-violet-50 text-violet-700 border-violet-100"
+                          title={`${user.crd_ids!.length} CRD(s) liberado(s) fora do setor`}
+                        >
+                          {user.crd_ids!.length === 1
+                            ? '1 CRD extra'
+                            : `${user.crd_ids!.length} CRDs extras`}
+                        </span>
+                      )}
                     </div>
 
                     <div className="flex items-start gap-2 text-xs text-slate-500 min-h-[2.5rem]">
@@ -969,20 +1120,46 @@ export const UsuariosPage: React.FC = () => {
 
               <div className="space-y-1.5">
                 <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Setores</label>
-                <div className="max-h-36 px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm overflow-auto space-y-2">
+                {selectedSectors.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 mb-1">
+                    {selectedSectors.map((s) => (
+                      <button
+                        key={s.id}
+                        type="button"
+                        onClick={() => toggleSector(String(s.id))}
+                        className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-emerald-50 text-emerald-800 text-[11px] font-semibold border border-emerald-100 hover:bg-emerald-100"
+                        title="Clique para remover"
+                      >
+                        {s.name}
+                        <X className="w-3 h-3" />
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <input
+                  value={sectorSearch}
+                  onChange={(e) => setSectorSearch(e.target.value)}
+                  placeholder="Buscar setor (ex.: Financeiro)"
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm mb-2"
+                />
+                <div className="max-h-40 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm overflow-auto space-y-1.5">
                   {sectors.length === 0 ? (
                     <p className="text-xs text-slate-400">Nenhum setor cadastrado.</p>
+                  ) : filteredSectorOptions.length === 0 ? (
+                    <p className="text-xs text-slate-400">Nenhum setor encontrado.</p>
                   ) : (
                     <>
                       <label className="flex items-center gap-2 text-sm font-semibold text-slate-800 border-b border-slate-200 pb-2 sticky top-0 bg-slate-50">
                         <input
                           type="checkbox"
-                          checked={allSectorsSelected}
+                          checked={sectorSearch.trim() ? filteredSectorsSelected : allSectorsSelected}
                           onChange={toggleAllSectors}
                         />
-                        <span>Selecionar todos</span>
+                        <span>
+                          {sectorSearch.trim() ? 'Selecionar filtrados' : 'Selecionar todos'}
+                        </span>
                       </label>
-                      {sectors.map((sector) => {
+                      {filteredSectorOptions.map((sector) => {
                         const sectorId = String(sector.id);
                         const checked = editForm.sector_ids.includes(sectorId);
                         return (
@@ -997,6 +1174,108 @@ export const UsuariosPage: React.FC = () => {
                         );
                       })}
                     </>
+                  )}
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+                  CRDs extras (fora do setor)
+                </label>
+                <p className="text-[11px] text-slate-500">
+                  Libera linhas específicas de CRD de outros setores para lançar e ver no Prev x Real — sem abrir o setor inteiro. Selecione um grupo para liberar todos os CRDs dele.
+                </p>
+                {(selectedCrdChips.groups.length > 0 || selectedCrdChips.singles.length > 0) && (
+                  <div className="flex flex-wrap gap-1.5 mb-1">
+                    {selectedCrdChips.groups.map((g) => (
+                      <button
+                        key={`g-${g.key}`}
+                        type="button"
+                        onClick={() => toggleCrdGroup(g.key)}
+                        className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-violet-50 text-violet-800 text-[11px] font-semibold border border-violet-100 hover:bg-violet-100"
+                        title="Clique para remover o grupo"
+                      >
+                        Grupo: {g.name} ({g.items.length})
+                        <X className="w-3 h-3" />
+                      </button>
+                    ))}
+                    {selectedCrdChips.singles.map((c) => (
+                      <button
+                        key={c.id}
+                        type="button"
+                        onClick={() => toggleCrd(String(c.id))}
+                        className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-violet-50 text-violet-800 text-[11px] font-semibold border border-violet-100 hover:bg-violet-100"
+                        title="Clique para remover"
+                      >
+                        {c.code} · {c.name}
+                        <X className="w-3 h-3" />
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <input
+                  value={crdSearch}
+                  onChange={(e) => setCrdSearch(e.target.value)}
+                  placeholder="Buscar por grupo, código ou nome (ex.: 399)"
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm mb-2"
+                />
+                <div className="max-h-28 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm overflow-auto space-y-1.5 mb-2">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 sticky top-0 bg-slate-50 pb-1">
+                    Selecionar por grupo
+                  </p>
+                  {filteredCrdGroups.length === 0 ? (
+                    <p className="text-xs text-slate-400">Nenhum grupo encontrado.</p>
+                  ) : (
+                    filteredCrdGroups.map((group) => {
+                      const checked = isCrdGroupSelected(group.key);
+                      return (
+                        <label
+                          key={group.key}
+                          className="flex items-center gap-2 text-sm text-slate-700"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => toggleCrdGroup(group.key)}
+                          />
+                          <span className="flex-1 min-w-0 truncate font-medium">{group.name}</span>
+                          <span className="text-[10px] font-bold text-slate-400 shrink-0">
+                            {group.items.length} CRDs
+                          </span>
+                        </label>
+                      );
+                    })
+                  )}
+                </div>
+                <div className="max-h-40 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm overflow-auto space-y-1.5">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 sticky top-0 bg-slate-50 pb-1">
+                    CRDs individuais
+                  </p>
+                  {filteredCrdOptions.length === 0 ? (
+                    <p className="text-xs text-slate-400">Nenhum CRD encontrado.</p>
+                  ) : (
+                    filteredCrdOptions.slice(0, 80).map((crd) => {
+                      const crdId = String(crd.id);
+                      const checked = editForm.crd_ids.includes(crdId);
+                      return (
+                        <label key={crd.id} className="flex items-start gap-2 text-sm text-slate-700">
+                          <input
+                            type="checkbox"
+                            className="mt-0.5"
+                            checked={checked}
+                            onChange={() => toggleCrd(crdId)}
+                          />
+                          <span>
+                            <span className="font-semibold">{crd.code}</span>
+                            {' — '}
+                            {crd.name}
+                            {crd.sector_name ? (
+                              <span className="text-slate-400"> · {crd.sector_name}</span>
+                            ) : null}
+                          </span>
+                        </label>
+                      );
+                    })
                   )}
                 </div>
               </div>

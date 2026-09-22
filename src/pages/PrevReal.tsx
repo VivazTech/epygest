@@ -134,6 +134,7 @@ export const PrevRealPage: React.FC<PrevRealPageProps> = ({ mode = 'diario' }) =
   const [usoConsumoSubgrupos, setUsoConsumoSubgrupos] = useState<UsoConsumoSubgrupo[]>([]);
   const [expandedSubgrupos, setExpandedSubgrupos] = useState<Set<number>>(new Set());
   const [allowedSectorNames, setAllowedSectorNames] = useState<string[]>([]);
+  const [allowedCrdCodes, setAllowedCrdCodes] = useState<string[]>([]);
   /** Índices 0–11. Clique = só aquele mês; "Mostrar todos" volta aos 12. */
   const [selectedMonths, setSelectedMonths] = useState<number[]>(() =>
     mode === 'diario'
@@ -178,8 +179,17 @@ export const PrevRealPage: React.FC<PrevRealPageProps> = ({ mode = 'diario' }) =
         const parsed = JSON.parse(raw);
         setUserRole(String(parsed?.role || 'viewer'));
 
-        const users = await fetch('/api/users').then((res) => res.json()).catch(() => []);
-        const freshUser = (Array.isArray(users) ? users : []).find((u: any) => String(u.id) === String(parsed?.id));
+        // Preferir /api/auth/me (inclui CRDs extras); fallback em /api/users (admin) e localStorage.
+        let freshUser: any = null;
+        const meRes = await fetch('/api/auth/me').catch(() => null);
+        if (meRes?.ok) {
+          freshUser = await meRes.json().catch(() => null);
+        }
+        if (!freshUser) {
+          const users = await fetch('/api/users').then((res) => res.json()).catch(() => []);
+          freshUser = (Array.isArray(users) ? users : []).find((u: any) => String(u.id) === String(parsed?.id));
+        }
+
         const sourceNames = Array.isArray(freshUser?.sector_names)
           ? freshUser.sector_names
           : (Array.isArray(parsed?.sector_names) ? parsed.sector_names : []);
@@ -191,6 +201,34 @@ export const PrevRealPage: React.FC<PrevRealPageProps> = ({ mode = 'diario' }) =
           )
         );
         setAllowedSectorNames(names);
+
+        const sourceCodes = Array.isArray(freshUser?.crd_codes)
+          ? freshUser.crd_codes
+          : Array.isArray(freshUser?.extra_crds)
+            ? freshUser.extra_crds.map((c: any) => c.code)
+            : (Array.isArray(parsed?.crd_codes) ? parsed.crd_codes : []);
+        const codes = Array.from(
+          new Set<string>(
+            sourceCodes
+              .map((code: any) => String(code || '').trim())
+              .filter((code: string) => Boolean(code))
+          )
+        );
+        setAllowedCrdCodes(codes);
+
+        if (freshUser) {
+          localStorage.setItem(
+            'user',
+            JSON.stringify({
+              ...parsed,
+              ...freshUser,
+              sector_ids: freshUser.sector_ids ?? parsed?.sector_ids,
+              sector_names: freshUser.sector_names ?? names,
+              crd_ids: freshUser.crd_ids ?? parsed?.crd_ids,
+              crd_codes: codes,
+            })
+          );
+        }
       } catch {
         // ignora erro de parse
       }
@@ -227,16 +265,17 @@ export const PrevRealPage: React.FC<PrevRealPageProps> = ({ mode = 'diario' }) =
   const visibleRows = useMemo(() => {
     const allRows = data?.rows || [];
     const scoped =
-      userRole !== 'manager'
+      userRole !== 'manager' && userRole !== 'estagiario'
         ? allRows
         : allRows.filter(
             (row) =>
               allowedSectorNames.includes(String(row.crd || '').trim()) ||
-              isSharedCrdCode(row.grupo)
+              isSharedCrdCode(row.grupo) ||
+              allowedCrdCodes.includes(String(row.grupo || '').trim())
           );
     if (!query.trim()) return scoped;
     return scoped.filter((row) => matchesSearch(query, row.crd, row.grupo, row.detalhado));
-  }, [data, userRole, allowedSectorNames, query]);
+  }, [data, userRole, allowedSectorNames, allowedCrdCodes, query]);
 
   const managerSectorOptions = useMemo(() => {
     const keys = new Set(
@@ -244,13 +283,14 @@ export const PrevRealPage: React.FC<PrevRealPageProps> = ({ mode = 'diario' }) =
         .filter(
           (row) =>
             allowedSectorNames.includes(String(row.crd || '').trim()) ||
-            isSharedCrdCode(row.grupo)
+            isSharedCrdCode(row.grupo) ||
+            allowedCrdCodes.includes(String(row.grupo || '').trim())
         )
         .map((row) => String(row.crd || '').trim())
         .filter(Boolean)
     );
     return Array.from(keys).sort((a, b) => a.localeCompare(b, 'pt-BR'));
-  }, [data, allowedSectorNames]);
+  }, [data, allowedSectorNames, allowedCrdCodes]);
 
   const groupOptions = useMemo(() => {
     const keys = new Set(visibleRows.map((row) => getGroupKey(row, groupBy)));

@@ -28,6 +28,7 @@ type RelCrdRow = {
   previsto?: number | null;
   estourada?: boolean;
   valor_estouro?: number;
+  fonte?: 'importacao' | 'cadastro';
 };
 
 type RelCrdSummary = {
@@ -51,6 +52,7 @@ type Competencia = {
   importado: boolean;
   contas: number;
   saldo_lanc: number;
+  tem_cadastro?: boolean;
 };
 
 type RelatorioCrdPageProps = {
@@ -104,7 +106,7 @@ export const RelatorioCrdPage: React.FC<RelatorioCrdPageProps> = ({ onSelectMont
         <div>
           <h2 className="text-2xl font-bold text-slate-900">Relatorio de CRD</h2>
           <p className="text-sm text-slate-500">
-            Consolidado de fechamento mensal importado em Importação › Rel. CRD. Referência para Prev × Real Mensal e apurações de fechamento.
+            Consolidado mensal. CRDs cadastrados em Cadastros › CRD entram no relatório do mês; a importação do Rel. CRD preenche os saldos.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -191,7 +193,9 @@ export const RelatorioCrdPage: React.FC<RelatorioCrdPageProps> = ({ onSelectMont
                   <p className="text-xs text-slate-500 mt-2">
                     {importado
                       ? `${comp?.contas ?? 0} contas · ${formatCurrency(comp?.saldo_lanc ?? 0)}`
-                      : 'Sem importação'}
+                      : comp?.tem_cadastro
+                        ? `${comp?.contas ?? 0} CRDs do cadastro`
+                        : 'Sem importação — cadastre em Cadastros › CRD'}
                   </p>
                 </button>
               );
@@ -305,7 +309,7 @@ export const RelatorioCrdMesPage: React.FC<RelatorioCrdMesPageProps> = ({ month 
             Relatorio de CRD — {MESES_REL_CRD[month]}/{year}
           </h2>
           <p className="text-sm text-slate-500">
-            Movimentação por conta financeira importada do Rel. CRD. O saldo lanç. também alimenta o Prev x Real Mensal.
+            Movimentação por conta financeira. CRDs cadastrados em Cadastros aparecem mesmo sem importação; o saldo lanç. da importação alimenta o Prev x Real Mensal.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -420,7 +424,7 @@ export const RelatorioCrdMesPage: React.FC<RelatorioCrdMesPageProps> = ({ month 
                 <td colSpan={10} className="px-4 py-10 text-center text-sm text-slate-400">
                   {onlyEstouradas
                     ? `Nenhuma linha estourada em ${MESES_REL_CRD[month]}/${year}.`
-                    : `Nenhuma conta importada para ${MESES_REL_CRD[month]}/${year}. Importe em Importação › Rel. CRD.`}
+                    : `Nenhum CRD para ${MESES_REL_CRD[month]}/${year}. Cadastre em Cadastros › CRD ou importe em Importação › Rel. CRD.`}
                 </td>
               </tr>
             )}
@@ -437,6 +441,9 @@ export const RelatorioCrdMesPage: React.FC<RelatorioCrdMesPageProps> = ({ month 
               >
                 <td className="px-4 py-2.5 text-xs tabular-nums text-slate-700">
                   <span style={{ paddingLeft: `${Math.max(0, row.nivel - 1) * 12}px` }}>{row.codigo}</span>
+                  {row.fonte === 'cadastro' && (
+                    <span className="ml-2 text-[10px] font-bold uppercase text-violet-600">cadastro</span>
+                  )}
                   {row.crd_id == null && (
                     <span className="ml-2 text-[10px] font-bold uppercase text-amber-600">sem CRD</span>
                   )}

@@ -724,11 +724,11 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
   const crdSelectOptions = useMemo(
     () =>
       crdOptions
-        .filter((c) => c.active)
+        .filter((c) => c.active !== false)
         .map((c) => ({
           value: String(c.code || ''),
-          label: `${c.name}${c.sector_name ? ` (${c.sector_name})` : ''}`,
-          keywords: `${c.code} ${c.name} ${c.sector_name || ''}`,
+          label: `${c.name}${c.sector_name ? ` (${c.sector_name})` : ''}${c.granted_extra ? ' · liberado' : ''}`,
+          keywords: `${c.code} ${c.name} ${c.sector_name || ''} ${c.granted_extra ? 'liberado extra' : ''}`,
         })),
     [crdOptions]
   );

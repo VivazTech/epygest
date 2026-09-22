@@ -330,6 +330,31 @@ const fetchMonthlyValuesByYear = async (year: number, empresaKey?: CompanyKey) =
   return { rows, error: null as any };
 };
 
+const seedCrdMonthlyBudget = async (
+  req: express.Request,
+  crdId: number,
+  monthlyValue: number,
+  year = new Date().getFullYear()
+) => {
+  const value = sanitizeMonthBudget(monthlyValue);
+  if (!Number.isFinite(crdId) || crdId <= 0 || value <= 0) return;
+  const payload = Array.from({ length: 12 }, (_, index) =>
+    withEmpresaKey(
+      {
+        crd_id: crdId,
+        year,
+        month: index + 1,
+        value,
+      },
+      req
+    )
+  );
+  const { error } = await supabase
+    .from("crd_monthly_values")
+    .upsert(payload, { onConflict: "crd_id,year,month", ignoreDuplicates: true });
+  if (error) console.error("Erro ao inicializar previsto mensal do CRD:", error);
+};
+
 const parseHierarchyLine = (raw: string): ParsedNode | null => {
   const normalized = raw.replace(/\s+/g, " ").trim();
   const match = normalized.match(/^([\d.]+)\s*-\s*(.*?)\s*\((\d+)\)\s*$/);
@@ -729,12 +754,41 @@ export function createApp() {
       sectorNames = (sectorRows ?? []).map((row: any) => String(row.name || ""));
     }
 
+    // CRDs extras liberados fora dos setores do usuário (ex.: CRD 399)
+    const { data: userCrdLinks } = await supabase
+      .from("user_crds")
+      .select("crd_id, crds(id, code, name, sector_id, active)")
+      .eq("user_id", user.id);
+
+    const extraCrds = (userCrdLinks ?? [])
+      .map((link: any) => {
+        const crd = link?.crds;
+        const id = Number(crd?.id ?? link?.crd_id);
+        if (!Number.isFinite(id)) return null;
+        if (crd && crd.active === false) return null;
+        return {
+          id,
+          code: String(crd?.code || "").trim(),
+          name: String(crd?.name || "").trim(),
+          sector_id: Number(crd?.sector_id) || null,
+        };
+      })
+      .filter(Boolean) as Array<{ id: number; code: string; name: string; sector_id: number | null }>;
+
+    const crdIds = Array.from(new Set(extraCrds.map((c) => c.id)));
+    const crdCodes = Array.from(
+      new Set(extraCrds.map((c) => c.code).filter((code) => Boolean(code)))
+    );
+
     const { password: _pwd, ...userWithoutPassword } = user;
     const permissions = await loadRolePermissions(String(user.role || ""));
     return {
       ...userWithoutPassword,
       sector_ids: sectorIds,
       sector_names: sectorNames,
+      crd_ids: crdIds,
+      crd_codes: crdCodes,
+      extra_crds: extraCrds,
       empresa_keys: empresaKeys,
       empresa_key: activeEmpresa,
       permissions,
@@ -1063,6 +1117,7 @@ export function createApp() {
     const userIds = (data ?? []).map((user: any) => user.id);
     let sectorLinksByUserId = new Map<string, Array<{ id: number; name: string }>>();
     let sectorNameById = new Map<number, string>();
+    let crdLinksByUserId = new Map<string, number[]>();
 
     if (userIds.length) {
       const { data: linksData, error: linksError } = await supabase
@@ -1119,6 +1174,20 @@ export function createApp() {
           (fallbackSectors ?? []).map((sector: any) => [Number(sector.id), String(sector.name || "")])
         );
       }
+
+      const { data: crdLinks, error: crdLinksError } = await supabase
+        .from("user_crds")
+        .select("user_id, crd_id")
+        .in("user_id", userIds);
+      if (!crdLinksError) {
+        for (const link of crdLinks ?? []) {
+          const userId = String((link as any).user_id ?? "");
+          const crdId = Number((link as any).crd_id);
+          if (!userId || !Number.isFinite(crdId)) continue;
+          if (!crdLinksByUserId.has(userId)) crdLinksByUserId.set(userId, []);
+          crdLinksByUserId.get(userId)!.push(crdId);
+        }
+      }
     }
 
     res.json(
@@ -1137,18 +1206,20 @@ export function createApp() {
             : (Number.isFinite(Number(user.sector_id)) && sectorNameById.get(Number(user.sector_id))
                 ? [String(sectorNameById.get(Number(user.sector_id)))]
                 : []),
+        crd_ids: crdLinksByUserId.get(String(user.id)) ?? [],
       }))
     );
   });
 
   app.post("/api/users", requireRole("admin"), async (req, res) => {
-    const { name, email, password, role, sector_id, sector_ids } = req.body as {
+    const { name, email, password, role, sector_id, sector_ids, crd_ids } = req.body as {
       name?: string;
       email?: string;
       password?: string;
       role?: string;
       sector_id?: number | null;
       sector_ids?: number[];
+      crd_ids?: number[];
     };
 
     if (!name || !email || !password || !role) {
@@ -1221,6 +1292,21 @@ export function createApp() {
       }
     }
 
+    const normalizedCrdIds = Array.from(
+      new Set(
+        (Array.isArray(crd_ids) ? crd_ids : [])
+          .map((value) => Number(value))
+          .filter((value) => Number.isFinite(value) && value > 0)
+      )
+    );
+    const crdLinksError = await replaceUserCrdLinks(data.id, normalizedCrdIds);
+    if (crdLinksError) {
+      console.error("Erro ao salvar CRDs do usuário:", crdLinksError);
+      return res.status(500).json({
+        error: "Usuário criado, mas não foi possível salvar os CRDs extras.",
+      });
+    }
+
     await ensureUserHasBothEmpresas(data.id);
 
     res.json({ id: data.id });
@@ -1228,13 +1314,14 @@ export function createApp() {
 
   app.patch("/api/users/:id", requireRole("admin"), async (req, res) => {
     const { id } = req.params;
-    const { name, email, password, role, sector_id, sector_ids } = req.body as {
+    const { name, email, password, role, sector_id, sector_ids, crd_ids } = req.body as {
       name?: string;
       email?: string;
       password?: string;
       role?: string;
       sector_id?: number | null;
       sector_ids?: number[];
+      crd_ids?: number[];
     };
 
     if (!name || !email || !role) {
@@ -1309,6 +1396,21 @@ export function createApp() {
           error: "Usuário atualizado, mas não foi possível salvar os setores.",
         });
       }
+    }
+
+    const normalizedCrdIds = Array.from(
+      new Set(
+        (Array.isArray(crd_ids) ? crd_ids : [])
+          .map((value) => Number(value))
+          .filter((value) => Number.isFinite(value) && value > 0)
+      )
+    );
+    const crdLinksError = await replaceUserCrdLinks(id, normalizedCrdIds);
+    if (crdLinksError) {
+      console.error("Erro ao salvar CRDs do usuário:", crdLinksError);
+      return res.status(500).json({
+        error: "Usuário atualizado, mas não foi possível salvar os CRDs extras.",
+      });
     }
 
     res.json({ success: true });
@@ -2451,8 +2553,9 @@ export function createApp() {
       const allowedSectorIds = session.sector_ids ?? [];
       const isGlobal = ["admin", "finance", "controle"].includes(String(userRow.role || ""));
       const shared = isSharedCrdCode((crd as any).code);
+      const granted = (session.crd_ids ?? []).includes(Number(crd.id));
 
-      if (!shared && !isGlobal) {
+      if (!shared && !isGlobal && !granted) {
         if (allowedSectorIds.length === 0) {
           return res.status(403).json({ error: "Seu usuário não possui setor vinculado para lançar requisições." });
         }
@@ -2541,6 +2644,55 @@ export function createApp() {
     return { ok: true as const };
   };
 
+  /** CRDs liberados ao usuário fora dos setores (Cadastros › Usuários › CRDs extras). */
+  const loadGrantedCrdIdsForUser = async (userId: number | string): Promise<Set<number>> => {
+    const { data, error } = await supabase
+      .from("user_crds")
+      .select("crd_id")
+      .eq("user_id", userId);
+    if (error) {
+      console.error("user_crds:", error);
+      return new Set();
+    }
+    return new Set(
+      (data ?? [])
+        .map((row: any) => Number(row.crd_id))
+        .filter((id: number) => Number.isFinite(id))
+    );
+  };
+
+  const userCanUseCrd = async (
+    req: express.Request,
+    crd: { id?: number; sector_id?: number; code?: string },
+    launchSectorId?: number
+  ) => {
+    const role = String(req.user?.role || "");
+    if (["admin", "finance", "controle"].includes(role)) return true;
+    if (isSharedCrdCode(crd.code)) return true;
+    if (
+      launchSectorId != null &&
+      Number.isFinite(Number(crd.sector_id)) &&
+      Number(crd.sector_id) === Number(launchSectorId)
+    ) {
+      return true;
+    }
+    const crdId = Number(crd.id);
+    if (!Number.isFinite(crdId) || !req.user?.id) return false;
+    const granted = await loadGrantedCrdIdsForUser(req.user.id);
+    return granted.has(crdId);
+  };
+
+  const replaceUserCrdLinks = async (userId: number | string, crdIds: number[]) => {
+    const { error: deleteError } = await supabase.from("user_crds").delete().eq("user_id", userId);
+    if (deleteError) return deleteError;
+    if (!crdIds.length) return null;
+    const { error: insertError } = await supabase.from("user_crds").upsert(
+      crdIds.map((crdId) => ({ user_id: userId, crd_id: crdId })),
+      { onConflict: "user_id,crd_id", ignoreDuplicates: true }
+    );
+    return insertError;
+  };
+
   app.get("/api/manual-entries", async (req, res) => {
     const { data, error } = await filterByEmpresa(
       supabase.from("manual_entries").select("*, sectors(name), crds(id, code, name), users(id, name)"),
@@ -2612,7 +2764,8 @@ export function createApp() {
       if (crdError || !crd) {
         return res.status(400).json({ error: "CRD inválido para o lançamento" });
       }
-      if (Number(crd.sector_id) !== sectorId && !isSharedCrdCode((crd as any).code)) {
+      const canUse = await userCanUseCrd(req, crd as any, sectorId);
+      if (!canUse) {
         return res.status(400).json({ error: "CRD não pertence ao setor informado" });
       }
       resolvedCrdId = Number(crd.id);
@@ -2851,7 +3004,8 @@ export function createApp() {
       if (crdError || !crd) {
         return res.status(400).json({ error: "CRD inválido para o estorno" });
       }
-      if (Number(crd.sector_id) !== sectorId && !isSharedCrdCode((crd as any).code)) {
+      const canUse = await userCanUseCrd(req, crd as any, sectorId);
+      if (!canUse) {
         return res.status(400).json({ error: "CRD não pertence ao setor informado" });
       }
       resolvedCrdId = Number(crd.id);
@@ -5356,7 +5510,8 @@ export function createApp() {
       .order("active", { ascending: false })
       .order("code");
 
-    // Filtro por setor: inclui também CRDs compartilhados (ex.: 326).
+    // Filtro por setor: inclui também CRDs compartilhados (ex.: 326)
+    // e CRDs extras liberados ao usuário (Cadastros › Usuários).
     if (sector_id && Number.isFinite(Number(sector_id))) {
       const { data, error } = await filterByEmpresa(
         supabase.from("crds").select("*, sectors(name)"),
@@ -5368,13 +5523,20 @@ export function createApp() {
       if (error) { console.error(error); return res.status(500).json({ error: "Erro interno ao processar a solicitação." }); }
 
       const sectorIdNum = Number(sector_id);
+      const grantedIds = req.user?.id
+        ? await loadGrantedCrdIdsForUser(req.user.id)
+        : new Set<number>();
       const filtered = (data ?? []).filter(
-        (r: any) => Number(r.sector_id) === sectorIdNum || isSharedCrdCode(r.code)
+        (r: any) =>
+          Number(r.sector_id) === sectorIdNum ||
+          isSharedCrdCode(r.code) ||
+          grantedIds.has(Number(r.id))
       );
       return res.json(
         filtered.map((r: any) => ({
           ...r,
           sector_name: r.sectors?.name ?? null,
+          granted_extra: grantedIds.has(Number(r.id)) && Number(r.sector_id) !== sectorIdNum,
           sectors: undefined,
         }))
       );
@@ -5411,8 +5573,8 @@ export function createApp() {
       .from("crds")
       .insert(withEmpresaKey({
         natureza: String(natureza).trim().toUpperCase(),
-        code,
-        name,
+        code: String(code).trim(),
+        name: String(name).trim(),
         sector_id: Number(sector_id),
         saldo_anterior: toNumberOrZero(saldo_anterior),
         previsto_mes: toNumberOrZero(previsto_mes),
@@ -5425,6 +5587,7 @@ export function createApp() {
       .single();
     if (error)
       return res.status(400).json({ error: "Não foi possível cadastrar CRD (código já existe neste setor?)" });
+    await seedCrdMonthlyBudget(req, Number(data.id), toNumberOrZero(previsto_mes));
     res.json({ id: data.id });
   });
 
@@ -5435,16 +5598,13 @@ export function createApp() {
       code,
       name,
       sector_id,
-      saldo_anterior,
-      previsto_mes,
-      disponivel_mes,
-      realizado_mes,
-      saldo,
       active,
     } = req.body;
     if (!natureza || !code || !name || !sector_id)
       return res.status(400).json({ error: "natureza, code, name e sector_id são obrigatórios" });
 
+    // Cadastro em Cadastros › CRD só define a linha (identidade). Valores financeiros
+    // (previsto, realizado, saldo) vêm de lançamentos / Prev x Real / importações.
     const { error } = await supabase
       .from("crds")
       .update({
@@ -5452,11 +5612,6 @@ export function createApp() {
         code: String(code).trim(),
         name: String(name).trim(),
         sector_id: Number(sector_id),
-        saldo_anterior: toNumberOrZero(saldo_anterior),
-        previsto_mes: toNumberOrZero(previsto_mes),
-        disponivel_mes: toNumberOrZero(disponivel_mes),
-        realizado_mes: toNumberOrZero(realizado_mes),
-        saldo: toNumberOrZero(saldo),
         active: active !== false,
       })
       .eq("id", Number(id));
@@ -5524,7 +5679,7 @@ export function createApp() {
       }
 
       const payload = groupedCrdRows
-        .map((row) => ({
+        .map((row) => withEmpresaKey({
           natureza: "O",
           code: row.code,
           name: row.name,
@@ -5535,7 +5690,7 @@ export function createApp() {
           realizado_mes: 0,
           saldo: 0,
           active: true,
-        }))
+        }, req))
         .filter((row) => Number.isFinite(Number(row.sector_id)));
 
       const { error: upsertError } = await supabase
@@ -7258,6 +7413,13 @@ export function createApp() {
       });
     }
 
+    const { data: cadastroCrds } = await filterByEmpresa(
+      supabase.from("crds").select("id").eq("active", true),
+      req,
+      "crds"
+    );
+    const cadastroTotal = (cadastroCrds ?? []).length;
+
     const byMonth = new Map<number, { contas: number; saldo_lanc: number }>();
     for (let m = 1; m <= 12; m++) byMonth.set(m, { contas: 0, saldo_lanc: 0 });
     for (const row of data ?? []) {
@@ -7271,11 +7433,13 @@ export function createApp() {
     res.json({
       year,
       import_scope: scope,
+      cadastro_crds: cadastroTotal,
       months: Array.from(byMonth.entries()).map(([month, agg]) => ({
         month,
         importado: agg.contas > 0,
-        contas: agg.contas,
+        contas: agg.contas > 0 ? agg.contas : cadastroTotal,
         saldo_lanc: agg.saldo_lanc,
+        tem_cadastro: cadastroTotal > 0,
       })),
     });
   });
@@ -7382,8 +7546,66 @@ export function createApp() {
         previsto,
         estourada,
         valor_estouro,
+        fonte: "importacao",
       };
     });
+
+    const { data: cadastroCrds } = await filterByEmpresa(
+      supabase.from("crds").select("id, code, name, previsto_mes, sectors(name)").eq("active", true),
+      req,
+      "crds"
+    ).order("code");
+    const existingCodes = new Set(
+      enrichedRows.map((r: any) => String(r.codigo || "").trim().toLowerCase()).filter(Boolean)
+    );
+    const existingCrdIds = new Set(
+      enrichedRows
+        .map((r: any) => Number(r.crd_id))
+        .filter((id: number) => Number.isFinite(id) && id > 0)
+    );
+    const cadastroMissing = (cadastroCrds ?? []).filter((c: any) => {
+      const id = Number(c.id);
+      const code = String(c.code || "").trim();
+      if (!code || !Number.isFinite(id)) return false;
+      if (existingCrdIds.has(id) || existingCodes.has(code.toLowerCase())) return false;
+      const paren = /\((\d+)\)\s*$/.exec(String(c.name || "").trim());
+      if (paren && existingCodes.has(paren[1])) return false;
+      return true;
+    });
+    const missingIds = cadastroMissing.map((c: any) => Number(c.id)).filter((id: number) => Number.isFinite(id));
+    if (missingIds.length) {
+      const { rows: monthlyRows } = await fetchMonthlyValuesByYear(year, empresaKeyOf(req));
+      for (const mv of monthlyRows ?? []) {
+        if (Number(mv.month) !== month) continue;
+        const crdId = Number(mv.crd_id);
+        if (!missingIds.includes(crdId)) continue;
+        previstoByCrdId.set(crdId, sanitizeMonthBudget(mv.value));
+      }
+    }
+    for (const c of cadastroMissing) {
+      const crdId = Number(c.id);
+      const previsto = previstoByCrdId.get(crdId) ?? sanitizeMonthBudget((c as any).previsto_mes);
+      enrichedRows.push({
+        id: null,
+        fonte: "cadastro",
+        nivel: 1,
+        codigo: String((c as any).code || "").trim(),
+        nome: (c as any).sectors?.name
+          ? `${(c as any).name} · ${(c as any).sectors.name}`
+          : String((c as any).name || ""),
+        lancamentos: 0,
+        cancelamentos: 0,
+        saldo_lanc: 0,
+        baixas: 0,
+        estorno: 0,
+        baixas_liquido: 0,
+        lanc_liquido: 0,
+        crd_id: crdId,
+        previsto,
+        estourada: false,
+        valor_estouro: 0,
+      });
+    }
 
     const linhasEstouradas = enrichedRows.filter((r: any) => r.estourada);
     const valorEstourado = linhasEstouradas.reduce(
@@ -15269,12 +15491,21 @@ export function createApp() {
 
     const crdById = new Map<number, any>();
     const crdBySectorAndCode = new Map<string, number>();
+    const codeCount = new Map<string, number>();
+    const crdByCodeUnique = new Map<string, number>();
     for (const c of crdData ?? []) {
       const id = Number((c as any).id);
       const sectorId = Number((c as any).sector_id);
       const code = String((c as any).code || "").trim();
       crdById.set(id, c);
       crdBySectorAndCode.set(`${sectorId}:${code}`, id);
+      const key = code.toLowerCase();
+      if (key) codeCount.set(key, (codeCount.get(key) || 0) + 1);
+    }
+    for (const c of crdData ?? []) {
+      const id = Number((c as any).id);
+      const key = String((c as any).code || "").trim().toLowerCase();
+      if (key && codeCount.get(key) === 1) crdByCodeUnique.set(key, id);
     }
 
     const realizedByKey = new Map<string, number>();
@@ -15303,7 +15534,9 @@ export function createApp() {
       const sectorId = Number((invoice as any).sector_id);
       const code = String((invoice as any).crd || "").trim();
       if (!code || !Number.isFinite(sectorId)) continue;
-      const crdId = crdBySectorAndCode.get(`${sectorId}:${code}`);
+      const crdId =
+        crdBySectorAndCode.get(`${sectorId}:${code}`) ??
+        (crdByCodeUnique.get(code.toLowerCase()) ?? undefined);
       if (!crdId) continue;
       addRealized(crdId, month, (invoice as any).amount);
     }

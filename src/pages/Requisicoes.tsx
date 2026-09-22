@@ -29,6 +29,7 @@ export const RequisicoesPage: React.FC = () => {
   const [crdFilter, setCrdFilter] = useState('');
   const [userRole, setUserRole] = useState<string>('viewer');
   const [allowedSectorIds, setAllowedSectorIds] = useState<string[]>([]);
+  const [grantedCrdIds, setGrantedCrdIds] = useState<string[]>([]);
   const [actingSector, setActingSector] = useState<'requester' | 'controle' | 'financeiro'>('requester');
   const [form, setForm] = useState({ ...EMPTY_FORM });
   const [showModal, setShowModal] = useState(false);
@@ -56,6 +57,15 @@ export const RequisicoesPage: React.FC = () => {
           )
         );
         setAllowedSectorIds(ids);
+        setGrantedCrdIds(
+          Array.from(
+            new Set<string>(
+              (Array.isArray(user?.crd_ids) ? user.crd_ids : [])
+                .map((id: unknown) => String(id ?? '').trim())
+                .filter((id: string) => id !== '')
+            )
+          )
+        );
       } catch {
         // mantém escopo vazio
       }
@@ -81,11 +91,14 @@ export const RequisicoesPage: React.FC = () => {
   const visibleCrds = useMemo(() => {
     const active = crds.filter((c) => c.active !== false);
     if (hasGlobalSectorView && allowedSectorIds.length === 0) return active;
-    if (allowedSectorIds.length === 0) return [];
+    if (allowedSectorIds.length === 0 && grantedCrdIds.length === 0) return [];
     return active.filter(
-      (c) => allowedSectorIds.includes(String(c.sector_id)) || isSharedCrdCode(c.code)
+      (c) =>
+        allowedSectorIds.includes(String(c.sector_id)) ||
+        isSharedCrdCode(c.code) ||
+        grantedCrdIds.includes(String(c.id))
     );
-  }, [crds, allowedSectorIds, hasGlobalSectorView]);
+  }, [crds, allowedSectorIds, hasGlobalSectorView, grantedCrdIds]);
 
   const crdSelectOptions = useMemo(
     () =>

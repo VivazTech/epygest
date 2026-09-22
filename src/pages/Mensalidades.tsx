@@ -96,6 +96,7 @@ export const MensalidadesPage: React.FC = () => {
   const [lancamentos, setLancamentos] = useState<ContratoLancamento[]>([]);
   const [solicitandoId, setSolicitandoId] = useState<number | null>(null);
   const [userRole, setUserRole] = useState('viewer');
+  const [grantedCrdIds, setGrantedCrdIds] = useState<number[]>([]);
 
   const ALERT_DAYS = 30;
 
@@ -147,6 +148,11 @@ export const MensalidadesPage: React.FC = () => {
         if (!res.ok) return;
         const user = await res.json();
         setUserRole(String(user?.role || 'viewer'));
+        setGrantedCrdIds(
+          (Array.isArray(user?.crd_ids) ? user.crd_ids : [])
+            .map((id: unknown) => Number(id))
+            .filter((id: number) => Number.isFinite(id))
+        );
       } catch {
         // ignore
       }
@@ -179,13 +185,15 @@ export const MensalidadesPage: React.FC = () => {
   const crdOptions = useMemo(() => {
     const sectorId = form.sector_id ? Number(form.sector_id) : null;
     return crds
-      .filter((c) => !sectorId || c.sector_id === sectorId)
+      .filter(
+        (c) => !sectorId || c.sector_id === sectorId || grantedCrdIds.includes(c.id)
+      )
       .map((c) => ({
         value: String(c.id),
         label: c.code && c.name ? `${c.code} — ${c.name}` : c.name || c.code,
         keywords: `${c.code} ${c.name}`,
       }));
-  }, [crds, form.sector_id]);
+  }, [crds, form.sector_id, grantedCrdIds]);
 
   const crdFilterOptions = useMemo(() => buildCrdFilterOptions(crds), [crds]);
 

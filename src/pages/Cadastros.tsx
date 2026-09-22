@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Database,
   Plus,
@@ -12,7 +12,8 @@ import {
   Upload,
   FolderOpen,
   UserRound,
-  Coins
+  Coins,
+  Hash,
 } from 'lucide-react';
 import { cn, formatCurrency } from '../lib/utils';
 import { ValueTrace } from '../components/ValueTrace';
@@ -28,7 +29,7 @@ import {
 
 export const CadastrosPage: React.FC = () => {
   const { query } = useSearch();
-  const [activeTab, setActiveTab] = useState('categorias');
+  const [activeTab, setActiveTab] = useState('crd');
   const [categories, setCategories] = useState<any[]>([]);
   const [sectors, setSectors] = useState<any[]>([]);
   const [paymentMethods, setPaymentMethods] = useState<any[]>([]);
@@ -53,11 +54,6 @@ export const CadastrosPage: React.FC = () => {
     code: '',
     name: '',
     sector_id: '',
-    saldo_anterior: '',
-    previsto_mes: '',
-    disponivel_mes: '',
-    realizado_mes: '',
-    saldo: '',
   });
   const [editingCrdId, setEditingCrdId] = useState<number | null>(null);
   const [editCrdForm, setEditCrdForm] = useState({
@@ -65,16 +61,13 @@ export const CadastrosPage: React.FC = () => {
     code: '',
     name: '',
     sector_id: '',
-    saldo_anterior: '0',
-    previsto_mes: '0',
-    disponivel_mes: '0',
-    realizado_mes: '0',
-    saldo: '0',
     active: true,
   });
   const [isImportingCrd, setIsImportingCrd] = useState(false);
+  const [savingCrd, setSavingCrd] = useState(false);
   const [reqForm, setReqForm] = useState({ crd_id: '', provider_name: '', date: '', amount: '', description: '' });
   const [expandedGroups, setExpandedGroups] = useState<Set<number>>(new Set());
+  const didExpandCrdGroups = useRef(false);
 
   const toggleGroup = (sectorId: number) => {
     setExpandedGroups((prev) => {
@@ -99,6 +92,12 @@ export const CadastrosPage: React.FC = () => {
       (a.sector.name || '').localeCompare(b.sector.name || '')
     );
   }, [crds, sectors]);
+
+  useEffect(() => {
+    if (didExpandCrdGroups.current || crdsByGroup.length === 0) return;
+    didExpandCrdGroups.current = true;
+    setExpandedGroups(new Set(crdsByGroup.map((g) => Number(g.sector.id)).filter((id) => Number.isFinite(id))));
+  }, [crdsByGroup]);
 
   const filteredCrdGroups = useMemo(() => {
     if (!query.trim()) return crdsByGroup;
@@ -207,13 +206,12 @@ export const CadastrosPage: React.FC = () => {
   }, []);
 
   const tabs = [
-    { id: 'categorias', label: 'Categorias', icon: Layers },
+    { id: 'crd', label: 'CRD', icon: Hash },
     { id: 'setores', label: 'Setores / Centros de Custo', icon: Briefcase },
     { id: 'colaboradores', label: 'Colaboradores', icon: UserRound },
-    { id: 'contas', label: 'Contas Gerenciais', icon: Database },
+    { id: 'categorias', label: 'Categorias', icon: Layers },
     { id: 'formas-pagamento', label: 'Formas de Pagamento', icon: Database },
     { id: 'moedas', label: 'Moedas', icon: Coins },
-    { id: 'crd', label: 'CRD', icon: Database },
     { id: 'requisicoes', label: 'Requisições Internas', icon: Database },
   ];
 
@@ -255,11 +253,8 @@ export const CadastrosPage: React.FC = () => {
       return;
     }
     if (activeTab === 'crd') {
-      const missingRequired = !newCrdForm.natureza || !newCrdForm.code.trim() || !newCrdForm.name.trim() || !newCrdForm.sector_id
-        || newCrdForm.saldo_anterior === '' || newCrdForm.previsto_mes === '' || newCrdForm.disponivel_mes === ''
-        || newCrdForm.realizado_mes === '' || newCrdForm.saldo === '';
-      if (missingRequired) {
-        alert('Preencha todos os campos do CRD.');
+      if (!newCrdForm.natureza || !newCrdForm.code.trim() || !newCrdForm.name.trim() || !newCrdForm.sector_id) {
+        alert('Preencha código, nome e setor do CRD.');
         return;
       }
       const res = await fetch('/api/crds', {
@@ -270,12 +265,7 @@ export const CadastrosPage: React.FC = () => {
           code: newCrdForm.code.trim(),
           name: newCrdForm.name.trim(),
           sector_id: parseInt(newCrdForm.sector_id),
-          saldo_anterior: parseFloat(newCrdForm.saldo_anterior),
-          previsto_mes: parseFloat(newCrdForm.previsto_mes),
-          disponivel_mes: parseFloat(newCrdForm.disponivel_mes),
-          realizado_mes: parseFloat(newCrdForm.realizado_mes),
-          saldo: parseFloat(newCrdForm.saldo),
-          active: true
+          active: true,
         })
       });
       if (!res.ok) {
@@ -283,17 +273,16 @@ export const CadastrosPage: React.FC = () => {
         alert(data.error || 'Erro ao cadastrar');
         return;
       }
+      const createdSectorId = Number(newCrdForm.sector_id);
       setNewCrdForm({
         natureza: 'O',
         code: '',
         name: '',
         sector_id: '',
-        saldo_anterior: '',
-        previsto_mes: '',
-        disponivel_mes: '',
-        realizado_mes: '',
-        saldo: '',
       });
+      if (Number.isFinite(createdSectorId)) {
+        setExpandedGroups((prev) => new Set(prev).add(createdSectorId));
+      }
       refreshCrds();
     }
   };
@@ -336,17 +325,16 @@ export const CadastrosPage: React.FC = () => {
   };
 
   const startEditCrd = (crd: any) => {
-    setEditingCrdId(crd.id);
+    const sectorId = Number(crd.sector_id);
+    if (Number.isFinite(sectorId)) {
+      setExpandedGroups((prev) => new Set(prev).add(sectorId));
+    }
+    setEditingCrdId(Number(crd.id));
     setEditCrdForm({
       natureza: crd.natureza ?? 'O',
       code: crd.code ?? '',
       name: crd.name ?? '',
       sector_id: crd.sector_id ? String(crd.sector_id) : '',
-      saldo_anterior: String(crd.saldo_anterior ?? 0),
-      previsto_mes: String(crd.previsto_mes ?? 0),
-      disponivel_mes: String(crd.disponivel_mes ?? 0),
-      realizado_mes: String(crd.realizado_mes ?? 0),
-      saldo: String(crd.saldo ?? 0),
       active: crd.active !== false,
     });
   };
@@ -354,35 +342,39 @@ export const CadastrosPage: React.FC = () => {
   const saveCrdEdit = async () => {
     if (!editingCrdId) return;
     if (!editCrdForm.natureza || !editCrdForm.code.trim() || !editCrdForm.name.trim() || !editCrdForm.sector_id) {
-      alert('Preencha natureza, código, nome e grupo.');
+      alert('Preencha natureza, código, nome e setor.');
       return;
     }
 
-    const res = await fetch(`/api/crds/${editingCrdId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        natureza: editCrdForm.natureza,
-        code: editCrdForm.code.trim(),
-        name: editCrdForm.name.trim(),
-        sector_id: parseInt(editCrdForm.sector_id),
-        saldo_anterior: parseFloat(editCrdForm.saldo_anterior || '0'),
-        previsto_mes: parseFloat(editCrdForm.previsto_mes || '0'),
-        disponivel_mes: parseFloat(editCrdForm.disponivel_mes || '0'),
-        realizado_mes: parseFloat(editCrdForm.realizado_mes || '0'),
-        saldo: parseFloat(editCrdForm.saldo || '0'),
-        active: editCrdForm.active,
-      })
-    });
+    setSavingCrd(true);
+    try {
+      const res = await fetch(`/api/crds/${editingCrdId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          natureza: editCrdForm.natureza,
+          code: editCrdForm.code.trim(),
+          name: editCrdForm.name.trim(),
+          sector_id: parseInt(editCrdForm.sector_id),
+          active: editCrdForm.active,
+        }),
+      });
 
-    if (!res.ok) {
-      const data = await res.json();
-      alert(data.error || 'Erro ao editar CRD');
-      return;
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        alert(data.error || 'Erro ao editar CRD');
+        return;
+      }
+
+      const nextSectorId = Number(editCrdForm.sector_id);
+      if (Number.isFinite(nextSectorId)) {
+        setExpandedGroups((prev) => new Set(prev).add(nextSectorId));
+      }
+      setEditingCrdId(null);
+      refreshCrds();
+    } finally {
+      setSavingCrd(false);
     }
-
-    setEditingCrdId(null);
-    refreshCrds();
   };
 
   const cancelCrdEdit = () => {
@@ -392,11 +384,6 @@ export const CadastrosPage: React.FC = () => {
       code: '',
       name: '',
       sector_id: '',
-      saldo_anterior: '0',
-      previsto_mes: '0',
-      disponivel_mes: '0',
-      realizado_mes: '0',
-      saldo: '0',
       active: true,
     });
   };
@@ -931,10 +918,16 @@ export const CadastrosPage: React.FC = () => {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-bold text-slate-900">Cadastros e Parametrizações</h2>
-          <p className="text-slate-500 text-sm">Gerencie as estruturas fundamentais do seu sistema financeiro.</p>
+          <p className="text-slate-500 text-sm">
+            Cadastre CRDs (código, nome e setor) para aparecerem nas listas e nos lançamentos. Valores financeiros são definidos em outras telas.
+          </p>
         </div>
         
-        <button className="flex items-center gap-2 bg-[#004D40] text-white px-4 py-2.5 rounded-xl shadow-lg shadow-emerald-900/10 hover:bg-[#003d33] transition-colors">
+        <button
+          type="button"
+          onClick={() => setActiveTab('crd')}
+          className="flex items-center gap-2 bg-[#004D40] text-white px-4 py-2.5 rounded-xl shadow-lg shadow-emerald-900/10 hover:bg-[#003d33] transition-colors"
+        >
           <Plus className="w-4 h-4" />
           <span className="text-sm font-bold">Novo Cadastro</span>
         </button>
@@ -964,7 +957,7 @@ export const CadastrosPage: React.FC = () => {
           {/* Toolbar */}
           <div className="p-4 border-b border-slate-50 flex flex-wrap items-center justify-between gap-3">
             <div className="w-full text-xs text-slate-500">
-              Grupo = Setor/centro de custo. Detalhado/Subgrupo = nome do CRD (ex.: Bar da Piscina, Cafe da manha, cambuza, frigobar).
+              Cadastre só a linha do CRD (código, nome e setor) para ela aparecer no Prev x Real, Relatório de CRD e nos selects dos lançamentos. Valores (previsto, realizado, saldo) vêm dos lançamentos e das outras telas.
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <select
@@ -985,56 +978,16 @@ export const CadastrosPage: React.FC = () => {
                 value={newCrdForm.name}
                 onChange={(e) => setNewCrdForm((p) => ({ ...p, name: e.target.value }))}
                 placeholder="Nome"
-                className="w-48 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+                className="w-56 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
               />
               <select
                 value={newCrdForm.sector_id}
                 onChange={(e) => setNewCrdForm((p) => ({ ...p, sector_id: e.target.value }))}
-                className="w-44 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+                className="w-52 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
               >
                 <option value="">Setor</option>
                 {sectors.map((s: any) => <option key={s.id} value={s.id}>{s.code ? `${s.code} — ${s.name}` : s.name}</option>)}
               </select>
-              <input
-                type="number"
-                step="0.01"
-                value={newCrdForm.saldo_anterior}
-                onChange={(e) => setNewCrdForm((p) => ({ ...p, saldo_anterior: e.target.value }))}
-                placeholder="Saldo Anterior"
-                className="w-36 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
-              />
-              <input
-                type="number"
-                step="0.01"
-                value={newCrdForm.previsto_mes}
-                onChange={(e) => setNewCrdForm((p) => ({ ...p, previsto_mes: e.target.value }))}
-                placeholder="Previsto Mês"
-                className="w-36 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
-              />
-              <input
-                type="number"
-                step="0.01"
-                value={newCrdForm.disponivel_mes}
-                onChange={(e) => setNewCrdForm((p) => ({ ...p, disponivel_mes: e.target.value }))}
-                placeholder="Disponível Mês"
-                className="w-36 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
-              />
-              <input
-                type="number"
-                step="0.01"
-                value={newCrdForm.realizado_mes}
-                onChange={(e) => setNewCrdForm((p) => ({ ...p, realizado_mes: e.target.value }))}
-                placeholder="Realizado Mês"
-                className="w-36 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
-              />
-              <input
-                type="number"
-                step="0.01"
-                value={newCrdForm.saldo}
-                onChange={(e) => setNewCrdForm((p) => ({ ...p, saldo: e.target.value }))}
-                placeholder="Saldo"
-                className="w-32 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
-              />
               <button
                 onClick={createCadastro}
                 className="px-4 py-2 bg-[#004D40] text-white font-bold rounded-xl hover:bg-[#003d33] transition-colors"
@@ -1067,7 +1020,7 @@ export const CadastrosPage: React.FC = () => {
             )}
             {filteredCrdGroups.map((group) => {
               const isOpen = expandedGroups.has(group.sector.id);
-              const activeCount = group.items.filter((c: any) => c.active).length;
+              const activeCount = group.items.filter((c: any) => c.active !== false).length;
               return (
                 <div key={group.sector.id}>
                   {/* Header do grupo */}
@@ -1095,19 +1048,22 @@ export const CadastrosPage: React.FC = () => {
                             <th className="pl-16 pr-4 py-2 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Natureza</th>
                             <th className="px-4 py-2 text-[10px] font-bold text-slate-400 uppercase tracking-widest">CRD</th>
                             <th className="px-4 py-2 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Nome</th>
-                            <th className="px-4 py-2 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Saldo Anterior</th>
-                            <th className="px-4 py-2 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Previsto no Mês</th>
-                            <th className="px-4 py-2 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Disponível Mês</th>
-                            <th className="px-4 py-2 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Realizado Mês</th>
-                            <th className="px-4 py-2 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Saldo</th>
                             <th className="px-4 py-2 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Status</th>
                             <th className="px-4 py-2 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-right pr-6">Ações</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100/60">
-                          {group.items.map((c: any) => (
-                            <tr key={c.id} className="hover:bg-white/60 transition-colors group">
-                              {editingCrdId === c.id ? (
+                          {group.items.map((c: any) => {
+                            const isEditing = Number(editingCrdId) === Number(c.id);
+                            return (
+                            <tr
+                              key={c.id}
+                              className={cn(
+                                'transition-colors',
+                                isEditing ? 'bg-emerald-50/70 ring-1 ring-inset ring-emerald-200' : 'hover:bg-white/60'
+                              )}
+                            >
+                              {isEditing ? (
                                 <>
                                   <td className="pl-16 pr-4 py-3">
                                     <select
@@ -1123,7 +1079,7 @@ export const CadastrosPage: React.FC = () => {
                                     <input
                                       value={editCrdForm.code}
                                       onChange={(e) => setEditCrdForm((p) => ({ ...p, code: e.target.value }))}
-                                      className="w-full px-2 py-1 bg-white border border-slate-200 rounded-lg text-xs font-bold"
+                                      className="w-full max-w-[120px] px-2 py-1 bg-white border border-slate-200 rounded-lg text-xs font-bold"
                                       placeholder="CRD"
                                     />
                                   </td>
@@ -1132,24 +1088,19 @@ export const CadastrosPage: React.FC = () => {
                                       <input
                                         value={editCrdForm.name}
                                         onChange={(e) => setEditCrdForm((p) => ({ ...p, name: e.target.value }))}
-                                        className="flex-1 px-2 py-1 bg-white border border-slate-200 rounded-lg text-sm"
+                                        className="flex-1 min-w-[180px] px-2 py-1 bg-white border border-slate-200 rounded-lg text-sm"
                                         placeholder="Nome"
                                       />
                                       <select
                                         value={editCrdForm.sector_id}
                                         onChange={(e) => setEditCrdForm((p) => ({ ...p, sector_id: e.target.value }))}
-                                        className="w-44 px-2 py-1 bg-white border border-slate-200 rounded-lg text-xs"
+                                        className="w-52 px-2 py-1 bg-white border border-slate-200 rounded-lg text-xs"
                                       >
-                                        <option value="">Grupo</option>
+                                        <option value="">Setor</option>
                                         {sectors.map((s: any) => <option key={s.id} value={s.id}>{s.code ? `${s.code} — ${s.name}` : s.name}</option>)}
                                       </select>
                                     </div>
                                   </td>
-                                  <td className="px-4 py-3"><input type="number" step="0.01" value={editCrdForm.saldo_anterior} onChange={(e) => setEditCrdForm((p) => ({ ...p, saldo_anterior: e.target.value }))} className="w-28 px-2 py-1 bg-white border border-slate-200 rounded-lg text-xs" /></td>
-                                  <td className="px-4 py-3"><input type="number" step="0.01" value={editCrdForm.previsto_mes} onChange={(e) => setEditCrdForm((p) => ({ ...p, previsto_mes: e.target.value }))} className="w-28 px-2 py-1 bg-white border border-slate-200 rounded-lg text-xs" /></td>
-                                  <td className="px-4 py-3"><input type="number" step="0.01" value={editCrdForm.disponivel_mes} onChange={(e) => setEditCrdForm((p) => ({ ...p, disponivel_mes: e.target.value }))} className="w-28 px-2 py-1 bg-white border border-slate-200 rounded-lg text-xs" /></td>
-                                  <td className="px-4 py-3"><input type="number" step="0.01" value={editCrdForm.realizado_mes} onChange={(e) => setEditCrdForm((p) => ({ ...p, realizado_mes: e.target.value }))} className="w-28 px-2 py-1 bg-white border border-slate-200 rounded-lg text-xs" /></td>
-                                  <td className="px-4 py-3"><input type="number" step="0.01" value={editCrdForm.saldo} onChange={(e) => setEditCrdForm((p) => ({ ...p, saldo: e.target.value }))} className="w-28 px-2 py-1 bg-white border border-slate-200 rounded-lg text-xs" /></td>
                                   <td className="px-4 py-3">
                                     <label className="inline-flex items-center gap-1.5 text-xs text-slate-600">
                                       <input
@@ -1163,14 +1114,18 @@ export const CadastrosPage: React.FC = () => {
                                   <td className="px-4 py-3 text-right pr-6">
                                     <div className="flex items-center justify-end gap-2">
                                       <button
+                                        type="button"
                                         onClick={saveCrdEdit}
-                                        className="px-3 py-1.5 text-xs font-bold rounded-lg bg-emerald-50 text-emerald-700 hover:bg-emerald-100 transition-colors"
+                                        disabled={savingCrd}
+                                        className="px-3 py-1.5 text-xs font-bold rounded-lg bg-[#004D40] text-white hover:bg-[#003d33] disabled:opacity-60 transition-colors"
                                       >
-                                        Salvar
+                                        {savingCrd ? 'Salvando...' : 'Salvar'}
                                       </button>
                                       <button
+                                        type="button"
                                         onClick={cancelCrdEdit}
-                                        className="px-3 py-1.5 text-xs font-bold rounded-lg bg-slate-100 text-slate-700 hover:bg-slate-200 transition-colors"
+                                        disabled={savingCrd}
+                                        className="px-3 py-1.5 text-xs font-bold rounded-lg bg-slate-100 text-slate-700 hover:bg-slate-200 disabled:opacity-60 transition-colors"
                                       >
                                         Cancelar
                                       </button>
@@ -1190,23 +1145,19 @@ export const CadastrosPage: React.FC = () => {
                                   <td className="px-4 py-3">
                                     <span className="text-sm text-slate-700">{c.name}</span>
                                   </td>
-                                  <td className="px-4 py-3"><ValueTrace className="text-xs text-slate-700" displayValue={formatCurrency(c.saldo_anterior || 0)} source={`CRD ${c.code}`} calculation="Campo saldo_anterior do cadastro do CRD" /></td>
-                                  <td className="px-4 py-3"><ValueTrace className="text-xs text-slate-700" displayValue={formatCurrency(c.previsto_mes || 0)} source={`CRD ${c.code}`} calculation="Campo previsto_mes do cadastro do CRD" /></td>
-                                  <td className="px-4 py-3"><ValueTrace className="text-xs text-slate-700" displayValue={formatCurrency(c.disponivel_mes || 0)} source={`CRD ${c.code}`} calculation="Campo disponivel_mes do cadastro do CRD" /></td>
-                                  <td className="px-4 py-3"><ValueTrace className="text-xs text-slate-700" displayValue={formatCurrency(c.realizado_mes || 0)} source={`CRD ${c.code}`} calculation="Campo realizado_mes do cadastro do CRD" /></td>
-                                  <td className="px-4 py-3"><ValueTrace className="text-xs font-semibold text-slate-800" displayValue={formatCurrency(c.saldo || 0)} source={`CRD ${c.code}`} calculation="Campo saldo do cadastro do CRD" /></td>
                                   <td className="px-4 py-3">
                                     <span className={cn(
                                       "text-[10px] font-bold px-2 py-1 rounded-lg uppercase tracking-wider",
-                                      c.active ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-600"
+                                      c.active !== false ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-600"
                                     )}>
-                                      {c.active ? 'Ativo' : 'Inativo'}
+                                      {c.active !== false ? 'Ativo' : 'Inativo'}
                                     </span>
                                   </td>
                                   <td className="px-4 py-3 text-right pr-6">
                                     <button
+                                      type="button"
                                       onClick={() => startEditCrd(c)}
-                                      className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold rounded-lg bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 transition-colors opacity-0 group-hover:opacity-100"
+                                      className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold rounded-lg bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 hover:border-slate-300 transition-colors"
                                     >
                                       <Edit2 className="w-3.5 h-3.5" />
                                       Editar
@@ -1215,7 +1166,8 @@ export const CadastrosPage: React.FC = () => {
                                 </>
                               )}
                             </tr>
-                          ))}
+                            );
+                          })}
                         </tbody>
                       </table>
                     </div>
