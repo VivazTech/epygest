@@ -1052,9 +1052,9 @@ export const UsuariosPage: React.FC = () => {
       )}
 
       {showModal && editForm && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-white w-full max-w-lg rounded-3xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
-            <div className="p-6 border-b border-slate-100 flex justify-between items-center">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overflow-y-auto bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white w-full max-w-lg max-h-[min(92vh,920px)] my-auto rounded-3xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col">
+            <div className="p-5 sm:p-6 border-b border-slate-100 flex justify-between items-center shrink-0">
               <div>
                 <h3 className="text-xl font-bold text-slate-900">
                   {creating ? 'Novo usuário' : 'Editar usuário'}
@@ -1079,8 +1079,9 @@ export const UsuariosPage: React.FC = () => {
                 if (creating) void saveCreate();
                 else void saveEdit();
               }}
-              className="p-6 space-y-4"
+              className="flex flex-col flex-1 min-h-0"
             >
+              <div className="p-5 sm:p-6 space-y-4 overflow-y-auto flex-1 min-h-0">
               <div className="space-y-1.5">
                 <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Nome</label>
                 <input
@@ -1142,7 +1143,7 @@ export const UsuariosPage: React.FC = () => {
                   placeholder="Buscar setor (ex.: Financeiro)"
                   className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm mb-2"
                 />
-                <div className="max-h-40 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm overflow-auto space-y-1.5">
+                <div className="max-h-32 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm overflow-auto space-y-1.5">
                   {sectors.length === 0 ? (
                     <p className="text-xs text-slate-400">Nenhum setor cadastrado.</p>
                   ) : filteredSectorOptions.length === 0 ? (
@@ -1219,7 +1220,7 @@ export const UsuariosPage: React.FC = () => {
                   placeholder="Buscar por grupo, código ou nome (ex.: 399)"
                   className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm mb-2"
                 />
-                <div className="max-h-28 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm overflow-auto space-y-1.5 mb-2">
+                <div className="max-h-24 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm overflow-auto space-y-1.5 mb-2">
                   <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 sticky top-0 bg-slate-50 pb-1">
                     Selecionar por grupo
                   </p>
@@ -1247,7 +1248,7 @@ export const UsuariosPage: React.FC = () => {
                     })
                   )}
                 </div>
-                <div className="max-h-40 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm overflow-auto space-y-1.5">
+                <div className="max-h-32 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm overflow-auto space-y-1.5">
                   <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 sticky top-0 bg-slate-50 pb-1">
                     CRDs individuais
                   </p>
@@ -1301,8 +1302,9 @@ export const UsuariosPage: React.FC = () => {
                   {saveError}
                 </p>
               )}
+              </div>
 
-              <div className="flex items-center justify-end gap-3 pt-2">
+              <div className="flex items-center justify-end gap-3 p-5 sm:p-6 pt-3 border-t border-slate-100 shrink-0 bg-white">
                 <button
                   type="button"
                   onClick={closeModal}

@@ -11,6 +11,11 @@ import { isDirectDocumentUrl } from '../lib/storagePath';
 import { confirmCancel, confirmDelete } from '../lib/confirmAction';
 import { SearchableSelect } from '../components/SearchableSelect';
 import { CrdListFilter } from '../components/CrdListFilter';
+import {
+  LaunchNumberAmountFilters,
+  matchesAmountFilter,
+  matchesInvoiceNumberFilter,
+} from '../components/LaunchNumberAmountFilters';
 import { buildCrdFilterOptions, matchesCrdCodeFilter } from '../lib/crdFilter';
 import { launchStatusMeta } from '../lib/launchFlow';
 
@@ -46,6 +51,8 @@ export const LancamentosManuaisPage: React.FC = () => {
   const [paymentMethods, setPaymentMethods] = useState<any[]>([]);
   const [currencies, setCurrencies] = useState<any[]>([]);
   const [crdFilter, setCrdFilter] = useState('');
+  const [invoiceNumberFilter, setInvoiceNumberFilter] = useState('');
+  const [amountFilter, setAmountFilter] = useState('');
   const [userRole, setUserRole] = useState<string>('viewer');
   const [allowedSectorIds, setAllowedSectorIds] = useState<string[]>([]);
   const [grantedCrdIds, setGrantedCrdIds] = useState<string[]>([]);
@@ -323,6 +330,10 @@ export const LancamentosManuaisPage: React.FC = () => {
     () =>
       scopedEntries.filter((entry) => {
         if (!matchesCrdCodeFilter(crdFilter, entry.crd_code, entry.crd_name)) return false;
+        if (!matchesInvoiceNumberFilter(invoiceNumberFilter, entry.protocol, entry.description, entry.provider_name)) {
+          return false;
+        }
+        if (!matchesAmountFilter(amountFilter, entry.amount)) return false;
         return matchesSearch(
           query,
           entry.protocol,
@@ -343,7 +354,7 @@ export const LancamentosManuaisPage: React.FC = () => {
           entry.status
         );
       }),
-    [scopedEntries, query, crdFilter]
+    [scopedEntries, query, crdFilter, invoiceNumberFilter, amountFilter]
   );
 
   const openTotal = useMemo(
@@ -417,6 +428,13 @@ export const LancamentosManuaisPage: React.FC = () => {
           Compromisso orçamentário usa a data de lançamento. Após a baixa pelo Financeiro, o valor deixa de contar no pendente.
         </p>
         <CrdListFilter value={crdFilter} onChange={setCrdFilter} options={crdFilterOptions} className="ml-auto" />
+        <LaunchNumberAmountFilters
+          invoiceNumber={invoiceNumberFilter}
+          onInvoiceNumberChange={setInvoiceNumberFilter}
+          amount={amountFilter}
+          onAmountChange={setAmountFilter}
+          numberLabel="Nº / protocolo"
+        />
       </div>
 
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-x-auto">

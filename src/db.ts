@@ -251,6 +251,8 @@ if (crdCount.count === 0) {
   insertCrd.run('664', 'COSTURAS UNIFORMES RH ZZ', rhSectorId, 1);
   insertCrd.run('337', 'TAXA PROC TRABALHISTA', rhSectorId, 1);
   insertCrd.run('RH-RECURSOS-HUMANOS', 'RECURSOS HUMANOS', rhSectorId, 1);
+  insertCrd.run('481', 'UNIFORMES E EPIS - FOLHA DE PAGAMENTO', rhSectorId, 1);
+  insertCrd.run('4812', 'UNIFORMES E EPIS - EXTRAS', rhSectorId, 1);
   insertCrd.run('RH-UNIFORMES-EPIS', 'UNIFORMES E EPIS', rhSectorId, 1);
   insertCrd.run('RH-FOLHA-PAGAMENTO', 'Folha de pagamento', rhSectorId, 1);
   insertCrd.run('RH-EXTRAS', 'Extras', rhSectorId, 1);

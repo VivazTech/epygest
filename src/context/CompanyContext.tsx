@@ -4,6 +4,7 @@ import {
   COMPANY_STORAGE_KEY,
   COMPANIES,
   DEFAULT_COMPANY_KEY,
+  applyCompanyTheme,
   getCompany,
   isCompanyKey,
   type CompanyKey,
@@ -34,12 +35,14 @@ const readStoredCompanyKey = (): CompanyKey => {
 
 if (typeof window !== 'undefined') {
   activeEmpresaKey = readStoredCompanyKey();
+  applyCompanyTheme(activeEmpresaKey);
 }
 
 export const getActiveEmpresaKey = (): CompanyKey => activeEmpresaKey;
 
 const persistEmpresaKey = (key: CompanyKey) => {
   activeEmpresaKey = key;
+  applyCompanyTheme(key);
   try {
     localStorage.setItem(COMPANY_STORAGE_KEY, key);
   } catch {
@@ -90,6 +93,10 @@ export const CompanyProvider: React.FC<{
     persistEmpresaKey(stored);
     return stored;
   });
+
+  useEffect(() => {
+    applyCompanyTheme(companyKey);
+  }, [companyKey]);
 
   useEffect(() => {
     if (!allowed.includes(companyKey)) {

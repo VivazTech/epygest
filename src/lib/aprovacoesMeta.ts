@@ -7,6 +7,8 @@ export type AprovacaoTipo =
   | 'danfe'
   | 'mensalidade';
 
+export type AprovacaoActingSector = 'gestor' | 'controle' | 'financeiro' | 'diretoria';
+
 export type AprovacaoItem = {
   key: string;
   type: AprovacaoTipo;
@@ -19,6 +21,7 @@ export type AprovacaoItem = {
   subtitle: string | null;
   description: string | null;
   protocol?: string | null;
+  invoice_number?: string | null;
   reference_date: string;
   issue_date: string | null;
   amount: number | null;
@@ -32,6 +35,21 @@ export type AprovacaoItem = {
   assinado?: boolean;
   alerta_vencimento?: boolean;
   items_count?: number;
+};
+
+/** Limiar: valores acima de R$ 800 exigem revisão da Diretoria (R$ 800,01 já entra). */
+export const DIRETORIA_AMOUNT_THRESHOLD = 800;
+
+/**
+ * Quando true, lançamentos acima do limiar só seguem ao Financeiro após
+ * aprovação do Controle E da Diretoria.
+ * Mantido false até o treinamento da Diretoria — o fluxo atual permanece.
+ */
+export const DIRETORIA_APPROVAL_ENFORCED = false;
+
+export const exceedsDiretoriaThreshold = (amount: unknown): boolean => {
+  const n = Number(amount);
+  return Number.isFinite(n) && n > DIRETORIA_AMOUNT_THRESHOLD;
 };
 
 export const APROVACAO_TIPOS: Array<{ value: AprovacaoTipo | 'all'; label: string }> = [
@@ -66,6 +84,9 @@ export const statusMeta = (item: AprovacaoItem) => {
     const flow = item.flow_stage || item.status;
     if (flow === 'paid' || item.status === 'paid') return { label: 'Pago', classes: 'bg-emerald-100 text-emerald-700' };
     if (flow === 'cancelled') return { label: 'Cancelado', classes: 'bg-slate-200 text-slate-700' };
+    if (flow === 'diretoria_pending' || flow === 'pending_diretoria') {
+      return { label: 'Aguardando Diretoria', classes: 'bg-cyan-100 text-cyan-800' };
+    }
     if (flow === 'control_approved') return { label: 'Aprovado Controle', classes: 'bg-blue-100 text-blue-700' };
     if (flow === 'manager_pending') return { label: 'Aguardando Gestor', classes: 'bg-violet-100 text-violet-700' };
     if (item.status === 'overdue') return { label: 'Vencido', classes: 'bg-red-100 text-red-700' };
@@ -73,6 +94,9 @@ export const statusMeta = (item: AprovacaoItem) => {
   }
   if (item.status === 'pending_manager') {
     return { label: 'Aguardando Gestor', classes: 'bg-violet-100 text-violet-700' };
+  }
+  if (item.status === 'pending_diretoria' || item.status === 'diretoria_pending') {
+    return { label: 'Aguardando Diretoria', classes: 'bg-cyan-100 text-cyan-800' };
   }
   if (item.type === 'manual' || item.type === 'estorno') {
     if (item.status === 'approved') return { label: 'Aprovado Controle', classes: 'bg-blue-100 text-blue-700' };
@@ -95,15 +119,33 @@ export const statusMeta = (item: AprovacaoItem) => {
 
 export const isPendingForRole = (
   item: AprovacaoItem,
-  actingSector: 'gestor' | 'controle' | 'financeiro'
+  actingSector: AprovacaoActingSector
 ) => {
   if (item.type === 'nota' || item.type === 'danfe') {
     const flow = item.flow_stage || 'control_pending';
     if (actingSector === 'gestor') return flow === 'manager_pending';
     if (actingSector === 'controle') return flow === 'control_pending';
+    if (actingSector === 'diretoria') {
+      // Futuro (DIRETORIA_APPROVAL_ENFORCED): flow === 'diretoria_pending'
+      return DIRETORIA_APPROVAL_ENFORCED && (flow === 'diretoria_pending' || flow === 'pending_diretoria');
+    }
+    // Financeiro
+    if (DIRETORIA_APPROVAL_ENFORCED && exceedsDiretoriaThreshold(item.amount)) {
+      return flow === 'diretoria_approved';
+    }
     return flow === 'control_approved';
   }
   if (actingSector === 'gestor') return item.status === 'pending_manager';
   if (actingSector === 'controle') return item.status === 'open';
+  if (actingSector === 'diretoria') {
+    return (
+      DIRETORIA_APPROVAL_ENFORCED &&
+      (item.status === 'pending_diretoria' || item.status === 'diretoria_pending')
+    );
+  }
+  // Financeiro (tipos com status)
+  if (DIRETORIA_APPROVAL_ENFORCED && exceedsDiretoriaThreshold(item.amount)) {
+    return item.status === 'diretoria_approved';
+  }
   return item.status === 'approved';
 };

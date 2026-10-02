@@ -10,6 +10,11 @@ import { matchesSearch } from '../lib/search';
 import { isSharedCrdCode } from '../lib/sharedCrds';
 import { SearchableSelect } from '../components/SearchableSelect';
 import { CrdListFilter } from '../components/CrdListFilter';
+import {
+  LaunchNumberAmountFilters,
+  matchesAmountFilter,
+  matchesInvoiceNumberFilter,
+} from '../components/LaunchNumberAmountFilters';
 import { buildCrdFilterOptions, matchesCrdCodeFilter } from '../lib/crdFilter';
 import { launchStatusMeta } from '../lib/launchFlow';
 
@@ -27,6 +32,8 @@ export const RequisicoesPage: React.FC = () => {
   const [requisitions, setRequisitions] = useState<any[]>([]);
   const [crds, setCrds] = useState<any[]>([]);
   const [crdFilter, setCrdFilter] = useState('');
+  const [invoiceNumberFilter, setInvoiceNumberFilter] = useState('');
+  const [amountFilter, setAmountFilter] = useState('');
   const [userRole, setUserRole] = useState<string>('viewer');
   const [allowedSectorIds, setAllowedSectorIds] = useState<string[]>([]);
   const [grantedCrdIds, setGrantedCrdIds] = useState<string[]>([]);
@@ -180,6 +187,10 @@ export const RequisicoesPage: React.FC = () => {
     () =>
       scopedRequisitions.filter((r) => {
         if (!matchesCrdCodeFilter(crdFilter, r.crd_code, r.crd_name)) return false;
+        if (!matchesInvoiceNumberFilter(invoiceNumberFilter, r.protocol, r.description, r.provider_name)) {
+          return false;
+        }
+        if (!matchesAmountFilter(amountFilter, r.amount)) return false;
         return matchesSearch(
           query,
           r.protocol,
@@ -193,7 +204,7 @@ export const RequisicoesPage: React.FC = () => {
           r.status
         );
       }),
-    [scopedRequisitions, query, crdFilter]
+    [scopedRequisitions, query, crdFilter, invoiceNumberFilter, amountFilter]
   );
 
   const crdFilterOptions = useMemo(() => buildCrdFilterOptions(crds), [crds]);
@@ -230,8 +241,15 @@ export const RequisicoesPage: React.FC = () => {
         </div>
       </div>
 
-      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4">
+      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 flex flex-wrap items-end gap-4">
         <CrdListFilter value={crdFilter} onChange={setCrdFilter} options={crdFilterOptions} />
+        <LaunchNumberAmountFilters
+          invoiceNumber={invoiceNumberFilter}
+          onInvoiceNumberChange={setInvoiceNumberFilter}
+          amount={amountFilter}
+          onAmountChange={setAmountFilter}
+          numberLabel="Nº / protocolo"
+        />
       </div>
 
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-x-auto">

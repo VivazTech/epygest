@@ -173,6 +173,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, Partial<Record<string, Per
     indicadores: ['view'],
     investimentos: ['view'],
     mensalidades: ['view'],
+    aprovacoes: ['view'],
     'painel-operacional': ['view'],
     'painel-ab': ['view'],
     'painel-spa': ['view'],
@@ -191,7 +192,7 @@ export const SYSTEM_ROLES: Array<{ slug: string; label: string; description: str
   { slug: 'manager', label: 'Gestor', description: 'Visão gerencial e painéis setoriais.', sort_order: 40 },
   { slug: 'estagiario', label: 'Estagiário', description: 'Lança no setor; o gestor aprova antes do Controle.', sort_order: 45 },
   { slug: 'viewer', label: 'Visualizador', description: 'Acesso somente leitura ao dashboard.', sort_order: 50 },
-  { slug: 'diretoria', label: 'Diretoria', description: 'Indicadores e visão consolidada.', sort_order: 60 },
+  { slug: 'diretoria', label: 'Diretoria', description: 'Indicadores, visão consolidada e acompanhamento de aprovações acima de R$ 800.', sort_order: 60 },
 ];
 
 export const actionsToFlags = (actions: PermissionAction[] = []) => ({

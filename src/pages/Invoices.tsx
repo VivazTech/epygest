@@ -20,7 +20,12 @@ import { cn, formatCurrency, formatCurrencyInput, formatDate, getCurrencyMeta, p
 import { ValueTrace } from '../components/ValueTrace';
 import { SearchableSelect } from '../components/SearchableSelect';
 import { CrdListFilter } from '../components/CrdListFilter';
-import { buildCrdFilterOptions, matchesCrdCodeFilter } from '../lib/crdFilter';
+import {
+  LaunchNumberAmountFilters,
+  matchesAmountFilter,
+  matchesInvoiceNumberFilter,
+} from '../components/LaunchNumberAmountFilters';
+import { buildCrdFilterOptions, matchesCrdCodeFilter, resolveCrdDisplayCodes } from '../lib/crdFilter';
 import { valueTrace } from '../lib/valueTraceMeta';
 import { useSearch } from '../context/SearchContext';
 import { useToast } from '../context/ToastContext';
@@ -42,11 +47,14 @@ const EMPTY_INVOICE_FORM = {
   payment_method: '',
   pix_key: '',
   currency: 'BRL',
+  description: '',
 };
 
 export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'servico' }) => {
   const { query } = useSearch();
   const [listQuery, setListQuery] = useState('');
+  const [invoiceNumberFilter, setInvoiceNumberFilter] = useState('');
+  const [amountFilter, setAmountFilter] = useState('');
   const isDanfe = mode === 'danfe';
   const pageTitle = isDanfe ? 'DANFE' : 'Notas de Serviço';
   const pageSubtitle = isDanfe
@@ -286,6 +294,14 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
       alert('Não é possível editar uma nota cancelada.');
       return;
     }
+    if (flow === 'paid' || invoice.status === 'paid') {
+      alert('Não é possível editar um lançamento já pago.');
+      return;
+    }
+    if (!canEditInvoice(invoice)) {
+      alert('Seu perfil não pode editar este lançamento.');
+      return;
+    }
     const paths = collectBoletoPaths(invoice);
     setEditingInvoice(invoice);
     setFormData({
@@ -302,6 +318,7 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
       payment_method: String(invoice.payment_method || ''),
       pix_key: String(invoice.pix_key || ''),
       currency: String(invoice.currency || 'BRL'),
+      description: String(invoice.description || ''),
     });
     setInvoicePdfName(invoice.file_path ? 'PDF anexado' : '');
     setBoletos(paths.length ? paths.map((path, index) => ({ path, name: `Boleto ${index + 1}` })) : [{ path: '', name: '' }]);
@@ -386,10 +403,6 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.file_path) {
-      alert('Anexe o PDF da nota fiscal para continuar.');
-      return;
-    }
     if (!formData.payment_method) {
       alert('Selecione a forma de pagamento.');
       return;
@@ -709,6 +722,19 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
   const canCancelAsRequester =
     actingSector === 'requester' &&
     (userRole === 'manager' || userRole === 'estagiario' || userRole === 'admin' || userRole === 'viewer');
+  /** Gestor (e perfis de lançamento) podem editar processos ainda abertos do seu setor — ex.: anexar NF depois. */
+  const canEditOpenLaunches =
+    userRole === 'manager' ||
+    userRole === 'estagiario' ||
+    userRole === 'admin' ||
+    userRole === 'controle' ||
+    userRole === 'finance';
+  const isInvoiceOpenForEdit = (invoice: any) => {
+    const flow = invoice.flow_stage || (invoice.status === 'paid' ? 'paid' : 'control_pending');
+    if (flow === 'cancelled' || flow === 'paid') return false;
+    if (invoice.status === 'paid') return false;
+    return true;
+  };
   const budgetSectors = isManager
     ? sectors.filter((s) => allowedSectorIds.includes(String(s.id)))
     : sectors;
@@ -720,28 +746,47 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
     if (allowedSectorIds.length > 0) return allowedSectorIds.includes(currentSectorId);
     return currentSectorId === requesterSectorId;
   };
+  const canEditInvoice = (invoice: any) => {
+    if (!canEditOpenLaunches) return false;
+    if (!isInvoiceOpenForEdit(invoice)) return false;
+    return canSeeSectorValues(invoice.sector_id);
+  };
   const getSectorBudget = (sector: any) => Number(sector?.budget_month ?? sector?.budget_limit ?? 0);
   const crdSelectOptions = useMemo(
     () =>
       crdOptions
         .filter((c) => c.active !== false)
-        .map((c) => ({
-          value: String(c.code || ''),
-          label: `${c.name}${c.sector_name ? ` (${c.sector_name})` : ''}${c.granted_extra ? ' · liberado' : ''}`,
-          keywords: `${c.code} ${c.name} ${c.sector_name || ''} ${c.granted_extra ? 'liberado extra' : ''}`,
-        })),
+        .map((c) => {
+          const { displayCode, name } = resolveCrdDisplayCodes(c);
+          return {
+            // Continua gravando o code interno (compatível com realizado por setor:code)
+            value: String(c.code || ''),
+            label: `${displayCode} — ${name || c.name || ''}${c.sector_name ? ` (${c.sector_name})` : ''}${c.granted_extra ? ' · liberado' : ''}`,
+            keywords: `${displayCode} ${c.code} ${c.name} ${c.sector_name || ''} ${c.granted_extra ? 'liberado extra' : ''}`,
+          };
+        }),
     [crdOptions]
   );
   const crdFilterOptions = useMemo(() => buildCrdFilterOptions(crdCatalog), [crdCatalog]);
-  const crdNameByCode = useMemo(() => {
-    const map = new Map<string, string>();
+  /** Lookup setor+código interno → código contábil (parênteses) + nome correto. */
+  const crdMetaBySectorCode = useMemo(() => {
+    const map = new Map<string, { displayCode: string; name: string; internalCode: string }>();
     for (const c of crdCatalog) {
-      const code = String(c.code || '').trim();
-      if (!code) continue;
-      map.set(code.toLowerCase(), String(c.name || '').trim());
+      const { internalCode, displayCode, name } = resolveCrdDisplayCodes(c);
+      if (!internalCode) continue;
+      const sectorId = String(c.sector_id ?? '').trim();
+      map.set(`${sectorId}:${internalCode.toLowerCase()}`, { displayCode, name, internalCode });
     }
     return map;
   }, [crdCatalog]);
+  const resolveInvoiceCrdMeta = (invoice: { crd?: unknown; sector_id?: unknown }) => {
+    const code = String(invoice.crd || '').trim();
+    if (!code) return null;
+    return (
+      crdMetaBySectorCode.get(`${String(invoice.sector_id ?? '').trim()}:${code.toLowerCase()}`) ||
+      null
+    );
+  };
   const currencyMeta = useMemo(
     () => getCurrencyMeta(formData.currency || 'BRL'),
     [formData.currency]
@@ -769,15 +814,33 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
   const filteredInvoices = useMemo(
     () =>
       sectorVisibleInvoices.filter((invoice) => {
-        if (!matchesCrdCodeFilter(crdFilter, invoice.crd)) return false;
+        const crdMeta = resolveInvoiceCrdMeta(invoice);
+        if (
+          !matchesCrdCodeFilter(
+            crdFilter,
+            invoice.crd,
+            crdMeta?.displayCode,
+            crdMeta?.name,
+            crdMeta?.internalCode
+          )
+        ) {
+          return false;
+        }
+        if (!matchesInvoiceNumberFilter(invoiceNumberFilter, invoice.invoice_number, invoice.protocol, invoice.description)) {
+          return false;
+        }
+        if (!matchesAmountFilter(amountFilter, invoice.amount)) return false;
         return matchesSearch(
           searchText,
           invoice.invoice_number,
           invoice.protocol,
           invoice.provider_name,
+          invoice.description,
           invoice.sector_name,
           invoice.user_name,
           invoice.crd,
+          crdMeta?.displayCode,
+          crdMeta?.name,
           invoice.payment_method,
           invoice.currency,
           invoice.status,
@@ -785,7 +848,7 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
           invoice.amount
         );
       }),
-    [sectorVisibleInvoices, searchText, crdFilter]
+    [sectorVisibleInvoices, searchText, crdFilter, invoiceNumberFilter, amountFilter, crdMetaBySectorCode]
   );
   const filteredBudgetSectors = useMemo(
     () => budgetSectors.filter((sector) => matchesSectorVisibilityFilter(sector.id)),
@@ -1157,6 +1220,12 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
             />
           </div>
           <CrdListFilter value={crdFilter} onChange={setCrdFilter} options={crdFilterOptions} />
+          <LaunchNumberAmountFilters
+            invoiceNumber={invoiceNumberFilter}
+            onInvoiceNumberChange={setInvoiceNumberFilter}
+            amount={amountFilter}
+            onAmountChange={setAmountFilter}
+          />
           <div className="flex items-center gap-2 pb-0.5">
             <button
               onClick={() => setShowReportModal(true)}
@@ -1210,6 +1279,11 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
                   </td>
                   <td className="px-6 py-4">
                     <p className="text-sm font-medium text-slate-700">{invoice.provider_name || '—'}</p>
+                    {invoice.description ? (
+                      <p className="text-xs text-slate-400 mt-0.5 line-clamp-2" title={invoice.description}>
+                        {invoice.description}
+                      </p>
+                    ) : null}
                   </td>
                   <td className="px-6 py-4">
                     <span className="text-xs font-medium text-slate-600 bg-slate-100 px-2 py-1 rounded-lg">
@@ -1218,14 +1292,21 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
                   </td>
                   <td className="px-6 py-4">
                     {invoice.crd ? (
-                      <div>
-                        <p className="text-sm font-bold text-slate-800">{invoice.crd}</p>
-                        {crdNameByCode.get(String(invoice.crd).trim().toLowerCase()) && (
-                          <p className="text-[10px] text-slate-400 mt-0.5 max-w-[160px] truncate">
-                            {crdNameByCode.get(String(invoice.crd).trim().toLowerCase())}
-                          </p>
-                        )}
-                      </div>
+                      (() => {
+                        const meta = resolveInvoiceCrdMeta(invoice);
+                        const shownCode = meta?.displayCode || String(invoice.crd);
+                        const shownName = meta?.name || '';
+                        return (
+                          <div>
+                            <p className="text-sm font-bold text-slate-800">{shownCode}</p>
+                            {shownName ? (
+                              <p className="text-[10px] text-slate-400 mt-0.5 max-w-[160px] truncate" title={shownName}>
+                                {shownName}
+                              </p>
+                            ) : null}
+                          </div>
+                        );
+                      })()
                     ) : (
                       <span className="text-xs text-slate-400">—</span>
                     )}
@@ -1304,7 +1385,9 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
                           Ver NF
                         </button>
                       ) : (
-                        <span className="text-xs text-slate-400">NF --</span>
+                        <span className="text-xs font-medium text-amber-700 bg-amber-50 px-2 py-1 rounded-lg">
+                          Sem NF
+                        </span>
                       )}
                       {collectBoletoPaths(invoice).map((path, boletoIndex, all) => (
                         <button
@@ -1329,14 +1412,14 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
                   </td>
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-2">
-                      {(invoice.flow_stage || (invoice.status === 'paid' ? 'paid' : 'control_pending')) !== 'cancelled' && (
+                      {canEditInvoice(invoice) && (
                         <button
                           onClick={() => openEditInvoice(invoice)}
                           className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors"
-                          title="Editar lançamento"
+                          title={invoice.file_path ? 'Editar lançamento' : 'Editar e anexar nota fiscal'}
                         >
                           <Pencil className="w-3.5 h-3.5" />
-                          Editar
+                          {invoice.file_path ? 'Editar' : 'Anexar NF'}
                         </button>
                       )}
                       {(invoice.file_path && (actingSector === 'controle' || actingSector === 'financeiro')) && (
@@ -1426,7 +1509,7 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
                       )}
                       {!(
                         userRole === 'admin' ||
-                        (invoice.flow_stage || (invoice.status === 'paid' ? 'paid' : 'control_pending')) !== 'cancelled' ||
+                        canEditInvoice(invoice) ||
                         (canApproveManager && (invoice.flow_stage || '') === 'manager_pending') ||
                         (canApproveControl && (invoice.flow_stage || 'control_pending') === 'control_pending') ||
                         (canApproveControl && (invoice.flow_stage || 'control_pending') === 'control_approved') ||
@@ -1459,7 +1542,13 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
             <form onSubmit={handleSubmit} className="flex flex-col min-h-0 flex-1">
               <div className="p-6 space-y-4 overflow-y-auto flex-1 min-h-0">
               <div className="space-y-1.5">
-                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">PDF da Nota Fiscal</label>
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+                  PDF da Nota Fiscal
+                  <span className="ml-1 font-medium normal-case text-slate-400">(opcional)</span>
+                </label>
+                <p className="text-[11px] text-slate-400 -mt-0.5 mb-1">
+                  Pode abrir o processo sem a nota (ex.: Mercado Livre) e anexar depois na edição.
+                </p>
                 <label
                   className={cn(
                     'flex items-center justify-center gap-2 w-full px-4 py-3 border border-dashed rounded-xl text-sm cursor-pointer transition-colors',
@@ -1479,7 +1568,10 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
                   <span className="truncate">
                     {extractingPdf
                       ? 'Lendo PDF...'
-                      : invoicePdfName || 'Selecionar PDF e preencher automaticamente'}
+                      : invoicePdfName ||
+                        (editingInvoice
+                          ? 'Anexar PDF da nota (quando disponível)'
+                          : 'Selecionar PDF agora ou anexar depois')}
                   </span>
                   <input
                     type="file"
@@ -1677,11 +1769,12 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
 
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1.5">
-                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Número da Nota</label>
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Número da Nota / Pedido</label>
                   <input 
                     required
                     value={formData.invoice_number}
                     onChange={e => setFormData({...formData, invoice_number: e.target.value})}
+                    placeholder="Nº da NF ou pedido (ex.: ML-123)"
                     className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
                   />
                 </div>
@@ -1715,6 +1808,16 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
                   required
                   value={formData.provider_name}
                   onChange={e => setFormData({...formData, provider_name: e.target.value})}
+                  className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Descrição (opcional)</label>
+                <input
+                  value={formData.description}
+                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                  placeholder="Do que se trata esta nota / boleto"
                   className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
                 />
               </div>

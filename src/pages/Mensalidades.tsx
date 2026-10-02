@@ -4,6 +4,11 @@ import { cn, formatCurrency } from '../lib/utils';
 import { confirmDelete } from '../lib/confirmAction';
 import { SearchableSelect } from '../components/SearchableSelect';
 import { CrdListFilter } from '../components/CrdListFilter';
+import {
+  LaunchNumberAmountFilters,
+  matchesAmountFilter,
+  matchesInvoiceNumberFilter,
+} from '../components/LaunchNumberAmountFilters';
 import { buildCrdFilterOptions, matchesCrdCodeFilter } from '../lib/crdFilter';
 import { useSearch } from '../context/SearchContext';
 import { matchesSearch } from '../lib/search';
@@ -89,6 +94,8 @@ export const MensalidadesPage: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [sectorFilter, setSectorFilter] = useState('');
   const [crdFilter, setCrdFilter] = useState('');
+  const [invoiceNumberFilter, setInvoiceNumberFilter] = useState('');
+  const [amountFilter, setAmountFilter] = useState('');
   const [onlyAlerts, setOnlyAlerts] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -204,6 +211,10 @@ export const MensalidadesPage: React.FC = () => {
       if (onlyAlerts && !r.alerta_vencimento) return false;
       const crdCode = crds.find((c) => c.id === r.crd_id)?.code;
       if (!matchesCrdCodeFilter(crdFilter, crdCode, r.crd_label)) return false;
+      if (!matchesInvoiceNumberFilter(invoiceNumberFilter, r.fornecedor, r.observacoes, r.responsavel)) {
+        return false;
+      }
+      if (!matchesAmountFilter(amountFilter, r.valor)) return false;
       return matchesSearch(
         query,
         r.fornecedor,
@@ -215,7 +226,7 @@ export const MensalidadesPage: React.FC = () => {
         r.valor
       );
     });
-  }, [rows, statusFilter, sectorFilter, onlyAlerts, query, crdFilter, crds]);
+  }, [rows, statusFilter, sectorFilter, onlyAlerts, query, crdFilter, crds, invoiceNumberFilter, amountFilter]);
 
   const counts = useMemo(() => {
     const base = {
@@ -425,6 +436,14 @@ export const MensalidadesPage: React.FC = () => {
             </select>
           </div>
           <CrdListFilter value={crdFilter} onChange={setCrdFilter} options={crdFilterOptions} />
+          <LaunchNumberAmountFilters
+            invoiceNumber={invoiceNumberFilter}
+            onInvoiceNumberChange={setInvoiceNumberFilter}
+            amount={amountFilter}
+            onAmountChange={setAmountFilter}
+            numberLabel="Nº / referência"
+            amountLabel="Valor"
+          />
           <label className="inline-flex items-center gap-2 text-xs font-semibold text-slate-600 cursor-pointer select-none px-2 pb-2.5">
             <input
               type="checkbox"

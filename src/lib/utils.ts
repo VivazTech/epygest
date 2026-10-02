@@ -67,6 +67,15 @@ export const formatPercent = (value: number) => {
 
 export const formatDate = (date: string | Date | null | undefined) => {
   if (date == null || date === '') return '—';
+  // YYYY-MM-DD (ou prefixo de timestamp) = data de calendário, sem UTC
+  // (new Date('YYYY-MM-DD') é meia-noite UTC e atrasa 1 dia no fuso BR)
+  if (typeof date === 'string') {
+    const m = date.trim().slice(0, 10).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (m) {
+      const [, y, mo, d] = m;
+      return `${d}/${mo}/${y}`;
+    }
+  }
   const parsed = date instanceof Date ? date : new Date(date);
   if (Number.isNaN(parsed.getTime())) return '—';
   try {

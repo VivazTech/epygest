@@ -157,6 +157,12 @@ INSERT INTO public.crds (code, name, sector_id, active)
 SELECT 'RH-RECURSOS-HUMANOS', 'RECURSOS HUMANOS', 3, true
 WHERE NOT EXISTS (SELECT 1 FROM public.crds WHERE code = 'RH-RECURSOS-HUMANOS' AND sector_id = 3);
 INSERT INTO public.crds (code, name, sector_id, active)
+SELECT '481', 'UNIFORMES E EPIS - FOLHA DE PAGAMENTO', 3, true
+WHERE NOT EXISTS (SELECT 1 FROM public.crds WHERE code = '481' AND sector_id = 3);
+INSERT INTO public.crds (code, name, sector_id, active)
+SELECT '4812', 'UNIFORMES E EPIS - EXTRAS', 3, true
+WHERE NOT EXISTS (SELECT 1 FROM public.crds WHERE code = '4812' AND sector_id = 3);
+INSERT INTO public.crds (code, name, sector_id, active)
 SELECT 'RH-UNIFORMES-EPIS', 'UNIFORMES E EPIS', 3, true
 WHERE NOT EXISTS (SELECT 1 FROM public.crds WHERE code = 'RH-UNIFORMES-EPIS' AND sector_id = 3);
 INSERT INTO public.crds (code, name, sector_id, active)

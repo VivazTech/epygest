@@ -12,10 +12,19 @@ import { cn, formatCurrency, formatDate } from '../lib/utils';
 import { useSearch } from '../context/SearchContext';
 import { useToast } from '../context/ToastContext';
 import { matchesSearch } from '../lib/search';
+import {
+  LaunchNumberAmountFilters,
+  matchesAmountFilter,
+  matchesInvoiceNumberFilter,
+} from '../components/LaunchNumberAmountFilters';
 import { isDirectDocumentUrl } from '../lib/storagePath';
 import { confirmCancel } from '../lib/confirmAction';
 import {
   APROVACAO_TIPOS,
+  DIRETORIA_AMOUNT_THRESHOLD,
+  DIRETORIA_APPROVAL_ENFORCED,
+  exceedsDiretoriaThreshold,
+  type AprovacaoActingSector,
   type AprovacaoItem,
   isPendingForRole,
   statusMeta,
@@ -30,12 +39,15 @@ export const AprovacoesPage: React.FC = () => {
   const [sectors, setSectors] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [userRole, setUserRole] = useState('viewer');
-  const [actingSector, setActingSector] = useState<'gestor' | 'controle' | 'financeiro'>('controle');
+  const [actingSector, setActingSector] = useState<AprovacaoActingSector>('controle');
+  const [viewTab, setViewTab] = useState<'geral' | 'diretoria'>('geral');
   const [typeFilter, setTypeFilter] = useState('all');
   const [sectorFilter, setSectorFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('pending');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
+  const [invoiceNumberFilter, setInvoiceNumberFilter] = useState('');
+  const [amountFilter, setAmountFilter] = useState('');
   const [receiptModal, setReceiptModal] = useState<{ id: number; type: 'nota' | 'danfe' } | null>(null);
   const [receiptFile, setReceiptFile] = useState<File | null>(null);
   const [uploadingReceipt, setUploadingReceipt] = useState(false);
@@ -47,6 +59,12 @@ export const AprovacoesPage: React.FC = () => {
     actingSector === 'financeiro' && (userRole === 'finance' || userRole === 'admin');
   const canApproveManager =
     actingSector === 'gestor' && (userRole === 'manager' || userRole === 'admin');
+  // Futuro: quando DIRETORIA_APPROVAL_ENFORCED = true, habilitar botões de aprovação da Diretoria.
+  const canApproveDiretoria =
+    DIRETORIA_APPROVAL_ENFORCED &&
+    actingSector === 'diretoria' &&
+    (userRole === 'diretoria' || userRole === 'admin');
+  void canApproveDiretoria;
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -83,7 +101,10 @@ export const AprovacoesPage: React.FC = () => {
         setUserRole(role);
         if (role === 'finance') setActingSector('financeiro');
         else if (role === 'manager') setActingSector('gestor');
-        else setActingSector('controle');
+        else if (role === 'diretoria') {
+          setActingSector('diretoria');
+          setViewTab('diretoria');
+        } else setActingSector('controle');
       } catch {
         // ignore
       }
@@ -95,15 +116,34 @@ export const AprovacoesPage: React.FC = () => {
     loadData();
   }, [loadData]);
 
+  const scopedItems = useMemo(() => {
+    if (viewTab !== 'diretoria') return items;
+    return items.filter((item) => exceedsDiretoriaThreshold(item.amount));
+  }, [items, viewTab]);
+
   const filteredItems = useMemo(
     () =>
-      items.filter((item) =>
-        matchesSearch(
+      scopedItems.filter((item) => {
+        if (
+          !matchesInvoiceNumberFilter(
+            invoiceNumberFilter,
+            item.invoice_number,
+            item.protocol,
+            item.subtitle,
+            item.title,
+            item.description
+          )
+        ) {
+          return false;
+        }
+        if (!matchesAmountFilter(amountFilter, item.amount)) return false;
+        return matchesSearch(
           query,
           tipoLabel(item.type),
           item.title,
           item.subtitle,
           item.protocol,
+          item.invoice_number,
           item.description,
           item.sector_name,
           item.crd_code,
@@ -115,21 +155,35 @@ export const AprovacoesPage: React.FC = () => {
           item.issue_date,
           item.amount,
           item.status
-        )
-      ),
-    [items, query]
+        );
+      }),
+    [scopedItems, query, invoiceNumberFilter, amountFilter]
   );
 
   const metrics = useMemo(() => {
-    const pendingGestor = items.filter((i) => isPendingForRole(i, 'gestor')).length;
-    const pendingControle = items.filter((i) => isPendingForRole(i, 'controle')).length;
-    const pendingFinanceiro = items.filter((i) => isPendingForRole(i, 'financeiro')).length;
-    const totalValor = items.reduce((sum, i) => {
+    const base = scopedItems;
+    const pendingGestor = base.filter((i) => isPendingForRole(i, 'gestor')).length;
+    const pendingControle = base.filter((i) => isPendingForRole(i, 'controle')).length;
+    const pendingFinanceiro = base.filter((i) => isPendingForRole(i, 'financeiro')).length;
+    const pendingDiretoria = base.filter((i) => exceedsDiretoriaThreshold(i.amount)).length;
+    const totalValor = base.reduce((sum, i) => {
       const value = Number(i.amount) || 0;
       return sum + (i.type === 'estorno' ? -value : value);
     }, 0);
-    return { pendingGestor, pendingControle, pendingFinanceiro, totalValor, total: items.length };
-  }, [items]);
+    return {
+      pendingGestor,
+      pendingControle,
+      pendingFinanceiro,
+      pendingDiretoria,
+      totalValor,
+      total: base.length,
+    };
+  }, [scopedItems]);
+
+  const diretoriaCount = useMemo(
+    () => items.filter((i) => exceedsDiretoriaThreshold(i.amount)).length,
+    [items]
+  );
 
   const updateManualStatus = async (id: number, status: 'open' | 'approved' | 'posted' | 'cancelled') => {
     if (status === 'cancelled' && !confirmCancel('este lançamento manual')) return;
@@ -551,15 +605,60 @@ export const AprovacoesPage: React.FC = () => {
         {canSwitchActingProfile && (
           <select
             value={actingSector}
-            onChange={(e) => setActingSector(e.target.value as 'gestor' | 'controle' | 'financeiro')}
+            onChange={(e) => setActingSector(e.target.value as AprovacaoActingSector)}
             className="px-3 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-semibold text-slate-700 shadow-sm self-start"
           >
             <option value="gestor">Atuar como Gestor</option>
             <option value="controle">Atuar como Controle</option>
             <option value="financeiro">Atuar como Financeiro</option>
+            <option value="diretoria">Atuar como Diretoria</option>
           </select>
         )}
       </div>
+
+      <div className="inline-flex rounded-xl border border-slate-200 bg-slate-50 p-1 gap-1">
+        <button
+          type="button"
+          onClick={() => setViewTab('geral')}
+          className={cn(
+            'px-4 py-2 text-sm font-semibold rounded-lg transition-colors',
+            viewTab === 'geral' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+          )}
+        >
+          Geral
+        </button>
+        <button
+          type="button"
+          onClick={() => setViewTab('diretoria')}
+          className={cn(
+            'px-4 py-2 text-sm font-semibold rounded-lg transition-colors inline-flex items-center gap-2',
+            viewTab === 'diretoria' ? 'bg-white text-cyan-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+          )}
+        >
+          Diretoria
+          <span
+            className={cn(
+              'text-[10px] font-bold px-1.5 py-0.5 rounded-md',
+              viewTab === 'diretoria' ? 'bg-cyan-100 text-cyan-800' : 'bg-slate-200 text-slate-600'
+            )}
+          >
+            {diretoriaCount}
+          </span>
+        </button>
+      </div>
+
+      {viewTab === 'diretoria' && (
+        <div className="rounded-2xl border border-cyan-100 bg-cyan-50/70 px-4 py-3 text-sm text-cyan-900">
+          <p className="font-semibold">
+            Lançamentos acima de {formatCurrency(DIRETORIA_AMOUNT_THRESHOLD)}
+          </p>
+          <p className="text-cyan-800/90 mt-0.5">
+            Exibe valores a partir de {formatCurrency(DIRETORIA_AMOUNT_THRESHOLD + 0.01)}. O fluxo de
+            aprovação continua o de sempre (Controle → Financeiro). Em breve, estes itens também
+            precisarão da aprovação da Diretoria antes do pagamento.
+          </p>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
         <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4">
@@ -571,8 +670,12 @@ export const AprovacoesPage: React.FC = () => {
           <p className="text-2xl font-extrabold text-orange-600 mt-1">{metrics.pendingControle}</p>
         </div>
         <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4">
-          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Pendentes Financeiro</p>
-          <p className="text-2xl font-extrabold text-blue-600 mt-1">{metrics.pendingFinanceiro}</p>
+          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+            {viewTab === 'diretoria' ? 'Acima de R$ 800' : 'Pendentes Financeiro'}
+          </p>
+          <p className={cn('text-2xl font-extrabold mt-1', viewTab === 'diretoria' ? 'text-cyan-700' : 'text-blue-600')}>
+            {viewTab === 'diretoria' ? metrics.pendingDiretoria : metrics.pendingFinanceiro}
+          </p>
         </div>
         <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4">
           <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Itens listados</p>
@@ -628,6 +731,14 @@ export const AprovacoesPage: React.FC = () => {
           className="px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm"
           title="Data final"
         />
+        <div className="md:col-span-5">
+          <LaunchNumberAmountFilters
+            invoiceNumber={invoiceNumberFilter}
+            onInvoiceNumberChange={setInvoiceNumberFilter}
+            amount={amountFilter}
+            onAmountChange={setAmountFilter}
+          />
+        </div>
       </div>
 
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-x-auto">
@@ -722,6 +833,11 @@ export const AprovacoesPage: React.FC = () => {
                       {item.amount != null
                         ? `${item.type === 'estorno' ? '−' : ''}${formatCurrency(item.amount)}`
                         : '—'}
+                      {exceedsDiretoriaThreshold(item.amount) ? (
+                        <span className="block text-[10px] font-bold uppercase tracking-wider text-cyan-700 mt-1">
+                          Acima de R$ 800
+                        </span>
+                      ) : null}
                     </td>
                     <td className="px-6 py-4">
                       <span

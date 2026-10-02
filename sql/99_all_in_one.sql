@@ -66,6 +66,7 @@ CREATE TABLE IF NOT EXISTS public.invoices (
   cancelled_at    TIMESTAMPTZ,
   cancelled_by_sector TEXT,
   cancel_reason   TEXT,
+  description     TEXT,
   created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 

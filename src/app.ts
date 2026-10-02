@@ -581,6 +581,12 @@ export function createApp() {
   // Limite de tamanho para evitar DoS/esgotamento de disco. Excel/PDF grandes cabem em 20MB.
   const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
   const upload = multer({ dest: uploadDir, limits: { fileSize: MAX_UPLOAD_BYTES } });
+  const ORDEM_ANEXO_MAX_BYTES = 10 * 1024 * 1024;
+  const ORDEM_ANEXO_MAX_FILES = 6;
+  const uploadOrdemAnexos = multer({
+    dest: uploadDir,
+    limits: { fileSize: ORDEM_ANEXO_MAX_BYTES, files: ORDEM_ANEXO_MAX_FILES },
+  });
 
   // ---------- Storage de documentos (bucket privado + signed URLs) ----------
   // O bucket "invoice-files" deve estar configurado como PRIVADO no Supabase.
@@ -3193,7 +3199,7 @@ export function createApp() {
     return false;
   };
 
-  app.get("/api/aprovacoes", requireRole("admin", "controle", "finance", "manager"), async (req, res) => {
+  app.get("/api/aprovacoes", requireRole("admin", "controle", "finance", "manager", "diretoria"), async (req, res) => {
     const q = req.query as {
       type?: string;
       sector_id?: string;
@@ -3430,8 +3436,9 @@ export function createApp() {
           crd_name: null,
           title: row.provider_name || `Nota #${row.id}`,
           subtitle: [row.protocol, row.invoice_number ? `Nº ${row.invoice_number}` : null].filter(Boolean).join(" · ") || null,
-          description: row.provider_name ?? null,
+          description: row.description ?? null,
           protocol: row.protocol ?? null,
+          invoice_number: row.invoice_number != null ? String(row.invoice_number) : null,
           reference_date: String(row.due_date || row.issue_date || "").slice(0, 10),
           issue_date: row.issue_date ? String(row.issue_date).slice(0, 10) : null,
           amount: Number(row.amount) || 0,
@@ -3474,6 +3481,11 @@ export function createApp() {
           const itemsSummary = comandaItemRows
             .map((i) => `${i.description} (${i.quantity})`)
             .join(", ");
+          const comandaAmount = comandaItemRows.reduce((sum, i) => {
+            const qty = Number(i.quantity) || 0;
+            const price = Number(i.unit_price) || 0;
+            return sum + qty * price;
+          }, 0);
           const item = {
             key: `comanda-${row.id}`,
             type: "comanda",
@@ -3488,7 +3500,7 @@ export function createApp() {
             protocol: row.protocol ?? null,
             reference_date: String(row.consumed_at || row.created_at || "").slice(0, 10),
             issue_date: null,
-            amount: null,
+            amount: Number.isFinite(comandaAmount) ? comandaAmount : null,
             status: String(row.status || "open"),
             flow_stage: null,
             user_name: row.users?.name ?? null,
@@ -3969,7 +3981,7 @@ export function createApp() {
   };
 
   const invoiceReportCsvHeader = [
-    "id", "invoice_number", "provider_name", "sector_name", "user_name", "amount",
+    "id", "invoice_number", "provider_name", "description", "sector_name", "user_name", "amount",
     "issue_date", "due_date", "payment_method", "currency", "pix_key", "flow_stage",
     "status", "natureza", "file_url", "boleto_file_url", "payment_receipt_url", "created_at",
   ];
@@ -4305,8 +4317,9 @@ export function createApp() {
     const {
       invoice_number, provider_name, amount, issue_date, due_date,
       sector_id, file_path, boleto_file_path, boleto_file_paths, natureza,
-      crd, payment_method, pix_key, currency,
+      crd, payment_method, pix_key, currency, description,
     } = req.body;
+    const resolvedDescription = String(description || "").trim() || null;
 
     const resolvedNumber = String(invoice_number || "").trim();
     const resolvedProvider = String(provider_name || "").trim();
@@ -4365,11 +4378,12 @@ export function createApp() {
         payment_method: resolvedPayment,
         pix_key: resolvedPayment === "pix" ? String(pix_key || "").trim() || null : null,
         currency: resolvedCurrency,
+        description: resolvedDescription,
         status: "received",
         flow_stage: initialInvoiceFlowStage(req.user?.role),
         protocol,
       }, req))
-      .select("id, invoice_number, protocol, provider_name, amount, issue_date, due_date, sector_id, flow_stage, status, crd, created_at")
+      .select("id, invoice_number, protocol, provider_name, amount, issue_date, due_date, sector_id, flow_stage, status, crd, description, created_at")
       .single();
 
     if (error) { console.error(error); return res.status(500).json({ error: "Erro interno ao processar a solicitação." }); }
@@ -4389,14 +4403,27 @@ export function createApp() {
     if (fetchErr || !invoice) {
       return res.status(404).json({ error: "Nota não encontrada" });
     }
-    if ((invoice.flow_stage || "") === "cancelled") {
+    const currentFlow = String(invoice.flow_stage || "");
+    if (currentFlow === "cancelled") {
       return res.status(400).json({ error: "Não é possível editar uma nota cancelada." });
     }
+    if (currentFlow === "paid" || String(invoice.status || "") === "paid") {
+      return res.status(400).json({ error: "Não é possível editar um lançamento já pago." });
+    }
+
+    const role = String(req.user?.role || "");
+    const canEditRole = ["admin", "finance", "controle", "manager", "estagiario"].includes(role);
+    if (!canEditRole) {
+      return res.status(403).json({ error: "Seu perfil não pode editar lançamentos." });
+    }
+
+    const accessCurrent = await assertSectorAccessForUser(req, Number(invoice.sector_id));
+    if (!accessCurrent.ok) return res.status(accessCurrent.status).json({ error: accessCurrent.error });
 
     const {
       invoice_number, provider_name, amount, issue_date, due_date,
       sector_id, file_path, boleto_file_path, boleto_file_paths, natureza,
-      crd, payment_method, pix_key, currency,
+      crd, payment_method, pix_key, currency, description,
     } = req.body;
 
     const resolvedNumber = String(invoice_number || "").trim();
@@ -4411,6 +4438,7 @@ export function createApp() {
     const resolvedNatureza = String(natureza || invoice.natureza || "O").trim() || "O";
     const resolvedPix = resolvedPayment === "pix" ? String(pix_key || "").trim() || null : null;
     const resolvedFile = String(file_path || "").trim() || null;
+    const resolvedDescription = String(description || "").trim() || null;
     const boletoPaths = collectBoletoPaths({ boleto_file_path, boleto_file_paths });
 
     if (!resolvedNumber || !resolvedProvider || !Number.isFinite(resolvedAmount) || resolvedAmount < 0) {
@@ -4428,6 +4456,9 @@ export function createApp() {
     if (!resolvedPayment) {
       return res.status(400).json({ error: "Selecione a forma de pagamento." });
     }
+
+    const accessTarget = await assertSectorAccessForUser(req, resolvedSectorId);
+    if (!accessTarget.ok) return res.status(accessTarget.status).json({ error: accessTarget.error });
 
     const asDate = (v: unknown) => String(v || "").slice(0, 10);
     const asText = (v: unknown) => String(v ?? "").trim();
@@ -4452,6 +4483,7 @@ export function createApp() {
     const candidates: Array<{ field: string; label: string; from: string; to: string }> = [
       { field: "invoice_number", label: "Número", from: asText(invoice.invoice_number), to: resolvedNumber },
       { field: "provider_name", label: "Fornecedor", from: asText(invoice.provider_name), to: resolvedProvider },
+      { field: "description", label: "Descrição", from: asText(invoice.description), to: asText(resolvedDescription) },
       { field: "amount", label: "Valor", from: asAmount(invoice.amount), to: asAmount(resolvedAmount) },
       { field: "issue_date", label: "Emissão", from: asDate(invoice.issue_date), to: resolvedIssue },
       { field: "due_date", label: "Vencimento", from: asDate(invoice.due_date), to: resolvedDue },
@@ -4498,13 +4530,14 @@ export function createApp() {
           payment_method: resolvedPayment,
           pix_key: resolvedPix,
           currency: resolvedCurrency,
+          description: resolvedDescription,
           edit_count: Number(invoice.edit_count || 0) + 1,
           last_edited_at: nowIso,
         })
         .eq("id", invoiceId),
       req
     )
-      .select("id, invoice_number, provider_name, amount, issue_date, due_date, sector_id, flow_stage, status, crd, edit_count, last_edited_at")
+      .select("id, invoice_number, provider_name, amount, issue_date, due_date, sector_id, flow_stage, status, crd, description, file_path, edit_count, last_edited_at")
       .single();
 
     if (error) {
@@ -14185,10 +14218,88 @@ export function createApp() {
   });
 
   // ====================================================
+  // CNPJ — consulta pública (BrasilAPI / dados Receita Federal)
+  // ====================================================
+  app.get("/api/cnpj/:cnpj", async (req, res) => {
+    const digits = String(req.params.cnpj || "").replace(/\D/g, "");
+    if (digits.length !== 14) {
+      return res.status(400).json({ error: "Informe um CNPJ com 14 dígitos." });
+    }
+    try {
+      const upstream = await fetch(`https://brasilapi.com.br/api/cnpj/v1/${digits}`, {
+        headers: { Accept: "application/json" },
+      });
+      if (upstream.status === 404) {
+        return res.status(404).json({ error: "CNPJ não encontrado na Receita Federal." });
+      }
+      if (!upstream.ok) {
+        return res.status(502).json({
+          error: "Não foi possível consultar o CNPJ no momento. Tente novamente.",
+        });
+      }
+      const data = (await upstream.json()) as Record<string, any>;
+      const razao = String(data.razao_social || "").trim();
+      const fantasia = String(data.nome_fantasia || "").trim();
+      const dddTel = String(data.ddd_telefone_1 || "").replace(/\D/g, "");
+      let telefone = "";
+      if (dddTel.length >= 10) {
+        const ddd = dddTel.slice(0, 2);
+        const rest = dddTel.slice(2);
+        telefone =
+          rest.length === 9
+            ? `(${ddd}) ${rest.slice(0, 5)}-${rest.slice(5)}`
+            : `(${ddd}) ${rest.slice(0, 4)}-${rest.slice(4)}`;
+      } else if (dddTel) {
+        telefone = dddTel;
+      }
+      res.json({
+        cnpj: digits,
+        razao_social: razao,
+        nome_fantasia: fantasia,
+        prestador: fantasia || razao,
+        telefone,
+        email: String(data.email || "").trim() || null,
+        municipio: String(data.municipio || "").trim() || null,
+        uf: String(data.uf || "").trim() || null,
+      });
+    } catch (err: any) {
+      console.error("Erro ao consultar CNPJ:", err?.message || err);
+      res.status(502).json({ error: "Falha na consulta do CNPJ." });
+    }
+  });
+
+  // ====================================================
   // COMPRAS: ORDEM DE COMPRA — geração de PDF (pdfkit)
   // ====================================================
-  app.post("/api/ordem-compra/pdf", async (req, res) => {
+  app.post(
+    "/api/ordem-compra/pdf",
+    (req, res, next) => {
+      uploadOrdemAnexos.array("anexos", ORDEM_ANEXO_MAX_FILES)(req, res, (err: any) => {
+        if (err instanceof multer.MulterError) {
+          if (err.code === "LIMIT_FILE_SIZE") {
+            return res.status(400).json({ error: "Cada anexo deve ter no máximo 10 MB." });
+          }
+          if (err.code === "LIMIT_FILE_COUNT" || err.code === "LIMIT_UNEXPECTED_FILE") {
+            return res.status(400).json({ error: `Máximo de ${ORDEM_ANEXO_MAX_FILES} anexos.` });
+          }
+          return res.status(400).json({ error: err.message || "Falha no upload dos anexos." });
+        }
+        if (err) return next(err);
+        return next();
+      });
+    },
+    async (req, res) => {
     const b = req.body as Record<string, string>;
+    const anexosFiles = (Array.isArray(req.files) ? req.files : []) as Express.Multer.File[];
+    const cleanupAnexos = () => {
+      for (const f of anexosFiles) {
+        try {
+          if (f?.path && fs.existsSync(f.path)) fs.unlinkSync(f.path);
+        } catch {
+          // ignore
+        }
+      }
+    };
 
     const fmtDate = (iso: string) => {
       if (!iso) return "___/___/______";
@@ -14200,92 +14311,112 @@ export function createApp() {
       if (!Number.isFinite(n)) return "R$ —";
       return `R$ ${n.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     };
-
-    const FATURAMENTO_LABEL: Record<string, string> = {
-      nf_recibo: "Emissão de Nota Fiscal + Recibo",
-      recibo: "Emissão de Recibo (sem nota fiscal)",
+    const fmtBytes = (n: number) => {
+      if (n < 1024) return `${n} B`;
+      if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+      return `${(n / (1024 * 1024)).toFixed(1)} MB`;
     };
-    const PAGAMENTO_LABEL: Record<string, string> = {
-      cartao: "Cartão de Crédito",
-      avista: "À Vista — Efetivo",
-      boleto: "Boleto Bancário — máximo de prazo possível considerando o vencimento",
-      pix: "PIX",
-    };
+    const isImageFile = (f: Express.Multer.File) =>
+      /^image\/(png|jpe?g|webp)$/i.test(f.mimetype || "") ||
+      /\.(png|jpe?g|webp)$/i.test(f.originalname || "");
+    const isPdfFile = (f: Express.Multer.File) =>
+      /pdf/i.test(f.mimetype || "") || /\.pdf$/i.test(f.originalname || "");
 
     try {
-      const doc = new PDFDocument({ margin: 45, size: "A4" });
+      if (anexosFiles.length > ORDEM_ANEXO_MAX_FILES) {
+        cleanupAnexos();
+        return res.status(400).json({ error: `Máximo de ${ORDEM_ANEXO_MAX_FILES} anexos.` });
+      }
+      for (const f of anexosFiles) {
+        if (f.size > ORDEM_ANEXO_MAX_BYTES) {
+          cleanupAnexos();
+          return res.status(400).json({
+            error: `Arquivo "${f.originalname}" excede 10 MB.`,
+          });
+        }
+      }
+
+      const ordemBuffer: Buffer = await new Promise((resolve, reject) => {
+      const doc = new PDFDocument({ margin: 40, size: "A4" });
       const chunks: Buffer[] = [];
       doc.on("data", (c: Buffer) => chunks.push(c));
-      doc.on("end", () => {
-        const pdf = Buffer.concat(chunks);
-        res.setHeader("Content-Type", "application/pdf");
-        res.setHeader("Content-Disposition", `attachment; filename="ordem_compra.pdf"`);
-        res.send(pdf);
-      });
+      doc.on("end", () => resolve(Buffer.concat(chunks)));
+      doc.on("error", reject);
 
-      const W = doc.page.width - 90; // largura útil
-      const X = 45;
+      const W = doc.page.width - 80; // largura útil
+      const X = 40;
       const TEAL = "#004D40";
       const GRAY = "#64748B";
       const LINE = "#E2E8F0";
+      const pageBottom = () => doc.page.height - doc.page.margins.bottom;
+      /** Garante espaço; só cria página nova se ainda houver conteúdo a desenhar. */
+      const ensureSpace = (needed: number) => {
+        if (doc.y + needed <= pageBottom()) return;
+        doc.addPage();
+      };
 
       // ── CABEÇALHO ──────────────────────────────────────────────────────
-      doc.rect(X, 40, W, 50).fill(TEAL);
-      doc.fillColor("white").fontSize(16).font("Helvetica-Bold")
-         .text("ORDEM DE COMPRA", X + 12, 52, { width: W - 12 });
-      doc.fontSize(9).font("Helvetica")
-         .text("VIVAZ CATARATAS RESORT", X + 12, 72, { width: W - 12 });
-
-      // Data — canto direito do header
+      doc.rect(X, 36, W, 44).fill(TEAL);
+      doc.fillColor("white").fontSize(15).font("Helvetica-Bold")
+         .text("ORDEM DE COMPRA", X + 12, 46, { width: W - 12 });
+      doc.fontSize(8).font("Helvetica")
+         .text("VIVAZ CATARATAS RESORT", X + 12, 64, { width: W - 12 });
       doc.fillColor("white").fontSize(8).font("Helvetica")
-         .text(`Data: ${fmtDate(b.data_execucao)}`, X, 56, { width: W - 12, align: "right" });
-
-      doc.y = 105;
+         .text(`Data: ${fmtDate(b.data_execucao)}`, X, 50, { width: W - 12, align: "right" });
+      doc.y = 92;
 
       // ── helper de seção ─────────────────────────────────────────────────
       const sectionTitle = (title: string) => {
-        doc.moveDown(0.4);
-        doc.rect(X, doc.y, W, 16).fill("#F1F5F9");
-        doc.fillColor(TEAL).fontSize(7.5).font("Helvetica-Bold")
-           .text(title.toUpperCase(), X + 6, doc.y + 4, { width: W - 12 });
-        doc.y += 20;
+        ensureSpace(22);
+        doc.rect(X, doc.y, W, 14).fill("#F1F5F9");
+        doc.fillColor(TEAL).fontSize(7).font("Helvetica-Bold")
+           .text(title.toUpperCase(), X + 6, doc.y + 3.5, { width: W - 12 });
+        doc.y += 18;
       };
 
       const row = (label: string, value: string, opts?: { bold?: boolean }) => {
+        ensureSpace(18);
         const yStart = doc.y;
         doc.fillColor(GRAY).fontSize(7).font("Helvetica")
            .text(label + ":", X, yStart, { continued: false });
-        doc.fillColor("#0F172A").fontSize(8.5)
+        doc.fillColor("#0F172A").fontSize(8)
            .font(opts?.bold ? "Helvetica-Bold" : "Helvetica")
            .text(value || "—", X + 90, yStart, { width: W - 90 });
-        const yEnd = doc.y;
-        doc.y = Math.max(yStart + 16, yEnd + 2);
+        doc.y = Math.max(yStart + 14, doc.y + 1);
       };
 
       const twoCol = (items: [string, string][]) => {
+        ensureSpace(26);
         const colW = (W - 12) / items.length;
         const yStart = doc.y;
         let xOff = X;
         for (const [label, value] of items) {
           doc.fillColor(GRAY).fontSize(7).font("Helvetica").text(label + ":", xOff, yStart);
-          doc.fillColor("#0F172A").fontSize(8.5).font("Helvetica").text(value || "—", xOff, yStart + 11, { width: colW - 6 });
+          doc.fillColor("#0F172A").fontSize(8).font("Helvetica").text(value || "—", xOff, yStart + 10, {
+            width: colW - 6,
+            height: 12,
+            ellipsis: true,
+          });
           xOff += colW + 6;
         }
-        doc.y = yStart + 28;
+        doc.y = yStart + 24;
       };
 
       const checkRow = (label: string, checked: boolean, note?: string) => {
-        const mark = checked ? "☑" : "☐";
-        doc.fillColor(checked ? TEAL : GRAY).fontSize(9).font("Helvetica-Bold")
-           .text(mark, X, doc.y, { continued: true });
-        doc.fillColor(checked ? "#0F172A" : GRAY).font(checked ? "Helvetica-Bold" : "Helvetica")
-           .fontSize(8.5).text(`  ${label}${note ? "  " + note : ""}`, { lineBreak: true });
+        ensureSpace(14);
+        const mark = checked ? "[X]" : "[ ]";
+        const line = `${mark}  ${label}${note ? `  ${note}` : ""}`;
+        doc.fillColor(checked ? "#0F172A" : GRAY)
+           .font(checked ? "Helvetica-Bold" : "Helvetica")
+           .fontSize(8)
+           .text(line, X, doc.y, { width: W, height: 12, ellipsis: true });
         doc.y += 2;
       };
 
       const divider = () => {
+        ensureSpace(10);
         doc.moveTo(X, doc.y).lineTo(X + W, doc.y).strokeColor(LINE).lineWidth(0.5).stroke();
-        doc.y += 6;
+        doc.y += 5;
       };
 
       // ── PRESTADOR ────────────────────────────────────────────────────────
@@ -14315,10 +14446,11 @@ export function createApp() {
 
       // ── VALOR ───────────────────────────────────────────────────────────
       sectionTitle("Valor");
-      doc.rect(X, doc.y, W, 22).fill("#F0FDF4");
-      doc.fillColor(TEAL).fontSize(12).font("Helvetica-Bold")
-         .text(`VALOR A SER PAGO: ${fmtCurrency(b.valor)}`, X + 8, doc.y + 5, { width: W - 16 });
-      doc.y += 28;
+      ensureSpace(24);
+      doc.rect(X, doc.y, W, 20).fill("#F0FDF4");
+      doc.fillColor(TEAL).fontSize(11).font("Helvetica-Bold")
+         .text(`VALOR A SER PAGO: ${fmtCurrency(b.valor)}`, X + 8, doc.y + 4, { width: W - 16 });
+      doc.y += 24;
 
       // ── FATURAMENTO ─────────────────────────────────────────────────────
       sectionTitle("Faturamento");
@@ -14330,8 +14462,11 @@ export function createApp() {
       checkRow("Cartão de Crédito", b.pagamento === "cartao");
       checkRow("À Vista — Efetivo", b.pagamento === "avista");
       checkRow("Boleto Bancário — máximo de prazo possível considerando o vencimento", b.pagamento === "boleto");
-      checkRow("PIX", b.pagamento === "pix", b.pagamento === "pix" && b.pix_chave ? `  Chave: ${b.pix_chave}` : "");
-      doc.moveDown(0.3);
+      checkRow(
+        "PIX",
+        b.pagamento === "pix",
+        b.pagamento === "pix" && b.pix_chave ? `Chave: ${b.pix_chave}` : ""
+      );
       twoCol([
         ["Banco", b.banco],
         ["Agência", b.agencia],
@@ -14341,9 +14476,27 @@ export function createApp() {
       // ── OBS ─────────────────────────────────────────────────────────────
       if (b.observacao) {
         sectionTitle("Observações");
-        doc.fillColor("#0F172A").fontSize(8.5).font("Helvetica")
-           .text(b.observacao, X, doc.y, { width: W });
-        doc.y += 8;
+        ensureSpace(28);
+        const obsStart = doc.y;
+        doc.fillColor("#0F172A").fontSize(8).font("Helvetica")
+           .text(b.observacao, X, obsStart, { width: W, height: 48, ellipsis: true });
+        doc.y = Math.min(obsStart + 52, Math.max(doc.y + 4, obsStart + 16));
+      }
+
+      // ── ANEXOS (lista) ──────────────────────────────────────────────────
+      if (anexosFiles.length) {
+        sectionTitle(`Anexos (${anexosFiles.length})`);
+        for (const f of anexosFiles) {
+          ensureSpace(12);
+          const kind = isPdfFile(f) ? "PDF" : isImageFile(f) ? "Imagem" : "Arquivo";
+          doc.fillColor("#0F172A").fontSize(8).font("Helvetica")
+             .text(`• [${kind}] ${f.originalname || "arquivo"} (${fmtBytes(f.size)})`, X, doc.y, {
+               width: W,
+               height: 11,
+               ellipsis: true,
+             });
+          doc.y += 1;
+        }
       }
 
       // ── AVISOS ──────────────────────────────────────────────────────────
@@ -14357,48 +14510,91 @@ export function createApp() {
         "Solicitar aos prestadores inserir a chave PIX no corpo da nota Fiscal.",
       ];
       for (const a of avisos) {
-        doc.fillColor(GRAY).fontSize(7.5).font("Helvetica")
-           .text(`• ${a}`, X, doc.y, { width: W });
-        doc.y += 2;
+        ensureSpace(12);
+        doc.fillColor(GRAY).fontSize(7).font("Helvetica")
+           .text(`• ${a}`, X, doc.y, { width: W, height: 11, ellipsis: true });
+        doc.y += 1;
       }
 
-      // ── ASSINATURAS ─────────────────────────────────────────────────────
-      doc.moveDown(1.2);
+      // ── ASSINATURAS (fluxo relativo — evita páginas vazias por Y absoluto) ─
+      const sigBlockHeight = 110;
+      ensureSpace(sigBlockHeight);
+      doc.moveDown(0.5);
       divider();
-      const sigY = doc.y + 30;
-      const sigW = (W - 20) / 3;
-      const sigs = [
+
+      const drawSigRow = (labels: string[], gap = 10) => {
+        const rowH = 42;
+        ensureSpace(rowH);
+        const yLine = doc.y + 22;
+        const sigW = (W - gap * (labels.length - 1)) / labels.length;
+        labels.forEach((label, i) => {
+          const sx = X + i * (sigW + gap);
+          doc.moveTo(sx, yLine).lineTo(sx + sigW, yLine).strokeColor("#94A3B8").lineWidth(0.8).stroke();
+          doc.fillColor(GRAY).fontSize(6.5).font("Helvetica")
+             .text(label, sx, yLine + 4, { width: sigW, align: "center", height: 16, ellipsis: true });
+        });
+        doc.y = yLine + 22;
+      };
+
+      drawSigRow([
         b.solicitado_por || "Solicitado por",
         "Autorizado — Gerência",
-        "Autorizado — Diretoria\nLuiza Mello",
-      ];
-      sigs.forEach((label, i) => {
-        const sx = X + i * (sigW + 10);
-        doc.moveTo(sx, sigY).lineTo(sx + sigW, sigY).strokeColor("#94A3B8").lineWidth(0.8).stroke();
-        doc.fillColor(GRAY).fontSize(7).font("Helvetica")
-           .text(label, sx, sigY + 4, { width: sigW, align: "center" });
-      });
-
-      doc.y = sigY + 36;
+        "Autorizado — Diretoria\nEdilson Andrade",
+      ]);
       divider();
+      drawSigRow(["Supervisora ADM — Cristiane Queiroz", "Controller — Elton Roque"], 20);
 
-      const sig2Y = doc.y + 28;
-      const sigs2 = ["Supervisora ADM — Cristiane Queiroz", "Controller — Elton Roque"];
-      const sig2W = (W - 20) / 2;
-      sigs2.forEach((label, i) => {
-        const sx = X + i * (sig2W + 20);
-        doc.moveTo(sx, sig2Y).lineTo(sx + sig2W, sig2Y).strokeColor("#94A3B8").lineWidth(0.8).stroke();
-        doc.fillColor(GRAY).fontSize(7).font("Helvetica")
-           .text(label, sx, sig2Y + 4, { width: sig2W, align: "center" });
-      });
-
-      // ── RODAPÉ ──────────────────────────────────────────────────────────
-      doc.y = sig2Y + 40;
-      doc.fillColor(GRAY).fontSize(7.5).font("Helvetica")
+      ensureSpace(16);
+      doc.fillColor(GRAY).fontSize(7).font("Helvetica")
          .text(`Foz do Iguaçu, ${fmtDate(b.data_execucao)}`, X, doc.y, { width: W, align: "right" });
 
+      // ── PÁGINAS DE IMAGENS ANEXADAS ─────────────────────────────────────
+      for (const f of anexosFiles.filter(isImageFile)) {
+        try {
+          doc.addPage();
+          doc.fillColor(TEAL).fontSize(9).font("Helvetica-Bold")
+             .text(`Anexo: ${f.originalname || "imagem"}`, X, 40, { width: W });
+          const maxW = W;
+          const maxH = doc.page.height - 100;
+          doc.image(f.path, X, 58, { fit: [maxW, maxH], align: "center", valign: "center" });
+        } catch (imgErr) {
+          console.error("Falha ao embutir imagem no PDF da ordem:", f.originalname, imgErr);
+          doc.addPage();
+          doc.fillColor("#B91C1C").fontSize(10).font("Helvetica")
+             .text(`Não foi possível embutir a imagem: ${f.originalname}`, X, 60, { width: W });
+        }
+      }
+
       doc.end();
+      });
+
+      // Mescla PDFs anexados ao final do documento
+      let finalBuffer = ordemBuffer;
+      const pdfAnexos = anexosFiles.filter(isPdfFile);
+      if (pdfAnexos.length) {
+        const { PDFDocument: PDFLibDocument } = await import("pdf-lib");
+        const merged = await PDFLibDocument.create();
+        const mainDoc = await PDFLibDocument.load(ordemBuffer);
+        const mainPages = await merged.copyPages(mainDoc, mainDoc.getPageIndices());
+        mainPages.forEach((p) => merged.addPage(p));
+        for (const f of pdfAnexos) {
+          try {
+            const src = await PDFLibDocument.load(fs.readFileSync(f.path), { ignoreEncryption: true });
+            const pages = await merged.copyPages(src, src.getPageIndices());
+            pages.forEach((p) => merged.addPage(p));
+          } catch (pdfErr) {
+            console.error("Falha ao mesclar PDF anexo:", f.originalname, pdfErr);
+          }
+        }
+        finalBuffer = Buffer.from(await merged.save());
+      }
+
+      cleanupAnexos();
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", `attachment; filename="ordem_compra.pdf"`);
+      res.send(finalBuffer);
     } catch (err: any) {
+      cleanupAnexos();
       console.error("Erro ao gerar PDF da Ordem de Compra:", err);
       res.status(500).json({ error: "Falha ao gerar o PDF.", detail: err?.message });
     }
