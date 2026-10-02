@@ -28,6 +28,7 @@ import {
 import { buildCrdFilterOptions, matchesCrdCodeFilter, resolveCrdDisplayCodes } from '../lib/crdFilter';
 import { valueTrace } from '../lib/valueTraceMeta';
 import { useSearch } from '../context/SearchContext';
+import { hasPermission, type RolePermissionRow } from '../lib/permissionCatalog';
 import { useToast } from '../context/ToastContext';
 import { matchesSearch } from '../lib/search';
 import { isDirectDocumentUrl, collectBoletoPaths, type StorageDocumentField } from '../lib/storagePath';
@@ -90,6 +91,7 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
   const [actingSector, setActingSector] = useState<'requester' | 'controle' | 'financeiro'>('requester');
   const [requesterSectorId, setRequesterSectorId] = useState<string>('');
   const [userRole, setUserRole] = useState<string>('viewer');
+  const [userPermissions, setUserPermissions] = useState<RolePermissionRow[] | null>(null);
   const [allowedSectorIds, setAllowedSectorIds] = useState<string[]>([]);
   const [showModal, setShowModal] = useState(false);
   const [showReceiptModal, setShowReceiptModal] = useState(false);
@@ -147,9 +149,20 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
       try {
         const user = JSON.parse(userRaw);
         setUserRole(String(user?.role || 'viewer'));
+        setUserPermissions(Array.isArray(user?.permissions) ? user.permissions : null);
         if (user?.role === 'finance') setActingSector('financeiro');
         else if (user?.role === 'controle') setActingSector('controle');
         else setActingSector('requester');
+
+        // Preferência: sessão atual do backend (inclui permissions atualizadas).
+        const meRes = await fetch('/api/auth/me').catch(() => null);
+        if (meRes?.ok) {
+          const me = await meRes.json().catch(() => null);
+          if (me) {
+            setUserRole(String(me.role || user?.role || 'viewer'));
+            setUserPermissions(Array.isArray(me.permissions) ? me.permissions : null);
+          }
+        }
 
         // Recarrega dados atuais do usuário no backend para refletir
         // vínculos novos de setores sem depender da sessão antiga.
@@ -716,9 +729,8 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
   const canPayFinance = actingSector === 'financeiro' && (userRole === 'finance' || userRole === 'admin');
   const canApproveManager = userRole === 'manager' || userRole === 'admin';
   const showImportButton =
-    userRole === 'manager' ||
-    userRole === 'estagiario' ||
-    (userRole === 'admin' && actingSector === 'requester');
+    hasPermission(userPermissions, 'notas', 'create', userRole) &&
+    (userRole !== 'admin' || actingSector === 'requester');
   const canCancelAsRequester =
     actingSector === 'requester' &&
     (userRole === 'manager' || userRole === 'estagiario' || userRole === 'admin' || userRole === 'viewer');

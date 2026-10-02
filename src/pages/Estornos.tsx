@@ -16,6 +16,7 @@ import {
 } from '../components/LaunchNumberAmountFilters';
 import { buildCrdFilterOptions, matchesCrdCodeFilter } from '../lib/crdFilter';
 import { launchStatusMeta } from '../lib/launchFlow';
+import { hasPermission, type RolePermissionRow } from '../lib/permissionCatalog';
 
 const EMPTY_FORM = {
   sector_id: '',
@@ -39,6 +40,7 @@ export const EstornosPage: React.FC = () => {
   const [invoiceNumberFilter, setInvoiceNumberFilter] = useState('');
   const [amountFilter, setAmountFilter] = useState('');
   const [userRole, setUserRole] = useState<string>('viewer');
+  const [userPermissions, setUserPermissions] = useState<RolePermissionRow[] | null>(null);
   const [allowedSectorIds, setAllowedSectorIds] = useState<string[]>([]);
   const [grantedCrdIds, setGrantedCrdIds] = useState<string[]>([]);
   const [actingSector, setActingSector] = useState<'requester' | 'controle' | 'financeiro'>('requester');
@@ -67,6 +69,26 @@ export const EstornosPage: React.FC = () => {
   };
 
   useEffect(() => {
+    const bootstrapFromCache = () => {
+      try {
+        const raw = localStorage.getItem('user');
+        if (!raw) return;
+        const cached = JSON.parse(raw);
+        const role = String(cached?.role || '').trim();
+        if (role) {
+          setUserRole(role);
+          if (role === 'finance') setActingSector('financeiro');
+          else if (role === 'controle') setActingSector('controle');
+          else setActingSector('requester');
+        }
+        if (Array.isArray(cached?.permissions)) {
+          setUserPermissions(cached.permissions);
+        }
+      } catch {
+        // ignora cache inválido
+      }
+    };
+
     const loadUserScope = async () => {
       try {
         const res = await fetch('/api/auth/me');
@@ -74,6 +96,7 @@ export const EstornosPage: React.FC = () => {
         const user = await res.json();
         const role = String(user?.role || 'viewer');
         setUserRole(role);
+        setUserPermissions(Array.isArray(user?.permissions) ? user.permissions : null);
         if (role === 'finance') setActingSector('financeiro');
         else if (role === 'controle') setActingSector('controle');
         else setActingSector('requester');
@@ -94,11 +117,21 @@ export const EstornosPage: React.FC = () => {
             )
           )
         );
+        try {
+          const prev = JSON.parse(localStorage.getItem('user') || '{}');
+          localStorage.setItem(
+            'user',
+            JSON.stringify({ ...prev, ...user, role, permissions: user?.permissions ?? prev?.permissions })
+          );
+        } catch {
+          // ok
+        }
       } catch {
         // mantém escopo vazio
       }
     };
 
+    bootstrapFromCache();
     loadUserScope();
     loadData();
   }, []);
@@ -110,9 +143,8 @@ export const EstornosPage: React.FC = () => {
   const canPayFinance = actingSector === 'financeiro' && (userRole === 'finance' || userRole === 'admin');
   const canApproveManager = userRole === 'manager' || userRole === 'admin';
   const canLaunch =
-    userRole === 'manager' ||
-    userRole === 'estagiario' ||
-    (userRole === 'admin' && actingSector === 'requester');
+    hasPermission(userPermissions, 'estornos', 'create', userRole) &&
+    (userRole !== 'admin' || actingSector === 'requester');
   const canCancelAsRequester =
     actingSector === 'requester' &&
     (userRole === 'manager' || userRole === 'estagiario' || userRole === 'admin');

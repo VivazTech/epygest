@@ -272,9 +272,16 @@ export const hasPermission = (
   role?: string
 ): boolean => {
   if (role === 'admin') return true;
-  if (!permissions?.length) return false;
+  // Sessão antiga sem matriz: usa o padrão do perfil (ex.: finance/controle com criar em lançamentos).
+  const rows =
+    permissions && permissions.length > 0
+      ? permissions
+      : role
+        ? buildDefaultPermissionRows(role)
+        : [];
+  if (!rows.length) return false;
   const key = resolvePermissionResourceKey(resourceKey);
-  const row = permissions.find((p) => p.resource_key === key);
+  const row = rows.find((p) => p.resource_key === key);
   if (!row) return false;
   if (action === 'view') return Boolean(row.can_view);
   if (action === 'create') return Boolean(row.can_create);
