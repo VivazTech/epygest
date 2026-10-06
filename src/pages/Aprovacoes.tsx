@@ -565,14 +565,14 @@ export const AprovacoesPage: React.FC = () => {
           {canApproveManager && flow === 'manager_pending' && (
             <>
               <button
-                onClick={() => runInvoiceFlow(item.source_id, 'approve_manager').then((ok) => ok && loadData())}
+                onClick={() => runInvoiceFlow(item.source_id, 'approve_manager').then((ok) => { if (ok) return loadData(); })}
                 className="p-2 text-violet-600 hover:bg-violet-50 rounded-lg transition-colors"
                 title="Aprovar (Gestor do setor)"
               >
                 <BadgeCheck className="w-4 h-4" />
               </button>
               <button
-                onClick={() => runInvoiceFlow(item.source_id, 'reject_manager').then((ok) => ok && loadData())}
+                onClick={() => runInvoiceFlow(item.source_id, 'reject_manager').then((ok) => { if (ok) return loadData(); })}
                 className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
                 title="Reprovar"
               >
@@ -583,14 +583,14 @@ export const AprovacoesPage: React.FC = () => {
           {canApproveControl && flow === 'control_pending' && (
             <>
               <button
-                onClick={() => runInvoiceFlow(item.source_id, 'approve_control').then((ok) => ok && loadData())}
+                onClick={() => runInvoiceFlow(item.source_id, 'approve_control').then((ok) => { if (ok) return loadData(); })}
                 className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
                 title="Aprovar (Controle)"
               >
                 <BadgeCheck className="w-4 h-4" />
               </button>
               <button
-                onClick={() => runInvoiceFlow(item.source_id, 'reject_control').then((ok) => ok && loadData())}
+                onClick={() => runInvoiceFlow(item.source_id, 'reject_control').then((ok) => { if (ok) return loadData(); })}
                 className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
                 title="Reprovar"
               >
@@ -600,7 +600,7 @@ export const AprovacoesPage: React.FC = () => {
           )}
           {canApproveControl && flow === 'control_approved' && (
             <button
-              onClick={() => runInvoiceFlow(item.source_id, 'disapprove_control').then((ok) => ok && loadData())}
+              onClick={() => runInvoiceFlow(item.source_id, 'disapprove_control').then((ok) => { if (ok) return loadData(); })}
               className="p-2 text-amber-600 hover:bg-amber-50 rounded-lg transition-colors"
               title="Desaprovar"
             >
