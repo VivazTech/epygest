@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Plus, Archive, XCircle, Trash2, BadgeCheck, RotateCcw, Upload, FileCheck, Paperclip } from 'lucide-react';
-import { cn, formatCurrency } from '../lib/utils';
+import { Plus, Archive, XCircle, Trash2, BadgeCheck, RotateCcw, Upload, FileCheck, Paperclip, Pencil, History } from 'lucide-react';
+import { cn, formatCurrency, formatDate } from '../lib/utils';
 import { useSearch } from '../context/SearchContext';
 import { useToast } from '../context/ToastContext';
 import { matchesSearch } from '../lib/search';
@@ -15,7 +15,13 @@ import {
   matchesInvoiceNumberFilter,
 } from '../components/LaunchNumberAmountFilters';
 import { buildCrdFilterOptions, matchesCrdCodeFilter } from '../lib/crdFilter';
-import { launchStatusMeta } from '../lib/launchFlow';
+import {
+  canEditLaunchRole,
+  isLaunchStatusEditableBeforeControl,
+  launchStatusMeta,
+  LAUNCH_STATUS_FILTER_OPTIONS,
+  matchesDatePeriod,
+} from '../lib/launchFlow';
 import { hasPermission, type RolePermissionRow } from '../lib/permissionCatalog';
 
 const EMPTY_FORM = {
@@ -39,6 +45,10 @@ export const EstornosPage: React.FC = () => {
   const [crdFilter, setCrdFilter] = useState('');
   const [invoiceNumberFilter, setInvoiceNumberFilter] = useState('');
   const [amountFilter, setAmountFilter] = useState('');
+  const [sectorFilter, setSectorFilter] = useState('all');
+  const [issueDateFrom, setIssueDateFrom] = useState('');
+  const [issueDateTo, setIssueDateTo] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
   const [userRole, setUserRole] = useState<string>('viewer');
   const [userPermissions, setUserPermissions] = useState<RolePermissionRow[] | null>(null);
   const [allowedSectorIds, setAllowedSectorIds] = useState<string[]>([]);
@@ -47,6 +57,11 @@ export const EstornosPage: React.FC = () => {
   const [form, setForm] = useState({ ...EMPTY_FORM });
   const [uploadingFile, setUploadingFile] = useState(false);
   const [showModal, setShowModal] = useState(false);
+  const [editingEntry, setEditingEntry] = useState<any | null>(null);
+  const [historyEntry, setHistoryEntry] = useState<any | null>(null);
+  const [historyRows, setHistoryRows] = useState<any[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
   const loadData = async () => {
     try {
@@ -172,6 +187,13 @@ export const EstornosPage: React.FC = () => {
     return allowedSectorIds.includes(String(sectorId ?? ''));
   };
 
+  const canEditOpenLaunches = canEditLaunchRole(userRole);
+  const canEditEntry = (entry: any) => {
+    if (!canEditOpenLaunches) return false;
+    if (!isLaunchStatusEditableBeforeControl(entry?.status)) return false;
+    return matchesUserSector(entry?.sector_id);
+  };
+
   const scopedEntries = useMemo(
     () => entries.filter((e) => matchesUserSector(e.sector_id)),
     [entries, allowedSectorIds, hasGlobalSectorView]
@@ -184,41 +206,102 @@ export const EstornosPage: React.FC = () => {
       return;
     }
 
-    const res = await fetch('/api/estornos', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        sector_id: parseInt(form.sector_id, 10),
-        crd_id: form.crd_id ? parseInt(form.crd_id, 10) : null,
-        provider_name: form.provider_name.trim(),
-        issue_date: form.issue_date,
-        date: form.date,
-        amount: parseFloat(form.amount),
-        description: form.description || null,
-        file_path: form.file_path || null,
-        file_name: form.file_name || null,
-      }),
-    });
+    const payload = {
+      sector_id: parseInt(form.sector_id, 10),
+      crd_id: form.crd_id ? parseInt(form.crd_id, 10) : null,
+      provider_name: form.provider_name.trim(),
+      issue_date: form.issue_date,
+      date: form.date,
+      amount: parseFloat(form.amount),
+      description: form.description || null,
+      file_path: form.file_path || null,
+      file_name: form.file_name || null,
+    };
 
-    if (!res.ok) {
-      const data = await res.json();
-      alert(data.error || 'Não foi possível registrar o estorno.');
-      return;
+    const isEdit = Boolean(editingEntry?.id);
+    setSubmitting(true);
+    try {
+      const res = await fetch(isEdit ? `/api/estornos/${editingEntry.id}` : '/api/estornos', {
+        method: isEdit ? 'PATCH' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) {
+        const data = await res.json();
+        alert(data.error || (isEdit ? 'Não foi possível salvar a edição.' : 'Não foi possível registrar o estorno.'));
+        return;
+      }
+
+      const saved = await res.json().catch(() => ({}));
+      if (isEdit) {
+        showSuccess('Estorno atualizado. A edição foi registrada no histórico.');
+      } else {
+        showSuccess(
+          saved?.protocol
+            ? `Estorno ${saved.protocol} criado. Aguardando aprovação do Controle.`
+            : 'Estorno criado. Aguardando aprovação do Controle.'
+        );
+      }
+      closeModal();
+      loadData();
+    } finally {
+      setSubmitting(false);
     }
-
-    const created = await res.json().catch(() => ({}));
-    showSuccess(
-      created?.protocol
-        ? `Estorno ${created.protocol} criado. Aguardando aprovação do Controle.`
-        : 'Estorno criado. Aguardando aprovação do Controle.'
-    );
-    closeModal();
-    loadData();
   };
 
   const closeModal = () => {
     setShowModal(false);
+    setEditingEntry(null);
     setForm({ ...EMPTY_FORM });
+  };
+
+  const openCreateModal = () => {
+    setEditingEntry(null);
+    setForm({ ...EMPTY_FORM });
+    setShowModal(true);
+  };
+
+  const openEditEntry = (entry: any) => {
+    if (!canEditEntry(entry)) {
+      alert(
+        isLaunchStatusEditableBeforeControl(entry?.status)
+          ? 'Apenas administrador ou gestor do setor pode editar este lançamento.'
+          : 'Não é possível editar após a aprovação do Controle.'
+      );
+      return;
+    }
+    setEditingEntry(entry);
+    setForm({
+      sector_id: String(entry.sector_id || ''),
+      crd_id: entry.crd_id ? String(entry.crd_id) : '',
+      provider_name: String(entry.provider_name || ''),
+      issue_date: String(entry.issue_date || '').slice(0, 10),
+      date: String(entry.date || '').slice(0, 10),
+      amount: entry.amount == null || entry.amount === '' ? '' : String(entry.amount),
+      description: String(entry.description || ''),
+      file_path: String(entry.file_path || ''),
+      file_name: String(entry.file_name || ''),
+    });
+    setShowModal(true);
+  };
+
+  const openEditHistory = async (entry: any) => {
+    setHistoryEntry(entry);
+    setHistoryRows([]);
+    setHistoryLoading(true);
+    try {
+      const res = await fetch(`/api/launch-edits/estorno/${entry.id}`);
+      const data = await res.json().catch(() => []);
+      if (!res.ok) {
+        alert((data as any)?.error || 'Não foi possível carregar o histórico.');
+        setHistoryEntry(null);
+        return;
+      }
+      setHistoryRows(Array.isArray(data) ? data : []);
+    } finally {
+      setHistoryLoading(false);
+    }
   };
 
   const handleFileUpload = async (file: File) => {
@@ -302,6 +385,9 @@ export const EstornosPage: React.FC = () => {
   const filteredEntries = useMemo(
     () =>
       scopedEntries.filter((entry) => {
+        if (sectorFilter !== 'all' && String(entry.sector_id) !== String(sectorFilter)) return false;
+        if (statusFilter !== 'all' && String(entry.status || '') !== statusFilter) return false;
+        if (!matchesDatePeriod(entry.issue_date, issueDateFrom, issueDateTo)) return false;
         if (!matchesCrdCodeFilter(crdFilter, entry.crd_code, entry.crd_name)) return false;
         if (!matchesInvoiceNumberFilter(invoiceNumberFilter, entry.protocol, entry.description, entry.provider_name)) {
           return false;
@@ -323,7 +409,17 @@ export const EstornosPage: React.FC = () => {
           entry.status
         );
       }),
-    [scopedEntries, query, crdFilter, invoiceNumberFilter, amountFilter]
+    [
+      scopedEntries,
+      query,
+      crdFilter,
+      invoiceNumberFilter,
+      amountFilter,
+      sectorFilter,
+      issueDateFrom,
+      issueDateTo,
+      statusFilter,
+    ]
   );
 
   const openTotal = useMemo(
@@ -373,7 +469,7 @@ export const EstornosPage: React.FC = () => {
           {canLaunch && (
             <button
               type="button"
-              onClick={() => setShowModal(true)}
+              onClick={openCreateModal}
               className="flex items-center gap-2 bg-[#004D40] text-white px-4 py-2.5 rounded-xl shadow-lg shadow-emerald-900/10 hover:bg-[#003d33] transition-colors"
             >
               <Plus className="w-4 h-4" />
@@ -383,24 +479,72 @@ export const EstornosPage: React.FC = () => {
         </div>
       </div>
 
-      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 flex flex-wrap items-end gap-4">
-        <div>
-          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Estornos em aberto / aprovados</p>
-          <p className="text-xl font-extrabold text-amber-700 mt-1">
-            −{formatCurrency(openTotal)}
+      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 space-y-4">
+        <div className="flex flex-wrap items-end gap-4">
+          <div>
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Estornos em aberto / aprovados</p>
+            <p className="text-xl font-extrabold text-amber-700 mt-1">
+              −{formatCurrency(openTotal)}
+            </p>
+          </div>
+          <p className="text-xs text-slate-400 max-w-md">
+            O valor do estorno entra como crédito. Depois que o Financeiro recebe, o item sai da fila de pendentes.
           </p>
+          <CrdListFilter value={crdFilter} onChange={setCrdFilter} options={crdFilterOptions} className="ml-auto" />
+          <LaunchNumberAmountFilters
+            invoiceNumber={invoiceNumberFilter}
+            onInvoiceNumberChange={setInvoiceNumberFilter}
+            amount={amountFilter}
+            onAmountChange={setAmountFilter}
+            numberLabel="Nº / protocolo"
+          />
         </div>
-        <p className="text-xs text-slate-400 max-w-md">
-          O valor do estorno entra como crédito. Depois que o Financeiro recebe, o item sai da fila de pendentes.
-        </p>
-        <CrdListFilter value={crdFilter} onChange={setCrdFilter} options={crdFilterOptions} className="ml-auto" />
-        <LaunchNumberAmountFilters
-          invoiceNumber={invoiceNumberFilter}
-          onInvoiceNumberChange={setInvoiceNumberFilter}
-          amount={amountFilter}
-          onAmountChange={setAmountFilter}
-          numberLabel="Nº / protocolo"
-        />
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+          <div>
+            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Setor</label>
+            <select
+              value={sectorFilter}
+              onChange={(e) => setSectorFilter(e.target.value)}
+              className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+            >
+              <option value="all">Todos os setores</option>
+              {visibleSectors.map((s) => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Emissão de</label>
+            <input
+              type="date"
+              value={issueDateFrom}
+              onChange={(e) => setIssueDateFrom(e.target.value)}
+              className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+            />
+          </div>
+          <div>
+            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Emissão até</label>
+            <input
+              type="date"
+              value={issueDateTo}
+              min={issueDateFrom || undefined}
+              onChange={(e) => setIssueDateTo(e.target.value)}
+              className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+            />
+          </div>
+          <div>
+            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Status</label>
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+            >
+              {LAUNCH_STATUS_FILTER_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
+          </div>
+        </div>
       </div>
 
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-x-auto">
@@ -429,9 +573,23 @@ export const EstornosPage: React.FC = () => {
             )}
             {filteredEntries.map((entry) => {
               const meta = statusMeta(entry.status);
+              const edited = Number(entry.edit_count || 0) > 0;
               return (
                 <tr key={entry.id} className="hover:bg-slate-50/50 transition-colors">
-                  <td className="px-6 py-4 text-xs font-mono font-bold text-emerald-800">{entry.protocol || '—'}</td>
+                  <td className="px-6 py-4 text-xs font-mono font-bold text-emerald-800">
+                    {entry.protocol || '—'}
+                    {edited && (
+                      <button
+                        type="button"
+                        onClick={() => openEditHistory(entry)}
+                        className="mt-1 flex items-center gap-1 text-[10px] font-semibold text-amber-700 hover:text-amber-900"
+                        title="Ver histórico de edições"
+                      >
+                        <History className="w-3 h-3" />
+                        Editado{Number(entry.edit_count) > 1 ? ` (${entry.edit_count}x)` : ''}
+                      </button>
+                    )}
+                  </td>
                   <td className="px-6 py-4 text-sm font-medium text-slate-700">
                     {entry.sector_name || 'Sem setor'}
                     {entry.crd_code ? (
@@ -477,6 +635,24 @@ export const EstornosPage: React.FC = () => {
                   </td>
                   <td className="px-6 py-4">
                     <div className="flex justify-end gap-2">
+                      {canEditEntry(entry) && (
+                        <button
+                          onClick={() => openEditEntry(entry)}
+                          className="p-2 text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+                          title="Editar estorno"
+                        >
+                          <Pencil className="w-4 h-4" />
+                        </button>
+                      )}
+                      {edited && (
+                        <button
+                          onClick={() => openEditHistory(entry)}
+                          className="p-2 text-amber-600 hover:bg-amber-50 rounded-lg transition-colors"
+                          title="Histórico de edições"
+                        >
+                          <History className="w-4 h-4" />
+                        </button>
+                      )}
                       {canApproveManager && entry.status === 'pending_manager' && (
                         <>
                           <button
@@ -562,7 +738,9 @@ export const EstornosPage: React.FC = () => {
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-white w-full max-w-lg max-h-[calc(100dvh-2rem)] rounded-3xl shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
             <div className="p-6 border-b border-slate-100 flex justify-between items-center shrink-0">
-              <h3 className="text-xl font-bold text-slate-900">Novo estorno</h3>
+              <h3 className="text-xl font-bold text-slate-900">
+                {editingEntry ? `Editar estorno ${editingEntry.protocol || `#${editingEntry.id}`}` : 'Novo estorno'}
+              </h3>
               <button type="button" onClick={closeModal} className="text-slate-400 hover:text-slate-600 transition-colors">
                 <Plus className="w-6 h-6 rotate-45" />
               </button>
@@ -711,13 +889,75 @@ export const EstornosPage: React.FC = () => {
                 </button>
                 <button
                   type="submit"
-                  disabled={uploadingFile}
+                  disabled={uploadingFile || submitting}
                   className="flex-1 px-4 py-3 bg-[#004D40] text-white font-bold rounded-xl hover:bg-[#003d33] shadow-lg shadow-emerald-900/10 transition-colors disabled:opacity-70"
                 >
-                  Lançar estorno
+                  {submitting ? 'Salvando...' : editingEntry ? 'Salvar edição' : 'Lançar estorno'}
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {historyEntry && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white w-full max-w-lg max-h-[calc(100dvh-2rem)] rounded-3xl shadow-2xl overflow-hidden flex flex-col animate-in zoom-in-95 duration-200">
+            <div className="p-6 border-b border-slate-100 flex justify-between items-center shrink-0">
+              <div>
+                <h3 className="text-xl font-bold text-slate-900">Histórico de edições</h3>
+                <p className="text-sm text-slate-500 mt-0.5">
+                  {historyEntry.protocol || `Estorno #${historyEntry.id}`}
+                </p>
+              </div>
+              <button
+                onClick={() => setHistoryEntry(null)}
+                className="text-slate-400 hover:text-slate-600 transition-colors"
+              >
+                <Plus className="w-6 h-6 rotate-45" />
+              </button>
+            </div>
+            <div className="p-6 space-y-4 overflow-y-auto flex-1 min-h-0">
+              {historyLoading && <p className="text-sm text-slate-400">Carregando histórico...</p>}
+              {!historyLoading && historyRows.length === 0 && (
+                <p className="text-sm text-slate-400">Nenhuma edição registrada neste estorno.</p>
+              )}
+              {!historyLoading && historyRows.map((row) => (
+                <div key={row.id} className="border border-slate-100 rounded-2xl p-4 space-y-2">
+                  <div className="flex items-start justify-between gap-3">
+                    <p className="text-sm font-bold text-slate-800">{row.editor_name || 'Usuário'}</p>
+                    <p className="text-[11px] text-slate-400 whitespace-nowrap">
+                      {row.created_at ? formatDate(row.created_at) : ''}
+                    </p>
+                  </div>
+                  <ul className="space-y-1.5">
+                    {(Array.isArray(row.changes) ? row.changes : []).map((change: any, idx: number) => {
+                      const label = String(change.label || change.field || 'Campo');
+                      const formatVal = (raw: unknown) => {
+                        const value = String(raw ?? '').trim();
+                        if (!value) return '—';
+                        if (label === 'Valor') {
+                          const n = Number(value);
+                          return Number.isFinite(n) ? formatCurrency(n) : value;
+                        }
+                        if (label === 'Emissão' || label === 'Lançamento') {
+                          try { return formatDate(value); } catch { return value; }
+                        }
+                        return value;
+                      };
+                      return (
+                        <li key={`${row.id}-${idx}`} className="text-xs text-slate-600">
+                          <span className="font-bold text-slate-700">{label}:</span>{' '}
+                          <span className="text-slate-400 line-through">{formatVal(change.from)}</span>
+                          {' → '}
+                          <span className="font-semibold text-slate-800">{formatVal(change.to)}</span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       )}

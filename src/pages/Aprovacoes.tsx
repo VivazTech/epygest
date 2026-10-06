@@ -39,6 +39,7 @@ export const AprovacoesPage: React.FC = () => {
   const [sectors, setSectors] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [userRole, setUserRole] = useState('viewer');
+  const [allowedSectorIds, setAllowedSectorIds] = useState<string[]>([]);
   const [actingSector, setActingSector] = useState<AprovacaoActingSector>('controle');
   const [viewTab, setViewTab] = useState<'geral' | 'diretoria'>('geral');
   const [typeFilter, setTypeFilter] = useState('all');
@@ -57,8 +58,9 @@ export const AprovacoesPage: React.FC = () => {
     actingSector === 'controle' && (userRole === 'controle' || userRole === 'admin');
   const canPayFinance =
     actingSector === 'financeiro' && (userRole === 'finance' || userRole === 'admin');
+  // Admin aprova etapa do gestor mesmo sem trocar o seletor; gestor só no perfil Gestor.
   const canApproveManager =
-    actingSector === 'gestor' && (userRole === 'manager' || userRole === 'admin');
+    userRole === 'admin' || (actingSector === 'gestor' && userRole === 'manager');
   // Futuro: quando DIRETORIA_APPROVAL_ENFORCED = true, habilitar botões de aprovação da Diretoria.
   const canApproveDiretoria =
     DIRETORIA_APPROVAL_ENFORCED &&
@@ -99,6 +101,14 @@ export const AprovacoesPage: React.FC = () => {
         const user = await res.json();
         const role = String(user?.role || 'viewer');
         setUserRole(role);
+        const sectorIds = Array.from(
+          new Set<string>(
+            (Array.isArray(user?.sector_ids) ? user.sector_ids : [user?.sector_id])
+              .map((id: unknown) => String(id ?? '').trim())
+              .filter((id: string) => id !== '')
+          )
+        );
+        setAllowedSectorIds(sectorIds);
         if (role === 'finance') setActingSector('financeiro');
         else if (role === 'manager') setActingSector('gestor');
         else if (role === 'diretoria') {
@@ -111,6 +121,20 @@ export const AprovacoesPage: React.FC = () => {
     };
     loadUser();
   }, []);
+
+  const visibleSectors = useMemo(() => {
+    if (userRole === 'manager' && allowedSectorIds.length > 0) {
+      return sectors.filter((s) => allowedSectorIds.includes(String(s.id)));
+    }
+    return sectors;
+  }, [sectors, userRole, allowedSectorIds]);
+
+  useEffect(() => {
+    if (userRole !== 'manager' || allowedSectorIds.length === 0) return;
+    if (sectorFilter !== 'all' && !allowedSectorIds.includes(String(sectorFilter))) {
+      setSectorFilter('all');
+    }
+  }, [userRole, allowedSectorIds, sectorFilter]);
 
   useEffect(() => {
     loadData();
@@ -397,6 +421,21 @@ export const AprovacoesPage: React.FC = () => {
   };
 
   const renderActions = (item: AprovacaoItem) => {
+    const waitingManager =
+      item.type === 'nota' || item.type === 'danfe'
+        ? (item.flow_stage || '') === 'manager_pending'
+        : item.status === 'pending_manager';
+
+    if (waitingManager && !canApproveManager) {
+      return (
+        <span className="text-[10px] text-slate-400 font-medium text-right max-w-[130px] leading-snug">
+          {canSwitchActingProfile
+            ? 'Troque para “Atuar como Gestor”'
+            : 'Aguardando gestor do setor'}
+        </span>
+      );
+    }
+
     if (item.type === 'manual') {
       return (
         <>
@@ -703,7 +742,7 @@ export const AprovacoesPage: React.FC = () => {
           className="px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm"
         >
           <option value="all">Todos os setores</option>
-          {sectors.map((s) => (
+          {visibleSectors.map((s) => (
             <option key={s.id} value={s.id}>{s.name}</option>
           ))}
         </select>

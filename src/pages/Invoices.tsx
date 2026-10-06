@@ -33,6 +33,10 @@ import { useToast } from '../context/ToastContext';
 import { matchesSearch } from '../lib/search';
 import { isDirectDocumentUrl, collectBoletoPaths, type StorageDocumentField } from '../lib/storagePath';
 import { confirmCancel, confirmDelete } from '../lib/confirmAction';
+import {
+  canEditLaunchRole,
+  isInvoiceFlowEditableBeforeControl,
+} from '../lib/launchFlow';
 
 const EMPTY_INVOICE_FORM = {
   invoice_number: '',
@@ -307,12 +311,12 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
       alert('Não é possível editar uma nota cancelada.');
       return;
     }
-    if (flow === 'paid' || invoice.status === 'paid') {
-      alert('Não é possível editar um lançamento já pago.');
+    if (!isInvoiceFlowEditableBeforeControl(flow)) {
+      alert('Não é possível editar após a aprovação do Controle.');
       return;
     }
     if (!canEditInvoice(invoice)) {
-      alert('Seu perfil não pode editar este lançamento.');
+      alert('Apenas administrador ou gestor do setor pode editar este lançamento.');
       return;
     }
     const paths = collectBoletoPaths(invoice);
@@ -734,18 +738,11 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
   const canCancelAsRequester =
     actingSector === 'requester' &&
     (userRole === 'manager' || userRole === 'estagiario' || userRole === 'admin' || userRole === 'viewer');
-  /** Gestor (e perfis de lançamento) podem editar processos ainda abertos do seu setor — ex.: anexar NF depois. */
-  const canEditOpenLaunches =
-    userRole === 'manager' ||
-    userRole === 'estagiario' ||
-    userRole === 'admin' ||
-    userRole === 'controle' ||
-    userRole === 'finance';
+  /** Gestor/admin podem editar só antes da aprovação do Controle. */
+  const canEditOpenLaunches = canEditLaunchRole(userRole);
   const isInvoiceOpenForEdit = (invoice: any) => {
     const flow = invoice.flow_stage || (invoice.status === 'paid' ? 'paid' : 'control_pending');
-    if (flow === 'cancelled' || flow === 'paid') return false;
-    if (invoice.status === 'paid') return false;
-    return true;
+    return isInvoiceFlowEditableBeforeControl(flow);
   };
   const budgetSectors = isManager
     ? sectors.filter((s) => allowedSectorIds.includes(String(s.id)))

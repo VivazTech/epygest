@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Plus, Archive, XCircle, Trash2, BadgeCheck, RotateCcw, Upload, FileCheck, Paperclip } from 'lucide-react';
-import { cn, formatCurrency, formatCurrencyInput, getCurrencyMeta, parseCurrencyInputDigits } from '../lib/utils';
+import { Plus, Archive, XCircle, Trash2, BadgeCheck, RotateCcw, Upload, FileCheck, Paperclip, Pencil, History } from 'lucide-react';
+import { cn, formatCurrency, formatCurrencyInput, formatDate, getCurrencyMeta, parseCurrencyInputDigits } from '../lib/utils';
 import { ValueTrace } from '../components/ValueTrace';
 import { valueTrace } from '../lib/valueTraceMeta';
 import { useSearch } from '../context/SearchContext';
@@ -17,7 +17,13 @@ import {
   matchesInvoiceNumberFilter,
 } from '../components/LaunchNumberAmountFilters';
 import { buildCrdFilterOptions, matchesCrdCodeFilter } from '../lib/crdFilter';
-import { launchStatusMeta } from '../lib/launchFlow';
+import {
+  canEditLaunchRole,
+  isLaunchStatusEditableBeforeControl,
+  launchStatusMeta,
+  LAUNCH_STATUS_FILTER_OPTIONS,
+  matchesDatePeriod,
+} from '../lib/launchFlow';
 import { hasPermission, type RolePermissionRow } from '../lib/permissionCatalog';
 
 const EMPTY_FORM = {
@@ -54,6 +60,11 @@ export const LancamentosManuaisPage: React.FC = () => {
   const [crdFilter, setCrdFilter] = useState('');
   const [invoiceNumberFilter, setInvoiceNumberFilter] = useState('');
   const [amountFilter, setAmountFilter] = useState('');
+  const [sectorFilter, setSectorFilter] = useState('all');
+  const [paymentFilter, setPaymentFilter] = useState('all');
+  const [issueDateFrom, setIssueDateFrom] = useState('');
+  const [issueDateTo, setIssueDateTo] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
   const [userRole, setUserRole] = useState<string>('viewer');
   const [userPermissions, setUserPermissions] = useState<RolePermissionRow[] | null>(null);
   const [allowedSectorIds, setAllowedSectorIds] = useState<string[]>([]);
@@ -62,6 +73,11 @@ export const LancamentosManuaisPage: React.FC = () => {
   const [form, setForm] = useState({ ...EMPTY_FORM });
   const [uploadingFile, setUploadingFile] = useState(false);
   const [showModal, setShowModal] = useState(false);
+  const [editingEntry, setEditingEntry] = useState<any | null>(null);
+  const [historyEntry, setHistoryEntry] = useState<any | null>(null);
+  const [historyRows, setHistoryRows] = useState<any[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
   const currencyMeta = useMemo(
     () => getCurrencyMeta(form.currency || 'BRL'),
@@ -206,6 +222,13 @@ export const LancamentosManuaisPage: React.FC = () => {
     return allowedSectorIds.includes(String(sectorId ?? ''));
   };
 
+  const canEditOpenLaunches = canEditLaunchRole(userRole);
+  const canEditEntry = (entry: any) => {
+    if (!canEditOpenLaunches) return false;
+    if (!isLaunchStatusEditableBeforeControl(entry?.status)) return false;
+    return matchesUserSector(entry?.sector_id);
+  };
+
   const scopedEntries = useMemo(
     () => entries.filter((e) => matchesUserSector(e.sector_id)),
     [entries, allowedSectorIds, hasGlobalSectorView]
@@ -237,45 +260,110 @@ export const LancamentosManuaisPage: React.FC = () => {
       return;
     }
 
-    const res = await fetch('/api/manual-entries', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        sector_id: parseInt(form.sector_id, 10),
-        crd_id: form.crd_id ? parseInt(form.crd_id, 10) : null,
-        provider_name: form.provider_name.trim(),
-        payment_method: form.payment_method,
-        currency: form.currency,
-        pix_key: form.payment_method === 'pix' ? form.pix_key.trim() : null,
-        issue_date: form.issue_date,
-        date: form.date,
-        due_date: form.due_date,
-        amount,
-        description: form.description || null,
-        file_path: form.file_path || null,
-        file_name: form.file_name || null,
-      }),
-    });
+    const payload = {
+      sector_id: parseInt(form.sector_id, 10),
+      crd_id: form.crd_id ? parseInt(form.crd_id, 10) : null,
+      provider_name: form.provider_name.trim(),
+      payment_method: form.payment_method,
+      currency: form.currency,
+      pix_key: form.payment_method === 'pix' ? form.pix_key.trim() : null,
+      issue_date: form.issue_date,
+      date: form.date,
+      due_date: form.due_date,
+      amount,
+      description: form.description || null,
+      file_path: form.file_path || null,
+      file_name: form.file_name || null,
+    };
 
-    if (!res.ok) {
-      const data = await res.json();
-      alert(data.error || 'Não foi possível registrar o lançamento.');
-      return;
+    const isEdit = Boolean(editingEntry?.id);
+    setSubmitting(true);
+    try {
+      const res = await fetch(isEdit ? `/api/manual-entries/${editingEntry.id}` : '/api/manual-entries', {
+        method: isEdit ? 'PATCH' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) {
+        const data = await res.json();
+        alert(data.error || (isEdit ? 'Não foi possível salvar a edição.' : 'Não foi possível registrar o lançamento.'));
+        return;
+      }
+
+      const saved = await res.json().catch(() => ({}));
+      if (isEdit) {
+        showSuccess('Lançamento atualizado. A edição foi registrada no histórico.');
+      } else {
+        showSuccess(
+          saved?.protocol
+            ? `Lançamento ${saved.protocol} criado. Aguardando aprovação do Controle.`
+            : 'Lançamento manual criado. Aguardando aprovação do Controle.'
+        );
+      }
+      closeModal();
+      loadData();
+    } finally {
+      setSubmitting(false);
     }
-
-    const created = await res.json().catch(() => ({}));
-    showSuccess(
-      created?.protocol
-        ? `Lançamento ${created.protocol} criado. Aguardando aprovação do Controle.`
-        : 'Lançamento manual criado. Aguardando aprovação do Controle.'
-    );
-    closeModal();
-    loadData();
   };
 
   const closeModal = () => {
     setShowModal(false);
+    setEditingEntry(null);
     setForm({ ...EMPTY_FORM });
+  };
+
+  const openCreateModal = () => {
+    setEditingEntry(null);
+    setForm({ ...EMPTY_FORM });
+    setShowModal(true);
+  };
+
+  const openEditEntry = (entry: any) => {
+    if (!canEditEntry(entry)) {
+      alert(
+        isLaunchStatusEditableBeforeControl(entry?.status)
+          ? 'Apenas administrador ou gestor do setor pode editar este lançamento.'
+          : 'Não é possível editar após a aprovação do Controle.'
+      );
+      return;
+    }
+    setEditingEntry(entry);
+    setForm({
+      sector_id: String(entry.sector_id || ''),
+      crd_id: entry.crd_id ? String(entry.crd_id) : '',
+      provider_name: String(entry.provider_name || ''),
+      payment_method: String(entry.payment_method || ''),
+      currency: String(entry.currency || 'BRL'),
+      pix_key: String(entry.pix_key || ''),
+      issue_date: String(entry.issue_date || '').slice(0, 10),
+      date: String(entry.date || '').slice(0, 10),
+      due_date: String(entry.due_date || '').slice(0, 10),
+      amount: entry.amount == null || entry.amount === '' ? '' : String(entry.amount),
+      description: String(entry.description || ''),
+      file_path: String(entry.file_path || ''),
+      file_name: String(entry.file_name || ''),
+    });
+    setShowModal(true);
+  };
+
+  const openEditHistory = async (entry: any) => {
+    setHistoryEntry(entry);
+    setHistoryRows([]);
+    setHistoryLoading(true);
+    try {
+      const res = await fetch(`/api/launch-edits/manual/${entry.id}`);
+      const data = await res.json().catch(() => []);
+      if (!res.ok) {
+        alert((data as any)?.error || 'Não foi possível carregar o histórico.');
+        setHistoryEntry(null);
+        return;
+      }
+      setHistoryRows(Array.isArray(data) ? data : []);
+    } finally {
+      setHistoryLoading(false);
+    }
   };
 
   const handleFileUpload = async (file: File) => {
@@ -359,6 +447,10 @@ export const LancamentosManuaisPage: React.FC = () => {
   const filteredEntries = useMemo(
     () =>
       scopedEntries.filter((entry) => {
+        if (sectorFilter !== 'all' && String(entry.sector_id) !== String(sectorFilter)) return false;
+        if (paymentFilter !== 'all' && String(entry.payment_method || '') !== paymentFilter) return false;
+        if (statusFilter !== 'all' && String(entry.status || '') !== statusFilter) return false;
+        if (!matchesDatePeriod(entry.issue_date, issueDateFrom, issueDateTo)) return false;
         if (!matchesCrdCodeFilter(crdFilter, entry.crd_code, entry.crd_name)) return false;
         if (!matchesInvoiceNumberFilter(invoiceNumberFilter, entry.protocol, entry.description, entry.provider_name)) {
           return false;
@@ -384,7 +476,18 @@ export const LancamentosManuaisPage: React.FC = () => {
           entry.status
         );
       }),
-    [scopedEntries, query, crdFilter, invoiceNumberFilter, amountFilter]
+    [
+      scopedEntries,
+      query,
+      crdFilter,
+      invoiceNumberFilter,
+      amountFilter,
+      sectorFilter,
+      paymentFilter,
+      issueDateFrom,
+      issueDateTo,
+      statusFilter,
+    ]
   );
 
   const openTotal = useMemo(
@@ -434,7 +537,7 @@ export const LancamentosManuaisPage: React.FC = () => {
           {canLaunch && (
             <button
               type="button"
-              onClick={() => setShowModal(true)}
+              onClick={openCreateModal}
               className="flex items-center gap-2 bg-[#004D40] text-white px-4 py-2.5 rounded-xl shadow-lg shadow-emerald-900/10 hover:bg-[#003d33] transition-colors"
             >
               <Plus className="w-4 h-4" />
@@ -444,27 +547,88 @@ export const LancamentosManuaisPage: React.FC = () => {
         </div>
       </div>
 
-      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 flex flex-wrap items-end gap-4">
-        <div>
-          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Em aberto / aprovados (visíveis)</p>
-          <p className="text-xl font-extrabold text-slate-900 mt-1">
-            <ValueTrace
-              displayValue={formatCurrency(openTotal)}
-              meta={valueTrace.manualEntries.openTotal()}
-            />
+      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 space-y-4">
+        <div className="flex flex-wrap items-end gap-4">
+          <div>
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Em aberto / aprovados (visíveis)</p>
+            <p className="text-xl font-extrabold text-slate-900 mt-1">
+              <ValueTrace
+                displayValue={formatCurrency(openTotal)}
+                meta={valueTrace.manualEntries.openTotal()}
+              />
+            </p>
+          </div>
+          <p className="text-xs text-slate-400 max-w-md">
+            Compromisso orçamentário usa a data de lançamento. Após a baixa pelo Financeiro, o valor deixa de contar no pendente.
           </p>
+          <CrdListFilter value={crdFilter} onChange={setCrdFilter} options={crdFilterOptions} className="ml-auto" />
+          <LaunchNumberAmountFilters
+            invoiceNumber={invoiceNumberFilter}
+            onInvoiceNumberChange={setInvoiceNumberFilter}
+            amount={amountFilter}
+            onAmountChange={setAmountFilter}
+            numberLabel="Nº / protocolo"
+          />
         </div>
-        <p className="text-xs text-slate-400 max-w-md">
-          Compromisso orçamentário usa a data de lançamento. Após a baixa pelo Financeiro, o valor deixa de contar no pendente.
-        </p>
-        <CrdListFilter value={crdFilter} onChange={setCrdFilter} options={crdFilterOptions} className="ml-auto" />
-        <LaunchNumberAmountFilters
-          invoiceNumber={invoiceNumberFilter}
-          onInvoiceNumberChange={setInvoiceNumberFilter}
-          amount={amountFilter}
-          onAmountChange={setAmountFilter}
-          numberLabel="Nº / protocolo"
-        />
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-3">
+          <div>
+            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Setor</label>
+            <select
+              value={sectorFilter}
+              onChange={(e) => setSectorFilter(e.target.value)}
+              className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+            >
+              <option value="all">Todos os setores</option>
+              {visibleSectors.map((s) => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Tipo de pagamento</label>
+            <select
+              value={paymentFilter}
+              onChange={(e) => setPaymentFilter(e.target.value)}
+              className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+            >
+              <option value="all">Todos</option>
+              {activePaymentMethods.map((pm) => (
+                <option key={pm.key} value={pm.key}>{pm.name}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Emissão de</label>
+            <input
+              type="date"
+              value={issueDateFrom}
+              onChange={(e) => setIssueDateFrom(e.target.value)}
+              className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+            />
+          </div>
+          <div>
+            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Emissão até</label>
+            <input
+              type="date"
+              value={issueDateTo}
+              min={issueDateFrom || undefined}
+              onChange={(e) => setIssueDateTo(e.target.value)}
+              className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+            />
+          </div>
+          <div>
+            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Status</label>
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+            >
+              {LAUNCH_STATUS_FILTER_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
+          </div>
+        </div>
       </div>
 
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-x-auto">
@@ -494,9 +658,23 @@ export const LancamentosManuaisPage: React.FC = () => {
             )}
             {filteredEntries.map((entry) => {
               const meta = statusMeta(entry.status);
+              const edited = Number(entry.edit_count || 0) > 0;
               return (
                 <tr key={entry.id} className="hover:bg-slate-50/50 transition-colors">
-                  <td className="px-6 py-4 text-xs font-mono font-bold text-emerald-800">{entry.protocol || '—'}</td>
+                  <td className="px-6 py-4 text-xs font-mono font-bold text-emerald-800">
+                    {entry.protocol || '—'}
+                    {edited && (
+                      <button
+                        type="button"
+                        onClick={() => openEditHistory(entry)}
+                        className="mt-1 flex items-center gap-1 text-[10px] font-semibold text-amber-700 hover:text-amber-900"
+                        title="Ver histórico de edições"
+                      >
+                        <History className="w-3 h-3" />
+                        Editado{Number(entry.edit_count) > 1 ? ` (${entry.edit_count}x)` : ''}
+                      </button>
+                    )}
+                  </td>
                   <td className="px-6 py-4 text-sm font-medium text-slate-700">
                     {entry.sector_name || 'Sem setor'}
                     {entry.crd_code ? (
@@ -557,6 +735,24 @@ export const LancamentosManuaisPage: React.FC = () => {
                   </td>
                   <td className="px-6 py-4">
                     <div className="flex justify-end gap-2">
+                      {canEditEntry(entry) && (
+                        <button
+                          onClick={() => openEditEntry(entry)}
+                          className="p-2 text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+                          title="Editar lançamento"
+                        >
+                          <Pencil className="w-4 h-4" />
+                        </button>
+                      )}
+                      {edited && (
+                        <button
+                          onClick={() => openEditHistory(entry)}
+                          className="p-2 text-amber-600 hover:bg-amber-50 rounded-lg transition-colors"
+                          title="Histórico de edições"
+                        >
+                          <History className="w-4 h-4" />
+                        </button>
+                      )}
                       {canApproveManager && entry.status === 'pending_manager' && (
                         <>
                           <button
@@ -642,7 +838,9 @@ export const LancamentosManuaisPage: React.FC = () => {
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-white w-full max-w-lg max-h-[calc(100dvh-2rem)] rounded-3xl shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
             <div className="p-6 border-b border-slate-100 flex justify-between items-center shrink-0">
-              <h3 className="text-xl font-bold text-slate-900">Novo lançamento manual</h3>
+              <h3 className="text-xl font-bold text-slate-900">
+                {editingEntry ? `Editar lançamento ${editingEntry.protocol || `#${editingEntry.id}`}` : 'Novo lançamento manual'}
+              </h3>
               <button type="button" onClick={closeModal} className="text-slate-400 hover:text-slate-600 transition-colors">
                 <Plus className="w-6 h-6 rotate-45" />
               </button>
@@ -863,13 +1061,78 @@ export const LancamentosManuaisPage: React.FC = () => {
                 </button>
                 <button
                   type="submit"
-                  disabled={uploadingFile}
+                  disabled={uploadingFile || submitting}
                   className="flex-1 px-4 py-3 bg-[#004D40] text-white font-bold rounded-xl hover:bg-[#003d33] shadow-lg shadow-emerald-900/10 transition-colors disabled:opacity-70"
                 >
-                  Lançar
+                  {submitting ? 'Salvando...' : editingEntry ? 'Salvar edição' : 'Lançar'}
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {historyEntry && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white w-full max-w-lg max-h-[calc(100dvh-2rem)] rounded-3xl shadow-2xl overflow-hidden flex flex-col animate-in zoom-in-95 duration-200">
+            <div className="p-6 border-b border-slate-100 flex justify-between items-center shrink-0">
+              <div>
+                <h3 className="text-xl font-bold text-slate-900">Histórico de edições</h3>
+                <p className="text-sm text-slate-500 mt-0.5">
+                  {historyEntry.protocol || `Lançamento #${historyEntry.id}`}
+                </p>
+              </div>
+              <button
+                onClick={() => setHistoryEntry(null)}
+                className="text-slate-400 hover:text-slate-600 transition-colors"
+              >
+                <Plus className="w-6 h-6 rotate-45" />
+              </button>
+            </div>
+            <div className="p-6 space-y-4 overflow-y-auto flex-1 min-h-0">
+              {historyLoading && <p className="text-sm text-slate-400">Carregando histórico...</p>}
+              {!historyLoading && historyRows.length === 0 && (
+                <p className="text-sm text-slate-400">Nenhuma edição registrada neste lançamento.</p>
+              )}
+              {!historyLoading && historyRows.map((row) => (
+                <div key={row.id} className="border border-slate-100 rounded-2xl p-4 space-y-2">
+                  <div className="flex items-start justify-between gap-3">
+                    <p className="text-sm font-bold text-slate-800">{row.editor_name || 'Usuário'}</p>
+                    <p className="text-[11px] text-slate-400 whitespace-nowrap">
+                      {row.created_at ? formatDate(row.created_at) : ''}
+                    </p>
+                  </div>
+                  <ul className="space-y-1.5">
+                    {(Array.isArray(row.changes) ? row.changes : []).map((change: any, idx: number) => {
+                      const label = String(change.label || change.field || 'Campo');
+                      const formatVal = (raw: unknown) => {
+                        const value = String(raw ?? '').trim();
+                        if (!value) return '—';
+                        if (label === 'Valor') {
+                          const n = Number(value);
+                          return Number.isFinite(n) ? formatCurrency(n) : value;
+                        }
+                        if (label === 'Emissão' || label === 'Lançamento' || label === 'Vencimento') {
+                          try { return formatDate(value); } catch { return value; }
+                        }
+                        if (label === 'Pagamento') {
+                          return activePaymentMethods.find((pm) => pm.key === value)?.name || value;
+                        }
+                        return value;
+                      };
+                      return (
+                        <li key={`${row.id}-${idx}`} className="text-xs text-slate-600">
+                          <span className="font-bold text-slate-700">{label}:</span>{' '}
+                          <span className="text-slate-400 line-through">{formatVal(change.from)}</span>
+                          {' → '}
+                          <span className="font-semibold text-slate-800">{formatVal(change.to)}</span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       )}

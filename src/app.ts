@@ -64,8 +64,11 @@ import {
   parseCorrectionNumber,
 } from "./lib/importCorrections.js";
 import {
+  canEditLaunchRole,
   initialInvoiceFlowStage,
   initialLaunchStatus,
+  isInvoiceFlowEditableBeforeControl,
+  isLaunchStatusEditableBeforeControl,
   validateLaunchFlowStatus,
 } from "./lib/launchFlow.js";
 import {
@@ -2592,6 +2595,109 @@ export function createApp() {
     res.json({ id: data.id, protocol: data.protocol });
   });
 
+  app.patch("/api/requisitions/:id", async (req, res) => {
+    const entryId = Number(req.params.id);
+    if (!Number.isFinite(entryId)) return res.status(400).json({ error: "Requisição inválida." });
+
+    const role = String(req.user?.role || "");
+    if (!canEditLaunchRole(role)) {
+      return res.status(403).json({ error: "Apenas administrador ou gestor pode editar lançamentos." });
+    }
+
+    const { data: existing, error: fetchError } = await scopeByEmpresa(
+      supabase.from("requisitions").select("*").eq("id", entryId),
+      req
+    ).single();
+    if (fetchError || !existing) return res.status(404).json({ error: "Requisição não encontrada" });
+    if (!isLaunchStatusEditableBeforeControl(existing.status)) {
+      return res.status(400).json({ error: "Não é possível editar após a aprovação do Controle." });
+    }
+
+    const accessCurrent = await assertSectorAccessForUser(req, Number(existing.sector_id));
+    if (!accessCurrent.ok) return res.status(accessCurrent.status).json({ error: accessCurrent.error });
+
+    const { crd_id, description, provider_name, amount, date } = req.body;
+    const resolvedProviderName = String(provider_name || "").trim();
+    const resolvedAmount = Number(amount);
+    const resolvedDate = String(date || "").trim().slice(0, 10);
+    const resolvedDescription = String(description || "").trim() || null;
+    const resolvedCrdId = Number(crd_id);
+
+    if (!Number.isFinite(resolvedCrdId) || !Number.isFinite(resolvedAmount) || resolvedAmount < 0 || !resolvedDate || !resolvedProviderName) {
+      return res.status(400).json({ error: "CRD, fornecedor, valor e data são obrigatórios" });
+    }
+
+    const { data: crd, error: crdError } = await scopeByEmpresa(
+      supabase.from("crds").select("id, sector_id, code").eq("id", resolvedCrdId),
+      req
+    ).single();
+    if (crdError || !crd) return res.status(400).json({ error: "CRD inválido para a requisição" });
+
+    const accessTarget = await assertSectorAccessForUser(req, Number(crd.sector_id));
+    if (!accessTarget.ok) return res.status(accessTarget.status).json({ error: accessTarget.error });
+
+    const canUse = await userCanUseCrd(req, crd as any, Number(crd.sector_id));
+    if (!canUse) return res.status(400).json({ error: "CRD fora dos setores permitidos para seu usuário." });
+
+    const asText = (v: unknown) => String(v ?? "").trim();
+    const asAmount = (v: unknown) => {
+      const n = Number(v);
+      return Number.isFinite(n) ? n.toFixed(2) : "";
+    };
+    const asDate = (v: unknown) => String(v || "").slice(0, 10);
+
+    const candidates = [
+      { field: "provider_name", label: "Fornecedor", from: asText(existing.provider_name), to: resolvedProviderName },
+      { field: "description", label: "Descrição", from: asText(existing.description), to: asText(resolvedDescription) },
+      { field: "amount", label: "Valor", from: asAmount(existing.amount), to: asAmount(resolvedAmount) },
+      { field: "date", label: "Data", from: asDate(existing.date), to: resolvedDate },
+      { field: "crd_id", label: "CRD", from: asText(existing.crd_id), to: asText(resolvedCrdId) },
+      {
+        field: "sector_id",
+        label: "Setor",
+        from: asText(existing.sector_id),
+        to: asText(crd.sector_id),
+      },
+    ];
+    const changes = candidates.filter((c) => c.from !== c.to);
+    if (changes.length === 0) return res.status(400).json({ error: "Nenhuma alteração para salvar." });
+
+    const nowIso = new Date().toISOString();
+    const { data, error } = await scopeByEmpresa(
+      supabase
+        .from("requisitions")
+        .update({
+          crd_id: resolvedCrdId,
+          sector_id: Number(crd.sector_id),
+          description: resolvedDescription,
+          provider_name: resolvedProviderName,
+          amount: resolvedAmount,
+          date: resolvedDate,
+          edit_count: Number(existing.edit_count || 0) + 1,
+          last_edited_at: nowIso,
+        })
+        .eq("id", entryId),
+      req
+    )
+      .select("id, protocol, edit_count, last_edited_at")
+      .single();
+
+    if (error) {
+      console.error(error);
+      return res.status(500).json({ error: "Não foi possível salvar a edição." });
+    }
+
+    await recordLaunchEdit(req, {
+      source_type: "requisicao",
+      source_id: entryId,
+      user_id: req.user?.id,
+      editor_name: req.user?.name || req.user?.email || "Usuário",
+      changes,
+    });
+
+    res.json(data);
+  });
+
   app.patch("/api/requisitions/:id/status", async (req, res) => {
     const { id } = req.params;
     const { status } = req.body;
@@ -2820,6 +2926,223 @@ export function createApp() {
       return res.status(500).json({ error: "Erro interno ao processar a solicitação." });
     }
     res.json({ id: data.id, protocol: data.protocol });
+  });
+
+  const recordLaunchEdit = async (
+    req: express.Request,
+    payload: {
+      source_type: "manual" | "estorno" | "requisicao";
+      source_id: number;
+      user_id: number | string | null | undefined;
+      editor_name: string;
+      changes: Array<{ field: string; label: string; from: string; to: string }>;
+    }
+  ) => {
+    const { error } = await supabase.from("launch_edit_history").insert(
+      withEmpresaKey(
+        {
+          source_type: payload.source_type,
+          source_id: payload.source_id,
+          user_id: payload.user_id ?? null,
+          editor_name: payload.editor_name,
+          changes: payload.changes,
+        },
+        req
+      )
+    );
+    if (error) console.error("launch_edit_history insert:", error);
+  };
+
+  app.get("/api/launch-edits/:sourceType/:sourceId", async (req, res) => {
+    const sourceType = String(req.params.sourceType || "");
+    const sourceId = Number(req.params.sourceId);
+    if (!["manual", "estorno", "requisicao"].includes(sourceType) || !Number.isFinite(sourceId)) {
+      return res.status(400).json({ error: "Parâmetros inválidos." });
+    }
+    const table =
+      sourceType === "manual" ? "manual_entries" : sourceType === "estorno" ? "estornos" : "requisitions";
+    const { data: parent, error: parentErr } = await scopeByEmpresa(
+      supabase.from(table).select("id").eq("id", sourceId),
+      req
+    ).maybeSingle();
+    if (parentErr || !parent) return res.status(404).json({ error: "Lançamento não encontrado." });
+
+    const { data, error } = await scopeByEmpresa(
+      supabase
+        .from("launch_edit_history")
+        .select("id, editor_name, changes, created_at, user_id")
+        .eq("source_type", sourceType)
+        .eq("source_id", sourceId)
+        .order("created_at", { ascending: false }),
+      req
+    );
+    if (error) {
+      console.error(error);
+      return res.status(500).json({ error: "Não foi possível carregar o histórico." });
+    }
+    res.json(data ?? []);
+  });
+
+  app.patch("/api/manual-entries/:id", async (req, res) => {
+    const entryId = Number(req.params.id);
+    if (!Number.isFinite(entryId)) return res.status(400).json({ error: "Lançamento inválido." });
+
+    const role = String(req.user?.role || "");
+    if (!canEditLaunchRole(role)) {
+      return res.status(403).json({ error: "Apenas administrador ou gestor pode editar lançamentos." });
+    }
+
+    const { data: existing, error: fetchError } = await scopeByEmpresa(
+      supabase.from("manual_entries").select("*").eq("id", entryId),
+      req
+    ).single();
+    if (fetchError || !existing) return res.status(404).json({ error: "Lançamento não encontrado" });
+    if (!isLaunchStatusEditableBeforeControl(existing.status)) {
+      return res.status(400).json({ error: "Não é possível editar após a aprovação do Controle." });
+    }
+
+    const accessCurrent = await assertSectorAccessForUser(req, Number(existing.sector_id));
+    if (!accessCurrent.ok) return res.status(accessCurrent.status).json({ error: accessCurrent.error });
+
+    const {
+      sector_id, crd_id, description, provider_name, amount, date, issue_date, due_date,
+      file_path, file_name, payment_method, pix_key, currency,
+    } = req.body;
+
+    const resolvedProviderName = String(provider_name || "").trim();
+    const resolvedDueDate = String(due_date || "").trim().slice(0, 10);
+    const resolvedIssue = String(issue_date || "").trim().slice(0, 10);
+    const resolvedDate = String(date || "").trim().slice(0, 10);
+    const resolvedPayment = String(payment_method || "").trim();
+    const resolvedCurrency = String(currency || "BRL").trim().toUpperCase() || "BRL";
+    const resolvedAmount = Number(amount);
+    const resolvedSectorId = Number(sector_id);
+    const resolvedDescription = String(description || "").trim() || null;
+    const resolvedFilePath = String(file_path || "").trim() || null;
+    const resolvedFileName = String(file_name || "").trim() || null;
+
+    if (
+      !Number.isFinite(resolvedSectorId) ||
+      !Number.isFinite(resolvedAmount) ||
+      resolvedAmount < 0 ||
+      !resolvedDate ||
+      !resolvedIssue ||
+      !resolvedDueDate ||
+      !resolvedProviderName ||
+      !resolvedPayment
+    ) {
+      return res.status(400).json({
+        error: "setor, fornecedor, forma de pagamento, valor, emissão, lançamento e vencimento são obrigatórios",
+      });
+    }
+    if (resolvedPayment === "pix" && !String(pix_key || "").trim()) {
+      return res.status(400).json({ error: "Informe a chave Pix." });
+    }
+
+    const accessTarget = await assertSectorAccessForUser(req, resolvedSectorId);
+    if (!accessTarget.ok) return res.status(accessTarget.status).json({ error: accessTarget.error });
+
+    let resolvedCrdId: number | null = null;
+    let resolvedCrdCode = "";
+    if (crd_id) {
+      const { data: crd, error: crdError } = await scopeByEmpresa(
+        supabase.from("crds").select("id, sector_id, code, name").eq("id", Number(crd_id)),
+        req
+      ).single();
+      if (crdError || !crd) return res.status(400).json({ error: "CRD inválido para o lançamento" });
+      const canUse = await userCanUseCrd(req, crd as any, resolvedSectorId);
+      if (!canUse) return res.status(400).json({ error: "CRD não pertence ao setor informado" });
+      resolvedCrdId = Number(crd.id);
+      resolvedCrdCode = String((crd as any).code || "");
+    }
+
+    const asText = (v: unknown) => String(v ?? "").trim();
+    const asAmount = (v: unknown) => {
+      const n = Number(v);
+      return Number.isFinite(n) ? n.toFixed(2) : "";
+    };
+    const asDate = (v: unknown) => String(v || "").slice(0, 10);
+
+    let sectorFrom = asText(existing.sector_id);
+    let sectorTo = String(resolvedSectorId);
+    if (String(existing.sector_id) !== String(resolvedSectorId)) {
+      const { data: sectorRows } = await supabase
+        .from("sectors")
+        .select("id, name")
+        .in("id", [existing.sector_id, resolvedSectorId].filter(Boolean));
+      const nameById = new Map((sectorRows || []).map((s: any) => [String(s.id), String(s.name || s.id)]));
+      sectorFrom = nameById.get(String(existing.sector_id)) || sectorFrom;
+      sectorTo = nameById.get(String(resolvedSectorId)) || sectorTo;
+    }
+
+    const candidates = [
+      { field: "provider_name", label: "Fornecedor", from: asText(existing.provider_name), to: resolvedProviderName },
+      { field: "description", label: "Descrição", from: asText(existing.description), to: asText(resolvedDescription) },
+      { field: "amount", label: "Valor", from: asAmount(existing.amount), to: asAmount(resolvedAmount) },
+      { field: "issue_date", label: "Emissão", from: asDate(existing.issue_date), to: resolvedIssue },
+      { field: "date", label: "Lançamento", from: asDate(existing.date), to: resolvedDate },
+      { field: "due_date", label: "Vencimento", from: asDate(existing.due_date), to: resolvedDueDate },
+      { field: "sector_id", label: "Setor", from: sectorFrom, to: sectorTo },
+      { field: "crd_id", label: "CRD", from: asText(existing.crd_id), to: asText(resolvedCrdId) },
+      { field: "payment_method", label: "Pagamento", from: asText(existing.payment_method), to: resolvedPayment },
+      {
+        field: "pix_key",
+        label: "Chave Pix",
+        from: asText(existing.pix_key),
+        to: resolvedPayment === "pix" ? asText(pix_key) : "",
+      },
+      { field: "currency", label: "Moeda", from: asText(existing.currency || "BRL"), to: resolvedCurrency },
+      {
+        field: "file_path",
+        label: "Anexo",
+        from: asText(existing.file_path) ? "anexado" : "sem anexo",
+        to: resolvedFilePath ? "anexado" : "sem anexo",
+      },
+    ];
+    const changes = candidates.filter((c) => c.from !== c.to);
+    if (changes.length === 0) return res.status(400).json({ error: "Nenhuma alteração para salvar." });
+
+    const nowIso = new Date().toISOString();
+    const { data, error } = await scopeByEmpresa(
+      supabase
+        .from("manual_entries")
+        .update({
+          sector_id: resolvedSectorId,
+          crd_id: resolvedCrdId,
+          description: resolvedDescription,
+          provider_name: resolvedProviderName,
+          amount: resolvedAmount,
+          date: resolvedDate,
+          issue_date: resolvedIssue,
+          due_date: resolvedDueDate,
+          payment_method: resolvedPayment,
+          currency: resolvedCurrency,
+          pix_key: resolvedPayment === "pix" ? String(pix_key || "").trim() || null : null,
+          file_path: resolvedFilePath,
+          file_name: resolvedFileName,
+          edit_count: Number(existing.edit_count || 0) + 1,
+          last_edited_at: nowIso,
+        })
+        .eq("id", entryId),
+      req
+    )
+      .select("id, protocol, edit_count, last_edited_at")
+      .single();
+
+    if (error) {
+      console.error(error);
+      return res.status(500).json({ error: "Não foi possível salvar a edição." });
+    }
+
+    await recordLaunchEdit(req, {
+      source_type: "manual",
+      source_id: entryId,
+      user_id: req.user?.id,
+      editor_name: req.user?.name || req.user?.email || "Usuário",
+      changes,
+    });
+
+    res.json({ ...data, crd_code: resolvedCrdCode || undefined });
   });
 
   app.patch("/api/manual-entries/:id/status", async (req, res) => {
@@ -3056,6 +3379,151 @@ export function createApp() {
       return res.status(500).json({ error: "Não foi possível registrar o estorno." });
     }
     res.json({ id: data.id, protocol: data.protocol });
+  });
+
+  app.patch("/api/estornos/:id", async (req, res) => {
+    const entryId = Number(req.params.id);
+    if (!Number.isFinite(entryId)) return res.status(400).json({ error: "Estorno inválido." });
+
+    const role = String(req.user?.role || "");
+    if (!canEditLaunchRole(role)) {
+      return res.status(403).json({ error: "Apenas administrador ou gestor pode editar lançamentos." });
+    }
+
+    const { data: existing, error: fetchError } = await scopeByEmpresa(
+      supabase.from("estornos").select("*").eq("id", entryId),
+      req
+    ).single();
+    if (fetchError || !existing) return res.status(404).json({ error: "Estorno não encontrado" });
+    if (!isLaunchStatusEditableBeforeControl(existing.status)) {
+      return res.status(400).json({ error: "Não é possível editar após a aprovação do Controle." });
+    }
+
+    const accessCurrent = await assertSectorAccessForUser(req, Number(existing.sector_id));
+    if (!accessCurrent.ok) return res.status(accessCurrent.status).json({ error: accessCurrent.error });
+
+    const { sector_id, crd_id, description, provider_name, amount, date, issue_date, file_path, file_name } = req.body;
+    const resolvedProviderName = String(provider_name || "").trim();
+    const resolvedAmount = Number(amount);
+    const resolvedSectorId = Number(sector_id);
+    const resolvedDate = String(date || "").trim().slice(0, 10);
+    const resolvedIssue = String(issue_date || "").trim().slice(0, 10);
+    const resolvedDescription = String(description || "").trim() || null;
+
+    if (
+      !Number.isFinite(resolvedSectorId) ||
+      !Number.isFinite(resolvedAmount) ||
+      resolvedAmount < 0 ||
+      !resolvedDate ||
+      !resolvedIssue ||
+      !resolvedProviderName
+    ) {
+      return res.status(400).json({
+        error: "setor, fornecedor, valor, data de emissão e data de lançamento são obrigatórios",
+      });
+    }
+
+    const accessTarget = await assertSectorAccessForUser(req, resolvedSectorId);
+    if (!accessTarget.ok) return res.status(accessTarget.status).json({ error: accessTarget.error });
+
+    let resolvedCrdId: number | null = null;
+    if (crd_id) {
+      const { data: crd, error: crdError } = await scopeByEmpresa(
+        supabase.from("crds").select("id, sector_id, code").eq("id", Number(crd_id)),
+        req
+      ).single();
+      if (crdError || !crd) return res.status(400).json({ error: "CRD inválido para o estorno" });
+      const canUse = await userCanUseCrd(req, crd as any, resolvedSectorId);
+      if (!canUse) return res.status(400).json({ error: "CRD não pertence ao setor informado" });
+      resolvedCrdId = Number(crd.id);
+    }
+
+    let resolvedFilePath: string | null = null;
+    let resolvedFileName: string | null = null;
+    const rawFilePath = String(file_path || "").trim();
+    if (rawFilePath) {
+      const objectPath = normalizeStorageObjectPath(rawFilePath);
+      if (!objectPath || !objectPath.startsWith("estornos/")) {
+        return res.status(400).json({ error: "Arquivo inválido" });
+      }
+      resolvedFilePath = objectPath;
+      resolvedFileName = String(file_name || "").trim().slice(0, 255) || null;
+    }
+
+    const asText = (v: unknown) => String(v ?? "").trim();
+    const asAmount = (v: unknown) => {
+      const n = Number(v);
+      return Number.isFinite(n) ? n.toFixed(2) : "";
+    };
+    const asDate = (v: unknown) => String(v || "").slice(0, 10);
+
+    let sectorFrom = asText(existing.sector_id);
+    let sectorTo = String(resolvedSectorId);
+    if (String(existing.sector_id) !== String(resolvedSectorId)) {
+      const { data: sectorRows } = await supabase
+        .from("sectors")
+        .select("id, name")
+        .in("id", [existing.sector_id, resolvedSectorId].filter(Boolean));
+      const nameById = new Map((sectorRows || []).map((s: any) => [String(s.id), String(s.name || s.id)]));
+      sectorFrom = nameById.get(String(existing.sector_id)) || sectorFrom;
+      sectorTo = nameById.get(String(resolvedSectorId)) || sectorTo;
+    }
+
+    const candidates = [
+      { field: "provider_name", label: "Fornecedor", from: asText(existing.provider_name), to: resolvedProviderName },
+      { field: "description", label: "Descrição", from: asText(existing.description), to: asText(resolvedDescription) },
+      { field: "amount", label: "Valor", from: asAmount(existing.amount), to: asAmount(resolvedAmount) },
+      { field: "issue_date", label: "Emissão", from: asDate(existing.issue_date), to: resolvedIssue },
+      { field: "date", label: "Lançamento", from: asDate(existing.date), to: resolvedDate },
+      { field: "sector_id", label: "Setor", from: sectorFrom, to: sectorTo },
+      { field: "crd_id", label: "CRD", from: asText(existing.crd_id), to: asText(resolvedCrdId) },
+      {
+        field: "file_path",
+        label: "Anexo",
+        from: asText(existing.file_path) ? "anexado" : "sem anexo",
+        to: resolvedFilePath ? "anexado" : "sem anexo",
+      },
+    ];
+    const changes = candidates.filter((c) => c.from !== c.to);
+    if (changes.length === 0) return res.status(400).json({ error: "Nenhuma alteração para salvar." });
+
+    const nowIso = new Date().toISOString();
+    const { data, error } = await scopeByEmpresa(
+      supabase
+        .from("estornos")
+        .update({
+          sector_id: resolvedSectorId,
+          crd_id: resolvedCrdId,
+          description: resolvedDescription,
+          provider_name: resolvedProviderName,
+          amount: resolvedAmount,
+          date: resolvedDate,
+          issue_date: resolvedIssue,
+          file_path: resolvedFilePath,
+          file_name: resolvedFileName,
+          edit_count: Number(existing.edit_count || 0) + 1,
+          last_edited_at: nowIso,
+        })
+        .eq("id", entryId),
+      req
+    )
+      .select("id, protocol, edit_count, last_edited_at")
+      .single();
+
+    if (error) {
+      console.error(error);
+      return res.status(500).json({ error: "Não foi possível salvar a edição." });
+    }
+
+    await recordLaunchEdit(req, {
+      source_type: "estorno",
+      source_id: entryId,
+      user_id: req.user?.id,
+      editor_name: req.user?.name || req.user?.email || "Usuário",
+      changes,
+    });
+
+    res.json(data);
   });
 
   app.patch("/api/estornos/:id/status", async (req, res) => {
@@ -4407,14 +4875,15 @@ export function createApp() {
     if (currentFlow === "cancelled") {
       return res.status(400).json({ error: "Não é possível editar uma nota cancelada." });
     }
-    if (currentFlow === "paid" || String(invoice.status || "") === "paid") {
-      return res.status(400).json({ error: "Não é possível editar um lançamento já pago." });
+    if (!isInvoiceFlowEditableBeforeControl(currentFlow)) {
+      return res.status(400).json({
+        error: "Não é possível editar após a aprovação do Controle (ou pagamento).",
+      });
     }
 
     const role = String(req.user?.role || "");
-    const canEditRole = ["admin", "finance", "controle", "manager", "estagiario"].includes(role);
-    if (!canEditRole) {
-      return res.status(403).json({ error: "Seu perfil não pode editar lançamentos." });
+    if (!canEditLaunchRole(role)) {
+      return res.status(403).json({ error: "Apenas administrador ou gestor pode editar lançamentos." });
     }
 
     const accessCurrent = await assertSectorAccessForUser(req, Number(invoice.sector_id));

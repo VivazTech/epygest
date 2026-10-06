@@ -5,7 +5,7 @@ import { confirmCancel } from '../lib/confirmAction';
 import { useSearch } from '../context/SearchContext';
 import { useToast } from '../context/ToastContext';
 import { matchesSearch } from '../lib/search';
-import { launchStatusMeta } from '../lib/launchFlow';
+import { launchStatusMeta, LAUNCH_STATUS_FILTER_OPTIONS, matchesDatePeriod } from '../lib/launchFlow';
 
 type ComandaItemForm = {
   description: string;
@@ -36,6 +36,9 @@ export const ComandasPage: React.FC = () => {
   const [actingSector, setActingSector] = useState<'requester' | 'controle' | 'financeiro'>('requester');
   const [form, setForm] = useState({ ...EMPTY_FORM, items: [emptyItem()] });
   const [showModal, setShowModal] = useState(false);
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
 
   const loadData = async () => {
     try {
@@ -202,8 +205,10 @@ export const ComandasPage: React.FC = () => {
 
   const filteredComandas = useMemo(
     () =>
-      comandas.filter((comanda) =>
-        matchesSearch(
+      comandas.filter((comanda) => {
+        if (statusFilter !== 'all' && String(comanda.status || '') !== statusFilter) return false;
+        if (!matchesDatePeriod(comanda.consumed_at, dateFrom, dateTo)) return false;
+        return matchesSearch(
           query,
           comanda.protocol,
           comanda.consumer_name,
@@ -214,9 +219,9 @@ export const ComandasPage: React.FC = () => {
           comanda.status,
           comanda.items_count,
           ...(comanda.items ?? []).flatMap((item: any) => [item.description, item.quantity])
-        )
-      ),
-    [comandas, query]
+        );
+      }),
+    [comandas, query, dateFrom, dateTo, statusFilter]
   );
 
   return (
@@ -261,6 +266,55 @@ export const ComandasPage: React.FC = () => {
           )}
         </div>
       )}
+
+      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 grid grid-cols-1 md:grid-cols-4 gap-3">
+        <div>
+          <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Período de</label>
+          <input
+            type="date"
+            value={dateFrom}
+            onChange={(e) => setDateFrom(e.target.value)}
+            className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+          />
+        </div>
+        <div>
+          <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Período até</label>
+          <input
+            type="date"
+            value={dateTo}
+            min={dateFrom || undefined}
+            onChange={(e) => setDateTo(e.target.value)}
+            className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+          />
+        </div>
+        <div>
+          <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Status</label>
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+          >
+            {LAUNCH_STATUS_FILTER_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
+          </select>
+        </div>
+        {(dateFrom || dateTo || statusFilter !== 'all') && (
+          <div className="flex items-end">
+            <button
+              type="button"
+              onClick={() => {
+                setDateFrom('');
+                setDateTo('');
+                setStatusFilter('all');
+              }}
+              className="px-3 py-2.5 text-sm font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl"
+            >
+              Limpar filtros
+            </button>
+          </div>
+        )}
+      </div>
 
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-x-auto">
         <table className="w-full text-left border-collapse">

@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Plus, Archive, XCircle, BadgeCheck, RotateCcw } from 'lucide-react';
-import { cn, formatCurrency } from '../lib/utils';
+import { Plus, Archive, XCircle, BadgeCheck, RotateCcw, Pencil, History } from 'lucide-react';
+import { cn, formatCurrency, formatDate } from '../lib/utils';
 import { confirmCancel } from '../lib/confirmAction';
 import { ValueTrace } from '../components/ValueTrace';
 import { valueTrace } from '../lib/valueTraceMeta';
@@ -16,7 +16,13 @@ import {
   matchesInvoiceNumberFilter,
 } from '../components/LaunchNumberAmountFilters';
 import { buildCrdFilterOptions, matchesCrdCodeFilter } from '../lib/crdFilter';
-import { launchStatusMeta } from '../lib/launchFlow';
+import {
+  canEditLaunchRole,
+  isLaunchStatusEditableBeforeControl,
+  launchStatusMeta,
+  LAUNCH_STATUS_FILTER_OPTIONS,
+  matchesDatePeriod,
+} from '../lib/launchFlow';
 
 const EMPTY_FORM = {
   crd_id: '',
@@ -34,12 +40,20 @@ export const RequisicoesPage: React.FC = () => {
   const [crdFilter, setCrdFilter] = useState('');
   const [invoiceNumberFilter, setInvoiceNumberFilter] = useState('');
   const [amountFilter, setAmountFilter] = useState('');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
   const [userRole, setUserRole] = useState<string>('viewer');
   const [allowedSectorIds, setAllowedSectorIds] = useState<string[]>([]);
   const [grantedCrdIds, setGrantedCrdIds] = useState<string[]>([]);
   const [actingSector, setActingSector] = useState<'requester' | 'controle' | 'financeiro'>('requester');
   const [form, setForm] = useState({ ...EMPTY_FORM });
   const [showModal, setShowModal] = useState(false);
+  const [editingEntry, setEditingEntry] = useState<any | null>(null);
+  const [historyEntry, setHistoryEntry] = useState<any | null>(null);
+  const [historyRows, setHistoryRows] = useState<any[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
   const loadData = () => {
     fetch('/api/requisitions').then((res) => res.json()).then(setRequisitions);
@@ -123,6 +137,13 @@ export const RequisicoesPage: React.FC = () => {
     return allowedSectorIds.includes(String(sectorId ?? ''));
   };
 
+  const canEditOpenLaunches = canEditLaunchRole(userRole);
+  const canEditEntry = (entry: any) => {
+    if (!canEditOpenLaunches) return false;
+    if (!isLaunchStatusEditableBeforeControl(entry?.status)) return false;
+    return matchesUserSector(entry?.sector_id);
+  };
+
   const scopedRequisitions = useMemo(
     () => requisitions.filter((r) => matchesUserSector(r.sector_id)),
     [requisitions, allowedSectorIds, hasGlobalSectorView]
@@ -130,7 +151,52 @@ export const RequisicoesPage: React.FC = () => {
 
   const closeModal = () => {
     setShowModal(false);
+    setEditingEntry(null);
     setForm({ ...EMPTY_FORM });
+  };
+
+  const openCreateModal = () => {
+    setEditingEntry(null);
+    setForm({ ...EMPTY_FORM });
+    setShowModal(true);
+  };
+
+  const openEditEntry = (entry: any) => {
+    if (!canEditEntry(entry)) {
+      alert(
+        isLaunchStatusEditableBeforeControl(entry?.status)
+          ? 'Apenas administrador ou gestor do setor pode editar este lançamento.'
+          : 'Não é possível editar após a aprovação do Controle.'
+      );
+      return;
+    }
+    setEditingEntry(entry);
+    setForm({
+      crd_id: entry.crd_id ? String(entry.crd_id) : '',
+      provider_name: String(entry.provider_name || ''),
+      date: String(entry.date || '').slice(0, 10),
+      amount: entry.amount == null || entry.amount === '' ? '' : String(entry.amount),
+      description: String(entry.description || ''),
+    });
+    setShowModal(true);
+  };
+
+  const openEditHistory = async (entry: any) => {
+    setHistoryEntry(entry);
+    setHistoryRows([]);
+    setHistoryLoading(true);
+    try {
+      const res = await fetch(`/api/launch-edits/requisicao/${entry.id}`);
+      const data = await res.json().catch(() => []);
+      if (!res.ok) {
+        alert((data as any)?.error || 'Não foi possível carregar o histórico.');
+        setHistoryEntry(null);
+        return;
+      }
+      setHistoryRows(Array.isArray(data) ? data : []);
+    } finally {
+      setHistoryLoading(false);
+    }
   };
 
   const createRequisition = async (e: React.FormEvent) => {
@@ -140,32 +206,44 @@ export const RequisicoesPage: React.FC = () => {
       return;
     }
 
-    const res = await fetch('/api/requisitions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        crd_id: parseInt(form.crd_id),
-        provider_name: form.provider_name.trim(),
-        date: form.date,
-        amount: parseFloat(form.amount),
-        description: form.description || null,
-      }),
-    });
+    const payload = {
+      crd_id: parseInt(form.crd_id),
+      provider_name: form.provider_name.trim(),
+      date: form.date,
+      amount: parseFloat(form.amount),
+      description: form.description || null,
+    };
 
-    if (!res.ok) {
-      const data = await res.json();
-      alert(data.error || 'Não foi possível lançar a requisição.');
-      return;
+    const isEdit = Boolean(editingEntry?.id);
+    setSubmitting(true);
+    try {
+      const res = await fetch(isEdit ? `/api/requisitions/${editingEntry.id}` : '/api/requisitions', {
+        method: isEdit ? 'PATCH' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) {
+        const data = await res.json();
+        alert(data.error || (isEdit ? 'Não foi possível salvar a edição.' : 'Não foi possível lançar a requisição.'));
+        return;
+      }
+
+      const saved = await res.json().catch(() => ({}));
+      if (isEdit) {
+        showSuccess('Requisição atualizada. A edição foi registrada no histórico.');
+      } else {
+        showSuccess(
+          saved?.protocol
+            ? `Requisição ${saved.protocol} lançada. Aguardando aprovação do Controle.`
+            : 'Requisição lançada. Aguardando aprovação do Controle.'
+        );
+      }
+      closeModal();
+      loadData();
+    } finally {
+      setSubmitting(false);
     }
-
-    const created = await res.json().catch(() => ({}));
-    showSuccess(
-      created?.protocol
-        ? `Requisição ${created.protocol} lançada. Aguardando aprovação do Controle.`
-        : 'Requisição lançada. Aguardando aprovação do Controle.'
-    );
-    closeModal();
-    loadData();
   };
 
   const updateStatus = async (id: number, status: 'open' | 'approved' | 'posted' | 'cancelled') => {
@@ -186,6 +264,8 @@ export const RequisicoesPage: React.FC = () => {
   const filteredRequisitions = useMemo(
     () =>
       scopedRequisitions.filter((r) => {
+        if (statusFilter !== 'all' && String(r.status || '') !== statusFilter) return false;
+        if (!matchesDatePeriod(r.date, dateFrom, dateTo)) return false;
         if (!matchesCrdCodeFilter(crdFilter, r.crd_code, r.crd_name)) return false;
         if (!matchesInvoiceNumberFilter(invoiceNumberFilter, r.protocol, r.description, r.provider_name)) {
           return false;
@@ -204,7 +284,7 @@ export const RequisicoesPage: React.FC = () => {
           r.status
         );
       }),
-    [scopedRequisitions, query, crdFilter, invoiceNumberFilter, amountFilter]
+    [scopedRequisitions, query, crdFilter, invoiceNumberFilter, amountFilter, dateFrom, dateTo, statusFilter]
   );
 
   const crdFilterOptions = useMemo(() => buildCrdFilterOptions(crds), [crds]);
@@ -232,7 +312,7 @@ export const RequisicoesPage: React.FC = () => {
           )}
           <button
             type="button"
-            onClick={() => setShowModal(true)}
+            onClick={openCreateModal}
             className="flex items-center gap-2 bg-[#004D40] text-white px-4 py-2.5 rounded-xl shadow-lg shadow-emerald-900/10 hover:bg-[#003d33] transition-colors"
           >
             <Plus className="w-4 h-4" />
@@ -241,15 +321,50 @@ export const RequisicoesPage: React.FC = () => {
         </div>
       </div>
 
-      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 flex flex-wrap items-end gap-4">
-        <CrdListFilter value={crdFilter} onChange={setCrdFilter} options={crdFilterOptions} />
-        <LaunchNumberAmountFilters
-          invoiceNumber={invoiceNumberFilter}
-          onInvoiceNumberChange={setInvoiceNumberFilter}
-          amount={amountFilter}
-          onAmountChange={setAmountFilter}
-          numberLabel="Nº / protocolo"
-        />
+      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 space-y-4">
+        <div className="flex flex-wrap items-end gap-4">
+          <CrdListFilter value={crdFilter} onChange={setCrdFilter} options={crdFilterOptions} />
+          <LaunchNumberAmountFilters
+            invoiceNumber={invoiceNumberFilter}
+            onInvoiceNumberChange={setInvoiceNumberFilter}
+            amount={amountFilter}
+            onAmountChange={setAmountFilter}
+            numberLabel="Nº / protocolo"
+          />
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div>
+            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Vencimento de</label>
+            <input
+              type="date"
+              value={dateFrom}
+              onChange={(e) => setDateFrom(e.target.value)}
+              className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+            />
+          </div>
+          <div>
+            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Vencimento até</label>
+            <input
+              type="date"
+              value={dateTo}
+              min={dateFrom || undefined}
+              onChange={(e) => setDateTo(e.target.value)}
+              className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+            />
+          </div>
+          <div>
+            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Status</label>
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+            >
+              {LAUNCH_STATUS_FILTER_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
+          </div>
+        </div>
       </div>
 
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-x-auto">
@@ -276,9 +391,23 @@ export const RequisicoesPage: React.FC = () => {
             )}
             {filteredRequisitions.map((r) => {
               const meta = statusLabel(r.status);
+              const edited = Number(r.edit_count || 0) > 0;
               return (
                 <tr key={r.id} className="hover:bg-slate-50/50 transition-colors">
-                  <td className="px-6 py-4 text-xs font-mono font-bold text-emerald-800">{r.protocol || '—'}</td>
+                  <td className="px-6 py-4 text-xs font-mono font-bold text-emerald-800">
+                    {r.protocol || '—'}
+                    {edited && (
+                      <button
+                        type="button"
+                        onClick={() => openEditHistory(r)}
+                        className="mt-1 flex items-center gap-1 text-[10px] font-semibold text-amber-700 hover:text-amber-900"
+                        title="Ver histórico de edições"
+                      >
+                        <History className="w-3 h-3" />
+                        Editado{Number(r.edit_count) > 1 ? ` (${r.edit_count}x)` : ''}
+                      </button>
+                    )}
+                  </td>
                   <td className="px-6 py-4 text-sm font-medium text-slate-700">
                     {(r.crd_code || 'CRD')} - {r.crd_name || 'Sem descrição'}
                     <span className="block text-xs font-normal text-slate-500">{r.sector_name || 'Sem setor'}</span>
@@ -308,6 +437,24 @@ export const RequisicoesPage: React.FC = () => {
                   </td>
                   <td className="px-6 py-4">
                     <div className="flex justify-end gap-2">
+                      {canEditEntry(r) && (
+                        <button
+                          onClick={() => openEditEntry(r)}
+                          className="p-2 text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+                          title="Editar requisição"
+                        >
+                          <Pencil className="w-4 h-4" />
+                        </button>
+                      )}
+                      {edited && (
+                        <button
+                          onClick={() => openEditHistory(r)}
+                          className="p-2 text-amber-600 hover:bg-amber-50 rounded-lg transition-colors"
+                          title="Histórico de edições"
+                        >
+                          <History className="w-4 h-4" />
+                        </button>
+                      )}
                       {canApproveManager && r.status === 'pending_manager' && (
                         <>
                           <button
@@ -384,7 +531,9 @@ export const RequisicoesPage: React.FC = () => {
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-white w-full max-w-lg max-h-[calc(100dvh-2rem)] rounded-3xl shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
             <div className="p-6 border-b border-slate-100 flex justify-between items-center shrink-0">
-              <h3 className="text-xl font-bold text-slate-900">Nova requisição interna</h3>
+              <h3 className="text-xl font-bold text-slate-900">
+                {editingEntry ? `Editar requisição ${editingEntry.protocol || `#${editingEntry.id}`}` : 'Nova requisição interna'}
+              </h3>
               <button type="button" onClick={closeModal} className="text-slate-400 hover:text-slate-600 transition-colors">
                 <Plus className="w-6 h-6 rotate-45" />
               </button>
@@ -467,12 +616,75 @@ export const RequisicoesPage: React.FC = () => {
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 px-4 py-3 bg-[#004D40] text-white font-bold rounded-xl hover:bg-[#003d33] shadow-lg shadow-emerald-900/10 transition-colors"
+                  disabled={submitting}
+                  className="flex-1 px-4 py-3 bg-[#004D40] text-white font-bold rounded-xl hover:bg-[#003d33] shadow-lg shadow-emerald-900/10 transition-colors disabled:opacity-70"
                 >
-                  Lançar
+                  {submitting ? 'Salvando...' : editingEntry ? 'Salvar edição' : 'Lançar'}
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {historyEntry && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white w-full max-w-lg max-h-[calc(100dvh-2rem)] rounded-3xl shadow-2xl overflow-hidden flex flex-col animate-in zoom-in-95 duration-200">
+            <div className="p-6 border-b border-slate-100 flex justify-between items-center shrink-0">
+              <div>
+                <h3 className="text-xl font-bold text-slate-900">Histórico de edições</h3>
+                <p className="text-sm text-slate-500 mt-0.5">
+                  {historyEntry.protocol || `Requisição #${historyEntry.id}`}
+                </p>
+              </div>
+              <button
+                onClick={() => setHistoryEntry(null)}
+                className="text-slate-400 hover:text-slate-600 transition-colors"
+              >
+                <Plus className="w-6 h-6 rotate-45" />
+              </button>
+            </div>
+            <div className="p-6 space-y-4 overflow-y-auto flex-1 min-h-0">
+              {historyLoading && <p className="text-sm text-slate-400">Carregando histórico...</p>}
+              {!historyLoading && historyRows.length === 0 && (
+                <p className="text-sm text-slate-400">Nenhuma edição registrada nesta requisição.</p>
+              )}
+              {!historyLoading && historyRows.map((row) => (
+                <div key={row.id} className="border border-slate-100 rounded-2xl p-4 space-y-2">
+                  <div className="flex items-start justify-between gap-3">
+                    <p className="text-sm font-bold text-slate-800">{row.editor_name || 'Usuário'}</p>
+                    <p className="text-[11px] text-slate-400 whitespace-nowrap">
+                      {row.created_at ? formatDate(row.created_at) : ''}
+                    </p>
+                  </div>
+                  <ul className="space-y-1.5">
+                    {(Array.isArray(row.changes) ? row.changes : []).map((change: any, idx: number) => {
+                      const label = String(change.label || change.field || 'Campo');
+                      const formatVal = (raw: unknown) => {
+                        const value = String(raw ?? '').trim();
+                        if (!value) return '—';
+                        if (label === 'Valor') {
+                          const n = Number(value);
+                          return Number.isFinite(n) ? formatCurrency(n) : value;
+                        }
+                        if (label === 'Data') {
+                          try { return formatDate(value); } catch { return value; }
+                        }
+                        return value;
+                      };
+                      return (
+                        <li key={`${row.id}-${idx}`} className="text-xs text-slate-600">
+                          <span className="font-bold text-slate-700">{label}:</span>{' '}
+                          <span className="text-slate-400 line-through">{formatVal(change.from)}</span>
+                          {' → '}
+                          <span className="font-semibold text-slate-800">{formatVal(change.to)}</span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       )}

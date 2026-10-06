@@ -35,6 +35,44 @@ export function launchStatusMeta(status: string, postedLabel = 'Pago') {
   return { label: 'Aguardando Controle', classes: 'bg-orange-100 text-orange-700' };
 }
 
+/** Edição permitida só para admin/gestor e só antes da aprovação do Controle. */
+export function canEditLaunchRole(role: string | null | undefined): boolean {
+  const r = String(role || '');
+  return r === 'admin' || r === 'manager';
+}
+
+/** Status de lançamentos (manual/estorno/req/comanda): editável se pending_manager ou open. */
+export function isLaunchStatusEditableBeforeControl(status: string | null | undefined): boolean {
+  const s = String(status || 'open');
+  return s === 'pending_manager' || s === 'open';
+}
+
+/** Fluxo de notas/DANFE: editável em manager_pending ou control_pending. */
+export function isInvoiceFlowEditableBeforeControl(flow: string | null | undefined): boolean {
+  const f = String(flow || 'control_pending');
+  return f === 'manager_pending' || f === 'control_pending';
+}
+
+/** Filtro de status nas listas de lançamentos. */
+export const LAUNCH_STATUS_FILTER_OPTIONS = [
+  { value: 'all', label: 'Todos os status' },
+  { value: 'pending_manager', label: 'Aguardando Gestor' },
+  { value: 'open', label: 'Aguardando Controle' },
+  { value: 'approved', label: 'Aprovado Controle' },
+  { value: 'posted', label: 'Concluído' },
+  { value: 'cancelled', label: 'Cancelado' },
+] as const;
+
+/** Período inclusivo (YYYY-MM-DD). Sem from/to = sem filtro. */
+export function matchesDatePeriod(dateValue: unknown, from: string, to: string) {
+  if (!from && !to) return true;
+  const d = String(dateValue || '').slice(0, 10);
+  if (!d) return false;
+  if (from && d < from) return false;
+  if (to && d > to) return false;
+  return true;
+}
+
 export function validateLaunchFlowStatus(
   role: string,
   current: string,

@@ -16,6 +16,7 @@ export const EMPRESA_SCOPED_TABLES = new Set([
   "crds",
   "invoices",
   "invoice_edit_history",
+  "launch_edit_history",
   "manual_entries",
   "requisitions",
   "comandas",
