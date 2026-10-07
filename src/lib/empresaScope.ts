@@ -22,6 +22,7 @@ export const EMPRESA_SCOPED_TABLES = new Set([
   "comandas",
   "comanda_items",
   "estornos",
+  "ordens_compra",
   "investimentos",
   "contratos",
   "contrato_lancamentos",

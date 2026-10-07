@@ -252,19 +252,27 @@ export const AprovacoesPage: React.FC = () => {
   };
 
   const updateFlowStatus = async (
-    type: 'comanda' | 'requisicao' | 'mensalidade',
+    type: 'comanda' | 'requisicao' | 'mensalidade' | 'ordem',
     id: number,
     status: 'open' | 'approved' | 'posted' | 'cancelled'
   ) => {
     if (status === 'cancelled' && !confirmCancel(
-      type === 'comanda' ? 'esta comanda' : type === 'requisicao' ? 'esta requisição' : 'este pagamento de mensalidade'
+      type === 'comanda'
+        ? 'esta comanda'
+        : type === 'requisicao'
+          ? 'esta requisição'
+          : type === 'ordem'
+            ? 'esta ordem de compra'
+            : 'este pagamento de mensalidade'
     )) return;
     const endpoint =
       type === 'comanda'
         ? `/api/comandas/${id}/status`
         : type === 'requisicao'
           ? `/api/requisitions/${id}/status`
-          : `/api/contrato-lancamentos/${id}/status`;
+          : type === 'ordem'
+            ? `/api/ordens-compra/${id}/status`
+            : `/api/contrato-lancamentos/${id}/status`;
     const res = await fetch(endpoint, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
@@ -285,7 +293,7 @@ export const AprovacoesPage: React.FC = () => {
     loadData();
   };
 
-  const renderFlowActions = (type: 'comanda' | 'requisicao' | 'mensalidade', item: AprovacaoItem) => (
+  const renderFlowActions = (type: 'comanda' | 'requisicao' | 'mensalidade' | 'ordem', item: AprovacaoItem) => (
     <>
       {canApproveManager && item.status === 'pending_manager' && (
         <>
@@ -372,6 +380,17 @@ export const AprovacoesPage: React.FC = () => {
     }
     showSuccess('Nota atualizada com sucesso.');
     return true;
+  };
+
+  const openOrdemDocumento = async (id: number, kind: 'nota' | 'recibo' | 'boleto') => {
+    try {
+      const res = await fetch(`/api/ordens-compra/${id}/document-url?kind=${kind}`);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data?.url) throw new Error(data?.error || 'Arquivo indisponível');
+      window.open(data.url, '_blank', 'noopener');
+    } catch (error: any) {
+      alert(error.message || 'Não foi possível abrir o documento.');
+    }
   };
 
   const openAttachedDocument = async (item: AprovacaoItem) => {
@@ -628,6 +647,7 @@ export const AprovacoesPage: React.FC = () => {
     if (item.type === 'comanda') return renderFlowActions('comanda', item);
     if (item.type === 'requisicao') return renderFlowActions('requisicao', item);
     if (item.type === 'mensalidade') return renderFlowActions('mensalidade', item);
+    if (item.type === 'ordem') return renderFlowActions('ordem', item);
 
     return null;
   };
@@ -845,6 +865,40 @@ export const AprovacoesPage: React.FC = () => {
                           <Paperclip className="w-3 h-3" />
                           Anexo
                         </button>
+                      ) : null}
+                      {item.type === 'ordem' && (item.file_path || item.recibo_file_path || item.boleto_file_path) ? (
+                        <span className="mt-1 flex flex-wrap gap-1">
+                          {item.file_path ? (
+                            <button
+                              type="button"
+                              onClick={() => openOrdemDocumento(item.source_id, 'nota')}
+                              className="inline-flex items-center gap-1 text-xs font-medium text-blue-700 bg-blue-50 px-2 py-1 rounded-lg hover:bg-blue-100"
+                            >
+                              <Paperclip className="w-3 h-3" />
+                              Nota
+                            </button>
+                          ) : null}
+                          {item.recibo_file_path ? (
+                            <button
+                              type="button"
+                              onClick={() => openOrdemDocumento(item.source_id, 'recibo')}
+                              className="inline-flex items-center gap-1 text-xs font-medium text-blue-700 bg-blue-50 px-2 py-1 rounded-lg hover:bg-blue-100"
+                            >
+                              <Paperclip className="w-3 h-3" />
+                              Recibo
+                            </button>
+                          ) : null}
+                          {item.boleto_file_path ? (
+                            <button
+                              type="button"
+                              onClick={() => openOrdemDocumento(item.source_id, 'boleto')}
+                              className="inline-flex items-center gap-1 text-xs font-medium text-blue-700 bg-blue-50 px-2 py-1 rounded-lg hover:bg-blue-100"
+                            >
+                              <Paperclip className="w-3 h-3" />
+                              Boleto
+                            </button>
+                          ) : null}
+                        </span>
                       ) : null}
                     </td>
                     <td className="px-6 py-4 text-sm text-slate-600">

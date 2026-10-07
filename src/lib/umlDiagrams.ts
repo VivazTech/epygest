@@ -464,7 +464,9 @@ export const API_REFERENCE: ApiGroup[] = [
     R('POST', '/api/contratos/:id/lancamentos', 'admin,controle,manager,finance'),
     R('GET', '/api/contrato-lancamentos', 'admin,controle,manager,finance,diretoria'), R('PATCH', '/api/contrato-lancamentos/:id/status', 'admin,controle,manager,finance'),
   ]},
-  { group: 'Compras', routes: [ R('POST', '/api/ordem-compra/pdf') ]},
+  { group: 'Compras', routes: [
+    R('GET', '/api/ordens-compra'), R('PATCH', '/api/ordens-compra/:id/status'), R('POST', '/api/ordem-compra/pdf'),
+  ]},
   { group: 'Importação', routes: [
     R('GET', '/api/import/history', 'admin,finance,controle'), R('POST', '/api/import/history/:id/undo', 'admin,finance,controle'),
     R('POST', '/api/import/desbravador/preview'), R('POST', '/api/import/desbravador/preview-excel'),

@@ -8,6 +8,7 @@ export const PROTOCOL_PREFIX = {
   nota: 'NOT',
   danfe: 'DAN',
   mensalidade: 'MEN',
+  ordem: 'ORD',
 } as const;
 
 export type ProtocolKind = keyof typeof PROTOCOL_PREFIX;

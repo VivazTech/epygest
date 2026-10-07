@@ -588,7 +588,7 @@ export function createApp() {
   const ORDEM_ANEXO_MAX_FILES = 6;
   const uploadOrdemAnexos = multer({
     dest: uploadDir,
-    limits: { fileSize: ORDEM_ANEXO_MAX_BYTES, files: ORDEM_ANEXO_MAX_FILES },
+    limits: { fileSize: ORDEM_ANEXO_MAX_BYTES, files: ORDEM_ANEXO_MAX_FILES + 3 },
   });
 
   // ---------- Storage de documentos (bucket privado + signed URLs) ----------
@@ -3661,7 +3661,7 @@ export function createApp() {
     if (item.type === "comanda" || item.type === "requisicao") {
       return item.status === "pending_manager" || item.status === "open" || item.status === "approved";
     }
-    if (item.type === "mensalidade") {
+    if (item.type === "mensalidade" || item.type === "ordem") {
       return item.status === "pending_manager" || item.status === "open" || item.status === "approved";
     }
     return false;
@@ -3711,7 +3711,7 @@ export function createApp() {
           return flow === "paid" || item.status === "paid";
         }
         if (item.type === "comanda" || item.type === "requisicao") return item.status === "posted";
-        if (item.type === "mensalidade") return item.status === "posted";
+        if (item.type === "mensalidade" || item.type === "ordem") return item.status === "posted";
         return false;
       }
       if (statusFilter === "cancelled") {
@@ -3720,7 +3720,7 @@ export function createApp() {
           return (item.flow_stage || "") === "cancelled";
         }
         if (item.type === "comanda" || item.type === "requisicao") return item.status === "cancelled";
-        if (item.type === "mensalidade") return item.status === "cancelled";
+        if (item.type === "mensalidade" || item.type === "ordem") return item.status === "cancelled";
       }
       return true;
     };
@@ -3733,6 +3733,7 @@ export function createApp() {
         invoiceRes,
         comandaRes,
         contratoRes,
+        ordemRes,
       ] = await Promise.all([
         includeType("manual")
           ? filterByEmpresa(
@@ -3778,9 +3779,16 @@ export function createApp() {
               "contrato_lancamentos"
             ).order("competencia", { ascending: false })
           : Promise.resolve({ data: [], error: null }),
+        includeType("ordem")
+          ? filterByEmpresa(
+              supabase.from("ordens_compra").select("*, users(id, name)"),
+              req,
+              "ordens_compra"
+            ).order("created_at", { ascending: false })
+          : Promise.resolve({ data: [], error: null }),
       ]);
 
-      for (const result of [manualRes, estornoRes, reqRes, invoiceRes, comandaRes, contratoRes]) {
+      for (const result of [manualRes, estornoRes, reqRes, invoiceRes, comandaRes, contratoRes, ordemRes]) {
         if (result.error) {
           console.error(result.error);
           return res.status(500).json({ error: "Erro ao carregar lançamentos para aprovação." });
@@ -4013,6 +4021,93 @@ export function createApp() {
           alerta_vencimento: false,
           fornecedor: contrato?.fornecedor ? String(contrato.fornecedor) : null,
           vencimento,
+        };
+        if (!matchesSector(item.sector_id, item.type)) continue;
+        if (!inDateRange(item.reference_date)) continue;
+        if (!matchesStatus(item)) continue;
+        items.push(item);
+      }
+
+      const ordemRows = ordemRes.data ?? [];
+      const ordemSectorIds = [
+        ...new Set(
+          ordemRows
+            .flatMap((row: any) => [row.servico_sector_id, row.materiais_sector_id])
+            .map((id: unknown) => Number(id))
+            .filter((id: number) => Number.isFinite(id) && id > 0)
+        ),
+      ];
+      const ordemCrdIds = [
+        ...new Set(
+          ordemRows
+            .flatMap((row: any) => [row.servico_crd_id, row.materiais_crd_id])
+            .map((id: unknown) => Number(id))
+            .filter((id: number) => Number.isFinite(id) && id > 0)
+        ),
+      ];
+      const ordemSectorMap = new Map<number, string>();
+      const ordemCrdMap = new Map<number, { code: string | null; name: string | null }>();
+      if (ordemSectorIds.length) {
+        const { data: sectorRows } = await supabase.from("sectors").select("id, name").in("id", ordemSectorIds);
+        for (const sector of sectorRows ?? []) ordemSectorMap.set(Number(sector.id), String(sector.name || ""));
+      }
+      if (ordemCrdIds.length) {
+        const { data: crdRows } = await supabase.from("crds").select("id, code, name").in("id", ordemCrdIds);
+        for (const crd of crdRows ?? []) {
+          ordemCrdMap.set(Number(crd.id), { code: crd.code ?? null, name: crd.name ?? null });
+        }
+      }
+      const pagamentoLabel: Record<string, string> = {
+        cartao: "Cartão",
+        avista: "À vista",
+        boleto: "Boleto",
+        pix: "PIX",
+        transferencia: "Transferência",
+      };
+
+      for (const row of ordemRows) {
+        const servicoSectorId = row.servico_sector_id != null ? Number(row.servico_sector_id) : null;
+        const materiaisSectorId = row.materiais_sector_id != null ? Number(row.materiais_sector_id) : null;
+        const sectorId = servicoSectorId ?? materiaisSectorId;
+        const sectorNames = [
+          ...new Set(
+            [servicoSectorId, materiaisSectorId]
+              .map((id) => (id != null ? ordemSectorMap.get(id) : null))
+              .filter(Boolean)
+          ),
+        ];
+        const primaryCrdId = row.servico_crd_id != null ? Number(row.servico_crd_id) : row.materiais_crd_id != null ? Number(row.materiais_crd_id) : null;
+        const primaryCrd = primaryCrdId != null ? ordemCrdMap.get(primaryCrdId) : null;
+        const descriptionParts = [
+          row.servico_executado ? `Serviço: ${row.servico_executado}` : null,
+          row.materiais_descricao ? `Materiais: ${row.materiais_descricao}` : null,
+        ].filter(Boolean);
+        const item = {
+          key: `ordem-${row.id}`,
+          type: "ordem",
+          source_id: Number(row.id),
+          sector_id: sectorId,
+          sector_name: sectorNames.join(" / ") || null,
+          crd_code: primaryCrd?.code ?? null,
+          crd_name: primaryCrd?.name ?? null,
+          title: String(row.prestador || `Ordem #${row.id}`),
+          subtitle: [row.protocol, pagamentoLabel[String(row.pagamento || "")] || null].filter(Boolean).join(" · ") || null,
+          description: descriptionParts.join(" · ") || row.observacao || null,
+          protocol: row.protocol ?? null,
+          reference_date: String(row.data_execucao || row.created_at || "").slice(0, 10),
+          issue_date: row.data_execucao ? String(row.data_execucao).slice(0, 10) : null,
+          amount: Number(row.valor) || 0,
+          status: String(row.status || "open"),
+          flow_stage: null,
+          user_name: row.users?.name ?? row.solicitado_por ?? null,
+          file_path: row.nota_file_path ?? null,
+          file_name: row.nota_file_name ?? null,
+          fornecedor: row.prestador ? String(row.prestador) : null,
+          vencimento: null,
+          recibo_file_path: row.recibo_file_path ?? null,
+          recibo_file_name: row.recibo_file_name ?? null,
+          boleto_file_path: row.boleto_file_path ?? null,
+          boleto_file_name: row.boleto_file_name ?? null,
         };
         if (!matchesSector(item.sector_id, item.type)) continue;
         if (!inDateRange(item.reference_date)) continue;
@@ -14738,12 +14833,106 @@ export function createApp() {
   });
 
   // ====================================================
+  // COMPRAS: ORDENS DE COMPRA
+  // ====================================================
+  app.get("/api/ordens-compra", async (req, res) => {
+    const { data, error } = await filterByEmpresa(
+      supabase.from("ordens_compra").select("*, users(id, name)"),
+      req,
+      "ordens_compra"
+    ).order("created_at", { ascending: false });
+    if (error) {
+      console.error(error);
+      return res.status(500).json({ error: "Erro ao listar ordens de compra." });
+    }
+    res.json(data ?? []);
+  });
+
+  app.patch("/api/ordens-compra/:id/status", async (req, res) => {
+    const { id } = req.params;
+    const { status } = req.body;
+    if (!["open", "approved", "cancelled", "posted"].includes(status)) {
+      return res.status(400).json({ error: "Status inválido" });
+    }
+
+    const { data: existing, error: fetchError } = await scopeByEmpresa(
+      supabase
+        .from("ordens_compra")
+        .select("id, servico_sector_id, materiais_sector_id, status")
+        .eq("id", id),
+      req
+    ).maybeSingle();
+    if (fetchError) {
+      console.error(fetchError);
+      return res.status(500).json({ error: "Erro interno ao processar a solicitação." });
+    }
+    if (!existing) return res.status(404).json({ error: "Ordem de compra não encontrada" });
+
+    const sectorId = (existing as { servico_sector_id?: number | null; materiais_sector_id?: number | null }).servico_sector_id
+      ?? (existing as { materiais_sector_id?: number | null }).materiais_sector_id;
+    if (sectorId != null) {
+      const access = await assertSectorAccessForUser(req, Number(sectorId));
+      if (!access.ok) return res.status(access.status).json({ error: access.error });
+    }
+
+    const role = String(req.user?.role || "");
+    const current = String((existing as { status?: string }).status || "open");
+    const validation = validateLaunchFlowStatus(role, current, status);
+    if (validation.ok === false) return res.status(validation.status).json({ error: validation.error });
+
+    const { error } = await scopeByEmpresa(
+      supabase.from("ordens_compra").update({ status }).eq("id", id),
+      req
+    );
+    if (error) {
+      console.error(error);
+      return res.status(500).json({ error: "Erro interno ao processar a solicitação." });
+    }
+    res.json({ success: true });
+  });
+
+  app.get("/api/ordens-compra/:id/document-url", async (req, res) => {
+    const kind = String(req.query.kind || "nota");
+    const columns: Record<string, string> = {
+      nota: "nota_file_path",
+      recibo: "recibo_file_path",
+      boleto: "boleto_file_path",
+    };
+    const column = columns[kind];
+    if (!column) {
+      return res.status(400).json({ error: "Informe kind=nota, kind=recibo ou kind=boleto." });
+    }
+    const { data, error } = await scopeByEmpresa(
+      supabase.from("ordens_compra").select(`id, ${column}`).eq("id", req.params.id),
+      req
+    ).maybeSingle();
+    if (error) {
+      console.error(error);
+      return res.status(500).json({ error: "Erro ao buscar o documento." });
+    }
+    if (!data) return res.status(404).json({ error: "Ordem de compra não encontrada" });
+    const rawPath = String((data as Record<string, unknown>)[column] || "");
+    if (!rawPath) return res.status(404).json({ error: "Documento não anexado" });
+    const result = await createSignedDocumentUrl(rawPath);
+    if (!("url" in result)) {
+      const status = result.error === "Caminho inválido" ? 400 : 404;
+      return res.status(status).json({ error: result.error });
+    }
+    res.json({ url: result.url });
+  });
+
+  // ====================================================
   // COMPRAS: ORDEM DE COMPRA — geração de PDF (pdfkit)
   // ====================================================
   app.post(
     "/api/ordem-compra/pdf",
     (req, res, next) => {
-      uploadOrdemAnexos.array("anexos", ORDEM_ANEXO_MAX_FILES)(req, res, (err: any) => {
+      uploadOrdemAnexos.fields([
+        { name: "anexos", maxCount: ORDEM_ANEXO_MAX_FILES },
+        { name: "nota_file", maxCount: 1 },
+        { name: "recibo_file", maxCount: 1 },
+        { name: "boleto_file", maxCount: 1 },
+      ])(req, res, (err: any) => {
         if (err instanceof multer.MulterError) {
           if (err.code === "LIMIT_FILE_SIZE") {
             return res.status(400).json({ error: "Cada anexo deve ter no máximo 10 MB." });
@@ -14759,9 +14948,18 @@ export function createApp() {
     },
     async (req, res) => {
     const b = req.body as Record<string, string>;
-    const anexosFiles = (Array.isArray(req.files) ? req.files : []) as Express.Multer.File[];
+    const uploaded = (req.files && !Array.isArray(req.files) ? req.files : {}) as {
+      anexos?: Express.Multer.File[];
+      nota_file?: Express.Multer.File[];
+      recibo_file?: Express.Multer.File[];
+      boleto_file?: Express.Multer.File[];
+    };
+    const anexosFiles = uploaded.anexos ?? [];
+    const notaFile = uploaded.nota_file?.[0];
+    const reciboFile = uploaded.recibo_file?.[0];
+    const boletoFile = uploaded.boleto_file?.[0];
     const cleanupAnexos = () => {
-      for (const f of anexosFiles) {
+      for (const f of [...anexosFiles, notaFile, reciboFile, boletoFile]) {
         try {
           if (f?.path && fs.existsSync(f.path)) fs.unlinkSync(f.path);
         } catch {
@@ -14805,6 +15003,39 @@ export function createApp() {
         }
       }
 
+      const faturamentoPermitido = (file?: Express.Multer.File) => {
+        if (!file) return true;
+        const mime = String(file.mimetype || "");
+        const ext = path.extname(file.originalname || "").toLowerCase();
+        const allowedExt = [".pdf", ".jpg", ".jpeg", ".png", ".webp"];
+        const allowedMime = ["application/pdf", "image/jpeg", "image/png", "image/webp"];
+        return allowedMime.includes(mime) || allowedExt.includes(ext);
+      };
+      if (!faturamentoPermitido(notaFile) || !faturamentoPermitido(reciboFile) || !faturamentoPermitido(boletoFile)) {
+        cleanupAnexos();
+        return res.status(400).json({ error: "Nota, recibo e boleto devem ser PDF ou imagem (PNG, JPG, WEBP)." });
+      }
+
+      const prestadorNome = String(b.prestador || "").trim();
+      const rawValor = String(b.valor ?? "").trim().replace(/\s/g, "");
+      const valorOrdem = rawValor.includes(",")
+        ? Number(rawValor.replace(/\./g, "").replace(",", "."))
+        : Number(rawValor);
+      if (!prestadorNome) {
+        cleanupAnexos();
+        return res.status(400).json({ error: "Prestador é obrigatório para lançar a ordem." });
+      }
+      if (!Number.isFinite(valorOrdem) || valorOrdem < 0) {
+        cleanupAnexos();
+        return res.status(400).json({ error: "Informe um valor válido para lançar a ordem." });
+      }
+
+      const protocol = await allocateLaunchProtocol(PROTOCOL_PREFIX.ordem, req);
+      if (!protocol) {
+        cleanupAnexos();
+        return res.status(500).json({ error: "Não foi possível gerar o protocolo da ordem de compra." });
+      }
+
       const ordemBuffer: Buffer = await new Promise((resolve, reject) => {
       const doc = new PDFDocument({ margin: 40, size: "A4" });
       const chunks: Buffer[] = [];
@@ -14827,11 +15058,13 @@ export function createApp() {
       // ── CABEÇALHO ──────────────────────────────────────────────────────
       doc.rect(X, 36, W, 44).fill(TEAL);
       doc.fillColor("white").fontSize(15).font("Helvetica-Bold")
-         .text("ORDEM DE COMPRA", X + 12, 46, { width: W - 12 });
+         .text("ORDEM DE COMPRA", X + 12, 46, { width: W - 170 });
+      doc.fontSize(8).font("Helvetica-Bold")
+         .text(protocol, X, 48, { width: W - 12, align: "right" });
       doc.fontSize(8).font("Helvetica")
-         .text("VIVAZ CATARATAS RESORT", X + 12, 64, { width: W - 12 });
+         .text("VIVAZ CATARATAS RESORT", X + 12, 64, { width: W * 0.55 });
       doc.fillColor("white").fontSize(8).font("Helvetica")
-         .text(`Data: ${fmtDate(b.data_execucao)}`, X, 50, { width: W - 12, align: "right" });
+         .text(`Data: ${fmtDate(b.data_execucao)}`, X, 62, { width: W - 12, align: "right" });
       doc.y = 92;
 
       // ── helper de seção ─────────────────────────────────────────────────
@@ -14923,24 +15156,29 @@ export function createApp() {
 
       // ── FATURAMENTO ─────────────────────────────────────────────────────
       sectionTitle("Faturamento");
-      checkRow("Emissão de Nota Fiscal + Recibo", b.faturamento === "nf_recibo");
-      checkRow("Emissão de Recibo (sem nota fiscal)", b.faturamento === "recibo");
+      checkRow("Emissão de Nota Fiscal + Recibo", b.faturamento === "nf_recibo", notaFile?.originalname || "");
+      checkRow("Emissão de Recibo (sem nota fiscal)", b.faturamento === "recibo", reciboFile?.originalname || "");
+      if (notaFile && b.faturamento !== "nf_recibo") checkRow("Nota fiscal anexada", true, notaFile.originalname);
+      if (reciboFile && b.faturamento !== "recibo") checkRow("Recibo anexado", true, reciboFile.originalname);
 
       // ── PAGAMENTO ───────────────────────────────────────────────────────
       sectionTitle("Condições de Pagamento");
       checkRow("Cartão de Crédito", b.pagamento === "cartao");
       checkRow("À Vista — Efetivo", b.pagamento === "avista");
-      checkRow("Boleto Bancário — máximo de prazo possível considerando o vencimento", b.pagamento === "boleto");
+      checkRow("Boleto Bancário — máximo de prazo possível considerando o vencimento", b.pagamento === "boleto", boletoFile?.originalname || "");
       checkRow(
         "PIX",
         b.pagamento === "pix",
         b.pagamento === "pix" && b.pix_chave ? `Chave: ${b.pix_chave}` : ""
       );
-      twoCol([
-        ["Banco", b.banco],
-        ["Agência", b.agencia],
-        ["C/C", b.conta_corrente],
-      ]);
+      checkRow("Transferência bancária", b.pagamento === "transferencia");
+      if (b.pagamento === "transferencia") {
+        twoCol([
+          ["Banco", b.banco],
+          ["Agência", b.agencia],
+          ["C/C", b.conta_corrente],
+        ]);
+      }
 
       // ── OBS ─────────────────────────────────────────────────────────────
       if (b.observacao) {
@@ -15034,12 +15272,33 @@ export function createApp() {
         }
       }
 
+      const faturamentoImagens: Array<{ file: Express.Multer.File; label: string }> = [];
+      if (notaFile && isImageFile(notaFile)) faturamentoImagens.push({ file: notaFile, label: "Nota fiscal" });
+      if (reciboFile && isImageFile(reciboFile)) faturamentoImagens.push({ file: reciboFile, label: "Recibo" });
+      if (boletoFile && isImageFile(boletoFile)) faturamentoImagens.push({ file: boletoFile, label: "Boleto" });
+      for (const item of faturamentoImagens) {
+        const f = item.file;
+        try {
+          doc.addPage();
+          doc.fillColor(TEAL).fontSize(9).font("Helvetica-Bold")
+             .text(`${item.label}: ${f.originalname || "imagem"}`, X, 40, { width: W });
+          doc.image(f.path, X, 58, { fit: [W, doc.page.height - 100], align: "center", valign: "center" });
+        } catch (imgErr) {
+          console.error("Falha ao embutir nota/recibo no PDF da ordem:", f.originalname, imgErr);
+        }
+      }
+
       doc.end();
       });
 
       // Mescla PDFs anexados ao final do documento
       let finalBuffer = ordemBuffer;
-      const pdfAnexos = anexosFiles.filter(isPdfFile);
+      const pdfAnexos = [
+        ...anexosFiles.filter(isPdfFile),
+        ...(notaFile && isPdfFile(notaFile) ? [notaFile] : []),
+        ...(reciboFile && isPdfFile(reciboFile) ? [reciboFile] : []),
+        ...(boletoFile && isPdfFile(boletoFile) ? [boletoFile] : []),
+      ];
       if (pdfAnexos.length) {
         const { PDFDocument: PDFLibDocument } = await import("pdf-lib");
         const merged = await PDFLibDocument.create();
@@ -15058,9 +15317,86 @@ export function createApp() {
         finalBuffer = Buffer.from(await merged.save());
       }
 
+      const textOrNull = (value: unknown) => {
+        const text = String(value ?? "").trim();
+        return text || null;
+      };
+      const idOrNull = (value: unknown) => {
+        const n = Number(value);
+        return Number.isFinite(n) && n > 0 ? Math.trunc(n) : null;
+      };
+      const dataExec = /^\d{4}-\d{2}-\d{2}$/.test(String(b.data_execucao || ""))
+        ? String(b.data_execucao).slice(0, 10)
+        : null;
+      const faturamento = textOrNull(b.faturamento);
+      const pagamento = textOrNull(b.pagamento);
+
+      const storeFaturamentoFile = async (file?: Express.Multer.File) => {
+        if (!file) return { path: null as string | null, name: null as string | null };
+        const mime = String(file.mimetype || "application/octet-stream");
+        const ext = path.extname(file.originalname || "").replace(".", "").toLowerCase() || "pdf";
+        const storagePath = await uploadDocument(fs.readFileSync(file.path), "ordens-compra", ext, mime);
+        return {
+          path: storagePath,
+          name: String(file.originalname || "").slice(0, 255) || null,
+        };
+      };
+      let notaStored = { path: null as string | null, name: null as string | null };
+      let reciboStored = { path: null as string | null, name: null as string | null };
+      let boletoStored = { path: null as string | null, name: null as string | null };
+      try {
+        notaStored = await storeFaturamentoFile(notaFile);
+        reciboStored = await storeFaturamentoFile(reciboFile);
+        boletoStored = await storeFaturamentoFile(boletoFile);
+      } catch (uploadErr) {
+        cleanupAnexos();
+        console.error("Falha ao salvar nota/recibo/boleto da ordem:", uploadErr);
+        return res.status(500).json({ error: "Não foi possível salvar a nota, o recibo ou o boleto." });
+      }
+
+      const { error: insertError } = await supabase.from("ordens_compra").insert(withEmpresaKey({
+        protocol,
+        user_id: req.user?.id ?? null,
+        data_execucao: dataExec,
+        prestador: prestadorNome,
+        telefone: textOrNull(b.telefone),
+        servico_executado: textOrNull(b.servico_executado),
+        servico_sector_id: idOrNull(b.servico_sector_id),
+        servico_crd_id: idOrNull(b.servico_crd_id),
+        materiais_descricao: textOrNull(b.materiais_descricao),
+        materiais_sector_id: idOrNull(b.materiais_sector_id),
+        materiais_crd_id: idOrNull(b.materiais_crd_id),
+        valor: valorOrdem,
+        faturamento: faturamento === "nf_recibo" || faturamento === "recibo" ? faturamento : null,
+        pagamento: pagamento === "cartao" || pagamento === "avista" || pagamento === "boleto" || pagamento === "pix" || pagamento === "transferencia"
+          ? pagamento
+          : null,
+        pix_chave: pagamento === "pix" ? textOrNull(b.pix_chave) : null,
+        banco: pagamento === "transferencia" ? textOrNull(b.banco) : null,
+        agencia: pagamento === "transferencia" ? textOrNull(b.agencia) : null,
+        conta_corrente: pagamento === "transferencia" ? textOrNull(b.conta_corrente) : null,
+        cnpj_cpf: textOrNull(b.cnpj_cpf),
+        nome_titular: textOrNull(b.nome_titular),
+        observacao: textOrNull(b.observacao),
+        solicitado_por: textOrNull(b.solicitado_por),
+        nota_file_path: notaStored.path,
+        nota_file_name: notaStored.name,
+        recibo_file_path: reciboStored.path,
+        recibo_file_name: reciboStored.name,
+        boleto_file_path: boletoStored.path,
+        boleto_file_name: boletoStored.name,
+        status: initialLaunchStatus(req.user?.role),
+      }, req));
+
       cleanupAnexos();
+      if (insertError) {
+        console.error(insertError);
+        return res.status(500).json({ error: "Não foi possível gravar a ordem de compra. O PDF não foi emitido." });
+      }
+
       res.setHeader("Content-Type", "application/pdf");
-      res.setHeader("Content-Disposition", `attachment; filename="ordem_compra.pdf"`);
+      res.setHeader("Content-Disposition", `attachment; filename="ordem_compra_${protocol}.pdf"`);
+      res.setHeader("X-Ordem-Protocol", protocol);
       res.send(finalBuffer);
     } catch (err: any) {
       cleanupAnexos();

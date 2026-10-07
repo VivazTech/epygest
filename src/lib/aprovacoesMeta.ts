@@ -5,7 +5,8 @@ export type AprovacaoTipo =
   | 'requisicao'
   | 'nota'
   | 'danfe'
-  | 'mensalidade';
+  | 'mensalidade'
+  | 'ordem';
 
 export type AprovacaoActingSector = 'gestor' | 'controle' | 'financeiro' | 'diretoria';
 
@@ -30,6 +31,10 @@ export type AprovacaoItem = {
   user_name: string | null;
   file_path: string | null;
   file_name: string | null;
+  recibo_file_path?: string | null;
+  recibo_file_name?: string | null;
+  boleto_file_path?: string | null;
+  boleto_file_name?: string | null;
   fornecedor: string | null;
   vencimento: string | null;
   assinado?: boolean;
@@ -61,6 +66,7 @@ export const APROVACAO_TIPOS: Array<{ value: AprovacaoTipo | 'all'; label: strin
   { value: 'nota', label: 'Notas de Serviço' },
   { value: 'danfe', label: 'DANFE' },
   { value: 'mensalidade', label: 'Mensalidades' },
+  { value: 'ordem', label: 'Ordens de Compra' },
 ];
 
 export const tipoLabel = (type: AprovacaoTipo) =>
@@ -75,6 +81,7 @@ export const tipoBadgeClass = (type: AprovacaoTipo) => {
     nota: 'bg-teal-100 text-teal-700',
     danfe: 'bg-indigo-100 text-indigo-700',
     mensalidade: 'bg-pink-100 text-pink-700',
+    ordem: 'bg-emerald-100 text-emerald-800',
   };
   return map[type] || 'bg-slate-100 text-slate-700';
 };
@@ -108,7 +115,7 @@ export const statusMeta = (item: AprovacaoItem) => {
     if (item.status === 'cancelled') return { label: 'Cancelado', classes: 'bg-slate-200 text-slate-700' };
     return { label: 'Aguardando Controle', classes: 'bg-orange-100 text-orange-700' };
   }
-  if (item.type === 'comanda' || item.type === 'requisicao' || item.type === 'mensalidade') {
+  if (item.type === 'comanda' || item.type === 'requisicao' || item.type === 'mensalidade' || item.type === 'ordem') {
     if (item.status === 'approved') return { label: 'Aprovado Controle', classes: 'bg-blue-100 text-blue-700' };
     if (item.status === 'posted') return { label: 'Pago', classes: 'bg-emerald-100 text-emerald-700' };
     if (item.status === 'cancelled') return { label: 'Cancelado', classes: 'bg-slate-200 text-slate-700' };
