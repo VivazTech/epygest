@@ -166,7 +166,7 @@ import {
   TANGERINO_EMPRESAS,
 } from "./lib/tangerino.js";
 
-import { parseInvoicePdfText } from "./lib/parseInvoicePdf.js";
+import { isDanfseNacional, parseInvoicePdfText } from "./lib/parseInvoicePdf.js";
 import { isSharedCrdCode } from "./lib/sharedCrds.js";
 import {
   addReqDestinoTotal,
@@ -198,6 +198,33 @@ import {
 const loadPdfParse = async () => {
   const mod = await import("pdf-parse/lib/pdf-parse.js");
   return (mod as any).default ?? (mod as any);
+};
+
+// Render de página para o pdf-parse que preserva o espaçamento entre palavras.
+// Alguns PDFs (ex.: DANFSe do portal nacional) gravam cada palavra como um item
+// separado e o render padrão cola tudo ("VIVAZCATARATASHOTEL"). Aqui o vão
+// horizontal entre itens da mesma linha vira espaço, e um vão grande (outra
+// coluna) vira quebra de linha.
+const renderPdfPageWithSpaces = async (pageData: any): Promise<string> => {
+  const content = await pageData.getTextContent();
+  let lastY: number | undefined;
+  let lastEndX = 0;
+  let text = "";
+  for (const item of content.items as any[]) {
+    const x = item.transform[4];
+    const y = item.transform[5];
+    if (lastY === undefined) {
+      text += item.str;
+    } else if (Math.abs(lastY - y) < 1) {
+      const gap = x - lastEndX;
+      text += (gap > 15 ? "\n" : gap > 1 ? " " : "") + item.str;
+    } else {
+      text += "\n" + item.str;
+    }
+    lastY = y;
+    lastEndX = x + item.width;
+  }
+  return text;
 };
 
 // pdfjs (vendorizado dentro do pdf-parse) dá acesso à posição (x,y) de cada
@@ -4702,7 +4729,11 @@ export function createApp() {
       try {
         const pdfParse = await loadPdfParse();
         const parsed = await pdfParse(fileBuffer);
-        const text = (parsed.text || "").replace(/\u00A0/g, " ");
+        let text = (parsed.text || "").replace(/\u00A0/g, " ");
+        if (isDanfseNacional(text)) {
+          const spaced = await pdfParse(fileBuffer, { pagerender: renderPdfPageWithSpaces });
+          text = (spaced.text || "").replace(/\u00A0/g, " ");
+        }
         const extracted = parseInvoicePdfText(text);
 
         const hasData = Boolean(

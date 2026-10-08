@@ -270,6 +270,7 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
         due_date: data.extracted?.due_date || prev.due_date,
         pix_key: data.extracted?.pix_key || prev.pix_key,
         payment_method: data.extracted?.payment_method || prev.payment_method,
+        description: prev.description || data.extracted?.description || '',
         file_path: data.file_path || prev.file_path,
       }));
 

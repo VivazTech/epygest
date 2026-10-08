@@ -73,6 +73,8 @@ export const extractPixKeyFromText = (text: string): string => {
     /(?:chave\s*)?pix\s*[:\-–]?\s*([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i,
     // CPF/CNPJ após PIX
     /(?:chave\s*)?pix\s*(?:cpf|cnpj)?\s*[:\-–]?\s*([\d./-]{11,18})/i,
+    // "Chave pix para depósito CNPJ: 00000000000000" (texto entre "pix" e o rótulo)
+    /\bpix\b[^\n@]{0,40}?\b(?:cpf|cnpj)\s*[:\-–]?\s*(\d[\d./-]{9,17}\d)/i,
     // Telefone após PIX
     /(?:chave\s*)?pix\s*(?:telefone|celular|fone)?\s*[:\-–]?\s*(\+?55?\s*\(?\d{2}\)?\s*9?\d{4}[-.\s]?\d{4})/i,
     // Pagamento via PIX: valor genérico
@@ -294,6 +296,91 @@ export function parseNfseFozGestaoIss(text: string): Partial<InvoicePdfExtracted
   };
 }
 
+/** DANFSe — Documento Auxiliar da NFS-e do portal nacional (layout v2.0). */
+export const isDanfseNacional = (text: string): boolean => {
+  const squeezed = normalizeText(text).replace(/\s+/g, "");
+  return /DANFSe/i.test(squeezed) || /DocumentoAuxiliardaNFS-?e/i.test(squeezed);
+};
+
+export function parseDanfseNacional(text: string): Partial<InvoicePdfExtracted> {
+  if (!isDanfseNacional(text)) return {};
+
+  const lines = linesOf(text);
+  // Rótulos comparados sem espaços: o texto pode vir com as palavras coladas
+  // quando o PDF é lido sem reconstrução de espaçamento.
+  const keys = lines.map((l) => l.replace(/\s+/g, "").toUpperCase());
+  const indexOfKey = (label: RegExp, from = 0) => {
+    for (let i = Math.max(0, from); i < keys.length; i++) if (label.test(keys[i])) return i;
+    return -1;
+  };
+  const valueAfter = (label: RegExp, from = 0): string => {
+    const idx = indexOfKey(label, from);
+    const value = idx >= 0 ? lines[idx + 1] || "" : "";
+    return value === "-" ? "" : value;
+  };
+  const nameInSection = (section: RegExp): string => {
+    const start = indexOfKey(section);
+    return start < 0 ? "" : valueAfter(/^NOME\/NOMEEMPRESARIAL$/, start);
+  };
+
+  const chave = valueAfter(/^CHAVEDEACESSODANFS-?E$/).replace(/\D/g, "");
+
+  let invoice_number = valueAfter(/^N[ÚU]MERODANFS-?E$/).replace(/\D/g, "");
+  if (!invoice_number && chave) {
+    invoice_number = extractInvoiceNumberFromChave(chave).replace(/^0+(?=\d)/, "");
+  }
+
+  const provider_name = nameInSection(/^PRESTADOR\/FORNECEDOR/);
+  const client_name = nameInSection(/^TOMADOR\/ADQUIRENTE/);
+
+  const issue_date = parseBrDateToIso(valueAfter(/^DATAEHORADAEMISS[ÃA]ODANFS-?E$/));
+
+  // A nota não traz vencimento: mesmo critério da NFS-e municipal (último dia
+  // do mês de competência).
+  let due_date = "";
+  const comp = valueAfter(/^COMPET[ÊE]NCIADANFS-?E$/).match(/(?:\d{2}\/)?(\d{2})\/(\d{4})/);
+  if (comp) {
+    const compMonth = Number(comp[1]);
+    const compYear = Number(comp[2]);
+    if (compMonth >= 1 && compMonth <= 12 && compYear >= 2000) {
+      due_date = lastDayOfMonthIso(compMonth, compYear);
+    }
+  }
+
+  const amount =
+    parseBrMoney(valueAfter(/^VALORL[ÍI]QUIDODANFS-?E$/)) ||
+    parseBrMoney(valueAfter(/^VALORDAOPERA[ÇC][ÃA]O\/SERVI[ÇC]O$/));
+
+  let description = "";
+  const descIdx = indexOfKey(/^DESCRI[ÇC][ÃA]ODOSERVI[ÇC]O$/);
+  if (descIdx >= 0) {
+    const parts: string[] = [];
+    for (let i = descIdx + 1; i < lines.length; i++) {
+      if (/^TRIBUTA[ÇC][ÃA]O/.test(keys[i])) break;
+      parts.push(lines[i]);
+    }
+    description = parts.join(" ");
+  }
+
+  let complementares = "";
+  const infoIdx = indexOfKey(/^INFORMA[ÇC][ÕO]ESCOMPLEMENTARES$/);
+  if (infoIdx >= 0) complementares = lines.slice(infoIdx + 1).join(" ");
+
+  const { pix_key, payment_method } = resolvePixFromSources(complementares, description);
+
+  return {
+    invoice_number,
+    provider_name,
+    client_name,
+    issue_date,
+    due_date,
+    amount,
+    pix_key,
+    payment_method,
+    description,
+  };
+}
+
 /** Parser genérico (outros layouts de NF). */
 export function parseInvoicePdfGeneric(text: string): Partial<InvoicePdfExtracted> {
   const compact = normalizeText(text).replace(/[ \t]+/g, " ");
@@ -488,7 +575,12 @@ export function parseInvoicePdfText(text: string): InvoicePdfExtracted {
     return merged;
   }
 
-  const nfse = parseNfseFozGestaoIss(text);
+  const danfse = parseDanfseNacional(text);
+  const nfse = { ...parseNfseFozGestaoIss(text) };
+  // No DANFSe, os campos do layout próprio prevalecem sobre os demais parsers.
+  for (const [field, value] of Object.entries(danfse)) {
+    if (value) (nfse as Record<string, string>)[field] = value;
+  }
   const generic = parseInvoicePdfGeneric(text);
 
   const description = nfse.description || generic.description || "";
