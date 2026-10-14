@@ -399,6 +399,46 @@ flowchart LR
   PG --> RE
 `;
 
+export const FLUXO_ORDEM_COMPRA = `
+sequenceDiagram
+  actor S as Solicitante
+  actor G as Gestor do setor
+  actor C as Controle
+  actor F as Financeiro
+  participant CP as Compras
+  participant AP as Aprovações
+  participant API as Express
+  participant ST as Storage
+  participant DB as Supabase (ordens_compra)
+
+  S->>CP: preenche prestador, valor, setor, CRD e pagamento
+  opt nota, recibo ou boleto
+    S->>CP: anexa o documento
+  end
+  S->>CP: Gerar PDF
+  CP->>API: POST /api/ordem-compra/pdf
+  API->>API: gera protocolo e usa o nome do usuário logado
+  API->>ST: grava nota, recibo e boleto
+  API->>DB: insert (estagiário = pending_manager, demais = open)
+  API-->>CP: PDF para download
+  Note over CP: a ordem aparece em Compras › Aprovação Financeiro
+  AP->>API: GET /api/aprovacoes
+  API->>DB: lê as ordens da empresa ativa
+  API-->>AP: item type ordem na fila unificada
+  opt lançada por estagiário
+    G->>AP: aprova
+    AP->>API: PATCH /api/ordens-compra/:id/status open
+    API->>DB: status open (aguardando Controle)
+  end
+  C->>AP: aprova
+  AP->>API: PATCH /api/ordens-compra/:id/status approved
+  API->>DB: status approved
+  F->>AP: registra o pagamento
+  AP->>API: PATCH /api/ordens-compra/:id/status posted
+  API->>DB: status posted (pago)
+  Note over AP,DB: Compras usa o mesmo PATCH. Cancelar antes do pagamento grava cancelled
+`;
+
 export const FLUXO_FOLHA = `
 sequenceDiagram
   actor C as Controle
@@ -483,7 +523,8 @@ export const API_REFERENCE: ApiGroup[] = [
     R('GET', '/api/contrato-lancamentos', 'admin,controle,manager,finance,diretoria'), R('PATCH', '/api/contrato-lancamentos/:id/status', 'admin,controle,manager,finance'),
   ]},
   { group: 'Compras', routes: [
-    R('GET', '/api/ordens-compra'), R('PATCH', '/api/ordens-compra/:id/status'), R('POST', '/api/ordem-compra/pdf'),
+    R('GET', '/api/ordens-compra'), R('PATCH', '/api/ordens-compra/:id/status'),
+    R('GET', '/api/ordens-compra/:id/document-url'), R('POST', '/api/ordem-compra/pdf'),
   ]},
   { group: 'Importação', routes: [
     R('GET', '/api/import/history', 'admin,finance,controle'), R('POST', '/api/import/history/:id/undo', 'admin,finance,controle'),

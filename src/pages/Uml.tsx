@@ -23,6 +23,7 @@ import {
   FLUXO_IMPORT,
   FLUXO_APROVACAO,
   FLUXO_LANCAMENTO,
+  FLUXO_ORDEM_COMPRA,
   FLUXO_FOLHA,
   FLUXO_CMV,
   API_REFERENCE,
@@ -169,6 +170,11 @@ export const UmlPage: React.FC = () => {
               title="Fluxo do lançamento (aprovação → pagamento → Realizado)"
               description="Ciclo do lançamento: aprovação financeira, aprovação de controle, pagamento e entrada na coluna Realizado do Prev x Real Diário (por CRD e setor, no mês do lançamento)."
               chart={FLUXO_LANCAMENTO}
+            />
+            <Diagram
+              title="Ordem de compra"
+              description="Do formulário em Compras até o PDF, a fila de Aprovações e o pagamento. Estagiário passa pelo gestor do setor antes do Controle."
+              chart={FLUXO_ORDEM_COMPRA}
             />
             <Diagram title="Apuração da Folha" chart={FLUXO_FOLHA} />
             <Diagram title="Apuração do CMV" chart={FLUXO_CMV} />
