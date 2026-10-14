@@ -110,6 +110,11 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
   const [showReportModal, setShowReportModal] = useState(false);
   const [showCompetencyWarning, setShowCompetencyWarning] = useState(false);
   const [confirmModal, setConfirmModal] = useState<null | { kind: 'cancel' | 'delete'; invoice: any }>(null);
+  const [duplicateNotice, setDuplicateNotice] = useState<null | {
+    invoiceNumber: string;
+    protocol: string;
+    providerName: string;
+  }>(null);
   const [confirmBusy, setConfirmBusy] = useState(false);
   const [submittingInvoice, setSubmittingInvoice] = useState(false);
   const [exportingReport, setExportingReport] = useState<'csv' | 'pdf' | null>(null);
@@ -412,6 +417,14 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
         }
       } else {
         const data = await response.json().catch(() => ({}));
+        if (data.code === 'duplicate_invoice') {
+          setDuplicateNotice({
+            invoiceNumber: String(data.duplicate?.invoice_number || formData.invoice_number || ''),
+            protocol: String(data.duplicate?.protocol || ''),
+            providerName: String(data.duplicate?.provider_name || formData.provider_name || ''),
+          });
+          return;
+        }
         alert(data.error || (isEdit ? 'Não foi possível salvar a edição.' : 'Não foi possível lançar a nota fiscal.'));
       }
     } finally {
@@ -2116,6 +2129,58 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
                   {exportingReport === 'pdf' ? 'Exportando PDF...' : 'Exportar PDF'}
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {duplicateNotice && (
+        <div className="fixed inset-0 z-[130] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="p-6 border-b border-slate-100 flex justify-between items-center">
+              <h3 className="text-xl font-bold text-slate-900">Lançamento duplicado</h3>
+              <button
+                type="button"
+                onClick={() => setDuplicateNotice(null)}
+                className="text-slate-400 hover:text-slate-600 transition-colors"
+              >
+                <Plus className="w-6 h-6 rotate-45" />
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div className="flex gap-3 items-start">
+                <AlertCircle className="w-5 h-5 shrink-0 mt-0.5 text-red-500" />
+                <div className="space-y-2">
+                  <p className="text-sm text-slate-700 leading-relaxed">
+                    Não é possível lançar duplicado.
+                  </p>
+                  <p className="text-sm text-slate-600 leading-relaxed">
+                    A nota{' '}
+                    <span className="font-semibold text-slate-800">#{duplicateNotice.invoiceNumber || '—'}</span>
+                    {duplicateNotice.providerName ? (
+                      <>
+                        {' '}de{' '}
+                        <span className="font-semibold text-slate-800">{duplicateNotice.providerName}</span>
+                      </>
+                    ) : null}{' '}
+                    já está lançada
+                    {duplicateNotice.protocol ? (
+                      <>
+                        {' '}no protocolo{' '}
+                        <span className="font-semibold text-slate-800">{duplicateNotice.protocol}</span>
+                      </>
+                    ) : null}
+                    .
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setDuplicateNotice(null)}
+                className="w-full px-4 py-3 bg-[#004D40] text-white font-bold rounded-xl hover:bg-[#003d33] transition-colors"
+              >
+                Entendi
+              </button>
             </div>
           </div>
         </div>

@@ -53,6 +53,7 @@ import {
 } from "./lib/permissionCatalog.js";
 import { logImportHistory } from "./lib/importHistory.js";
 import { PROTOCOL_PREFIX, invoiceProtocolPrefix } from "./lib/launchProtocol.js";
+import { findInvoiceDuplicate, type InvoiceDuplicateRow } from "./lib/invoiceDuplicate.js";
 import { buildPeriodKey, parseImportPeriodInput, type ImportScope } from "./lib/importPeriod.js";
 import { computeCmv, toCmvInputs } from "./lib/cmv.js";
 import { parseCmvApuracaoPeriod } from "./lib/cmvHistorico.js";
@@ -4906,6 +4907,35 @@ export function createApp() {
     res.json(data ?? []);
   });
 
+  const findActiveInvoiceDuplicate = async (
+    req: express.Request,
+    invoiceNumber: string,
+    providerName: string,
+    ignoreId?: number
+  ) => {
+    const { data, error } = await scopeByEmpresa(
+      supabase
+        .from("invoices")
+        .select("id, invoice_number, protocol, provider_name, flow_stage")
+        .neq("flow_stage", "cancelled"),
+      req
+    );
+    if (error) throw error;
+    return findInvoiceDuplicate((data ?? []) as InvoiceDuplicateRow[], invoiceNumber, providerName, ignoreId);
+  };
+
+  const duplicateInvoiceResponse = (existing: InvoiceDuplicateRow) => ({
+    error: `Não é possível lançar duplicado. A nota nº ${existing.invoice_number || "—"} de ${existing.provider_name || "—"} já está no protocolo ${existing.protocol || "—"}.`,
+    code: "duplicate_invoice",
+    duplicate: {
+      id: existing.id,
+      invoice_number: existing.invoice_number ?? null,
+      protocol: existing.protocol ?? null,
+      provider_name: existing.provider_name ?? null,
+      flow_stage: existing.flow_stage ?? null,
+    },
+  });
+
   // Criar nota fiscal
   app.post("/api/invoices", async (req, res) => {
     const {
@@ -4943,6 +4973,14 @@ export function createApp() {
 
     const access = await assertSectorAccessForUser(req, resolvedSectorId);
     if (!access.ok) return res.status(access.status).json({ error: access.error });
+
+    try {
+      const duplicate = await findActiveInvoiceDuplicate(req, resolvedNumber, resolvedProvider);
+      if (duplicate) return res.status(409).json(duplicateInvoiceResponse(duplicate));
+    } catch (dupErr) {
+      console.error(dupErr);
+      return res.status(500).json({ error: "Não foi possível verificar se a nota já foi lançada." });
+    }
 
     const boletoPaths = collectBoletoPaths({
       boleto_file_path,
@@ -5054,6 +5092,14 @@ export function createApp() {
 
     const accessTarget = await assertSectorAccessForUser(req, resolvedSectorId);
     if (!accessTarget.ok) return res.status(accessTarget.status).json({ error: accessTarget.error });
+
+    try {
+      const duplicate = await findActiveInvoiceDuplicate(req, resolvedNumber, resolvedProvider, invoiceId);
+      if (duplicate) return res.status(409).json(duplicateInvoiceResponse(duplicate));
+    } catch (dupErr) {
+      console.error(dupErr);
+      return res.status(500).json({ error: "Não foi possível verificar se a nota já foi lançada." });
+    }
 
     const asDate = (v: unknown) => String(v || "").slice(0, 10);
     const asText = (v: unknown) => String(v ?? "").trim();
