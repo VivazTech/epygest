@@ -1413,10 +1413,10 @@ export const ImportacaoPage: React.FC = () => {
                 ) : source.key === 'extrato_mensal' ? (
                   <label className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl border border-[#004D40] bg-white text-sm font-bold text-[#004D40] cursor-pointer hover:bg-emerald-50 transition-colors">
                     {extratoLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
-                    {extratoLoading ? 'Processando...' : 'Enviar arquivo (.xls)'}
+                    {extratoLoading ? 'Processando...' : 'Enviar arquivo (.xls ou PDF)'}
                     <input
                       type="file"
-                      accept=".xls,.xlsx,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                      accept=".xls,.xlsx,.pdf,application/pdf,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                       onChange={uploadExtratoMensal}
                       disabled={extratoLoading}
                       className="hidden"

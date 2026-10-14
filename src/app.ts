@@ -10781,19 +10781,47 @@ export function createApp() {
 
   app.post("/api/import/extrato-mensal/preview", upload.single("extrato_file"), async (req, res) => {
     if (!req.file) return res.status(400).json({ error: "Arquivo não enviado" });
-    if (!/\.(xls|xlsx)$/i.test(req.file.originalname || "")) {
+    const originalName = String(req.file.originalname || "");
+    const isPdf = /\.pdf$/i.test(originalName);
+    const isXls = /\.(xls|xlsx)$/i.test(originalName);
+    if (!isPdf && !isXls) {
       if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
-      return res.status(400).json({ error: "Envie o relatório em Excel (.xls ou .xlsx)." });
+      return res.status(400).json({ error: "Envie o relatório em Excel (.xls ou .xlsx) ou PDF." });
     }
     try {
-      const grid = readDesbravadorXlsGrid(req.file.path);
-      if (!grid.length) {
-        return res.status(422).json({
-          success: false,
-          error: "Não consegui ler o conteúdo do Excel. O arquivo pode estar corrompido ou em um formato não suportado.",
-        });
+      let employees: any[] = [];
+      let period: { month: number; year: number } | null = null;
+      if (isPdf) {
+        const pdfRows = await extractPdfRowsByPosition(fs.readFileSync(req.file.path));
+        const parsed = parseExtratoFolhaPdf(pdfRows);
+        employees = parsed.funcionarios.map((f) => ({
+          matricula: f.matricula,
+          nome: f.nome,
+          situacao: f.situacao,
+          cpf: f.cpf,
+          cargo_cod: f.cargo_cod,
+          cargo: f.cargo,
+          setor: f.setor,
+          salario: f.salario,
+          proventos: f.proventos,
+          descontos: f.descontos,
+          liquido: f.liquido,
+          base_inss: f.base_inss,
+          base_fgts: f.base_fgts,
+          base_irrf: f.base_irrf,
+        }));
+        period = detectExtratoPeriod([], originalName);
+      } else {
+        const grid = readDesbravadorXlsGrid(req.file.path);
+        if (!grid.length) {
+          return res.status(422).json({
+            success: false,
+            error: "Não consegui ler o conteúdo do Excel. O arquivo pode estar corrompido ou em um formato não suportado.",
+          });
+        }
+        employees = parseExtratoEmployees(grid);
+        period = detectExtratoPeriod(grid, originalName);
       }
-      const employees = parseExtratoEmployees(grid);
       if (!employees.length) {
         return res.status(422).json({
           success: false,
@@ -10801,8 +10829,6 @@ export function createApp() {
             "O arquivo foi lido, mas nenhum funcionário foi reconhecido. Confira se este é o relatório 'Extrato Mensal' (folha de pagamento) do Desbravador — o layout parece diferente do esperado.",
         });
       }
-      const period = detectExtratoPeriod(grid, req.file.originalname || "");
-
       const totalProventos = employees.reduce((s, e) => s + e.proventos, 0);
       const totalDescontos = employees.reduce((s, e) => s + e.descontos, 0);
       const totalLiquido = employees.reduce((s, e) => s + e.liquido, 0);
