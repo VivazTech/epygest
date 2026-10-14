@@ -252,6 +252,8 @@ export const ComprasPage: React.FC = () => {
 
         if (meRes.ok) {
           const user = await meRes.json();
+          const loggedName = String(user?.name || '').trim();
+          if (loggedName) setForm((prev) => ({ ...prev, solicitado_por: loggedName }));
           setUserRole(String(user?.role || 'viewer'));
           setAllowedSectorIds(
             Array.from(
@@ -980,10 +982,13 @@ export const ComprasPage: React.FC = () => {
                   <Label required>Solicitado por</Label>
                   <Input
                     type="text"
-                    placeholder="Nome do solicitante"
+                    readOnly
                     value={form.solicitado_por}
-                    onChange={set('solicitado_por')}
+                    className="bg-slate-100 text-slate-700"
                   />
+                  <p className="text-[11px] text-slate-400 mt-1">
+                    Nome do usuário logado. É esse nome que entra na assinatura do PDF.
+                  </p>
                 </Field>
               </div>
             </div>

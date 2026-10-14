@@ -15067,6 +15067,22 @@ export function createApp() {
         return res.status(500).json({ error: "Não foi possível gerar o protocolo da ordem de compra." });
       }
 
+      let solicitadoPor = String(req.user?.name || "").trim();
+      if (req.user?.id) {
+        const { data: userRow } = await supabase
+          .from("users")
+          .select("name")
+          .eq("id", req.user.id)
+          .maybeSingle();
+        const dbName = String(userRow?.name || "").trim();
+        if (dbName) solicitadoPor = dbName;
+      }
+      if (!solicitadoPor) solicitadoPor = String(req.user?.email || "").trim();
+      if (!solicitadoPor) {
+        cleanupAnexos();
+        return res.status(400).json({ error: "Não foi possível identificar o usuário logado." });
+      }
+
       const ordemBuffer: Buffer = await new Promise((resolve, reject) => {
       const doc = new PDFDocument({ margin: 40, size: "A4" });
       const chunks: Buffer[] = [];
@@ -15275,7 +15291,7 @@ export function createApp() {
       };
 
       drawSigRow([
-        b.solicitado_por || "Solicitado por",
+        solicitadoPor,
         "Autorizado — Gerência",
         "Autorizado — Diretoria\nEdilson Andrade",
       ]);
@@ -15409,7 +15425,7 @@ export function createApp() {
         cnpj_cpf: textOrNull(b.cnpj_cpf),
         nome_titular: textOrNull(b.nome_titular),
         observacao: textOrNull(b.observacao),
-        solicitado_por: textOrNull(b.solicitado_por),
+        solicitado_por: solicitadoPor,
         nota_file_path: notaStored.path,
         nota_file_name: notaStored.name,
         recibo_file_path: reciboStored.path,

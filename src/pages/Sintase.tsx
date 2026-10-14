@@ -70,8 +70,12 @@ export const SintasePage: React.FC = () => {
         const parsed = JSON.parse(raw);
         setUserRole(String(parsed?.role || 'viewer'));
 
-        const users = await fetch('/api/users').then((res) => res.json()).catch(() => []);
-        const freshUser = (Array.isArray(users) ? users : []).find((u: any) => String(u.id) === String(parsed?.id));
+        // /api/users é só admin. Gestor usa /api/auth/me, que inclui todos os setores vinculados.
+        let freshUser: any = null;
+        const meRes = await fetch('/api/auth/me').catch(() => null);
+        if (meRes?.ok) {
+          freshUser = await meRes.json().catch(() => null);
+        }
         const sourceNames = Array.isArray(freshUser?.sector_names)
           ? freshUser.sector_names
           : (Array.isArray(parsed?.sector_names) ? parsed.sector_names : []);

@@ -158,37 +158,37 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
         else if (user?.role === 'controle') setActingSector('controle');
         else setActingSector('requester');
 
-        // Preferência: sessão atual do backend (inclui permissions atualizadas).
+        // /api/auth/me traz todos os setores de user_sectors. /api/users é só admin:
+        // para gestor a chamada falha e o fallback antigo ficava só com users.sector_id.
         const meRes = await fetch('/api/auth/me').catch(() => null);
-        if (meRes?.ok) {
-          const me = await meRes.json().catch(() => null);
-          if (me) {
-            setUserRole(String(me.role || user?.role || 'viewer'));
-            setUserPermissions(Array.isArray(me.permissions) ? me.permissions : null);
-          }
+        const me = meRes?.ok ? await meRes.json().catch(() => null) : null;
+        if (me) {
+          setUserRole(String(me.role || user?.role || 'viewer'));
+          setUserPermissions(Array.isArray(me.permissions) ? me.permissions : null);
         }
 
-        // Recarrega dados atuais do usuário no backend para refletir
-        // vínculos novos de setores sem depender da sessão antiga.
-        const users = await fetch('/api/users').then((res) => res.json()).catch(() => []);
-        const freshUser = (Array.isArray(users) ? users : []).find((u: any) => String(u.id) === String(user.id));
+        const sourceSectorIds = Array.isArray(me?.sector_ids)
+          ? me.sector_ids
+          : (Array.isArray(user?.sector_ids) && user.sector_ids.length > 0
+              ? user.sector_ids
+              : [user?.sector_id]);
         const normalizedSectorIds = Array.from(
           new Set<string>(
-            (Array.isArray(freshUser?.sector_ids) ? freshUser.sector_ids : [freshUser?.sector_id ?? user?.sector_id])
-              .map((id) => String(id ?? '').trim())
-              .filter((id) => id !== '')
+            sourceSectorIds
+              .map((id: unknown) => String(id ?? '').trim())
+              .filter((id: string) => id !== '')
           )
         );
         setAllowedSectorIds(normalizedSectorIds);
 
-        if (freshUser) {
-          const updatedUser = {
+        if (me) {
+          localStorage.setItem('user', JSON.stringify({
             ...user,
-            sector_ids: freshUser.sector_ids ?? [],
-            sector_names: freshUser.sector_names ?? [],
-            sector_id: freshUser.sector_id ?? user?.sector_id ?? null,
-          };
-          localStorage.setItem('user', JSON.stringify(updatedUser));
+            ...me,
+            sector_ids: me.sector_ids ?? user?.sector_ids ?? [],
+            sector_names: me.sector_names ?? user?.sector_names ?? [],
+            sector_id: me.sector_id ?? user?.sector_id ?? null,
+          }));
         }
       } catch {
         // fallback mantém requester
