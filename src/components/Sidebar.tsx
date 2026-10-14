@@ -17,6 +17,7 @@ import {
   Rows4,
   PanelLeftClose,
   PanelLeftOpen,
+  X,
   ChevronDown,
   Table2,
   ClipboardList,
@@ -72,6 +73,8 @@ interface SidebarProps {
   onLogout: () => void;
   collapsed: boolean;
   onToggleCollapsed: () => void;
+  mobileOpen: boolean;
+  onCloseMobile: () => void;
 }
 
 const lancamentosMenuItems = [
@@ -107,7 +110,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
   user,
   onLogout,
   collapsed,
-  onToggleCollapsed
+  onToggleCollapsed,
+  mobileOpen,
+  onCloseMobile,
 }) => {
   const permissions = (user?.permissions || null) as RolePermissionRow[] | null;
   const role = String(user?.role || '');
@@ -255,11 +260,24 @@ export const Sidebar: React.FC<SidebarProps> = ({
   return (
     <div
       className={cn(
-        "text-white h-screen flex flex-col fixed left-0 top-0 z-50 transition-all duration-200",
-        collapsed ? "w-20" : "w-64"
+        "text-white h-screen flex flex-col fixed left-0 top-0 z-50 transition-transform duration-200 lg:transition-[width,transform] lg:duration-200",
+        "w-72 max-w-[88vw]",
+        mobileOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0",
+        collapsed ? "lg:w-20" : "lg:w-64"
       )}
       style={{ backgroundColor: company.sidebarBg, color: '#FFFFFF' }}
     >
+      <div className="lg:hidden flex items-center justify-between px-4 pt-3">
+        <span className="text-[10px] font-bold uppercase tracking-widest text-white/50">Menu</span>
+        <button
+          type="button"
+          onClick={onCloseMobile}
+          className="p-2 rounded-lg hover:bg-white/10"
+          aria-label="Fechar menu"
+        >
+          <X className="w-5 h-5" />
+        </button>
+      </div>
       <div ref={companyMenuRef} className="relative border-b border-white/10">
         <button
           type="button"
@@ -1297,7 +1315,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <button
             type="button"
             onClick={onToggleCollapsed}
-            className="shrink-0 p-1 rounded-lg text-white hover:bg-white/10 transition-colors"
+            className="hidden lg:flex shrink-0 p-1 rounded-lg text-white hover:bg-white/10 transition-colors"
             title={collapsed ? 'Expandir menu' : 'Colapsar menu'}
             aria-label={collapsed ? 'Expandir menu' : 'Colapsar menu'}
           >

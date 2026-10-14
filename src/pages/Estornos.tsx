@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Plus, Archive, XCircle, Trash2, BadgeCheck, RotateCcw, Upload, FileCheck, Paperclip, Pencil, History, Loader2 } from 'lucide-react';
 import { cn, formatCurrency, formatDate } from '../lib/utils';
+import { MobileRecordList } from '../components/MobileRecordList';
 import { useSearch } from '../context/SearchContext';
 import { useToast } from '../context/ToastContext';
 import { isSharedCrdCode } from '../lib/sharedCrds';
@@ -569,8 +570,75 @@ export const EstornosPage: React.FC = () => {
         </div>
       </div>
 
+      <MobileRecordList
+        empty={crdFilter ? `Nenhum estorno com CRD ${crdFilter}.` : 'Nenhum estorno encontrado.'}
+        items={filteredEntries.map((entry) => {
+          const meta = statusMeta(entry.status);
+          return {
+            id: String(entry.id),
+            badge: <span className="text-[10px] font-mono font-bold text-emerald-800">{entry.protocol || '—'}</span>,
+            status: (
+              <span className={cn('text-[10px] font-bold px-2 py-1 rounded-lg uppercase tracking-wider', meta.classes)}>
+                {meta.label}
+              </span>
+            ),
+            title: entry.provider_name || entry.description || 'Sem fornecedor',
+            subtitle: entry.sector_name || undefined,
+            amount: <span className="text-amber-700">−{formatCurrency(entry.amount)}</span>,
+            details: [
+              { label: 'Setor', value: entry.sector_name || 'Sem setor' },
+              { label: 'CRD', value: entry.crd_code ? `${entry.crd_code} - ${entry.crd_name || 'CRD'}` : '—' },
+              { label: 'Emissão', value: entry.issue_date || '—' },
+              { label: 'Lançamento', value: entry.date || '—' },
+              ...(entry.user_name ? [{ label: 'Lançado por', value: entry.user_name, wide: true }] : []),
+              ...(entry.provider_name && entry.description ? [{ label: 'Descrição', value: entry.description, wide: true }] : []),
+            ],
+            extra: entry.file_path ? (
+              <button type="button" onClick={() => openEntryDocument(entry)} className="inline-flex items-center gap-1 text-xs font-medium text-blue-700 bg-blue-50 px-2 py-1 rounded-lg">
+                <Paperclip className="w-3.5 h-3.5" />
+                {entry.file_name || 'Anexo'}
+              </button>
+            ) : null,
+            actions: (
+              <>
+                {canEditEntry(entry) && (
+                  <button type="button" onClick={() => openEditEntry(entry)} className="p-2 text-slate-600 hover:bg-slate-100 rounded-lg" title="Editar estorno"><Pencil className="w-4 h-4" /></button>
+                )}
+                {Number(entry.edit_count || 0) > 0 && (
+                  <button type="button" onClick={() => openEditHistory(entry)} className="p-2 text-amber-600 hover:bg-amber-50 rounded-lg" title="Histórico"><History className="w-4 h-4" /></button>
+                )}
+                {canApproveManager && entry.status === 'pending_manager' && (
+                  <>
+                    <button type="button" onClick={() => updateStatus(entry.id, 'open')} className="p-2 text-violet-600 hover:bg-violet-50 rounded-lg" title="Aprovar (Gestor)"><BadgeCheck className="w-4 h-4" /></button>
+                    <button type="button" onClick={() => updateStatus(entry.id, 'cancelled')} className="p-2 text-red-600 hover:bg-red-50 rounded-lg" title="Reprovar"><XCircle className="w-4 h-4" /></button>
+                  </>
+                )}
+                {canApproveControl && entry.status === 'open' && (
+                  <>
+                    <button type="button" onClick={() => updateStatus(entry.id, 'approved')} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg" title="Aprovar no Controle"><BadgeCheck className="w-4 h-4" /></button>
+                    <button type="button" onClick={() => updateStatus(entry.id, 'cancelled')} className="p-2 text-red-600 hover:bg-red-50 rounded-lg" title="Reprovar"><XCircle className="w-4 h-4" /></button>
+                  </>
+                )}
+                {canApproveControl && entry.status === 'approved' && (
+                  <button type="button" onClick={() => updateStatus(entry.id, 'open')} className="p-2 text-amber-600 hover:bg-amber-50 rounded-lg" title="Desaprovar"><RotateCcw className="w-4 h-4" /></button>
+                )}
+                {canPayFinance && entry.status === 'approved' && (
+                  <button type="button" onClick={() => updateStatus(entry.id, 'posted')} className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-lg" title="Receber"><Archive className="w-4 h-4" /></button>
+                )}
+                {canCancelAsRequester && (entry.status === 'pending_manager' || entry.status === 'open' || entry.status === 'approved') && (
+                  <button type="button" onClick={() => updateStatus(entry.id, 'cancelled')} className="p-2 text-slate-600 hover:bg-slate-100 rounded-lg" title="Cancelar estorno"><XCircle className="w-4 h-4" /></button>
+                )}
+                {userRole === 'admin' && (
+                  <button type="button" onClick={() => deleteEntry(entry)} className="p-2 text-red-600 hover:bg-red-50 rounded-lg" title="Excluir"><Trash2 className="w-4 h-4" /></button>
+                )}
+              </>
+            ),
+          };
+        })}
+      />
+
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-        <div className="overflow-x-auto">
+        <div className="hidden md:block overflow-x-auto">
         <table className="w-full text-left border-collapse">
           <thead>
             <tr className="bg-slate-50/50">

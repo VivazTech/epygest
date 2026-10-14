@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Eye, EyeOff, ArrowLeft } from 'lucide-react';
+import { Eye, EyeOff, ArrowLeft, Menu } from 'lucide-react';
 import { Sidebar } from './components/Sidebar';
 import { Dashboard } from './pages/Dashboard';
 import { DashboardDiretoria } from './pages/DashboardDiretoria';
@@ -563,7 +563,7 @@ export default function App() {
       'text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-xl px-3 py-2';
 
     return (
-      <div className="min-h-screen bg-[#F8FAFC] font-sans text-slate-900 flex items-center justify-center p-6">
+      <div className="min-h-screen bg-[#F8FAFC] font-sans text-slate-900 flex items-center justify-center p-4 sm:p-6">
         <div className="w-full max-w-md">
           <div className="bg-white border border-slate-100 rounded-2xl shadow-sm p-6 space-y-5">
             <div className="text-center">
@@ -704,7 +704,7 @@ export default function App() {
           </div>
 
           {authView === 'login' && (
-            <div className="mt-4 flex items-center justify-center gap-3">
+            <div className="mt-4 flex flex-wrap items-center justify-center gap-3">
               <button
                 type="button"
                 className="px-4 py-2 text-sm font-semibold text-slate-600 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors"
@@ -776,13 +776,42 @@ function AppShell({
 }) {
   const { query, setQuery } = useSearch();
   const { companyKey, company } = useCompany();
+  const [mobileNavOpen, setMobileNavOpen] = React.useState(false);
 
   React.useEffect(() => {
     setQuery('');
   }, [activeTab, companyKey, setQuery]);
 
+  React.useEffect(() => {
+    if (!mobileNavOpen) return;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setMobileNavOpen(false);
+    };
+    const onResize = () => {
+      if (window.innerWidth >= 1024) setMobileNavOpen(false);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('resize', onResize);
+    return () => {
+      document.body.style.overflow = previous;
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('resize', onResize);
+    };
+  }, [mobileNavOpen]);
+
+  const selectTab = React.useCallback((tab: string) => {
+    setActiveTab(tab);
+    setMobileNavOpen(false);
+  }, [setActiveTab]);
+
   const prepareSidebar = React.useCallback(() => {
-    if (sidebarCollapsed) onToggleCollapsed();
+    if (window.innerWidth < 1024) {
+      setMobileNavOpen(true);
+    } else if (sidebarCollapsed) {
+      onToggleCollapsed();
+    }
     window.dispatchEvent(new Event('vivaz-tutorial-expand'));
   }, [sidebarCollapsed, onToggleCollapsed]);
 
@@ -790,25 +819,43 @@ function AppShell({
     <ToastProvider>
       <TutorialProvider
         userRole={user?.role}
-        setActiveTab={setActiveTab}
+        setActiveTab={selectTab}
         prepareSidebar={prepareSidebar}
       >
       <div className="min-h-screen bg-[#F8FAFC] font-sans text-slate-900">
+          {mobileNavOpen ? (
+            <button
+              type="button"
+              aria-label="Fechar menu"
+              className="fixed inset-0 z-40 bg-slate-900/40 lg:hidden"
+              onClick={() => setMobileNavOpen(false)}
+            />
+          ) : null}
           <Sidebar
             activeTab={activeTab}
-            setActiveTab={setActiveTab}
+            setActiveTab={selectTab}
             user={user}
             onLogout={onLogout}
-            collapsed={sidebarCollapsed}
+            collapsed={sidebarCollapsed && !mobileNavOpen}
             onToggleCollapsed={onToggleCollapsed}
+            mobileOpen={mobileNavOpen}
+            onCloseMobile={() => setMobileNavOpen(false)}
           />
           {user?.id ? <SystemNamePrompt userId={user.id} /> : null}
 
-          <main className={sidebarCollapsed ? 'pl-20 min-h-screen' : 'pl-64 min-h-screen'}>
-        <header className="h-20 bg-white/80 backdrop-blur-md border-b border-slate-100 flex items-center gap-4 px-8 sticky top-0 z-40">
-          <div className="flex items-center gap-2 min-w-0 shrink-0">
-            <span className="text-slate-400 text-sm font-medium">{company.budgetTitle}</span>
-            <span className="text-slate-300">/</span>
+          <main className={sidebarCollapsed ? 'lg:pl-20 min-h-screen min-w-0 w-full' : 'lg:pl-64 min-h-screen min-w-0 w-full'}>
+        <header className="h-16 lg:h-20 bg-white/80 backdrop-blur-md border-b border-slate-100 flex items-center gap-2 sm:gap-4 px-3 sm:px-6 lg:px-8 sticky top-0 z-30">
+          <button
+            type="button"
+            className="lg:hidden shrink-0 p-2 -ml-1 rounded-xl text-slate-600 hover:bg-slate-100"
+            aria-label="Abrir menu"
+            onClick={() => setMobileNavOpen(true)}
+          >
+            <Menu size={20} />
+          </button>
+          <div className="flex items-center gap-2 min-w-0 flex-1">
+            <span className="text-slate-400 text-sm font-medium hidden sm:inline shrink-0">{company.budgetTitle}</span>
+            <span className="text-slate-300 hidden sm:inline shrink-0">/</span>
             <span className="text-slate-900 text-sm font-bold capitalize truncate">
               {isBaseOrcamentoTab(activeTab)
                 ? `Base de Orçamento / ${BASE_ORCAMENTO_ITENS.find((p) => p.tabId === activeTab)?.nome ?? ''}`
@@ -892,7 +939,7 @@ function AppShell({
             dataTour="header-search"
           />
 
-          <div className="flex items-center gap-4 shrink-0">
+          <div className="flex items-center gap-2 sm:gap-4 shrink-0">
             <div className="text-right hidden sm:block">
               <p className="text-xs font-bold text-slate-900">{user.name}</p>
               <p className="text-[10px] text-slate-400 font-bold uppercase tracking-tighter">{user.role}</p>
@@ -903,7 +950,7 @@ function AppShell({
           </div>
         </header>
 
-        <div className="px-8 pt-4 md:hidden">
+        <div className="px-3 sm:px-6 pt-4 md:hidden">
           <SearchBar
             value={query}
             onChange={setQuery}
@@ -914,7 +961,7 @@ function AppShell({
         <div
           key={companyKey}
           data-tour="page-content"
-          className={activeTab === 'notas' || activeTab === 'danfe' || activeTab === 'comandas' || activeTab === 'lancamentos-manuais' || activeTab === 'estornos' || activeTab === 'requisicoes' || activeTab === 'mensalidades' || activeTab === 'aprovacoes' || activeTab === 'compras-mensalidades' || activeTab === 'cadastros' || activeTab === 'sintase' || activeTab === 'prev-real' || activeTab === 'indicadores' || activeTab === 'dre' || activeTab === 'rel-crd' || activeTab.startsWith('rel-crd-') || activeTab === 'rel-req' || activeTab.startsWith('rel-req-') || activeTab === 'rel-consumo' || activeTab.startsWith('rel-consumo-') || activeTab === 'rel-rds' || activeTab.startsWith('rel-rds-') || activeTab.startsWith('planilha-') || activeTab.startsWith('folha-') || activeTab === 'painel-rh' || activeTab === 'absenteismo' || activeTab === 'turnover' || activeTab === 'tangerino-ponto' || activeTab === 'folha-apuracao' || activeTab === 'compras-ordem' || activeTab === 'aqua-orcamento' || activeTab === 'investimentos' || activeTab === 'tutorial' || activeTab === 'sugestoes' || isPainelSetorialTab(activeTab) ? 'p-8 pt-4 md:pt-8 w-full max-w-none' : 'p-8 pt-4 md:pt-8 max-w-7xl mx-auto'}
+          className={activeTab === 'notas' || activeTab === 'danfe' || activeTab === 'comandas' || activeTab === 'lancamentos-manuais' || activeTab === 'estornos' || activeTab === 'requisicoes' || activeTab === 'mensalidades' || activeTab === 'aprovacoes' || activeTab === 'compras-mensalidades' || activeTab === 'cadastros' || activeTab === 'sintase' || activeTab === 'prev-real' || activeTab === 'indicadores' || activeTab === 'dre' || activeTab === 'rel-crd' || activeTab.startsWith('rel-crd-') || activeTab === 'rel-req' || activeTab.startsWith('rel-req-') || activeTab === 'rel-consumo' || activeTab.startsWith('rel-consumo-') || activeTab === 'rel-rds' || activeTab.startsWith('rel-rds-') || activeTab.startsWith('planilha-') || activeTab.startsWith('folha-') || activeTab === 'painel-rh' || activeTab === 'absenteismo' || activeTab === 'turnover' || activeTab === 'tangerino-ponto' || activeTab === 'folha-apuracao' || activeTab === 'compras-ordem' || activeTab === 'aqua-orcamento' || activeTab === 'investimentos' || activeTab === 'tutorial' || activeTab === 'sugestoes' || isPainelSetorialTab(activeTab) ? 'p-3 sm:p-6 lg:p-8 min-w-0 w-full max-w-none' : 'p-3 sm:p-6 lg:p-8 min-w-0 max-w-7xl mx-auto'}
         >
           <PageErrorBoundary resetKey={`${companyKey}:${activeTab}`}>
             {renderContent()}

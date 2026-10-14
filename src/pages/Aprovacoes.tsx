@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Archive,
   BadgeCheck,
+  ChevronDown,
   Paperclip,
   RotateCcw,
   XCircle,
@@ -57,6 +58,7 @@ export const AprovacoesPage: React.FC = () => {
   const [dateTo, setDateTo] = useState('');
   const [invoiceNumberFilter, setInvoiceNumberFilter] = useState('');
   const [amountFilter, setAmountFilter] = useState('');
+  const [expandedKey, setExpandedKey] = useState<string | null>(null);
   const [receiptModal, setReceiptModal] = useState<{ id: number; type: 'nota' | 'danfe' } | null>(null);
   const [receiptFile, setReceiptFile] = useState<File | null>(null);
   const [uploadingReceipt, setUploadingReceipt] = useState(false);
@@ -794,8 +796,180 @@ export const AprovacoesPage: React.FC = () => {
         </div>
       </div>
 
+      <div className="md:hidden space-y-3">
+        {loading && (
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm px-4 py-10 text-center text-sm text-slate-400">
+            Carregando lançamentos...
+          </div>
+        )}
+        {!loading && items.length === 0 && (
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm px-4 py-10 text-center text-sm text-slate-400">
+            Nenhum lançamento encontrado com os filtros atuais.
+          </div>
+        )}
+        {!loading &&
+          items.map((item) => {
+            const meta = statusMeta(item);
+            const open = expandedKey === item.key;
+            const actions = renderActions(item);
+            return (
+              <article
+                key={item.key}
+                className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4"
+              >
+                <button
+                  type="button"
+                  className="w-full text-left"
+                  aria-expanded={open}
+                  onClick={() => setExpandedKey(open ? null : item.key)}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <span
+                      className={cn(
+                        'text-[10px] font-bold px-2 py-1 rounded-lg uppercase tracking-wider',
+                        tipoBadgeClass(item.type)
+                      )}
+                    >
+                      {tipoLabel(item.type)}
+                    </span>
+                    <span
+                      className={cn(
+                        'text-[10px] font-bold px-2 py-1 rounded-lg uppercase tracking-wider text-right',
+                        meta.classes
+                      )}
+                    >
+                      {meta.label}
+                    </span>
+                  </div>
+                  <p className="mt-3 text-sm font-semibold text-slate-900 line-clamp-2">{item.title}</p>
+                  {item.subtitle ? (
+                    <p className="mt-1 text-xs text-slate-500 line-clamp-1">{item.subtitle}</p>
+                  ) : null}
+                  <div className="mt-3 flex items-end justify-between gap-3">
+                    <p
+                      className={cn(
+                        'text-lg font-extrabold leading-none',
+                        item.type === 'estorno' ? 'text-amber-700' : 'text-slate-900'
+                      )}
+                    >
+                      {item.amount != null
+                        ? `${item.type === 'estorno' ? '−' : ''}${formatCurrency(item.amount)}`
+                        : '—'}
+                    </p>
+                    <span className="inline-flex items-center gap-1 text-xs font-semibold text-slate-500 shrink-0">
+                      {open ? 'Recolher' : 'Detalhes'}
+                      <ChevronDown className={cn('w-4 h-4 transition-transform', open && 'rotate-180')} />
+                    </span>
+                  </div>
+                </button>
+
+                {open && (
+                  <div className="mt-3 pt-3 border-t border-slate-100 space-y-3">
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="col-span-2">
+                        <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Fornecedor</p>
+                        <p className="text-sm text-slate-700 mt-0.5">{item.fornecedor || '—'}</p>
+                      </div>
+                      <div>
+                        <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Setor</p>
+                        <p className="text-sm text-slate-700 mt-0.5">
+                          {item.sector_name || (item.type === 'comanda' ? '—' : 'Sem setor')}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">CRD</p>
+                        <p className="text-sm text-slate-700 mt-0.5">
+                          {item.crd_code
+                            ? `${item.crd_code}${item.crd_name ? ` — ${item.crd_name}` : ''}`
+                            : '—'}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Vencimento</p>
+                        <p className="text-sm text-slate-700 mt-0.5">
+                          {item.vencimento ? formatDate(item.vencimento) : '—'}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Data</p>
+                        <p className="text-sm text-slate-700 mt-0.5">
+                          {item.reference_date ? formatDate(item.reference_date) : '—'}
+                          {item.issue_date ? (
+                            <span className="block text-xs text-slate-400">Emissão: {item.issue_date}</span>
+                          ) : null}
+                        </p>
+                      </div>
+                    </div>
+                    {item.description ? (
+                      <p className="text-xs text-slate-500">{item.description}</p>
+                    ) : null}
+                    {item.user_name ? (
+                      <p className="text-[10px] text-slate-400">por {item.user_name}</p>
+                    ) : null}
+                    {exceedsDiretoriaThreshold(item.amount) ? (
+                      <p className="text-[10px] font-bold uppercase tracking-wider text-cyan-700">
+                        Acima de R$ 800
+                      </p>
+                    ) : null}
+                    {(item.type === 'manual' || item.type === 'estorno') && item.file_path ? (
+                      <button
+                        type="button"
+                        onClick={() => openAttachedDocument(item)}
+                        className="inline-flex items-center gap-1 text-xs font-medium text-blue-700 bg-blue-50 px-2 py-1 rounded-lg hover:bg-blue-100"
+                      >
+                        <Paperclip className="w-3 h-3" />
+                        Anexo
+                      </button>
+                    ) : null}
+                    {item.type === 'ordem' && (item.file_path || item.recibo_file_path || item.boleto_file_path) ? (
+                      <span className="flex flex-wrap gap-1">
+                        {item.file_path ? (
+                          <button
+                            type="button"
+                            onClick={() => openOrdemDocumento(item.source_id, 'nota')}
+                            className="inline-flex items-center gap-1 text-xs font-medium text-blue-700 bg-blue-50 px-2 py-1 rounded-lg hover:bg-blue-100"
+                          >
+                            <Paperclip className="w-3 h-3" />
+                            Nota
+                          </button>
+                        ) : null}
+                        {item.recibo_file_path ? (
+                          <button
+                            type="button"
+                            onClick={() => openOrdemDocumento(item.source_id, 'recibo')}
+                            className="inline-flex items-center gap-1 text-xs font-medium text-blue-700 bg-blue-50 px-2 py-1 rounded-lg hover:bg-blue-100"
+                          >
+                            <Paperclip className="w-3 h-3" />
+                            Recibo
+                          </button>
+                        ) : null}
+                        {item.boleto_file_path ? (
+                          <button
+                            type="button"
+                            onClick={() => openOrdemDocumento(item.source_id, 'boleto')}
+                            className="inline-flex items-center gap-1 text-xs font-medium text-blue-700 bg-blue-50 px-2 py-1 rounded-lg hover:bg-blue-100"
+                          >
+                            <Paperclip className="w-3 h-3" />
+                            Boleto
+                          </button>
+                        ) : null}
+                      </span>
+                    ) : null}
+                  </div>
+                )}
+
+                {actions ? (
+                  <div className="mt-3 pt-3 border-t border-slate-100 flex flex-wrap items-center justify-end gap-1">
+                    {actions}
+                  </div>
+                ) : null}
+              </article>
+            );
+          })}
+      </div>
+
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-        <div className="overflow-x-auto">
+        <div className="hidden md:block overflow-x-auto">
         <table className="w-full text-left border-collapse">
           <thead>
             <tr className="bg-slate-50/50">

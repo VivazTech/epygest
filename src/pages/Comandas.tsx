@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Plus, Trash2, Archive, XCircle, BadgeCheck, RotateCcw, Loader2 } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { MobileRecordList } from '../components/MobileRecordList';
 import { confirmCancel } from '../lib/confirmAction';
 import { useSearch } from '../context/SearchContext';
 import { useToast } from '../context/ToastContext';
@@ -337,8 +338,69 @@ export const ComandasPage: React.FC = () => {
         </div>
       </div>
 
+      <MobileRecordList
+        empty="Nenhuma comanda registrada."
+        items={filteredComandas.map((comanda) => {
+          const meta = statusLabel(comanda.status);
+          const itemCount = (comanda.items ?? []).length;
+          return {
+            id: String(comanda.id),
+            badge: <span className="text-[10px] font-mono font-bold text-emerald-800">{comanda.protocol || '—'}</span>,
+            status: (
+              <span className={cn('text-[10px] font-bold px-2 py-1 rounded-lg uppercase tracking-wider', meta.classes)}>
+                {meta.label}
+              </span>
+            ),
+            title: comanda.consumer_name || 'Sem consumidor',
+            subtitle: comanda.provider_name || undefined,
+            amount: itemCount === 1 ? '1 item' : `${itemCount} itens`,
+            details: [
+              { label: 'Fornecedor', value: comanda.provider_name || '—', wide: true },
+              { label: 'Data', value: comanda.consumed_at || '—' },
+              { label: 'Local', value: comanda.location || '—' },
+              ...(comanda.user_name ? [{ label: 'Registrado por', value: comanda.user_name, wide: true }] : []),
+            ],
+            extra: itemCount > 0 ? (
+              <ul className="space-y-1">
+                {(comanda.items ?? []).map((item: { id: string | number; description: string; quantity: number }) => (
+                  <li key={item.id} className="text-xs text-slate-600">
+                    <span className="font-medium text-slate-700">{item.description}</span>
+                    <span> · qtd. {item.quantity}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : null,
+            actions: (
+              <>
+                {canApproveManager && comanda.status === 'pending_manager' && (
+                  <>
+                    <button type="button" onClick={() => updateStatus(comanda.id, 'open')} className="p-2 text-violet-600 hover:bg-violet-50 rounded-lg" title="Aprovar (Gestor)"><BadgeCheck className="w-4 h-4" /></button>
+                    <button type="button" onClick={() => updateStatus(comanda.id, 'cancelled')} className="p-2 text-red-600 hover:bg-red-50 rounded-lg" title="Reprovar"><XCircle className="w-4 h-4" /></button>
+                  </>
+                )}
+                {canApproveControl && comanda.status === 'open' && (
+                  <>
+                    <button type="button" onClick={() => updateStatus(comanda.id, 'approved')} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg" title="Aprovar no Controle"><BadgeCheck className="w-4 h-4" /></button>
+                    <button type="button" onClick={() => updateStatus(comanda.id, 'cancelled')} className="p-2 text-red-600 hover:bg-red-50 rounded-lg" title="Reprovar"><XCircle className="w-4 h-4" /></button>
+                  </>
+                )}
+                {canApproveControl && comanda.status === 'approved' && (
+                  <button type="button" onClick={() => updateStatus(comanda.id, 'open')} className="p-2 text-amber-600 hover:bg-amber-50 rounded-lg" title="Desaprovar"><RotateCcw className="w-4 h-4" /></button>
+                )}
+                {canPayFinance && comanda.status === 'approved' && (
+                  <button type="button" onClick={() => updateStatus(comanda.id, 'posted')} className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-lg" title="Registrar pagamento"><Archive className="w-4 h-4" /></button>
+                )}
+                {canCancelAsRequester && (comanda.status === 'pending_manager' || comanda.status === 'open' || comanda.status === 'approved') && (
+                  <button type="button" onClick={() => updateStatus(comanda.id, 'cancelled')} className="p-2 text-slate-600 hover:bg-slate-100 rounded-lg" title="Cancelar comanda"><XCircle className="w-4 h-4" /></button>
+                )}
+              </>
+            ),
+          };
+        })}
+      />
+
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-        <div className="overflow-x-auto">
+        <div className="hidden md:block overflow-x-auto">
         <table className="w-full text-left border-collapse">
           <thead>
             <tr className="bg-slate-50/50">

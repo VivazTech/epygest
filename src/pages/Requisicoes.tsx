@@ -3,6 +3,7 @@ import { Plus, Archive, XCircle, BadgeCheck, RotateCcw, Pencil, History, Loader2
 import { cn, formatCurrency, formatDate } from '../lib/utils';
 import { confirmCancel } from '../lib/confirmAction';
 import { ValueTrace } from '../components/ValueTrace';
+import { MobileRecordList } from '../components/MobileRecordList';
 import { valueTrace } from '../lib/valueTraceMeta';
 import { useSearch } from '../context/SearchContext';
 import { useToast } from '../context/ToastContext';
@@ -403,8 +404,64 @@ export const RequisicoesPage: React.FC = () => {
         </div>
       </div>
 
+      <MobileRecordList
+        empty={crdFilter ? `Nenhuma requisição com CRD ${crdFilter}.` : 'Nenhuma requisição encontrada.'}
+        items={filteredRequisitions.map((r) => {
+          const meta = statusLabel(r.status);
+          return {
+            id: String(r.id),
+            badge: <span className="text-[10px] font-mono font-bold text-emerald-800">{r.protocol || '—'}</span>,
+            status: (
+              <span className={cn('text-[10px] font-bold px-2 py-1 rounded-lg uppercase tracking-wider', meta.classes)}>
+                {meta.label}
+              </span>
+            ),
+            title: r.provider_name || r.description || 'Sem fornecedor',
+            subtitle: r.sector_name || undefined,
+            amount: formatCurrency(r.amount),
+            details: [
+              { label: 'CRD', value: `${r.crd_code || 'CRD'} - ${r.crd_name || 'Sem descrição'}`, wide: true },
+              { label: 'Setor', value: r.sector_name || 'Sem setor' },
+              { label: 'Data', value: r.date || '—' },
+              ...(r.provider_name && r.description ? [{ label: 'Descrição', value: r.description, wide: true }] : []),
+            ],
+            actions: (
+              <>
+                {canEditEntry(r) && (
+                  <button type="button" onClick={() => openEditEntry(r)} className="p-2 text-slate-600 hover:bg-slate-100 rounded-lg" title="Editar"><Pencil className="w-4 h-4" /></button>
+                )}
+                {Number(r.edit_count || 0) > 0 && (
+                  <button type="button" onClick={() => openEditHistory(r)} className="p-2 text-amber-600 hover:bg-amber-50 rounded-lg" title="Histórico"><History className="w-4 h-4" /></button>
+                )}
+                {canApproveManager && r.status === 'pending_manager' && (
+                  <>
+                    <button type="button" onClick={() => updateStatus(r.id, 'open')} className="p-2 text-violet-600 hover:bg-violet-50 rounded-lg" title="Aprovar (Gestor)"><BadgeCheck className="w-4 h-4" /></button>
+                    <button type="button" onClick={() => updateStatus(r.id, 'cancelled')} className="p-2 text-red-600 hover:bg-red-50 rounded-lg" title="Reprovar"><XCircle className="w-4 h-4" /></button>
+                  </>
+                )}
+                {canApproveControl && r.status === 'open' && (
+                  <>
+                    <button type="button" onClick={() => updateStatus(r.id, 'approved')} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg" title="Aprovar no Controle"><BadgeCheck className="w-4 h-4" /></button>
+                    <button type="button" onClick={() => updateStatus(r.id, 'cancelled')} className="p-2 text-red-600 hover:bg-red-50 rounded-lg" title="Reprovar"><XCircle className="w-4 h-4" /></button>
+                  </>
+                )}
+                {canApproveControl && r.status === 'approved' && (
+                  <button type="button" onClick={() => updateStatus(r.id, 'open')} className="p-2 text-amber-600 hover:bg-amber-50 rounded-lg" title="Desaprovar"><RotateCcw className="w-4 h-4" /></button>
+                )}
+                {canPayFinance && r.status === 'approved' && (
+                  <button type="button" onClick={() => updateStatus(r.id, 'posted')} className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-lg" title="Registrar pagamento"><Archive className="w-4 h-4" /></button>
+                )}
+                {canCancelAsRequester && (r.status === 'pending_manager' || r.status === 'open' || r.status === 'approved') && (
+                  <button type="button" onClick={() => updateStatus(r.id, 'cancelled')} className="p-2 text-slate-600 hover:bg-slate-100 rounded-lg" title="Cancelar"><XCircle className="w-4 h-4" /></button>
+                )}
+              </>
+            ),
+          };
+        })}
+      />
+
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-        <div className="overflow-x-auto">
+        <div className="hidden md:block overflow-x-auto">
         <table className="w-full text-left border-collapse">
           <thead>
             <tr className="bg-slate-50/50">

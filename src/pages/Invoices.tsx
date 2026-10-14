@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { cn, formatCurrency, formatCurrencyInput, formatDate, getCurrencyMeta, parseCurrencyInputDigits } from '../lib/utils';
 import { ValueTrace } from '../components/ValueTrace';
+import { MobileRecordList } from '../components/MobileRecordList';
 import { SearchableSelect } from '../components/SearchableSelect';
 import { CrdListFilter } from '../components/CrdListFilter';
 import {
@@ -1296,7 +1297,101 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
           </div>
         </div>
 
-        <div className="overflow-x-auto">
+        <MobileRecordList
+          className="p-3"
+          empty={
+            crdFilter
+              ? `Nenhuma nota com CRD ${crdFilter} nesta competência.`
+              : 'Nenhuma nota nesta competência. Confira mês/ano e a data de vencimento do lançamento.'
+          }
+          items={filteredInvoices.map((invoice) => {
+            const flowStage = invoice.flow_stage || (invoice.status === 'paid' ? 'paid' : 'control_pending');
+            const statusUI = getStatusUI(flowStage, invoice.status);
+            const StatusIcon = statusUI.icon;
+            const crdMeta = invoice.crd ? resolveInvoiceCrdMeta(invoice) : null;
+            const shownCode = crdMeta?.displayCode || (invoice.crd ? String(invoice.crd) : '');
+            return {
+              id: String(invoice.id),
+              status: (
+                <span className={cn('inline-flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-lg uppercase tracking-wider', statusUI.classes)}>
+                  <StatusIcon className="w-3 h-3 shrink-0" />
+                  {statusUI.label}
+                </span>
+              ),
+              title: invoice.provider_name || 'Sem fornecedor',
+              subtitle: `#${invoice.invoice_number}${invoice.protocol ? ` · ${invoice.protocol}` : ''}`,
+              amount: canSeeSectorValues(invoice.sector_id)
+                ? formatCurrency(invoice.amount, invoice.currency || 'BRL')
+                : 'Valor oculto',
+              details: [
+                { label: 'Setor', value: invoice.sector_name || '—' },
+                { label: 'CRD', value: shownCode ? `${shownCode}${crdMeta?.name ? ` — ${crdMeta.name}` : ''}` : '—' },
+                { label: 'Lançado por', value: invoice.user_name || '—' },
+                { label: 'Vencimento', value: invoice.due_date ? formatDate(invoice.due_date) : '—' },
+                ...(invoice.description ? [{ label: 'Descrição', value: invoice.description, wide: true }] : []),
+              ],
+              extra: (
+                <div className="flex flex-wrap gap-1">
+                  {invoice.file_path ? (
+                    <button type="button" onClick={() => openInvoiceDocument(invoice.id, 'file_path', invoice.file_path)} className="text-xs font-medium text-blue-700 bg-blue-50 px-2 py-1 rounded-lg">Ver NF</button>
+                  ) : (
+                    <span className="text-xs font-medium text-amber-700 bg-amber-50 px-2 py-1 rounded-lg">Sem NF</span>
+                  )}
+                  {collectBoletoPaths(invoice).map((path, boletoIndex, all) => (
+                    <button key={`${invoice.id}-boleto-${boletoIndex}`} type="button" onClick={() => openInvoiceDocument(invoice.id, 'boleto_file_path', path, boletoIndex)} className="text-xs font-medium text-sky-700 bg-sky-50 px-2 py-1 rounded-lg">
+                      {all.length > 1 ? `Boleto ${boletoIndex + 1}` : 'Boleto'}
+                    </button>
+                  ))}
+                  {invoice.payment_receipt_path ? (
+                    <button type="button" onClick={() => openInvoiceDocument(invoice.id, 'payment_receipt_path', invoice.payment_receipt_path)} className="text-xs font-medium text-emerald-700 bg-emerald-50 px-2 py-1 rounded-lg">Ver Comp.</button>
+                  ) : null}
+                  {Number(invoice.edit_count || 0) > 0 && (
+                    <button type="button" onClick={() => openEditHistory(invoice)} className="text-xs font-medium text-amber-800 bg-amber-100 px-2 py-1 rounded-lg">Editado</button>
+                  )}
+                </div>
+              ),
+              actions: (
+                <>
+                  {canEditInvoice(invoice) && (
+                    <button type="button" onClick={() => openEditInvoice(invoice)} className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold text-slate-700 bg-slate-100 rounded-lg">
+                      <Pencil className="w-3.5 h-3.5" />
+                      {invoice.file_path ? 'Editar' : 'Anexar NF'}
+                    </button>
+                  )}
+                  {canApproveManager && flowStage === 'manager_pending' && (
+                    <>
+                      <button type="button" onClick={() => approveByManager(invoice.id)} className="px-3 py-1.5 text-xs font-semibold text-violet-700 bg-violet-50 rounded-lg">Aprovar</button>
+                      <button type="button" onClick={() => rejectByManager(invoice.id)} className="px-3 py-1.5 text-xs font-semibold text-red-700 bg-red-50 rounded-lg">Reprovar</button>
+                    </>
+                  )}
+                  {canApproveControl && flowStage === 'control_pending' && (
+                    <>
+                      <button type="button" onClick={() => approveByControl(invoice.id)} className="px-3 py-1.5 text-xs font-semibold text-blue-700 bg-blue-50 rounded-lg">Aprovar</button>
+                      <button type="button" onClick={() => rejectByControl(invoice.id)} className="px-3 py-1.5 text-xs font-semibold text-red-700 bg-red-50 rounded-lg">Reprovar</button>
+                    </>
+                  )}
+                  {canApproveControl && flowStage === 'control_approved' && (
+                    <button type="button" onClick={() => disapproveByControl(invoice.id)} className="px-3 py-1.5 text-xs font-semibold text-amber-700 bg-amber-50 rounded-lg">Desaprovar</button>
+                  )}
+                  {canPayFinance && flowStage === 'control_approved' && (
+                    <button type="button" onClick={() => markAsPaid(invoice.id)} className="px-3 py-1.5 text-xs font-semibold text-emerald-700 bg-emerald-50 rounded-lg">Marcar como pago</button>
+                  )}
+                  {canCancelAsRequester && flowStage !== 'paid' && flowStage !== 'cancelled' && invoice.status !== 'paid' && (
+                    <button type="button" onClick={() => cancelRequest(invoice)} className="px-3 py-1.5 text-xs font-semibold text-slate-700 bg-slate-100 rounded-lg">Cancelar</button>
+                  )}
+                  {userRole === 'admin' && (
+                    <button type="button" onClick={() => deleteInvoice(invoice)} className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold text-red-700 bg-red-50 rounded-lg">
+                      <Trash2 className="w-3.5 h-3.5" />
+                      Excluir
+                    </button>
+                  )}
+                </>
+              ),
+            };
+          })}
+        />
+
+        <div className="hidden md:block overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-slate-50/50">

@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, CalendarClock, Plus, RefreshCcw, Trash2, Pencil, X, Banknote, BadgeCheck, XCircle, Loader2 } from 'lucide-react';
 import { cn, formatCurrency } from '../lib/utils';
+import { MobileRecordList } from '../components/MobileRecordList';
 import { confirmDelete } from '../lib/confirmAction';
 import { SearchableSelect } from '../components/SearchableSelect';
 import { CrdListFilter } from '../components/CrdListFilter';
@@ -492,7 +493,54 @@ export const MensalidadesPage: React.FC = () => {
           </div>
         </div>
 
-        <div className="overflow-x-auto">
+        <MobileRecordList
+          className="p-3"
+          loading={loading}
+          empty="Nenhum contrato encontrado."
+          items={filtered.map((row) => {
+            const lanc = lancamentoByContrato.get(row.id);
+            const flow = lanc ? (FLOW_STATUS_LABELS[lanc.status] || { label: lanc.status, classes: 'bg-slate-100 text-slate-700' }) : null;
+            return {
+              id: String(row.id),
+              status: <StatusBadge status={row.status} />,
+              title: row.fornecedor,
+              subtitle: [
+                row.alerta_vencimento ? 'Próximo do vencimento' : '',
+                !row.assinado && row.status !== 'encerrado' ? 'Não assinado' : '',
+              ].filter(Boolean).join(' · ') || undefined,
+              amount: formatCurrency(Number(row.valor) || 0),
+              details: [
+                { label: 'Setor', value: row.sector_name || '—' },
+                { label: 'Periodicidade', value: PERIOD_LABELS[row.periodicidade] || row.periodicidade },
+                { label: 'CRD', value: row.crd_label || '—', wide: true },
+                { label: 'Vencimento', value: row.vencimento || '—' },
+                { label: 'Responsável', value: row.responsavel || '—' },
+                ...(flow ? [{ label: 'Pagamento', value: flow.label }] : []),
+                ...(row.dias_para_vencer != null ? [{
+                  label: 'Prazo',
+                  value: row.dias_para_vencer < 0 ? `${Math.abs(row.dias_para_vencer)}d atrasado` : `${row.dias_para_vencer}d restantes`,
+                }] : []),
+              ],
+              actions: (
+                <>
+                  {lanc && canApproveManager && lanc.status === 'pending_manager' && (
+                    <>
+                      <button type="button" onClick={() => updateLancamentoStatus(lanc.id, 'open')} className="p-2 text-violet-600 hover:bg-violet-50 rounded-lg" title="Aprovar (Gestor)"><BadgeCheck className="w-4 h-4" /></button>
+                      <button type="button" onClick={() => updateLancamentoStatus(lanc.id, 'cancelled')} className="p-2 text-red-600 hover:bg-red-50 rounded-lg" title="Reprovar"><XCircle className="w-4 h-4" /></button>
+                    </>
+                  )}
+                  {row.status !== 'encerrado' && row.ativo && (
+                    <button type="button" onClick={() => solicitarPagamento(row)} disabled={solicitandoId === row.id} className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-lg disabled:opacity-50" title="Solicitar pagamento"><Banknote className="w-4 h-4" /></button>
+                  )}
+                  <button type="button" onClick={() => openEdit(row)} className="p-2 text-slate-400 hover:text-[#004D40] hover:bg-emerald-50 rounded-lg" title="Editar"><Pencil className="w-4 h-4" /></button>
+                  <button type="button" onClick={() => remove(row)} className="p-2 text-red-400 hover:bg-red-50 rounded-lg" title="Excluir"><Trash2 className="w-4 h-4" /></button>
+                </>
+              ),
+            };
+          })}
+        />
+
+        <div className="hidden md:block overflow-x-auto">
           <table className="w-full text-left border-collapse min-w-[1000px]">
             <thead>
               <tr className="bg-slate-50/50">
@@ -653,7 +701,25 @@ export const MensalidadesPage: React.FC = () => {
             <h3 className="text-sm font-bold text-slate-900">Lançamentos de pagamento</h3>
             <p className="text-xs text-slate-500 mt-0.5">Solicitações enviadas para aprovação do Controle e pagamento do Financeiro.</p>
           </div>
-          <div className="overflow-x-auto">
+          <MobileRecordList
+            className="p-3"
+            items={lancamentos.map((l) => {
+              const meta = FLOW_STATUS_LABELS[l.status] || { label: l.status, classes: 'bg-slate-100 text-slate-700' };
+              return {
+                id: `lanc-${l.id}`,
+                badge: <span className="text-[10px] font-mono font-bold text-emerald-800">{l.protocol || '—'}</span>,
+                status: (
+                  <span className={cn('text-[10px] font-bold px-2 py-1 rounded-lg uppercase tracking-wider', meta.classes)}>
+                    {meta.label}
+                  </span>
+                ),
+                title: l.fornecedor || 'Sem fornecedor',
+                subtitle: l.competencia || undefined,
+                amount: formatCurrency(Number(l.valor) || 0),
+              };
+            })}
+          />
+          <div className="hidden md:block overflow-x-auto">
             <table className="w-full text-left border-collapse min-w-[800px]">
               <thead>
                 <tr className="bg-slate-50/50">
