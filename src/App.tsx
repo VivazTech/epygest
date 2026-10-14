@@ -23,7 +23,7 @@ import { ConfiguracoesPage as Configuracoes } from './pages/Configuracoes';
 import { UsuariosPage as Usuarios } from './pages/Usuarios';
 import { SugestoesPage as Sugestoes } from './pages/Sugestoes';
 import { NomesSistemaPage as NomesSistema } from './pages/NomesSistema';
-import { SystemNamePrompt, clearSystemNamePromptLater } from './components/SystemNamePrompt';
+import { SystemNamePrompt } from './components/SystemNamePrompt';
 import { PlanilhasPage } from './pages/Planilhas';
 import { PLANILHAS, APURACAO_RECEITA_ITENS, BASE_ORCAMENTO_ITENS, isApuracaoReceitaPlanilha, isBaseOrcamentoTab } from './lib/planilhas';
 import { FolhaPagamentoPage, MESES_FOLHA } from './pages/FolhaPagamento';
@@ -57,6 +57,7 @@ import { TutorialPage as Tutorial } from './pages/Tutorial';
 import { TutorialProvider } from './context/TutorialContext';
 import { hasPermission } from './lib/permissionCatalog';
 import { SuggestionFab } from './components/SuggestionFab';
+import { CrdLinkReminder } from './components/CrdLinkReminder';
 import { getPageLabel } from './lib/pageLabels';
 
 const ACTIVE_TAB_KEY = 'app:activeTab';
@@ -218,7 +219,6 @@ export default function App() {
     } catch {
       // mesmo se falhar a chamada, limpamos o estado local
     }
-    clearSystemNamePromptLater(user?.id);
     setUser(null);
     setLoginForm({ email: '', password: '' });
     setActiveTab('dashboard');
@@ -918,6 +918,7 @@ function AppShell({
         </div>
       </main>
         <SuggestionFab activeTab={activeTab} />
+        <CrdLinkReminder />
         </div>
       </TutorialProvider>
       </ToastProvider>

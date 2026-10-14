@@ -23,6 +23,12 @@ export type SectorResolveInput = {
   name?: string | null;
   /** Cria setor quando não encontrado (padrão: true em imports). */
   create?: boolean;
+  /**
+   * No PDF, o centro de custo vem sem o sufixo da empresa (LANCHONETE → LANCHONETE ACQUA).
+   * exact é o padrão. prefix só escolhe um setor quando o nome começa pelo centro de custo
+   * e, havendo mais de um, prefere o que termina em "acqua".
+   */
+  nameMatch?: "exact" | "prefix";
   budget_limit?: number;
   empresa_key?: CompanyKey;
 };
@@ -137,6 +143,10 @@ export class SectorCache {
     return key ? this.byName.get(key) : undefined;
   }
 
+  list(): SectorRow[] {
+    return Array.from(this.byName.values());
+  }
+
   remember(sector: SectorRow): void {
     this.byName.set(normalizeSectorName(sector.name), sector);
     if (sector.code) this.byCode.set(sector.code, sector);
@@ -196,6 +206,24 @@ export async function resolveSector(
         sectorCache.remember({ ...byName, code: resolvedCode });
       }
       return { id: byName.id, code: resolvedCode, name: byName.name };
+    }
+
+    if (input.nameMatch === "prefix") {
+      const key = normalizeSectorName(displayName);
+      const candidates = sectorCache.list().filter((row) => {
+        const normalized = normalizeSectorName(row.name);
+        return normalized === key || normalized.startsWith(`${key} `);
+      });
+      const preferred =
+        candidates.find((row) => normalizeSectorName(row.name) === `${key} acqua`) ||
+        (candidates.length === 1 ? candidates[0] : undefined);
+      if (preferred) {
+        return {
+          id: preferred.id,
+          code: preferred.code ?? slugSectorCodeFromName(preferred.name),
+          name: preferred.name,
+        };
+      }
     }
   }
 

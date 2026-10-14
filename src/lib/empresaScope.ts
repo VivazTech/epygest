@@ -8,8 +8,9 @@ import {
 
 /**
  * Tabelas com coluna empresa_key (isolamento Vivaz / Aquamania).
- * Globais (sem coluna): users, app_roles, role_permissions, payment_methods,
- * currencies, tangerino_empresas, password_reset_tokens, document_sequences, user_empresas.
+ * Globais (sem coluna ou catálogo compartilhado): users, app_roles, role_permissions,
+ * payment_methods, currencies, tangerino_empresas, password_reset_tokens,
+ * document_sequences, user_empresas, folha_rubricas_parametros, folha_parametros_encargos.
  */
 export const EMPRESA_SCOPED_TABLES = new Set([
   "sectors",
@@ -69,9 +70,7 @@ export const EMPRESA_SCOPED_TABLES = new Set([
   "folha_config",
   "folha_custo_manual",
   "folha_rubricas",
-  "folha_rubricas_parametros",
   "folha_rubricas_ignoradas",
-  "folha_parametros_encargos",
   "folha_apuracoes_mensais",
   "folha_apuracao_auditoria",
   "folha_situacoes_resumo",

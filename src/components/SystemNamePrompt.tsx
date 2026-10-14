@@ -1,18 +1,6 @@
 import React, { useEffect, useState } from 'react';
 
 const storageKeyFor = (userId: string | number) => `systemNameSuggestion:${userId}`;
-const laterKeyFor = (userId: string | number) => `systemNameSuggestionLater:${userId}`;
-
-/** Limpa o adiamento. O aviso volta no próximo login. */
-export const clearSystemNamePromptLater = (userId?: string | number) => {
-  if (userId != null && userId !== '') {
-    sessionStorage.removeItem(laterKeyFor(userId));
-    return;
-  }
-  for (const key of Object.keys(sessionStorage)) {
-    if (key.startsWith('systemNameSuggestionLater:')) sessionStorage.removeItem(key);
-  }
-};
 
 export const SystemNamePrompt: React.FC<{ userId: string | number }> = ({ userId }) => {
   const storageKey = storageKeyFor(userId);
@@ -23,7 +11,6 @@ export const SystemNamePrompt: React.FC<{ userId: string | number }> = ({ userId
 
   useEffect(() => {
     if (localStorage.getItem(storageKey) === '1') return;
-    if (sessionStorage.getItem(laterKeyFor(userId)) === '1') return;
     let cancelled = false;
     (async () => {
       try {
@@ -79,7 +66,6 @@ export const SystemNamePrompt: React.FC<{ userId: string | number }> = ({ userId
         return;
       }
       localStorage.setItem(storageKey, '1');
-      sessionStorage.removeItem(laterKeyFor(userId));
       setOpen(false);
     } catch {
       setError('Não foi possível enviar a sugestão.');
@@ -132,10 +118,7 @@ export const SystemNamePrompt: React.FC<{ userId: string | number }> = ({ userId
             <button
               type="button"
               disabled={saving}
-              onClick={() => {
-                sessionStorage.setItem(laterKeyFor(userId), '1');
-                setOpen(false);
-              }}
+              onClick={() => setOpen(false)}
               className="flex-1 px-4 py-3 bg-slate-100 text-slate-600 font-bold rounded-xl hover:bg-slate-200 transition-colors disabled:opacity-60"
             >
               Responder depois

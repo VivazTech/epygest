@@ -140,6 +140,7 @@ import {
   summarizeAbsenteismo,
 } from "./lib/absenteismo.js";
 import { loadAbsenteismoConfig, syncAbsenteismoCompetencia } from "./lib/absenteismoDb.js";
+import { parseExtratoFolhaPdf } from "./lib/extratoFolhaPdf.js";
 import {
   calcularTurnoverPct,
   FORMULA_OPTIONS,
@@ -1532,15 +1533,26 @@ export function createApp() {
   });
 
   app.get("/api/system-name-suggestions", requireRole("admin"), async (_req, res) => {
-    const { data, error } = await supabase
-      .from("system_name_suggestions")
-      .select("id, user_id, user_name, user_email, user_role, suggestion, created_at")
-      .order("created_at", { ascending: false });
+    const [{ data, error }, usersCount] = await Promise.all([
+      supabase
+        .from("system_name_suggestions")
+        .select("id, user_id, user_name, user_email, user_role, suggestion, created_at")
+        .order("created_at", { ascending: false }),
+      supabase.from("users").select("id", { count: "exact", head: true }),
+    ]);
     if (error) {
       console.error("Erro ao listar sugestões de nome:", error);
       return res.status(500).json({ error: "Não foi possível carregar as sugestões." });
     }
-    res.json(data ?? []);
+    if (usersCount.error) {
+      console.error("Erro ao contar usuários:", usersCount.error);
+    }
+    const suggestions = data ?? [];
+    res.json({
+      suggestions,
+      total_users: Number(usersCount.count ?? 0),
+      answered: suggestions.length,
+    });
   });
 
   // ====================================================
@@ -2923,6 +2935,76 @@ export function createApp() {
         users: undefined,
       }))
     );
+  });
+
+  // Lançamentos manuais do próprio usuário que ficaram SEM CRD (para o aviso de vínculo).
+  app.get("/api/manual-entries/sem-crd", async (req, res) => {
+    const userId = Number((req as any).user?.id);
+    const { data, error } = await filterByEmpresa(
+      supabase
+        .from("manual_entries")
+        .select("id, description, amount, date, sector_id, status, user_id, sectors(name)")
+        .is("crd_id", null)
+        .neq("status", "cancelled"),
+      req,
+      "manual_entries"
+    ).order("date", { ascending: false });
+    if (error) {
+      console.error("manual-entries/sem-crd:", error);
+      return res.status(500).json({ error: "Erro ao buscar lançamentos sem CRD." });
+    }
+    const mine = (data ?? []).filter((r: any) => Number.isFinite(userId) && Number(r.user_id) === userId);
+    res.json({
+      entries: mine.map((r: any) => ({
+        id: r.id,
+        description: r.description ?? null,
+        amount: Number(r.amount) || 0,
+        date: r.date,
+        sector_id: r.sector_id,
+        sector_name: r.sectors?.name ?? null,
+        status: r.status,
+      })),
+    });
+  });
+
+  // Vínculo leve de CRD a um lançamento sem CRD (quem criou, ou admin/controle).
+  app.patch("/api/manual-entries/:id/crd", async (req, res) => {
+    const entryId = Number(req.params.id);
+    if (!Number.isFinite(entryId)) return res.status(400).json({ error: "Lançamento inválido." });
+    const crdId = Number((req.body as any)?.crd_id);
+    if (!Number.isFinite(crdId)) return res.status(400).json({ error: "Informe o CRD." });
+
+    const { data: existing, error: fErr } = await scopeByEmpresa(
+      supabase.from("manual_entries").select("id, user_id, sector_id, crd_id, status").eq("id", entryId),
+      req
+    ).single();
+    if (fErr || !existing) return res.status(404).json({ error: "Lançamento não encontrado." });
+
+    const userId = Number((req as any).user?.id);
+    const role = String((req as any).user?.role || "");
+    const isOwner = Number((existing as any).user_id) === userId;
+    const isPriv = role === "admin" || role === "controle";
+    if (!isOwner && !isPriv) {
+      return res.status(403).json({ error: "Apenas quem criou o lançamento (ou admin/controle) pode vinculá-lo a um CRD." });
+    }
+    if ((existing as any).crd_id != null) return res.status(400).json({ error: "Este lançamento já possui CRD." });
+    if (String((existing as any).status) === "cancelled") return res.status(400).json({ error: "Lançamento cancelado." });
+
+    const { data: crd, error: cErr } = await scopeByEmpresa(
+      supabase.from("crds").select("id, sector_id, code, name").eq("id", crdId),
+      req
+    ).single();
+    if (cErr || !crd) return res.status(400).json({ error: "CRD inválido." });
+    if (Number((crd as any).sector_id) !== Number((existing as any).sector_id) && !isSharedCrdCode((crd as any).code)) {
+      return res.status(400).json({ error: "O CRD não pertence ao setor do lançamento." });
+    }
+
+    const { error: uErr } = await supabase.from("manual_entries").update({ crd_id: crdId }).eq("id", entryId);
+    if (uErr) {
+      console.error("manual-entries/:id/crd update:", uErr);
+      return res.status(500).json({ error: "Não foi possível vincular o CRD." });
+    }
+    res.json({ ok: true, id: entryId, crd_id: crdId, crd_code: (crd as any).code, crd_name: (crd as any).name });
   });
 
   app.post("/api/manual-entries", async (req, res) => {
@@ -5767,7 +5849,7 @@ export function createApp() {
         ativo: (row as any).active !== false,
         updated_at: new Date().toISOString(),
       },
-      { onConflict: "codigo_funcionario" }
+      { onConflict: "empresa_key,codigo_funcionario" }
     );
   };
 
@@ -10761,12 +10843,16 @@ export function createApp() {
     const filtroSetor = String((req.query as any)?.setor ?? "").trim().toLowerCase();
     const filtroFuncionario = String((req.query as any)?.funcionario ?? "").trim().toLowerCase();
 
-    const { data, error } = await supabase
-      .from("folha_pagamento")
-      .select("matricula, nome, cargo, situacao, cpf, salario, proventos, descontos, liquido, base_inss, base_fgts, base_irrf")
-      .eq("year", year)
-      .eq("month", month)
-      .order("nome");
+    const { data, error } = await filterByEmpresa(
+      supabase
+        .from("folha_pagamento")
+        .select("matricula, nome, cargo, situacao, cpf, salario, proventos, descontos, liquido, base_inss, base_fgts, base_irrf")
+        .eq("year", year)
+        .eq("month", month)
+        .order("nome"),
+      req,
+      "folha_pagamento"
+    );
     if (error) {
       console.error("Erro ao carregar folha:", error);
       return res.status(500).json({ error: "Erro interno ao processar a solicitação." });
@@ -10778,13 +10864,21 @@ export function createApp() {
     const setorByMatricula = new Map<string, string>();
     if (mats.length) {
       const [{ data: funcs }, { data: lancSetores }] = await Promise.all([
-        supabase.from("folha_funcionarios").select("codigo_funcionario, setor_nome").in("codigo_funcionario", mats),
-        supabase
-          .from("folha_lancamentos")
-          .select("codigo_funcionario, setor_nome")
-          .eq("competencia_ano", year)
-          .eq("competencia_mes", month)
-          .not("setor_nome", "is", null),
+        filterByEmpresa(
+          supabase.from("folha_funcionarios").select("codigo_funcionario, setor_nome").in("codigo_funcionario", mats),
+          req,
+          "folha_funcionarios"
+        ),
+        filterByEmpresa(
+          supabase
+            .from("folha_lancamentos")
+            .select("codigo_funcionario, setor_nome")
+            .eq("competencia_ano", year)
+            .eq("competencia_mes", month)
+            .not("setor_nome", "is", null),
+          req,
+          "folha_lancamentos"
+        ),
       ]);
       for (const l of lancSetores ?? []) {
         const mat = String((l as any).codigo_funcionario ?? "").trim();
@@ -10828,12 +10922,15 @@ export function createApp() {
     });
   });
 
-  // Importa o Extrato Mensal (.xls) e grava a folha do mês (substitui o que existir).
+  // Importa o Extrato Mensal (.xls ou PDF) e grava a folha do mês da empresa ativa.
   app.post("/api/folha/import", requireRole("admin", "finance", "controle"), upload.single("extrato_file"), async (req, res) => {
     if (!req.file) return res.status(400).json({ error: "Arquivo não enviado" });
-    if (!/\.(xls|xlsx)$/i.test(req.file.originalname || "")) {
+    const originalName = String(req.file.originalname || "");
+    const isPdf = /\.pdf$/i.test(originalName);
+    const isXls = /\.(xls|xlsx)$/i.test(originalName);
+    if (!isPdf && !isXls) {
       if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
-      return res.status(400).json({ error: "Envie o relatório em Excel (.xls ou .xlsx)." });
+      return res.status(400).json({ error: "Envie o relatório em Excel (.xls ou .xlsx) ou PDF." });
     }
     const year = Number((req.body as any)?.year) || new Date().getFullYear();
     const month = Number((req.body as any)?.month);
@@ -10842,14 +10939,76 @@ export function createApp() {
       return res.status(400).json({ error: "Informe o mês (1 a 12) para gravar a folha." });
     }
     try {
-      const grid = readDesbravadorXlsGrid(req.file.path);
-      if (!grid.length) {
-        return res.status(422).json({
-          error: "Não consegui ler o conteúdo do Excel. O arquivo pode estar corrompido ou em formato não suportado.",
-        });
+      const empresaFolhaCache = sectorCacheFor(empresaKeyOf(req));
+      let grid: any[][] = [];
+      let empresaNome = "";
+      let employees: any[] = [];
+      let fromPdf = false;
+      let rubricasParsed: any[] = [];
+      let detalheRubricas: any[] = [];
+
+      if (isPdf) {
+        const pdfRows = await extractPdfRowsByPosition(fs.readFileSync(req.file.path));
+        const parsed = parseExtratoFolhaPdf(pdfRows);
+        empresaNome = parsed.empresaNome;
+        fromPdf = true;
+        employees = parsed.funcionarios.map((f) => ({
+          matricula: f.matricula,
+          nome: f.nome,
+          cargo: f.cargo,
+          situacao: f.situacao,
+          cpf: f.cpf,
+          salario: f.salario,
+          proventos: f.proventos,
+          descontos: f.descontos,
+          liquido: f.liquido,
+          base_inss: f.base_inss,
+          base_fgts: f.base_fgts,
+          base_irrf: f.base_irrf,
+          setor: f.setor,
+        }));
+        detalheRubricas = parsed.rubricas.map((r) => ({
+          matricula: r.matricula,
+          nome: r.nome,
+          cpf: r.cpf,
+          cargo: r.cargo,
+          situacao: r.situacao,
+          setor: r.setor,
+          codigo: r.codigo,
+          nome_rubrica: r.nome_rubrica,
+          tipo: r.tipo,
+          horas: r.horas,
+          valor: r.valor,
+        }));
+        const resumo = new Map<string, { codigo: string; nome: string; horas: string; valor: number; tipo: string; operacao: string }>();
+        for (const r of parsed.rubricas) {
+          const codigo = String(r.codigo || "").trim();
+          const tipo = String(r.tipo || "").trim().toUpperCase();
+          if (!codigo || (tipo !== "P" && tipo !== "D")) continue;
+          const key = `${codigo}|${tipo}`;
+          const current = resumo.get(key) || {
+            codigo,
+            nome: String(r.nome_rubrica || "").trim(),
+            horas: "",
+            valor: 0,
+            tipo,
+            operacao: tipo === "D" ? "subtracao" : "soma",
+          };
+          current.valor += Number(r.valor) || 0;
+          if (!current.nome && r.nome_rubrica) current.nome = String(r.nome_rubrica).trim();
+          resumo.set(key, current);
+        }
+        rubricasParsed = Array.from(resumo.values());
+      } else {
+        grid = readDesbravadorXlsGrid(req.file.path);
+        if (!grid.length) {
+          return res.status(422).json({
+            error: "Não consegui ler o conteúdo do Excel. O arquivo pode estar corrompido ou em formato não suportado.",
+          });
+        }
+        empresaNome = parseExtratoEmpresa(grid);
+        employees = parseExtratoEmployees(grid);
       }
-      const empresaNome = parseExtratoEmpresa(grid);
-      const employees = parseExtratoEmployees(grid);
       if (!employees.length) {
         return res.status(422).json({
           error:
@@ -10907,7 +11066,7 @@ export function createApp() {
             const resolvedFromCargo = await resolveSector(
               supabase,
               { name: assigned.sector_name, create: false },
-              sectorCache
+              empresaFolhaCache
             );
             if (resolvedFromCargo) {
               e.setor_codigo = resolvedFromCargo.code;
@@ -10919,8 +11078,10 @@ export function createApp() {
           const parsedSetor = parseSectorText(String(e.setor));
           const resolved = await resolveSector(
             supabase,
-            { code: parsedSetor.code, name: parsedSetor.name || e.setor, create: true },
-            sectorCache
+            fromPdf
+              ? { name: parsedSetor.name || e.setor, create: false, nameMatch: "prefix" as const }
+              : { code: parsedSetor.code, name: parsedSetor.name || e.setor, create: true },
+            empresaFolhaCache
           );
           if (resolved) {
             e.sector_id = resolved.id;
@@ -10959,9 +11120,12 @@ export function createApp() {
         }
       }
 
-      // Substitui a folha do mês.
-      await supabase.from("folha_pagamento").delete().eq("year", year).eq("month", month);
-      const { error } = await supabase.from("folha_pagamento").insert(rows);
+      // Substitui a folha do mês da empresa ativa.
+      await scopeByEmpresa(
+        supabase.from("folha_pagamento").delete().eq("year", year).eq("month", month),
+        req
+      );
+      const { error } = await supabase.from("folha_pagamento").insert(rows.map((r) => withEmpresaKey(r, req)));
       if (error) {
         console.error("Erro ao gravar folha:", error);
         await logImportHistory({
@@ -10980,9 +11144,15 @@ export function createApp() {
       }
 
       // Grava o "Resumo por Rubrica" do mês (substitui o que existir).
-      const rubricasParsed = parseExtratoRubricas(grid);
+      if (!fromPdf) {
+        rubricasParsed = parseExtratoRubricas(grid);
+        detalheRubricas = parseExtratoEmployeeRubricas(grid);
+      }
       if (rubricasParsed.length) {
-        await supabase.from("folha_rubricas").delete().eq("year", year).eq("month", month);
+        await scopeByEmpresa(
+          supabase.from("folha_rubricas").delete().eq("year", year).eq("month", month),
+          req
+        );
         const seen = new Set<string>();
         const rubricaRows = rubricasParsed
           .filter((rb) => {
@@ -11001,12 +11171,12 @@ export function createApp() {
             tipo: rb.tipo,
             operacao: rb.operacao,
           }));
-        const { error: rubErr } = await supabase.from("folha_rubricas").insert(rubricaRows);
+        const { error: rubErr } = await supabase
+          .from("folha_rubricas")
+          .insert(rubricaRows.map((rb) => withEmpresaKey(rb, req)));
         if (rubErr) console.error("Erro ao gravar rubricas da folha:", rubErr);
       }
 
-      // Parser de detalhe (reutilizado no cadastro e no v2)
-      const detalheRubricas = parseExtratoEmployeeRubricas(grid);
       for (const d of detalheRubricas) {
         const mat = String(d.matricula ?? "").trim();
         const setor = String(d.setor ?? "").trim();
@@ -11014,8 +11184,10 @@ export function createApp() {
           const parsedSetor = parseSectorText(setor);
           const resolved = await resolveSector(
             supabase,
-            { code: parsedSetor.code, name: parsedSetor.name || setor, create: true },
-            sectorCache
+            fromPdf
+              ? { name: parsedSetor.name || setor, create: false, nameMatch: "prefix" as const }
+              : { code: parsedSetor.code, name: parsedSetor.name || setor, create: true },
+            empresaFolhaCache
           );
           setorByMatriculaImport.set(mat, {
             nome: resolved?.name ?? setor,
@@ -11069,19 +11241,22 @@ export function createApp() {
       // Metadados da importação para o módulo de apuração (v1 — sempre grava)
       let detalheRubricasCount = detalheRubricas.length;
       const { error: impMetaErr } = await supabase.from("folha_importacoes").upsert(
-        {
-          nome_arquivo: req.file.originalname,
-          competencia_mes: month,
-          competencia_ano: year,
-          data_importacao: new Date().toISOString(),
-          usuario_id: req.user?.id ?? null,
-          status: "importado",
-          total_funcionarios: rows.length,
-          total_rubricas: rubricasParsed.length,
-          empresa_nome: empresaNome,
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: "competencia_ano,competencia_mes" }
+        withEmpresaKey(
+          {
+            nome_arquivo: req.file.originalname,
+            competencia_mes: month,
+            competencia_ano: year,
+            data_importacao: new Date().toISOString(),
+            usuario_id: req.user?.id ?? null,
+            status: "importado",
+            total_funcionarios: rows.length,
+            total_rubricas: rubricasParsed.length,
+            empresa_nome: empresaNome,
+            updated_at: new Date().toISOString(),
+          },
+          req
+        ),
+        { onConflict: "empresa_key,competencia_ano,competencia_mes" }
       );
       if (impMetaErr) {
         console.error("Erro ao registrar folha_importacoes:", impMetaErr);
@@ -11089,7 +11264,10 @@ export function createApp() {
 
       // Complementos v2 (funcionários, lançamentos detalhados, situações)
       try {
-        await supabase.from("folha_lancamentos_importados").delete().eq("competencia_ano", year).eq("competencia_mes", month);
+        await scopeByEmpresa(
+          supabase.from("folha_lancamentos_importados").delete().eq("competencia_ano", year).eq("competencia_mes", month),
+          req
+        );
         if (detalheRubricas.length) {
           const detRows = detalheRubricas.map((d) => ({
             competencia_ano: year,
@@ -11108,7 +11286,7 @@ export function createApp() {
             quantidade: d.horas,
             valor_original: d.valor,
           }));
-          await supabase.from("folha_lancamentos_importados").insert(detRows);
+          await supabase.from("folha_lancamentos_importados").insert(detRows.map((d) => withEmpresaKey(d, req)));
         }
 
         for (const r of rows) {
@@ -11129,20 +11307,30 @@ export function createApp() {
             payload.setor_codigo = setorInfo.codigo;
             payload.sector_id = setorInfo.sector_id;
           }
-          await supabase.from("folha_funcionarios").upsert(payload, { onConflict: "codigo_funcionario" });
+          await supabase
+            .from("folha_funcionarios")
+            .upsert(withEmpresaKey(payload, req), { onConflict: "empresa_key,codigo_funcionario" });
         }
         const situacoes = new Map<string, number>();
         for (const r of rows) {
           const sit = String(r.situacao || "Outros").trim() || "Outros";
           situacoes.set(sit, (situacoes.get(sit) || 0) + 1);
         }
-        await supabase.from("folha_situacoes_resumo").delete().eq("competencia_ano", year).eq("competencia_mes", month);
-        const sitRows = Array.from(situacoes.entries()).map(([situacao, quantidade]) => ({
-          competencia_ano: year,
-          competencia_mes: month,
-          situacao,
-          quantidade,
-        }));
+        await scopeByEmpresa(
+          supabase.from("folha_situacoes_resumo").delete().eq("competencia_ano", year).eq("competencia_mes", month),
+          req
+        );
+        const sitRows = Array.from(situacoes.entries()).map(([situacao, quantidade]) =>
+          withEmpresaKey(
+            {
+              competencia_ano: year,
+              competencia_mes: month,
+              situacao,
+              quantidade,
+            },
+            req
+          )
+        );
         if (sitRows.length) await supabase.from("folha_situacoes_resumo").insert(sitRows);
       } catch (e) {
         console.error("Falha ao registrar dados de apuração v2 (execute sql/folha_apuracao_module_v2.sql):", e);
@@ -11247,13 +11435,17 @@ export function createApp() {
     const year = Number((req.query as any)?.year) || new Date().getFullYear();
     const month = Number((req.query as any)?.month);
     if (!month || month < 1 || month > 12) return res.status(400).json({ error: "month deve estar entre 1 e 12" });
-    const { data, error } = await supabase
-      .from("folha_rubricas")
-      .select("codigo, nome, horas, valor, tipo, operacao")
-      .eq("year", year)
-      .eq("month", month)
-      .order("tipo")
-      .order("codigo");
+    const { data, error } = await filterByEmpresa(
+      supabase
+        .from("folha_rubricas")
+        .select("codigo, nome, horas, valor, tipo, operacao")
+        .eq("year", year)
+        .eq("month", month)
+        .order("tipo")
+        .order("codigo"),
+      req,
+      "folha_rubricas"
+    );
     if (error) {
       console.error("Erro ao carregar rubricas:", error);
       return res.status(500).json({ error: "Erro interno ao processar a solicitação." });
@@ -11279,13 +11471,16 @@ export function createApp() {
     if (operacao !== "soma" && operacao !== "subtracao") {
       return res.status(400).json({ error: "operacao deve ser 'soma' ou 'subtracao'" });
     }
-    const { error } = await supabase
-      .from("folha_rubricas")
-      .update({ operacao })
-      .eq("year", Number(year))
-      .eq("month", Number(month))
-      .eq("codigo", String(codigo))
-      .eq("tipo", String(tipo ?? "P"));
+    const { error } = await scopeByEmpresa(
+      supabase
+        .from("folha_rubricas")
+        .update({ operacao })
+        .eq("year", Number(year))
+        .eq("month", Number(month))
+        .eq("codigo", String(codigo))
+        .eq("tipo", String(tipo ?? "P")),
+      req
+    );
     if (error) {
       console.error("Erro ao atualizar operação da rubrica:", error);
       return res.status(500).json({ error: "Não foi possível salvar a alteração." });
@@ -11300,11 +11495,15 @@ export function createApp() {
     if (!year || !month || month < 1 || month > 12) {
       return res.status(400).json({ error: "Informe ano e mês (1 a 12)." });
     }
-    const { data: rubricas, error } = await supabase
-      .from("folha_rubricas")
-      .select("valor, operacao")
-      .eq("year", year)
-      .eq("month", month);
+    const { data: rubricas, error } = await filterByEmpresa(
+      supabase
+        .from("folha_rubricas")
+        .select("valor, operacao")
+        .eq("year", year)
+        .eq("month", month),
+      req,
+      "folha_rubricas"
+    );
     if (error) {
       console.error("Erro ao carregar rubricas para envio:", error);
       return res.status(500).json({ error: "Erro ao carregar as rubricas." });
@@ -11367,22 +11566,30 @@ export function createApp() {
     const month = Number((req.query as any)?.month);
     if (!month || month < 1 || month > 12) return res.status(400).json({ error: "month deve estar entre 1 e 12" });
 
-    const { data: rubricas, error } = await supabase
-      .from("folha_rubricas")
-      .select("codigo, nome, valor, tipo")
-      .eq("year", year)
-      .eq("month", month);
+    const { data: rubricas, error } = await filterByEmpresa(
+      supabase
+        .from("folha_rubricas")
+        .select("codigo, nome, valor, tipo")
+        .eq("year", year)
+        .eq("month", month),
+      req,
+      "folha_rubricas"
+    );
     if (error) {
       console.error("Erro ao carregar rubricas (custo):", error);
       return res.status(500).json({ error: "Erro interno ao processar a solicitação." });
     }
 
-    const { data: manualRows } = await supabase
-      .from("folha_custo_manual")
-      .select("fgts, fgts_prov_ferias, fgts_prov_13")
-      .eq("year", year)
-      .eq("month", month)
-      .limit(1);
+    const { data: manualRows } = await filterByEmpresa(
+      supabase
+        .from("folha_custo_manual")
+        .select("fgts, fgts_prov_ferias, fgts_prov_13")
+        .eq("year", year)
+        .eq("month", month)
+        .limit(1),
+      req,
+      "folha_custo_manual"
+    );
     const manual = (manualRows && manualRows[0]) || { fgts: 0, fgts_prov_ferias: 0, fgts_prov_13: 0 };
 
     const groups: Record<string, { valor: number; codigos: any[] }> = {};
@@ -11462,7 +11669,9 @@ export function createApp() {
     if ((req.body as any)?.fgts_prov_ferias !== undefined) row.fgts_prov_ferias = num((req.body as any).fgts_prov_ferias);
     if ((req.body as any)?.fgts_prov_13 !== undefined) row.fgts_prov_13 = num((req.body as any).fgts_prov_13);
 
-    const { error } = await supabase.from("folha_custo_manual").upsert(row, { onConflict: "year,month" });
+    const { error } = await supabase
+      .from("folha_custo_manual")
+      .upsert(withEmpresaKey(row, req), { onConflict: "empresa_key,year,month" });
     if (error) {
       console.error("Erro ao salvar FGTS manual:", error);
       return res.status(500).json({ error: "Não foi possível salvar." });
@@ -11536,16 +11745,19 @@ export function createApp() {
     const { data, error } = await supabase
       .from("folha_funcionarios")
       .upsert(
-        {
-          codigo_funcionario: codigo,
-          nome: body?.nome ? String(body.nome).trim() : codigo,
-          setor_nome,
-          setor_codigo,
-          sector_id,
-          ativo: true,
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: "codigo_funcionario" }
+        withEmpresaKey(
+          {
+            codigo_funcionario: codigo,
+            nome: body?.nome ? String(body.nome).trim() : codigo,
+            setor_nome,
+            setor_codigo,
+            sector_id,
+            ativo: true,
+            updated_at: new Date().toISOString(),
+          },
+          req
+        ),
+        { onConflict: "empresa_key,codigo_funcionario" }
       )
       .select()
       .single();
@@ -11576,20 +11788,44 @@ export function createApp() {
       { data: provFeriasFgtsRows },
       { data: prov13FgtsRows },
     ] = await Promise.all([
-      supabase.from("folha_apuracoes_mensais").select("*").eq("competencia_ano", year).eq("competencia_mes", month).maybeSingle(),
-      supabase
-        .from("folha_lancamentos")
-        .select("codigo_funcionario, setor_nome, valor_provento, valor_retorno, valor_comissao, valor_produtividade")
-        .eq("competencia_ano", year)
-        .eq("competencia_mes", month),
-      supabase.from("folha_importacoes").select("*").eq("competencia_ano", year).eq("competencia_mes", month).maybeSingle(),
-      supabase.from("folha_pagamento").select("matricula, nome, situacao, proventos, salario, liquido").eq("year", year).eq("month", month),
-      supabase
-        .from("folha_funcionarios")
-        .select("codigo_funcionario, nome, setor_nome, setor_codigo, sector_id")
-        .eq("ativo", true),
+      filterByEmpresa(
+        supabase.from("folha_apuracoes_mensais").select("*").eq("competencia_ano", year).eq("competencia_mes", month),
+        req,
+        "folha_apuracoes_mensais"
+      ).maybeSingle(),
+      filterByEmpresa(
+        supabase
+          .from("folha_lancamentos")
+          .select("codigo_funcionario, setor_nome, valor_provento, valor_retorno, valor_comissao, valor_produtividade")
+          .eq("competencia_ano", year)
+          .eq("competencia_mes", month),
+        req,
+        "folha_lancamentos"
+      ),
+      filterByEmpresa(
+        supabase.from("folha_importacoes").select("*").eq("competencia_ano", year).eq("competencia_mes", month),
+        req,
+        "folha_importacoes"
+      ).maybeSingle(),
+      filterByEmpresa(
+        supabase.from("folha_pagamento").select("matricula, nome, situacao, proventos, salario, liquido").eq("year", year).eq("month", month),
+        req,
+        "folha_pagamento"
+      ),
+      filterByEmpresa(
+        supabase
+          .from("folha_funcionarios")
+          .select("codigo_funcionario, nome, setor_nome, setor_codigo, sector_id")
+          .eq("ativo", true),
+        req,
+        "folha_funcionarios"
+      ),
       supabase.from("sectors").select("id, name, code, budget_limit, active").eq("active", true),
-      supabase.from("folha_importacoes").select("empresa_nome").not("empresa_nome", "is", null),
+      filterByEmpresa(
+        supabase.from("folha_importacoes").select("empresa_nome").not("empresa_nome", "is", null),
+        req,
+        "folha_importacoes"
+      ),
       supabase.from("crds").select("id, previsto_mes").eq("code", "RH-FOLHA-PAGAMENTO").maybeSingle(),
       supabase.from("rds_snapshots").select("sections").eq("year", year).eq("month", month).maybeSingle(),
       supabase
@@ -11771,18 +12007,26 @@ export function createApp() {
 
     let componentes = apuracao && scale > 0 ? componentesFromApuracao(apuracao as any, scale) : [];
 
-    const { data: rubricasPainel } = await supabase
-      .from("folha_rubricas")
-      .select("codigo, nome, valor, tipo")
-      .eq("year", year)
-      .eq("month", month);
+    const { data: rubricasPainel } = await filterByEmpresa(
+      supabase
+        .from("folha_rubricas")
+        .select("codigo, nome, valor, tipo")
+        .eq("year", year)
+        .eq("month", month),
+      req,
+      "folha_rubricas"
+    );
 
-    const { data: manualRowsPainel } = await supabase
-      .from("folha_custo_manual")
-      .select("fgts, fgts_prov_ferias, fgts_prov_13")
-      .eq("year", year)
-      .eq("month", month)
-      .limit(1);
+    const { data: manualRowsPainel } = await filterByEmpresa(
+      supabase
+        .from("folha_custo_manual")
+        .select("fgts, fgts_prov_ferias, fgts_prov_13")
+        .eq("year", year)
+        .eq("month", month)
+        .limit(1),
+      req,
+      "folha_custo_manual"
+    );
     const manualPainel = (manualRowsPainel && manualRowsPainel[0]) || {
       fgts: 0,
       fgts_prov_ferias: 0,
@@ -13516,15 +13760,23 @@ export function createApp() {
   };
 
   /** Cria parâmetros de rubricas a partir dos dados já importados (folha_rubricas + detalhe). */
-  const sincronizarCadastroRubricasCompetencia = async (year: number, month: number): Promise<number> => {
+  const sincronizarCadastroRubricasCompetencia = async (year: number, month: number, req: express.Request): Promise<number> => {
     const [{ data: rubricas }, { data: paramsExistentes }, { data: detalhe }] = await Promise.all([
-      supabase.from("folha_rubricas").select("codigo, nome, tipo").eq("year", year).eq("month", month),
+      filterByEmpresa(
+        supabase.from("folha_rubricas").select("codigo, nome, tipo").eq("year", year).eq("month", month),
+        req,
+        "folha_rubricas"
+      ),
       supabase.from("folha_rubricas_parametros").select("codigo_rubrica"),
-      supabase
-        .from("folha_lancamentos_importados")
-        .select("codigo_rubrica, descricao_rubrica, tipo_original")
-        .eq("competencia_ano", year)
-        .eq("competencia_mes", month),
+      filterByEmpresa(
+        supabase
+          .from("folha_lancamentos_importados")
+          .select("codigo_rubrica, descricao_rubrica, tipo_original")
+          .eq("competencia_ano", year)
+          .eq("competencia_mes", month),
+        req,
+        "folha_lancamentos_importados"
+      ),
     ]);
     const codigosCadastrados = new Set((paramsExistentes ?? []).map((p: any) => String(p.codigo_rubrica).trim()));
     const rubricasUnicas: { codigo: string; nome: string; tipo: string }[] = [];
@@ -13662,10 +13914,14 @@ export function createApp() {
     const year = Number((req.query as any)?.year) || new Date().getFullYear();
     const month = Number((req.query as any)?.month);
 
-    const { data: rubricas, error } = await supabase
-      .from("folha_rubricas")
-      .select("codigo, nome, valor, tipo, year, month")
-      .eq("year", year);
+    const { data: rubricas, error } = await filterByEmpresa(
+      supabase
+        .from("folha_rubricas")
+        .select("codigo, nome, valor, tipo, year, month")
+        .eq("year", year),
+      req,
+      "folha_rubricas"
+    );
     if (error) return res.status(500).json({ error: "Erro ao carregar rubricas importadas." });
 
     const paramsMap = await loadRubricaParamsMap();
@@ -13783,11 +14039,31 @@ export function createApp() {
     if (!month || month < 1 || month > 12) return res.status(400).json({ error: "Informe o mês (1-12)." });
 
     const [{ data: funcionarios }, { data: rubricas }, { data: importacao }, { data: apuracao }, { data: detalhe }] = await Promise.all([
-      supabase.from("folha_pagamento").select("matricula, nome, situacao, proventos, descontos, liquido").eq("year", year).eq("month", month),
-      supabase.from("folha_rubricas").select("codigo, nome, valor, tipo").eq("year", year).eq("month", month),
-      supabase.from("folha_importacoes").select("*").eq("competencia_ano", year).eq("competencia_mes", month).maybeSingle(),
-      supabase.from("folha_apuracoes_mensais").select("*").eq("competencia_ano", year).eq("competencia_mes", month).maybeSingle(),
-      supabase.from("folha_lancamentos_importados").select("id").eq("competencia_ano", year).eq("competencia_mes", month),
+      filterByEmpresa(
+        supabase.from("folha_pagamento").select("matricula, nome, situacao, proventos, descontos, liquido").eq("year", year).eq("month", month),
+        req,
+        "folha_pagamento"
+      ),
+      filterByEmpresa(
+        supabase.from("folha_rubricas").select("codigo, nome, valor, tipo").eq("year", year).eq("month", month),
+        req,
+        "folha_rubricas"
+      ),
+      filterByEmpresa(
+        supabase.from("folha_importacoes").select("*").eq("competencia_ano", year).eq("competencia_mes", month),
+        req,
+        "folha_importacoes"
+      ).maybeSingle(),
+      filterByEmpresa(
+        supabase.from("folha_apuracoes_mensais").select("*").eq("competencia_ano", year).eq("competencia_mes", month),
+        req,
+        "folha_apuracoes_mensais"
+      ).maybeSingle(),
+      filterByEmpresa(
+        supabase.from("folha_lancamentos_importados").select("id").eq("competencia_ano", year).eq("competencia_mes", month),
+        req,
+        "folha_lancamentos_importados"
+      ),
     ]);
 
     const paramsMap = await loadRubricaParamsMap();
@@ -13823,12 +14099,15 @@ export function createApp() {
       return res.status(400).json({ error: "Informe ano e mês válidos." });
     }
 
-    const { data: apExistente } = await supabase
-      .from("folha_apuracoes_mensais")
-      .select("bloqueado")
-      .eq("competencia_ano", year)
-      .eq("competencia_mes", month)
-      .maybeSingle();
+    const { data: apExistente } = await filterByEmpresa(
+      supabase
+        .from("folha_apuracoes_mensais")
+        .select("bloqueado")
+        .eq("competencia_ano", year)
+        .eq("competencia_mes", month),
+      req,
+      "folha_apuracoes_mensais"
+    ).maybeSingle();
     if (apExistente?.bloqueado) {
       if (!force) {
         return res.status(403).json({ error: "Competência bloqueada. Apenas administradores podem reprocessar com confirmação." });
@@ -13838,12 +14117,15 @@ export function createApp() {
       }
     }
 
-    const { data: importacao } = await supabase
-      .from("folha_importacoes")
-      .select("id, status")
-      .eq("competencia_ano", year)
-      .eq("competencia_mes", month)
-      .maybeSingle();
+    const { data: importacao } = await filterByEmpresa(
+      supabase
+        .from("folha_importacoes")
+        .select("id, status")
+        .eq("competencia_ano", year)
+        .eq("competencia_mes", month),
+      req,
+      "folha_importacoes"
+    ).maybeSingle();
 
     const encargos = await loadEncargosAno(year);
     if (!encargos) {
@@ -13854,21 +14136,29 @@ export function createApp() {
     const ignored = await loadIgnoredRubricas();
 
     // Garante cadastro de rubricas a partir da importação (equivalente à tabela de classificação da planilha)
-    await sincronizarCadastroRubricasCompetencia(year, month);
+    await sincronizarCadastroRubricasCompetencia(year, month, req);
 
     const paramsMap = await loadRubricaParamsMap();
 
-    const { data: detalheImportado } = await supabase
-      .from("folha_lancamentos_importados")
-      .select("*")
-      .eq("competencia_ano", year)
-      .eq("competencia_mes", month);
+    const { data: detalheImportado } = await filterByEmpresa(
+      supabase
+        .from("folha_lancamentos_importados")
+        .select("*")
+        .eq("competencia_ano", year)
+        .eq("competencia_mes", month),
+      req,
+      "folha_lancamentos_importados"
+    );
 
-    const { data: rubricasResumo, error: rubErr } = await supabase
-      .from("folha_rubricas")
-      .select("codigo, nome, horas, valor, tipo")
-      .eq("year", year)
-      .eq("month", month);
+    const { data: rubricasResumo, error: rubErr } = await filterByEmpresa(
+      supabase
+        .from("folha_rubricas")
+        .select("codigo, nome, horas, valor, tipo")
+        .eq("year", year)
+        .eq("month", month),
+      req,
+      "folha_rubricas"
+    );
     if (rubErr) return res.status(500).json({ error: "Erro ao carregar rubricas do mês." });
 
     const rawInputs = lancamentosDaImportacao(detalheImportado ?? [], rubricasResumo ?? []);
@@ -13876,10 +14166,14 @@ export function createApp() {
       return res.status(400).json({ error: "Não há dados importados para esta competência. Importe o extrato mensal primeiro." });
     }
 
-    const { data: funcCadastroRows } = await supabase
-      .from("folha_funcionarios")
-      .select("codigo_funcionario, setor_nome, setor_codigo, sector_id")
-      .eq("ativo", true);
+    const { data: funcCadastroRows } = await filterByEmpresa(
+      supabase
+        .from("folha_funcionarios")
+        .select("codigo_funcionario, setor_nome, setor_codigo, sector_id")
+        .eq("ativo", true),
+      req,
+      "folha_funcionarios"
+    );
     const cadastroSetorMap = buildCadastroSetorMap(funcCadastroRows ?? []);
     const rawInputsComSetor = enrichLancamentosComCadastroSetor(rawInputs, cadastroSetorMap);
 
@@ -13889,11 +14183,15 @@ export function createApp() {
 
     const lancamentos = classificarLancamentosImportacao(rawLancamentos, paramsMap);
 
-    const { data: funcionarios } = await supabase
-      .from("folha_pagamento")
-      .select("matricula, nome, cargo, situacao, cpf")
-      .eq("year", year)
-      .eq("month", month);
+    const { data: funcionarios } = await filterByEmpresa(
+      supabase
+        .from("folha_pagamento")
+        .select("matricula, nome, cargo, situacao, cpf")
+        .eq("year", year)
+        .eq("month", month),
+      req,
+      "folha_pagamento"
+    );
 
     const qtdFuncionarios = (funcionarios ?? []).length;
     const qtdTrabalhando = (funcionarios ?? []).filter((f: any) =>
@@ -13909,7 +14207,10 @@ export function createApp() {
       });
     }
 
-    await supabase.from("folha_lancamentos").delete().eq("competencia_ano", year).eq("competencia_mes", month);
+    await scopeByEmpresa(
+      supabase.from("folha_lancamentos").delete().eq("competencia_ano", year).eq("competencia_mes", month),
+      req
+    );
 
     const lancRows = lancamentos.map((l) => ({
       importacao_id: importacao?.id ?? null,
@@ -13933,22 +14234,27 @@ export function createApp() {
       status_mapeamento: l.status_mapeamento,
       updated_at: new Date().toISOString(),
     }));
-    const { error: insErr } = await supabase.from("folha_lancamentos").insert(lancRows);
+    const { error: insErr } = await supabase
+      .from("folha_lancamentos")
+      .insert(lancRows.map((row) => withEmpresaKey(row, req)));
     if (insErr) {
       console.error("Erro ao gravar lançamentos:", insErr);
       return res.status(500).json({ error: "Não foi possível gravar lançamentos." });
     }
 
-    const apRow = {
-      ...apuracao,
-      status: "calculado",
-      calculado_por: req.user?.id ?? null,
-      calculado_em: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    };
+    const apRow = withEmpresaKey(
+      {
+        ...apuracao,
+        status: "calculado",
+        calculado_por: req.user?.id ?? null,
+        calculado_em: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      },
+      req
+    );
     const { data: saved, error: apErr } = await supabase
       .from("folha_apuracoes_mensais")
-      .upsert(apRow, { onConflict: "competencia_ano,competencia_mes" })
+      .upsert(apRow, { onConflict: "empresa_key,competencia_ano,competencia_mes" })
       .select()
       .single();
     if (apErr) {
@@ -13985,16 +14291,24 @@ export function createApp() {
   app.get("/api/folha/apuracao/competencias", folhaApuracaoRoles, async (req, res) => {
     const year = Number((req.query as any)?.year) || new Date().getFullYear();
     const [{ data: importacoes }, { data: apuracoes }] = await Promise.all([
-      supabase
-        .from("folha_importacoes")
-        .select("competencia_mes, competencia_ano, nome_arquivo, data_importacao, total_funcionarios, total_rubricas, status")
-        .eq("competencia_ano", year)
-        .order("competencia_mes"),
-      supabase
-        .from("folha_apuracoes_mensais")
-        .select("competencia_mes, status, calculado_em, total_custo")
-        .eq("competencia_ano", year)
-        .order("competencia_mes"),
+      filterByEmpresa(
+        supabase
+          .from("folha_importacoes")
+          .select("competencia_mes, competencia_ano, nome_arquivo, data_importacao, total_funcionarios, total_rubricas, status")
+          .eq("competencia_ano", year)
+          .order("competencia_mes"),
+        req,
+        "folha_importacoes"
+      ),
+      filterByEmpresa(
+        supabase
+          .from("folha_apuracoes_mensais")
+          .select("competencia_mes, status, calculado_em, total_custo")
+          .eq("competencia_ano", year)
+          .order("competencia_mes"),
+        req,
+        "folha_apuracoes_mensais"
+      ),
     ]);
 
     const apMap = new Map((apuracoes ?? []).map((a: any) => [Number(a.competencia_mes), a]));
@@ -14031,15 +14345,51 @@ export function createApp() {
       { data: detalheRows },
       { data: rubricasRows },
     ] = await Promise.all([
-      supabase.from("folha_apuracoes_mensais").select("*").eq("competencia_ano", year).eq("competencia_mes", month).maybeSingle(),
-      supabase.from("folha_lancamentos").select("*").eq("competencia_ano", year).eq("competencia_mes", month).order("codigo_rubrica"),
-      supabase.from("folha_situacoes_resumo").select("*").eq("competencia_ano", year).eq("competencia_mes", month),
-      supabase.from("folha_pagamento").select("*", { count: "exact", head: true }).eq("year", year).eq("month", month),
-      supabase.from("folha_rubricas").select("*", { count: "exact", head: true }).eq("year", year).eq("month", month),
-      supabase.from("folha_importacoes").select("*").eq("competencia_ano", year).eq("competencia_mes", month).maybeSingle(),
-      supabase.from("folha_lancamentos_importados").select("*", { count: "exact", head: true }).eq("competencia_ano", year).eq("competencia_mes", month),
-      supabase.from("folha_lancamentos_importados").select("*").eq("competencia_ano", year).eq("competencia_mes", month),
-      supabase.from("folha_rubricas").select("codigo, nome, horas, valor, tipo").eq("year", year).eq("month", month),
+      filterByEmpresa(
+        supabase.from("folha_apuracoes_mensais").select("*").eq("competencia_ano", year).eq("competencia_mes", month),
+        req,
+        "folha_apuracoes_mensais"
+      ).maybeSingle(),
+      filterByEmpresa(
+        supabase.from("folha_lancamentos").select("*").eq("competencia_ano", year).eq("competencia_mes", month).order("codigo_rubrica"),
+        req,
+        "folha_lancamentos"
+      ),
+      filterByEmpresa(
+        supabase.from("folha_situacoes_resumo").select("*").eq("competencia_ano", year).eq("competencia_mes", month),
+        req,
+        "folha_situacoes_resumo"
+      ),
+      filterByEmpresa(
+        supabase.from("folha_pagamento").select("*", { count: "exact", head: true }).eq("year", year).eq("month", month),
+        req,
+        "folha_pagamento"
+      ),
+      filterByEmpresa(
+        supabase.from("folha_rubricas").select("*", { count: "exact", head: true }).eq("year", year).eq("month", month),
+        req,
+        "folha_rubricas"
+      ),
+      filterByEmpresa(
+        supabase.from("folha_importacoes").select("*").eq("competencia_ano", year).eq("competencia_mes", month),
+        req,
+        "folha_importacoes"
+      ).maybeSingle(),
+      filterByEmpresa(
+        supabase.from("folha_lancamentos_importados").select("*", { count: "exact", head: true }).eq("competencia_ano", year).eq("competencia_mes", month),
+        req,
+        "folha_lancamentos_importados"
+      ),
+      filterByEmpresa(
+        supabase.from("folha_lancamentos_importados").select("*").eq("competencia_ano", year).eq("competencia_mes", month),
+        req,
+        "folha_lancamentos_importados"
+      ),
+      filterByEmpresa(
+        supabase.from("folha_rubricas").select("codigo, nome, horas, valor, tipo").eq("year", year).eq("month", month),
+        req,
+        "folha_rubricas"
+      ),
     ]);
 
     if (sitErr) console.warn("folha_situacoes_resumo indisponível:", sitErr.message);
@@ -14055,7 +14405,7 @@ export function createApp() {
     let rubricasPendentesProvento = 0;
     if (dadosImportados) {
       try {
-        await sincronizarCadastroRubricasCompetencia(year, month);
+        await sincronizarCadastroRubricasCompetencia(year, month, req);
         const paramsMap = await loadRubricaParamsMap();
         const ignored = await loadIgnoredRubricas();
         const rawImport = lancamentosDaImportacao(detalheRows ?? [], rubricasRows ?? []).filter(
@@ -14131,11 +14481,15 @@ export function createApp() {
   // Síntese anual com variação mês a mês
   app.get("/api/folha/apuracao/sintese", folhaApuracaoRoles, async (req, res) => {
     const year = Number((req.query as any)?.year) || new Date().getFullYear();
-    const { data, error } = await supabase
-      .from("folha_apuracoes_mensais")
-      .select("*")
-      .eq("competencia_ano", year)
-      .order("competencia_mes");
+    const { data, error } = await filterByEmpresa(
+      supabase
+        .from("folha_apuracoes_mensais")
+        .select("*")
+        .eq("competencia_ano", year)
+        .order("competencia_mes"),
+      req,
+      "folha_apuracoes_mensais"
+    );
     if (error) return res.status(500).json({ error: "Erro ao carregar síntese." });
 
     const meses = Array.from({ length: 12 }, (_, i) => {
@@ -14176,11 +14530,15 @@ export function createApp() {
     const year = Number((req.query as any)?.year) || new Date().getFullYear();
     const month = Number((req.query as any)?.month);
     if (!month) return res.status(400).json({ error: "Informe o mês." });
-    const { data: lancamentos } = await supabase
-      .from("folha_lancamentos")
-      .select("*")
-      .eq("competencia_ano", year)
-      .eq("competencia_mes", month);
+    const { data: lancamentos } = await filterByEmpresa(
+      supabase
+        .from("folha_lancamentos")
+        .select("*")
+        .eq("competencia_ano", year)
+        .eq("competencia_mes", month),
+      req,
+      "folha_lancamentos"
+    );
     const paramsMap = await loadRubricaParamsMap();
     const grouped = new Map<string, any>();
     for (const l of lancamentos ?? []) {
@@ -14212,11 +14570,15 @@ export function createApp() {
     const year = Number((req.query as any)?.year) || new Date().getFullYear();
     const month = Number((req.query as any)?.month);
     if (!month) return res.status(400).json({ error: "Informe o mês." });
-    const { data: lancamentos } = await supabase
-      .from("folha_lancamentos")
-      .select("*")
-      .eq("competencia_ano", year)
-      .eq("competencia_mes", month);
+    const { data: lancamentos } = await filterByEmpresa(
+      supabase
+        .from("folha_lancamentos")
+        .select("*")
+        .eq("competencia_ano", year)
+        .eq("competencia_mes", month),
+      req,
+      "folha_lancamentos"
+    );
     const grouped = new Map<string, any>();
     for (const l of lancamentos ?? []) {
       const setor = String((l as any).setor_nome || "Sem setor");
@@ -14316,11 +14678,14 @@ export function createApp() {
     const month = Number((req.body as any)?.month);
     const bloqueado = Boolean((req.body as any)?.bloqueado);
     if (!year || !month) return res.status(400).json({ error: "Informe ano e mês." });
-    const { error } = await supabase
-      .from("folha_apuracoes_mensais")
-      .update({ bloqueado, updated_at: new Date().toISOString() })
-      .eq("competencia_ano", year)
-      .eq("competencia_mes", month);
+    const { error } = await scopeByEmpresa(
+      supabase
+        .from("folha_apuracoes_mensais")
+        .update({ bloqueado, updated_at: new Date().toISOString() })
+        .eq("competencia_ano", year)
+        .eq("competencia_mes", month),
+      req
+    );
     if (error) return res.status(500).json({ error: "Não foi possível atualizar bloqueio." });
     await logFolhaAuditoria(year, month, bloqueado ? "bloquear" : "desbloquear", req.user?.id, { bloqueado });
     res.json({ success: true, bloqueado });
@@ -16724,6 +17089,50 @@ export function createApp() {
       const month = date.getMonth() + 1;
       const crdId = Number((reqRow as any).crd_id);
       addRealized(crdId, month, (reqRow as any).amount);
+    }
+
+    // Lançamentos Manuais (+) e Estornos (−) entram SÓ no Prev x Real Diário.
+    // O mensal é alimentado pelas importações (Rel. CRD fechamento etc.).
+    // Qualquer status exceto "cancelled" conta — independe de aprovação.
+    if (viewMode === "diario") {
+      const { data: manualData, error: manualError } = await filterByEmpresa(
+        supabase
+          .from("manual_entries")
+          .select("amount, date, status, crd_id")
+          .neq("status", "cancelled")
+          .gte("date", dateFrom)
+          .lte("date", dateTo),
+        req,
+        "manual_entries"
+      );
+      if (manualError) return res.status(500).json({ error: manualError.message });
+      for (const row of manualData ?? []) {
+        const date = new Date(String((row as any).date || ""));
+        if (Number.isNaN(date.getTime())) continue;
+        const crdId = Number((row as any).crd_id);
+        if (!Number.isFinite(crdId)) continue; // sem CRD: usuário é avisado para vincular
+        addRealized(crdId, date.getMonth() + 1, (row as any).amount);
+      }
+
+      const { data: estornoData, error: estornoError } = await filterByEmpresa(
+        supabase
+          .from("estornos")
+          .select("amount, date, status, crd_id")
+          .neq("status", "cancelled")
+          .gte("date", dateFrom)
+          .lte("date", dateTo),
+        req,
+        "estornos"
+      );
+      if (estornoError) return res.status(500).json({ error: estornoError.message });
+      for (const row of estornoData ?? []) {
+        const date = new Date(String((row as any).date || ""));
+        if (Number.isNaN(date.getTime())) continue;
+        const crdId = Number((row as any).crd_id);
+        if (!Number.isFinite(crdId)) continue;
+        // Estorno reverte o lançamento: subtrai do Realizado.
+        addRealized(crdId, date.getMonth() + 1, -Math.abs(Number((row as any).amount) || 0));
+      }
     }
 
     // Realizado importado (ex.: Consumo Interno, Rel. CRD).

@@ -22,6 +22,7 @@ import {
   FLUXO_AUTH,
   FLUXO_IMPORT,
   FLUXO_APROVACAO,
+  FLUXO_LANCAMENTO,
   FLUXO_FOLHA,
   FLUXO_CMV,
   API_REFERENCE,
@@ -164,6 +165,11 @@ export const UmlPage: React.FC = () => {
             <Diagram title="Autenticação e sessão" chart={FLUXO_AUTH} />
             <Diagram title="Importação de planilha (preview → commit)" chart={FLUXO_IMPORT} />
             <Diagram title="Aprovações" chart={FLUXO_APROVACAO} />
+            <Diagram
+              title="Fluxo do lançamento (aprovação → pagamento → Realizado)"
+              description="Ciclo do lançamento: aprovação financeira, aprovação de controle, pagamento e entrada na coluna Realizado do Prev x Real Diário (por CRD e setor, no mês do lançamento)."
+              chart={FLUXO_LANCAMENTO}
+            />
             <Diagram title="Apuração da Folha" chart={FLUXO_FOLHA} />
             <Diagram title="Apuração do CMV" chart={FLUXO_CMV} />
           </>

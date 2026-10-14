@@ -23,6 +23,7 @@ const formatWhen = (iso: string) => {
 
 export const NomesSistemaPage: React.FC = () => {
   const [rows, setRows] = useState<NameSuggestion[]>([]);
+  const [totalUsers, setTotalUsers] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [query, setQuery] = useState('');
@@ -32,14 +33,17 @@ export const NomesSistemaPage: React.FC = () => {
     (async () => {
       try {
         const res = await fetch('/api/system-name-suggestions');
-        const data = await res.json().catch(() => []);
+        const data = await res.json().catch(() => ({}));
         if (cancelled) return;
         if (!res.ok) {
           setError(data?.error || 'Não foi possível carregar as sugestões.');
           setRows([]);
+          setTotalUsers(0);
           return;
         }
-        setRows(Array.isArray(data) ? data : []);
+        const list = Array.isArray(data) ? data : (Array.isArray(data?.suggestions) ? data.suggestions : []);
+        setRows(list);
+        setTotalUsers(Number(data?.total_users) || 0);
       } catch {
         if (!cancelled) setError('Não foi possível carregar as sugestões.');
       } finally {
@@ -59,6 +63,9 @@ export const NomesSistemaPage: React.FC = () => {
     [rows, query]
   );
 
+  const answered = rows.length;
+  const percent = totalUsers > 0 ? Math.min(100, Math.round((answered / totalUsers) * 100)) : 0;
+
   return (
     <div className="p-8 max-w-6xl mx-auto space-y-6">
       <div>
@@ -66,6 +73,26 @@ export const NomesSistemaPage: React.FC = () => {
         <p className="text-sm text-slate-500 mt-1">
           Sugestões enviadas para substituir o nome Budget Controle. Cada pessoa envia uma vez.
         </p>
+      </div>
+
+      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5 space-y-3">
+        <div className="flex items-end justify-between gap-4">
+          <div>
+            <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Participação</p>
+            <p className="text-sm text-slate-600 mt-1">
+              {loading
+                ? 'Calculando respostas...'
+                : `${answered} de ${totalUsers} usuários responderam`}
+            </p>
+          </div>
+          <p className="text-2xl font-bold text-[#004D40] tabular-nums">{loading ? '—' : `${percent}%`}</p>
+        </div>
+        <div className="h-3 rounded-full bg-slate-100 overflow-hidden" role="progressbar" aria-valuenow={percent} aria-valuemin={0} aria-valuemax={100}>
+          <div
+            className="h-full rounded-full bg-[#004D40] transition-all duration-500"
+            style={{ width: loading ? '0%' : `${percent}%` }}
+          />
+        </div>
       </div>
 
       <div className="relative max-w-md">

@@ -381,6 +381,24 @@ sequenceDiagram
   API-->>AP: item atualizado
 `;
 
+export const FLUXO_LANCAMENTO = `
+flowchart LR
+  L["1 · Lançamento criado<br/>Lançamento Manual · Nota · Requisição<br/>status inicial: open"]
+  AF{"2 · Aprovação<br/>Financeira"}
+  AC{"3 · Aprovação<br/>Controle"}
+  PG["4 · Pagamento Financeiro<br/>status: posted (pago)"]
+  RE["5 · Coluna Realizado<br/>Prev x Real Diário<br/>soma no mês do lançamento · por CRD e por Setor"]
+  DEV["Devolvido para ajuste"]
+
+  L --> AF
+  AF -->|aprova| AC
+  AF -->|reprova| DEV
+  AC -->|aprova| PG
+  AC -->|reprova| DEV
+  DEV -.->|corrige e reenvia| L
+  PG --> RE
+`;
+
 export const FLUXO_FOLHA = `
 sequenceDiagram
   actor C as Controle
