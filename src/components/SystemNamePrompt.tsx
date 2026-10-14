@@ -1,6 +1,18 @@
 import React, { useEffect, useState } from 'react';
 
 const storageKeyFor = (userId: string | number) => `systemNameSuggestion:${userId}`;
+const laterKeyFor = (userId: string | number) => `systemNameSuggestionLater:${userId}`;
+
+/** Limpa o adiamento. O aviso volta no próximo login. */
+export const clearSystemNamePromptLater = (userId?: string | number) => {
+  if (userId != null && userId !== '') {
+    sessionStorage.removeItem(laterKeyFor(userId));
+    return;
+  }
+  for (const key of Object.keys(sessionStorage)) {
+    if (key.startsWith('systemNameSuggestionLater:')) sessionStorage.removeItem(key);
+  }
+};
 
 export const SystemNamePrompt: React.FC<{ userId: string | number }> = ({ userId }) => {
   const storageKey = storageKeyFor(userId);
@@ -11,6 +23,7 @@ export const SystemNamePrompt: React.FC<{ userId: string | number }> = ({ userId
 
   useEffect(() => {
     if (localStorage.getItem(storageKey) === '1') return;
+    if (sessionStorage.getItem(laterKeyFor(userId)) === '1') return;
     let cancelled = false;
     (async () => {
       try {
@@ -29,7 +42,7 @@ export const SystemNamePrompt: React.FC<{ userId: string | number }> = ({ userId
     return () => {
       cancelled = true;
     };
-  }, [storageKey]);
+  }, [storageKey, userId]);
 
   useEffect(() => {
     if (!open) return;
@@ -66,6 +79,7 @@ export const SystemNamePrompt: React.FC<{ userId: string | number }> = ({ userId
         return;
       }
       localStorage.setItem(storageKey, '1');
+      sessionStorage.removeItem(laterKeyFor(userId));
       setOpen(false);
     } catch {
       setError('Não foi possível enviar a sugestão.');
@@ -88,7 +102,10 @@ export const SystemNamePrompt: React.FC<{ userId: string | number }> = ({ userId
             Ajude a escolher um novo nome para este sistema
           </h2>
           <p className="text-sm text-slate-600 mt-3 leading-relaxed">
-            A pedido da Sra. Luiza, gostaríamos da colaboração de todos com sugestões de nomes para o sistema atualmente nomeado &quot;Budget Controle&quot;. Lembre que precisa ter algo a ver com financeiro.
+            A pedido da Sra. Luiza, gostaríamos da colaboração de todos com sugestões de nomes para o sistema atualmente nomeado &quot;Budget Controle&quot;. Lembre que precisa ter algo a ver com Financeiro e gestão estratégica.
+          </p>
+          <p className="text-sm font-semibold text-slate-800 mt-3 leading-relaxed">
+            Você só pode enviar essa sugestão uma vez.
           </p>
         </div>
         <div className="p-6 space-y-4">
@@ -111,13 +128,26 @@ export const SystemNamePrompt: React.FC<{ userId: string | number }> = ({ userId
             />
           </div>
           {error && <p className="text-sm text-red-600">{error}</p>}
-          <button
-            type="submit"
-            disabled={saving || suggestion.trim().length < 2}
-            className="w-full px-4 py-3 bg-[#004D40] text-white font-bold rounded-xl hover:bg-[#003d33] transition-colors disabled:opacity-60"
-          >
-            {saving ? 'Enviando...' : 'Enviar sugestão'}
-          </button>
+          <div className="flex flex-col sm:flex-row gap-3">
+            <button
+              type="button"
+              disabled={saving}
+              onClick={() => {
+                sessionStorage.setItem(laterKeyFor(userId), '1');
+                setOpen(false);
+              }}
+              className="flex-1 px-4 py-3 bg-slate-100 text-slate-600 font-bold rounded-xl hover:bg-slate-200 transition-colors disabled:opacity-60"
+            >
+              Responder depois
+            </button>
+            <button
+              type="submit"
+              disabled={saving || suggestion.trim().length < 2}
+              className="flex-1 px-4 py-3 bg-[#004D40] text-white font-bold rounded-xl hover:bg-[#003d33] transition-colors disabled:opacity-60"
+            >
+              {saving ? 'Enviando...' : 'Enviar sugestão'}
+            </button>
+          </div>
         </div>
       </form>
     </div>

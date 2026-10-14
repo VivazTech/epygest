@@ -23,7 +23,7 @@ import { ConfiguracoesPage as Configuracoes } from './pages/Configuracoes';
 import { UsuariosPage as Usuarios } from './pages/Usuarios';
 import { SugestoesPage as Sugestoes } from './pages/Sugestoes';
 import { NomesSistemaPage as NomesSistema } from './pages/NomesSistema';
-import { SystemNamePrompt } from './components/SystemNamePrompt';
+import { SystemNamePrompt, clearSystemNamePromptLater } from './components/SystemNamePrompt';
 import { PlanilhasPage } from './pages/Planilhas';
 import { PLANILHAS, APURACAO_RECEITA_ITENS, BASE_ORCAMENTO_ITENS, isApuracaoReceitaPlanilha, isBaseOrcamentoTab } from './lib/planilhas';
 import { FolhaPagamentoPage, MESES_FOLHA } from './pages/FolhaPagamento';
@@ -218,6 +218,7 @@ export default function App() {
     } catch {
       // mesmo se falhar a chamada, limpamos o estado local
     }
+    clearSystemNamePromptLater(user?.id);
     setUser(null);
     setLoginForm({ email: '', password: '' });
     setActiveTab('dashboard');
