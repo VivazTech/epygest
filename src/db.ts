@@ -201,6 +201,7 @@ const manualEntryHasColumn = (name: string) => manualEntriesInfo.some((column) =
 if (!manualEntryHasColumn('file_path')) db.exec(`ALTER TABLE manual_entries ADD COLUMN file_path TEXT`);
 if (!manualEntryHasColumn('file_name')) db.exec(`ALTER TABLE manual_entries ADD COLUMN file_name TEXT`);
 if (!manualEntryHasColumn('provider_name')) db.exec(`ALTER TABLE manual_entries ADD COLUMN provider_name TEXT`);
+if (!manualEntryHasColumn('document_number')) db.exec(`ALTER TABLE manual_entries ADD COLUMN document_number TEXT`);
 
 const requisitionsInfo = db.prepare(`PRAGMA table_info(requisitions)`).all() as Array<{ name: string }>;
 if (!requisitionsInfo.some((column) => column.name === 'provider_name')) {

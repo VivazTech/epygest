@@ -22,6 +22,8 @@ import { IndicadoresPage as Indicadores } from './pages/Indicadores';
 import { ConfiguracoesPage as Configuracoes } from './pages/Configuracoes';
 import { UsuariosPage as Usuarios } from './pages/Usuarios';
 import { SugestoesPage as Sugestoes } from './pages/Sugestoes';
+import { NomesSistemaPage as NomesSistema } from './pages/NomesSistema';
+import { SystemNamePrompt } from './components/SystemNamePrompt';
 import { PlanilhasPage } from './pages/Planilhas';
 import { PLANILHAS, APURACAO_RECEITA_ITENS, BASE_ORCAMENTO_ITENS, isApuracaoReceitaPlanilha, isBaseOrcamentoTab } from './lib/planilhas';
 import { FolhaPagamentoPage, MESES_FOLHA } from './pages/FolhaPagamento';
@@ -522,6 +524,7 @@ export default function App() {
       case 'usuarios': return <Usuarios />;
       case 'uml': return canAccessTab('uml') ? <UmlPage /> : <Dashboard />;
       case 'sugestoes': return <Sugestoes />;
+      case 'nomes-sistema': return user?.role === 'admin' ? <NomesSistema /> : <Dashboard />;
       case 'configuracoes': return <Configuracoes />;
       case 'tutorial': return <Tutorial />;
       case 'compras-ordem': return <ComprasPage />;
@@ -796,6 +799,7 @@ function AppShell({
             collapsed={sidebarCollapsed}
             onToggleCollapsed={onToggleCollapsed}
           />
+          {user?.id ? <SystemNamePrompt userId={user.id} /> : null}
 
           <main className={sidebarCollapsed ? 'pl-20 min-h-screen' : 'pl-64 min-h-screen'}>
         <header className="h-20 bg-white/80 backdrop-blur-md border-b border-slate-100 flex items-center gap-4 px-8 sticky top-0 z-40">
@@ -867,6 +871,8 @@ function AppShell({
                 ? 'Tutorial guiado'
                 : activeTab === 'sugestoes'
                 ? 'Sugestões'
+                : activeTab === 'nomes-sistema'
+                ? 'Nomes do sistema'
                 : activeTab === 'uml'
                 ? 'UML do Sistema'
                 : activeTab.replace('-', ' ')}

@@ -1478,6 +1478,72 @@ export function createApp() {
   });
 
   // ====================================================
+  // SUGESTÃO DE NOME DO SISTEMA (uma vez por usuário)
+  // ====================================================
+  app.get("/api/system-name-suggestions/me", async (req, res) => {
+    const userId = Number(req.user?.id);
+    if (!Number.isFinite(userId)) return res.status(401).json({ error: "Não autenticado" });
+    const { data, error } = await supabase
+      .from("system_name_suggestions")
+      .select("id")
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (error) {
+      console.error("Erro ao verificar sugestão de nome:", error);
+      return res.status(500).json({ error: "Não foi possível verificar a sugestão." });
+    }
+    res.json({ submitted: Boolean(data) });
+  });
+
+  app.post("/api/system-name-suggestions", async (req, res) => {
+    const suggestion = String(req.body?.suggestion || "").trim().slice(0, 80);
+    if (suggestion.length < 2) {
+      return res.status(400).json({ error: "Informe um nome para continuar." });
+    }
+    const userId = Number(req.user?.id);
+    if (!Number.isFinite(userId)) return res.status(401).json({ error: "Não autenticado" });
+
+    const { data: userRow } = await supabase
+      .from("users")
+      .select("id, name, email, role")
+      .eq("id", userId)
+      .maybeSingle();
+
+    const { data, error } = await supabase
+      .from("system_name_suggestions")
+      .insert({
+        user_id: userId,
+        user_name: userRow?.name || req.user?.name || null,
+        user_email: userRow?.email || req.user?.email || null,
+        user_role: userRow?.role || req.user?.role || null,
+        suggestion,
+      })
+      .select("id, created_at")
+      .single();
+
+    if (error) {
+      if (String((error as { code?: string }).code || "") === "23505") {
+        return res.json({ submitted: true, already: true });
+      }
+      console.error("Erro ao salvar sugestão de nome:", error);
+      return res.status(500).json({ error: "Não foi possível salvar a sugestão." });
+    }
+    res.status(201).json({ id: data.id, submitted: true, created_at: data.created_at });
+  });
+
+  app.get("/api/system-name-suggestions", requireRole("admin"), async (_req, res) => {
+    const { data, error } = await supabase
+      .from("system_name_suggestions")
+      .select("id, user_id, user_name, user_email, user_role, suggestion, created_at")
+      .order("created_at", { ascending: false });
+    if (error) {
+      console.error("Erro ao listar sugestões de nome:", error);
+      return res.status(500).json({ error: "Não foi possível carregar as sugestões." });
+    }
+    res.json(data ?? []);
+  });
+
+  // ====================================================
   // SUGESTÕES DOS USUÁRIOS
   // ====================================================
   app.post("/api/suggestions", async (req, res) => {
@@ -2861,10 +2927,11 @@ export function createApp() {
 
   app.post("/api/manual-entries", async (req, res) => {
     const {
-      sector_id, crd_id, description, provider_name, amount, date, issue_date, due_date,
+      sector_id, crd_id, description, provider_name, document_number, amount, date, issue_date, due_date,
       file_path, file_name, payment_method, pix_key, currency,
     } = req.body;
     const resolvedProviderName = String(provider_name || "").trim();
+    const resolvedDocumentNumber = String(document_number || "").trim().slice(0, 80) || null;
     const resolvedDueDate = String(due_date || "").trim().slice(0, 10);
     const resolvedPayment = String(payment_method || "").trim();
     const resolvedCurrency = String(currency || "BRL").trim().toUpperCase() || "BRL";
@@ -2934,6 +3001,7 @@ export function createApp() {
         user_id: req.user!.id,
         description: description || null,
         provider_name: resolvedProviderName,
+        document_number: resolvedDocumentNumber,
         amount: resolvedAmount,
         issue_date,
         date,
@@ -3033,11 +3101,12 @@ export function createApp() {
     if (!accessCurrent.ok) return res.status(accessCurrent.status).json({ error: accessCurrent.error });
 
     const {
-      sector_id, crd_id, description, provider_name, amount, date, issue_date, due_date,
+      sector_id, crd_id, description, provider_name, document_number, amount, date, issue_date, due_date,
       file_path, file_name, payment_method, pix_key, currency,
     } = req.body;
 
     const resolvedProviderName = String(provider_name || "").trim();
+    const resolvedDocumentNumber = String(document_number || "").trim().slice(0, 80) || null;
     const resolvedDueDate = String(due_date || "").trim().slice(0, 10);
     const resolvedIssue = String(issue_date || "").trim().slice(0, 10);
     const resolvedDate = String(date || "").trim().slice(0, 10);
@@ -3110,6 +3179,7 @@ export function createApp() {
       { field: "issue_date", label: "Emissão", from: asDate(existing.issue_date), to: resolvedIssue },
       { field: "date", label: "Lançamento", from: asDate(existing.date), to: resolvedDate },
       { field: "due_date", label: "Vencimento", from: asDate(existing.due_date), to: resolvedDueDate },
+      { field: "document_number", label: "Nº do documento", from: asText(existing.document_number), to: asText(resolvedDocumentNumber) },
       { field: "sector_id", label: "Setor", from: sectorFrom, to: sectorTo },
       { field: "crd_id", label: "CRD", from: asText(existing.crd_id), to: asText(resolvedCrdId) },
       { field: "payment_method", label: "Pagamento", from: asText(existing.payment_method), to: resolvedPayment },
@@ -3139,6 +3209,7 @@ export function createApp() {
           crd_id: resolvedCrdId,
           description: resolvedDescription,
           provider_name: resolvedProviderName,
+          document_number: resolvedDocumentNumber,
           amount: resolvedAmount,
           date: resolvedDate,
           issue_date: resolvedIssue,

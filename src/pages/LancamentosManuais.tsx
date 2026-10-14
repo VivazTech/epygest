@@ -30,6 +30,7 @@ const EMPTY_FORM = {
   sector_id: '',
   crd_id: '',
   provider_name: '',
+  document_number: '',
   payment_method: '',
   currency: 'BRL',
   pix_key: '',
@@ -264,6 +265,7 @@ export const LancamentosManuaisPage: React.FC = () => {
       sector_id: parseInt(form.sector_id, 10),
       crd_id: form.crd_id ? parseInt(form.crd_id, 10) : null,
       provider_name: form.provider_name.trim(),
+      document_number: form.document_number.trim() || null,
       payment_method: form.payment_method,
       currency: form.currency,
       pix_key: form.payment_method === 'pix' ? form.pix_key.trim() : null,
@@ -334,6 +336,7 @@ export const LancamentosManuaisPage: React.FC = () => {
       sector_id: String(entry.sector_id || ''),
       crd_id: entry.crd_id ? String(entry.crd_id) : '',
       provider_name: String(entry.provider_name || ''),
+      document_number: String(entry.document_number || ''),
       payment_method: String(entry.payment_method || ''),
       currency: String(entry.currency || 'BRL'),
       pix_key: String(entry.pix_key || ''),
@@ -452,7 +455,7 @@ export const LancamentosManuaisPage: React.FC = () => {
         if (statusFilter !== 'all' && String(entry.status || '') !== statusFilter) return false;
         if (!matchesDatePeriod(entry.issue_date, issueDateFrom, issueDateTo)) return false;
         if (!matchesCrdCodeFilter(crdFilter, entry.crd_code, entry.crd_name)) return false;
-        if (!matchesInvoiceNumberFilter(invoiceNumberFilter, entry.protocol, entry.description, entry.provider_name)) {
+        if (!matchesInvoiceNumberFilter(invoiceNumberFilter, entry.protocol, entry.document_number, entry.description, entry.provider_name)) {
           return false;
         }
         if (!matchesAmountFilter(amountFilter, entry.amount)) return false;
@@ -464,6 +467,7 @@ export const LancamentosManuaisPage: React.FC = () => {
           entry.crd_name,
           entry.description,
           entry.provider_name,
+          entry.document_number,
           entry.payment_method,
           entry.currency,
           entry.pix_key,
@@ -688,6 +692,9 @@ export const LancamentosManuaisPage: React.FC = () => {
                   </td>
                   <td className="px-6 py-4 text-sm text-slate-600">
                     {entry.provider_name || entry.description || '—'}
+                    {entry.document_number ? (
+                      <span className="block text-xs font-semibold text-slate-700 mt-0.5">Nº {entry.document_number}</span>
+                    ) : null}
                     {entry.provider_name && entry.description ? (
                       <span className="block text-xs font-normal text-slate-400 mt-0.5">{entry.description}</span>
                     ) : null}
@@ -889,6 +896,17 @@ export const LancamentosManuaisPage: React.FC = () => {
                     value={form.provider_name}
                     onChange={(e) => setForm((p) => ({ ...p, provider_name: e.target.value }))}
                     placeholder="Nome do fornecedor"
+                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Número do documento ou nota</label>
+                  <input
+                    value={form.document_number}
+                    onChange={(e) => setForm((p) => ({ ...p, document_number: e.target.value }))}
+                    placeholder="Ex.: 2026000000088"
+                    maxLength={80}
                     className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
                   />
                 </div>

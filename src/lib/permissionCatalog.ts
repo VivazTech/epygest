@@ -31,6 +31,7 @@ export const PERMISSION_RESOURCES: PermissionResource[] = [
   { key: 'investimentos', label: 'Investimentos', group: 'Menu principal', actions: ['view', 'create', 'edit', 'delete'] },
   { key: 'usuarios', label: 'Usuários / Permissões', group: 'Menu principal', actions: ['view', 'create', 'edit', 'delete'] },
   { key: 'sugestoes', label: 'Sugestões', group: 'Menu principal', actions: ['view'] },
+  { key: 'nomes-sistema', label: 'Nomes do sistema', group: 'Menu principal', actions: ['view'] },
   { key: 'configuracoes', label: 'Configurações', group: 'Menu principal', actions: ['view', 'edit'] },
 
   { key: 'comandas', label: 'Comandas', group: 'Lançamentos', actions: ['view', 'create', 'edit'] },
@@ -123,7 +124,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, Partial<Record<string, Per
   },
   controle: Object.fromEntries(
     PERMISSION_RESOURCES.filter(
-      (r) => r.key !== 'usuarios' && r.key !== 'configuracoes' && r.key !== 'uml'
+      (r) => r.key !== 'usuarios' && r.key !== 'configuracoes' && r.key !== 'uml' && r.key !== 'nomes-sistema'
     ).map((r) => [r.key, r.actions])
   ),
   manager: {

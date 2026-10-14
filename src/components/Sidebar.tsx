@@ -32,6 +32,7 @@ import {
   Landmark,
   BookOpen,
   Lightbulb,
+  PenLine,
   ShieldCheck,
   Percent,
   Network,
@@ -95,6 +96,7 @@ const menuItems = [
   { id: 'investimentos', label: 'Investimentos', icon: Landmark, roles: ['admin', 'controle', 'manager', 'finance', 'diretoria'] },
   { id: 'usuarios', label: 'Usuários', icon: Users, roles: ['admin'] },
   { id: 'sugestoes', label: 'Sugestões', icon: Lightbulb, roles: ['admin'] },
+  { id: 'nomes-sistema', label: 'Nomes do sistema', icon: PenLine, roles: ['admin'] },
   { id: 'configuracoes', label: 'Configurações', icon: Settings, roles: ['admin'] },
   { id: 'uml', label: 'UML do Sistema', icon: Network, roles: ['admin'] },
 ];
@@ -118,7 +120,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   const constructionGroupIds = ['dashboard', 'analise', 'planejamento'];
   const lancamentosGroupIds = lancamentosMenuItems.map((item) => item.id);
-  const adminGroupIds = ['usuarios', 'sugestoes', 'configuracoes', 'uml'];
+  const adminGroupIds = ['usuarios', 'sugestoes', 'nomes-sistema', 'configuracoes', 'uml'];
   const filteredMenu = menuItems.filter((item) => canView(item.id, item.roles));
   const lancamentosMenu = lancamentosMenuItems.filter((item) => canView(item.id, item.roles));
   const constructionMenu = filteredMenu.filter((item) => constructionGroupIds.includes(item.id));
