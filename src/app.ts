@@ -3073,14 +3073,26 @@ export function createApp() {
         "manual_entries"
       );
       sumQuery = applyFilters(sumQuery);
+      if (crdTerm) {
+        const { data: crdRows } = await filterByEmpresa(
+          supabase.from("crds").select("id").or(`code.ilike.%${crdTerm}%,name.ilike.%${crdTerm}%`),
+          req,
+          "crds"
+        );
+        const crdIds = (crdRows ?? []).map((c: any) => Number(c.id)).filter((id: number) => Number.isFinite(id));
+        if (crdIds.length) sumQuery = sumQuery.in("crd_id", crdIds);
+      }
       const { data: amountRows } = await sumQuery;
       if (Array.isArray(amountRows)) totalAmount = sumAmounts(amountRows, (r: any) => r.amount);
     } catch {
       // mantém soma da página
     }
 
+    const totalCount =
+      count != null && Number.isFinite(Number(count)) ? Number(count) : mapped.length;
+
     return res.json(
-      paginatedPayload(mapped, count ?? mapped.length, pag.page, pag.pageSize, { totalAmount })
+      paginatedPayload(mapped, totalCount, pag.page, pag.pageSize, { totalAmount })
     );
   });
 
@@ -4841,7 +4853,9 @@ export function createApp() {
 
     const mapped = mapComandaRows(comandas ?? [], items ?? []);
     if (!pag.enabled) return res.json(mapped);
-    return res.json(paginatedPayload(mapped, count ?? mapped.length, pag.page, pag.pageSize));
+    const totalCount =
+      count != null && Number.isFinite(Number(count)) ? Number(count) : mapped.length;
+    return res.json(paginatedPayload(mapped, totalCount, pag.page, pag.pageSize));
   });
 
   app.post("/api/comandas", async (req, res) => {
@@ -4978,8 +4992,15 @@ export function createApp() {
     }
     // Sem month/from/to: retorna todas as notas (competência "Todos").
 
-    // DANFE vs serviço: inferido pelo nº da nota (44 dígitos), filtrado no front/pós-query se necessário.
-    void doc_type;
+    // DANFE vs serviço: inferido pelo nº da nota (44 dígitos). Com doc_type, filtra antes de paginar.
+    const docTypeRaw = String(doc_type || "").trim().toLowerCase();
+    const docTypeFilter =
+      docTypeRaw === "danfe" || docTypeRaw === "nota" || docTypeRaw === "servico"
+        ? docTypeRaw === "danfe"
+          ? "danfe"
+          : "nota"
+        : null;
+
     if (amount) {
       const amt = Number(String(amount).replace(",", "."));
       if (Number.isFinite(amt)) query = query.eq("amount", amt);
@@ -4994,13 +5015,20 @@ export function createApp() {
       );
     }
 
-    if (pag.enabled) query = query.range(pag.from, pag.to);
+    // Com filtro DANFE/nota, precisa carregar o conjunto filtrável e paginar em memória
+    // (não há coluna doc_type — classificação é pelo nº com 44 dígitos).
+    if (pag.enabled && !docTypeFilter) {
+      query = query.range(pag.from, pag.to);
+    } else if (docTypeFilter) {
+      // evita o default 1000 do PostgREST ao filtrar/paginar em memória
+      query = query.limit(10000);
+    }
 
     const { data, error, count } = await query;
 
     if (error) { console.error(error); return res.status(500).json({ error: "Erro interno ao processar a solicitação." }); }
 
-    const mapped = (data ?? []).map((i: any) => ({
+    let mapped = (data ?? []).map((i: any) => ({
       ...i,
       sector_name: i.sectors?.name ?? null,
       user_name: i.users?.name ?? null,
@@ -5010,36 +5038,51 @@ export function createApp() {
       users: undefined,
     }));
 
+    if (docTypeFilter) {
+      mapped = mapped.filter((i: any) => inferInvoiceDocType(i) === docTypeFilter);
+    }
+
     if (!pag.enabled) return res.json(mapped);
 
-    let totalAmount = sumAmounts(mapped, (r: any) => r.amount);
-    try {
-      let sumQuery = filterByEmpresa(supabase.from("invoices").select("amount"), req, "invoices");
-      if (from || to) {
-        sumQuery = applyProvisionDateRange(sumQuery, from || to!, to || from!);
-      } else if (month && Number(month) >= 1 && Number(month) <= 12) {
-        const { dateFrom, dateTo } = getMonthDateRange(Number(year) || now.getFullYear(), Number(month));
-        sumQuery = applyProvisionDateRange(sumQuery, dateFrom, dateTo);
+    const filteredTotal = docTypeFilter ? mapped.length : (count ?? mapped.length);
+    const pageItems = docTypeFilter
+      ? mapped.slice(pag.from, pag.from + pag.pageSize)
+      : mapped;
+    const totalAmount = sumAmounts(docTypeFilter ? mapped : pageItems, (r: any) => r.amount);
+
+    // Sem doc_type: tenta soma no banco com os mesmos filtros (mais precisa que a página).
+    let resolvedTotalAmount = totalAmount;
+    if (!docTypeFilter) {
+      try {
+        let sumQuery = filterByEmpresa(supabase.from("invoices").select("amount"), req, "invoices");
+        if (from || to) {
+          sumQuery = applyProvisionDateRange(sumQuery, from || to!, to || from!);
+        } else if (month && Number(month) >= 1 && Number(month) <= 12) {
+          const { dateFrom, dateTo } = getMonthDateRange(Number(year) || now.getFullYear(), Number(month));
+          sumQuery = applyProvisionDateRange(sumQuery, dateFrom, dateTo);
+        }
+        if (amount) {
+          const amt = Number(String(amount).replace(",", "."));
+          if (Number.isFinite(amt)) sumQuery = sumQuery.eq("amount", amt);
+        }
+        if (crdTerm) sumQuery = sumQuery.ilike("crd", `%${crdTerm}%`);
+        if (term) {
+          const like = `%${term}%`;
+          sumQuery = sumQuery.or(
+            `protocol.ilike.${like},invoice_number.ilike.${like},provider_name.ilike.${like},description.ilike.${like}`
+          );
+        }
+        const { data: amountRows } = await sumQuery;
+        if (Array.isArray(amountRows)) resolvedTotalAmount = sumAmounts(amountRows, (r: any) => r.amount);
+      } catch {
+        // mantém soma da página
       }
-      if (amount) {
-        const amt = Number(String(amount).replace(",", "."));
-        if (Number.isFinite(amt)) sumQuery = sumQuery.eq("amount", amt);
-      }
-      if (crdTerm) sumQuery = sumQuery.ilike("crd", `%${crdTerm}%`);
-      if (term) {
-        const like = `%${term}%`;
-        sumQuery = sumQuery.or(
-          `protocol.ilike.${like},invoice_number.ilike.${like},provider_name.ilike.${like},description.ilike.${like}`
-        );
-      }
-      const { data: amountRows } = await sumQuery;
-      if (Array.isArray(amountRows)) totalAmount = sumAmounts(amountRows, (r: any) => r.amount);
-    } catch {
-      // mantém soma da página
     }
 
     return res.json(
-      paginatedPayload(mapped, count ?? mapped.length, pag.page, pag.pageSize, { totalAmount })
+      paginatedPayload(pageItems, filteredTotal, pag.page, pag.pageSize, {
+        totalAmount: resolvedTotalAmount,
+      })
     );
   });
 

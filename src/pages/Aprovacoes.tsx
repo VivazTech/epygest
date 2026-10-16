@@ -15,7 +15,7 @@ import { useToast } from '../context/ToastContext';
 import { LaunchNumberAmountFilters } from '../components/LaunchNumberAmountFilters';
 import { DateBrInput } from '../components/DateBrInput';
 import { ListPagination } from '../components/ListPagination';
-import { parseListResponse, useServerPagination } from '../hooks/useServerPagination';
+import { parseListResponse, useServerListEffect, useServerPagination } from '../hooks/useServerPagination';
 import { isDirectDocumentUrl } from '../lib/storagePath';
 import { confirmCancel } from '../lib/confirmAction';
 import {
@@ -76,7 +76,7 @@ export const AprovacoesPage: React.FC = () => {
     (userRole === 'diretoria' || userRole === 'admin');
   void canApproveDiretoria;
 
-  const loadData = useCallback(async () => {
+  const loadData = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
     try {
       const params = new URLSearchParams(pagination.queryParams);
@@ -91,22 +91,24 @@ export const AprovacoesPage: React.FC = () => {
       if (amountFilter.trim()) params.set('amount', amountFilter.trim());
 
       const [aprovRes, sectorsRes] = await Promise.all([
-        fetch(`/api/aprovacoes?${params.toString()}`),
-        fetch('/api/sectors'),
+        fetch(`/api/aprovacoes?${params.toString()}`, { signal }),
+        fetch('/api/sectors', { signal }),
       ]);
       const data = await aprovRes.json().catch(() => ({}));
       const sectorsData = await sectorsRes.json().catch(() => []);
+      if (signal?.aborted) return;
       const parsed = parseListResponse<AprovacaoItem>(data);
       setItems(parsed.items);
       pagination.applyMeta({ total: parsed.total, totalAmount: parsed.totalAmount ?? null });
       setSummary(data?.summary && typeof data.summary === 'object' ? data.summary : null);
       setSectors(Array.isArray(sectorsData) ? sectorsData : []);
-    } catch {
+    } catch (err) {
+      if ((err as any)?.name === 'AbortError') return;
       setItems([]);
       pagination.applyMeta({ total: 0, totalAmount: 0 });
       setSummary(null);
     } finally {
-      setLoading(false);
+      if (!signal?.aborted) setLoading(false);
     }
   }, [
     typeFilter,
@@ -165,9 +167,7 @@ export const AprovacoesPage: React.FC = () => {
     }
   }, [userRole, allowedSectorIds, sectorFilter]);
 
-  useEffect(() => {
-    pagination.resetPage();
-  }, [
+  const listFilterKey = [
     typeFilter,
     sectorFilter,
     dateFrom,
@@ -177,12 +177,9 @@ export const AprovacoesPage: React.FC = () => {
     query,
     invoiceNumberFilter,
     amountFilter,
-    pagination.resetPage,
-  ]);
+  ].join('|');
 
-  useEffect(() => {
-    loadData();
-  }, [loadData]);
+  useServerListEffect(listFilterKey, pagination, (signal) => loadData(signal));
 
   const filteredAmountTotal = useMemo(() => {
     if (pagination.totalAmount != null && Number.isFinite(pagination.totalAmount)) {

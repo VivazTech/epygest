@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { PAGE_SIZE_OPTIONS } from './useClientPagination';
 
 export { PAGE_SIZE_OPTIONS };
@@ -19,14 +19,32 @@ export function useServerPagination(defaultPageSize = 20) {
 
   const resetPage = useCallback(() => setPage(1), []);
 
+  /**
+   * Quando filtros mudam e a página atual não é 1, volta para 1 e sinaliza
+   * para o efeito de fetch NÃO buscar com a página antiga (evita corrida).
+   * Retorna true se o fetch deve rodar nesta execução.
+   */
+  const syncPageForFilters = useCallback(
+    (filterKey: string, prevFilterKeyRef: { current: string }) => {
+      if (prevFilterKeyRef.current !== filterKey) {
+        prevFilterKeyRef.current = filterKey;
+        if (page !== 1) {
+          setPage(1);
+          return false;
+        }
+      }
+      return true;
+    },
+    [page]
+  );
+
   const applyMeta = useCallback(
     (meta: { total?: number; totalAmount?: number | null; page?: number; pageSize?: number }) => {
       if (meta.total != null) setTotal(Math.max(0, Number(meta.total) || 0));
       if (meta.totalAmount !== undefined) {
         setTotalAmount(meta.totalAmount == null ? null : Number(meta.totalAmount));
       }
-      if (meta.page != null && Number(meta.page) >= 1) setPage(Number(meta.page));
-      if (meta.pageSize != null && Number(meta.pageSize) >= 1) setPageSizeState(Number(meta.pageSize));
+      // Não aplica page/pageSize da resposta — evita “puxar” de volta para página antiga.
     },
     []
   );
@@ -53,10 +71,31 @@ export function useServerPagination(defaultPageSize = 20) {
     setTotalAmount,
     applyMeta,
     resetPage,
+    syncPageForFilters,
     queryParams,
     from,
     to,
   };
+}
+
+/** Efeito de lista paginada: cancela fetch antigo e evita corrida filtro×página. */
+export function useServerListEffect(
+  filterKey: string,
+  pagination: ReturnType<typeof useServerPagination>,
+  load: (signal: AbortSignal) => Promise<void>
+) {
+  const prevFilterKeyRef = useRef(filterKey);
+
+  useEffect(() => {
+    if (!pagination.syncPageForFilters(filterKey, prevFilterKeyRef)) return;
+
+    const ac = new AbortController();
+    void load(ac.signal).catch(() => {
+      // abort / rede — ignorado
+    });
+    return () => ac.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- load fecha sobre filtros atuais
+  }, [filterKey, pagination.page, pagination.pageSize, pagination.syncPageForFilters]);
 }
 
 /** Normaliza resposta legada (array) ou paginada ({ items, total }). */
