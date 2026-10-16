@@ -222,6 +222,15 @@ Aterrado na stack atual: **React 19 + Vite + Express (`src/app.ts`) + Supabase (
 
 **Critério:** budget do Aquamania criado a partir da base do Vivaz, dados principais importados, estrutura pronta para acompanhamento.
 
+**Feito (2026-10) — módulo próprio "Orçamento Aquamania"** (menu só com a empresa Aquamania; permissão `aqua-orcamento`):
+- **SQL:** [sql/82_aqua_orcamento.sql](sql/82_aqua_orcamento.sql) (temporada set→ago, premissas, parâmetros, estrutura, valores, quadro) e [sql/83_aqua_orcamento_permissions.sql](sql/83_aqua_orcamento_permissions.sql).
+- **Cálculos:** [src/lib/aquaOrcamento.ts](src/lib/aquaOrcamento.ts) replica a Síntese (receitas por pax, comissões, VA, ISS/ICMS/PIS/COFINS, CSLL/IRPJ, CMV 34%), o Prev x Real (Resultado = Faturamento − Despesas − Impostos − Obras − CMV, acumulado até o mês) e o Quadro de Empregados (FGTS/INSS sobre salário, 13º e férias; VT = 220 − 6%).
+- **Importação:** [src/lib/aquaImportXlsx.ts](src/lib/aquaImportXlsx.ts) lê os .xlsx originais (fórmulas → regra de cada linha; constantes "+X" das fórmulas → ajustes por célula).
+- **Conferência:** `npx tsx scripts/conferir-aqua-orcamento.ts` — previsto, realizado (alimentado pelos relatórios da própria planilha) e quadro batem 100% com a planilha 2026-27.
+- **API:** [src/aquaOrcamentoRoutes.ts](src/aquaOrcamentoRoutes.ts) (`/api/aqua/*`); realizado vem de Rel. CRD, Vendas por Ambiente, Requisições e Folha apurada.
+- **Tela:** [src/pages/AquaOrcamento.tsx](src/pages/AquaOrcamento.tsx) — Prev x Real, Premissas e Síntese, Quadro de Pessoal, Parâmetros, Estrutura.
+- **Pendências:** Repasse Vivaz e Folha prevista seguem digitados/importados (na planilha vinham por IMPORTRANGE); confirmar com a equipe os erros encontrados na planilha (Atrações fora do total do quadro, VT negativo, base do A&B Bar com passantes do ano anterior, consumo interno contado em Despesas e em CMV).
+
 ---
 
 # Dependências externas (bloqueiam parte das fases)

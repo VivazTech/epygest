@@ -54,6 +54,7 @@ import {
   type RolePermissionRow,
 } from "./lib/permissionCatalog.js";
 import { logImportHistory } from "./lib/importHistory.js";
+import { registerAquaOrcamentoRoutes } from "./aquaOrcamentoRoutes.js";
 import { PROTOCOL_PREFIX, invoiceProtocolPrefix } from "./lib/launchProtocol.js";
 import { findInvoiceDuplicate, type InvoiceDuplicateRow } from "./lib/invoiceDuplicate.js";
 import { buildPeriodKey, parseImportPeriodInput, type ImportScope } from "./lib/importPeriod.js";
@@ -18890,6 +18891,11 @@ export function createApp() {
     if (error) { console.error(error); return res.status(500).json({ error: "Erro interno ao processar a solicitação." }); }
     res.json(data);
   });
+
+  // ====================================================
+  // ORÇAMENTO AQUAMANIA (temporada set→ago) — src/aquaOrcamentoRoutes.ts
+  // ====================================================
+  registerAquaOrcamentoRoutes(app);
 
   // Tratador de erros de upload (ex.: arquivo acima do limite) e fallback genérico.
   app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {

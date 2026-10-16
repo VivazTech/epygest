@@ -556,6 +556,17 @@ export const API_REFERENCE: ApiGroup[] = [
     R('GET', '/api/orcamento'), R('PATCH', '/api/orcamento/cell'), R('POST', '/api/orcamento/import', 'admin'),
     R('GET', '/api/ajustes'), R('PATCH', '/api/ajustes/cell'), R('POST', '/api/ajustes/import', 'admin'),
   ]},
+  { group: 'Orçamento Aquamania', routes: [
+    R('GET', '/api/aqua/temporadas', 'admin,controle,finance,diretoria'), R('POST', '/api/aqua/temporadas', 'admin,controle'),
+    R('PATCH', '/api/aqua/temporadas/:id', 'admin,controle'), R('DELETE', '/api/aqua/temporadas/:id', 'admin'),
+    R('GET', '/api/aqua/temporadas/:id/dados', 'admin,controle,finance,diretoria'), R('GET', '/api/aqua/temporadas/:id/prev-real', 'admin,controle,finance,diretoria'),
+    R('PUT', '/api/aqua/temporadas/:id/premissas', 'admin,controle'), R('PUT', '/api/aqua/temporadas/:id/parametros', 'admin,controle'),
+    R('PUT', '/api/aqua/temporadas/:id/calendario', 'admin,controle'), R('PATCH', '/api/aqua/valores', 'admin,controle'),
+    R('POST', '/api/aqua/temporadas/:id/linhas', 'admin,controle'), R('PATCH', '/api/aqua/linhas/:id', 'admin,controle'), R('DELETE', '/api/aqua/linhas/:id', 'admin,controle'),
+    R('POST', '/api/aqua/temporadas/:id/vagas', 'admin,controle'), R('PATCH', '/api/aqua/vagas/:id', 'admin,controle'), R('DELETE', '/api/aqua/vagas/:id', 'admin,controle'),
+    R('POST', '/api/aqua/temporadas/:id/quadro/duplicar', 'admin,controle'),
+    R('POST', '/api/aqua/import/preview', 'admin,controle'), R('POST', '/api/aqua/import/commit', 'admin,controle'),
+  ]},
   { group: 'Apuração da Folha', routes: [
     R('GET', '/api/folha'), R('POST', '/api/folha/import', 'admin,finance,controle'),
     R('GET', '/api/folha/rubricas'), R('PATCH', '/api/folha/rubricas/operacao', 'admin,finance,controle'), R('POST', '/api/folha/rubricas/enviar', 'admin,finance,controle'),

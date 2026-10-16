@@ -37,6 +37,7 @@ import { RelatorioCrdPage, RelatorioCrdMesPage, MESES_REL_CRD } from './pages/Re
 import { RelatorioRequisicoesPage, RelatorioRequisicoesMesPage, MESES_REL_REQ } from './pages/RelatorioRequisicoes';
 import { ConsumoInternoPage, ConsumoInternoMesPage, MESES_CONSUMO } from './pages/ConsumoInterno';
 import { VendasPdvsPage } from './pages/VendasPdvs';
+import { AquaOrcamentoPage } from './pages/AquaOrcamento';
 import { CmvPage, CmvMesPage } from './pages/Cmv';
 import { CmvTarifasPage } from './pages/CmvTarifas';
 import { MESES_CMV } from './lib/cmv';
@@ -530,6 +531,7 @@ export default function App() {
       case 'tutorial': return <Tutorial />;
       case 'compras-ordem': return <ComprasPage />;
       case 'vendas-pdvs': return <VendasPdvsPage />;
+      case 'aqua-orcamento': return canAccessTab('aqua-orcamento') ? <AquaOrcamentoPage user={user ?? undefined} /> : <Dashboard />;
       case 'mensalidades':
       case 'compras-mensalidades': // compatibilidade com atalho antigo
         return <MensalidadesPage />;
@@ -862,6 +864,8 @@ function AppShell({
                   }`
                 : activeTab === 'compras-ordem'
                 ? 'Compras / Ordem de Compra'
+                : activeTab === 'aqua-orcamento'
+                ? 'Orçamento Aquamania'
                 : activeTab === 'investimentos'
                 ? 'Investimentos'
                 : activeTab === 'prev-real'
@@ -910,7 +914,7 @@ function AppShell({
         <div
           key={companyKey}
           data-tour="page-content"
-          className={activeTab === 'notas' || activeTab === 'danfe' || activeTab === 'comandas' || activeTab === 'lancamentos-manuais' || activeTab === 'estornos' || activeTab === 'requisicoes' || activeTab === 'mensalidades' || activeTab === 'aprovacoes' || activeTab === 'compras-mensalidades' || activeTab === 'cadastros' || activeTab === 'sintase' || activeTab === 'prev-real' || activeTab === 'indicadores' || activeTab === 'dre' || activeTab === 'rel-crd' || activeTab.startsWith('rel-crd-') || activeTab === 'rel-req' || activeTab.startsWith('rel-req-') || activeTab === 'rel-consumo' || activeTab.startsWith('rel-consumo-') || activeTab === 'rel-rds' || activeTab.startsWith('rel-rds-') || activeTab.startsWith('planilha-') || activeTab.startsWith('folha-') || activeTab === 'painel-rh' || activeTab === 'absenteismo' || activeTab === 'turnover' || activeTab === 'tangerino-ponto' || activeTab === 'folha-apuracao' || activeTab === 'compras-ordem' || activeTab === 'investimentos' || activeTab === 'tutorial' || activeTab === 'sugestoes' || isPainelSetorialTab(activeTab) ? 'p-8 pt-4 md:pt-8 w-full max-w-none' : 'p-8 pt-4 md:pt-8 max-w-7xl mx-auto'}
+          className={activeTab === 'notas' || activeTab === 'danfe' || activeTab === 'comandas' || activeTab === 'lancamentos-manuais' || activeTab === 'estornos' || activeTab === 'requisicoes' || activeTab === 'mensalidades' || activeTab === 'aprovacoes' || activeTab === 'compras-mensalidades' || activeTab === 'cadastros' || activeTab === 'sintase' || activeTab === 'prev-real' || activeTab === 'indicadores' || activeTab === 'dre' || activeTab === 'rel-crd' || activeTab.startsWith('rel-crd-') || activeTab === 'rel-req' || activeTab.startsWith('rel-req-') || activeTab === 'rel-consumo' || activeTab.startsWith('rel-consumo-') || activeTab === 'rel-rds' || activeTab.startsWith('rel-rds-') || activeTab.startsWith('planilha-') || activeTab.startsWith('folha-') || activeTab === 'painel-rh' || activeTab === 'absenteismo' || activeTab === 'turnover' || activeTab === 'tangerino-ponto' || activeTab === 'folha-apuracao' || activeTab === 'compras-ordem' || activeTab === 'aqua-orcamento' || activeTab === 'investimentos' || activeTab === 'tutorial' || activeTab === 'sugestoes' || isPainelSetorialTab(activeTab) ? 'p-8 pt-4 md:pt-8 w-full max-w-none' : 'p-8 pt-4 md:pt-8 max-w-7xl mx-auto'}
         >
           <PageErrorBoundary resetKey={`${companyKey}:${activeTab}`}>
             {renderContent()}

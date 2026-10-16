@@ -43,6 +43,7 @@ const STATIC_LABELS: Record<string, string> = {
   aprovacoes: 'Aprovações',
   'compras-ordem': 'Compras / Ordem de Compra',
   'vendas-pdvs': 'Vendas / PDVs',
+  'aqua-orcamento': 'Orçamento Aquamania',
   'folha-apuracao': 'Apuração da Folha',
   'painel-rh': 'Orçado × Realizado — Folha',
   absenteismo: 'Absenteísmo',

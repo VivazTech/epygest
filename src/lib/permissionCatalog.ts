@@ -52,6 +52,13 @@ export const PERMISSION_RESOURCES: PermissionResource[] = [
     actions: ['view', 'create'],
     description: 'Aquamania: importação Vendas por Ambiente e métricas de PDVs.',
   },
+  {
+    key: 'aqua-orcamento',
+    label: 'Orçamento Aquamania',
+    group: 'Vendas',
+    actions: ['view', 'create', 'edit', 'delete'],
+    description: 'Aquamania: Prev x Real da temporada, premissas, quadro de pessoal e parâmetros.',
+  },
 
   { key: 'painel-operacional', label: 'Painel Operacional', group: 'Painéis setoriais', actions: ['view', 'edit'] },
   { key: 'painel-ab', label: 'Painel A&B', group: 'Painéis setoriais', actions: ['view', 'edit'] },
@@ -120,6 +127,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, Partial<Record<string, Per
     danfe: ['view', 'create', 'edit'],
     mensalidades: ['view', 'create', 'edit'],
     'vendas-pdvs': ['view', 'create'],
+    'aqua-orcamento': ['view'],
     tutorial: ['view'],
   },
   controle: Object.fromEntries(
@@ -182,6 +190,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, Partial<Record<string, Per
     'painel-nutricionista': ['view'],
     'painel-controladoria': ['view'],
     'vendas-pdvs': ['view'],
+    'aqua-orcamento': ['view'],
     tutorial: ['view'],
   },
 };

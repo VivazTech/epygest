@@ -90,6 +90,13 @@ export const EMPRESA_SCOPED_TABLES = new Set([
   "tangerino_colaborador_vinculo",
   "tangerino_ponto_mensal",
   "vendas_ambiente_rows",
+  "aqua_temporadas",
+  "aqua_temporada_meses",
+  "aqua_premissas",
+  "aqua_parametros",
+  "aqua_orc_linhas",
+  "aqua_orc_valores",
+  "aqua_quadro_vagas",
 ]);
 
 export const readEmpresaKeyFromRequest = (req: Request): CompanyKey => {
