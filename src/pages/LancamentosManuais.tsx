@@ -5,29 +5,23 @@ import { ValueTrace } from '../components/ValueTrace';
 import { valueTrace } from '../lib/valueTraceMeta';
 import { useSearch } from '../context/SearchContext';
 import { useToast } from '../context/ToastContext';
-import { matchesSearch } from '../lib/search';
 import { isSharedCrdCode } from '../lib/sharedCrds';
 import { isDirectDocumentUrl } from '../lib/storagePath';
 import { confirmCancel, confirmDelete } from '../lib/confirmAction';
 import { SearchableSelect } from '../components/SearchableSelect';
 import { CrdListFilter } from '../components/CrdListFilter';
-import {
-  LaunchNumberAmountFilters,
-  matchesAmountFilter,
-  matchesInvoiceNumberFilter,
-} from '../components/LaunchNumberAmountFilters';
-import { buildCrdFilterOptions, matchesCrdCodeFilter } from '../lib/crdFilter';
+import { LaunchNumberAmountFilters } from '../components/LaunchNumberAmountFilters';
+import { buildCrdFilterOptions } from '../lib/crdFilter';
 import {
   canEditLaunchRole,
   isLaunchStatusEditableBeforeControl,
   launchStatusMeta,
   LAUNCH_STATUS_FILTER_OPTIONS,
-  matchesDatePeriod,
 } from '../lib/launchFlow';
-import { CompetenciaFilter, currentCompetencia, matchesCompetencia } from '../components/CompetenciaFilter';
-import { ListPagination, sumAmountsByCurrency } from '../components/ListPagination';
+import { CompetenciaFilter, currentCompetencia } from '../components/CompetenciaFilter';
+import { ListPagination } from '../components/ListPagination';
 import { DateBrInput } from '../components/DateBrInput';
-import { useClientPagination } from '../hooks/useClientPagination';
+import { parseListResponse, useServerPagination } from '../hooks/useServerPagination';
 import { hasPermission, type RolePermissionRow } from '../lib/permissionCatalog';
 
 const EMPTY_FORM = {
@@ -76,6 +70,7 @@ export const LancamentosManuaisPage: React.FC = () => {
   const [issueDateFrom, setIssueDateFrom] = useState('');
   const [issueDateTo, setIssueDateTo] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
+  const pagination = useServerPagination(20);
   const [userRole, setUserRole] = useState<string>('viewer');
   const [userPermissions, setUserPermissions] = useState<RolePermissionRow[] | null>(null);
   const [allowedSectorIds, setAllowedSectorIds] = useState<string[]>([]);
@@ -103,32 +98,56 @@ export const LancamentosManuaisPage: React.FC = () => {
     [paymentMethods]
   );
 
-  const loadData = async (showSpinner = true) => {
-    if (showSpinner) setLoading(true);
+  const loadMeta = async () => {
     try {
-      const [entriesRes, sectorsRes, crdsRes, pmRes, curRes] = await Promise.all([
-        fetch('/api/manual-entries'),
+      const [sectorsRes, crdsRes, pmRes, curRes] = await Promise.all([
         fetch('/api/sectors'),
         fetch('/api/crds'),
         fetch('/api/payment-methods'),
         fetch('/api/currencies'),
       ]);
-      const entriesData = await entriesRes.json().catch(() => null);
       const sectorsData = await sectorsRes.json().catch(() => null);
       const crdsData = await crdsRes.json().catch(() => null);
       const pmData = await pmRes.json().catch(() => null);
       const curData = await curRes.json().catch(() => null);
-      setEntries(Array.isArray(entriesData) ? entriesData : []);
       setSectors(Array.isArray(sectorsData) ? sectorsData : []);
       setCrds(Array.isArray(crdsData) ? crdsData : []);
       setPaymentMethods(Array.isArray(pmData) ? pmData : []);
       setCurrencies(Array.isArray(curData) ? curData : []);
     } catch {
-      setEntries([]);
       setSectors([]);
       setCrds([]);
       setPaymentMethods([]);
       setCurrencies([]);
+    }
+  };
+
+  const loadData = async (showSpinner = true) => {
+    if (showSpinner) setLoading(true);
+    try {
+      const params = new URLSearchParams(pagination.queryParams);
+      if (statusFilter !== 'all') params.set('status', statusFilter);
+      if (sectorFilter !== 'all') params.set('sector_id', sectorFilter);
+      if (paymentFilter !== 'all') params.set('payment_method', paymentFilter);
+      if (competenciaMonth) {
+        params.set('month', competenciaMonth);
+        params.set('year', competenciaYear);
+      }
+      if (issueDateFrom) params.set('issue_from', issueDateFrom);
+      if (issueDateTo) params.set('issue_to', issueDateTo);
+      if (crdFilter) params.set('crd', crdFilter);
+      if (amountFilter.trim()) params.set('amount', amountFilter.trim());
+      const searchBits = [query, invoiceNumberFilter].map((s) => s.trim()).filter(Boolean);
+      if (searchBits.length) params.set('q', searchBits.join(' '));
+
+      const entriesRes = await fetch(`/api/manual-entries?${params.toString()}`);
+      const entriesData = await entriesRes.json().catch(() => null);
+      const parsed = parseListResponse<any>(entriesData);
+      setEntries(parsed.items);
+      pagination.applyMeta({ total: parsed.total, totalAmount: parsed.totalAmount ?? null });
+    } catch {
+      setEntries([]);
+      pagination.applyMeta({ total: 0, totalAmount: 0 });
     } finally {
       if (showSpinner) setLoading(false);
     }
@@ -196,8 +215,44 @@ export const LancamentosManuaisPage: React.FC = () => {
 
     bootstrapFromCache();
     loadUserScope();
-    loadData();
+    loadMeta();
   }, []);
+
+  useEffect(() => {
+    pagination.resetPage();
+  }, [
+    statusFilter,
+    sectorFilter,
+    paymentFilter,
+    competenciaMonth,
+    competenciaYear,
+    issueDateFrom,
+    issueDateTo,
+    crdFilter,
+    amountFilter,
+    query,
+    invoiceNumberFilter,
+    pagination.resetPage,
+  ]);
+
+  useEffect(() => {
+    loadData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- loadData usa filtros + page
+  }, [
+    pagination.page,
+    pagination.pageSize,
+    statusFilter,
+    sectorFilter,
+    paymentFilter,
+    competenciaMonth,
+    competenciaYear,
+    issueDateFrom,
+    issueDateTo,
+    crdFilter,
+    amountFilter,
+    query,
+    invoiceNumberFilter,
+  ]);
 
   const hasGlobalSectorView =
     userRole === 'admin' || userRole === 'finance' || userRole === 'controle';
@@ -247,6 +302,8 @@ export const LancamentosManuaisPage: React.FC = () => {
     () => entries.filter((e) => matchesUserSector(e.sector_id)),
     [entries, allowedSectorIds, hasGlobalSectorView]
   );
+
+  const filteredEntries = scopedEntries;
 
   const createEntry = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -460,62 +517,12 @@ export const LancamentosManuaisPage: React.FC = () => {
     loadData(false);
   };
 
-  const filteredEntries = useMemo(
-    () =>
-      scopedEntries.filter((entry) => {
-        if (sectorFilter !== 'all' && String(entry.sector_id) !== String(sectorFilter)) return false;
-        if (paymentFilter !== 'all' && String(entry.payment_method || '') !== paymentFilter) return false;
-        if (statusFilter !== 'all' && String(entry.status || '') !== statusFilter) return false;
-        if (!matchesCompetencia(entry.date || entry.issue_date, competenciaMonth, competenciaYear)) return false;
-        if (!matchesDatePeriod(entry.issue_date, issueDateFrom, issueDateTo)) return false;
-        if (!matchesCrdCodeFilter(crdFilter, entry.crd_code, entry.crd_name)) return false;
-        if (!matchesInvoiceNumberFilter(invoiceNumberFilter, entry.protocol, entry.document_number, entry.description, entry.provider_name)) {
-          return false;
-        }
-        if (!matchesAmountFilter(amountFilter, entry.amount)) return false;
-        return matchesSearch(
-          query,
-          entry.protocol,
-          entry.sector_name,
-          entry.crd_code,
-          entry.crd_name,
-          entry.description,
-          entry.provider_name,
-          entry.document_number,
-          entry.payment_method,
-          entry.currency,
-          entry.pix_key,
-          entry.file_name,
-          entry.user_name,
-          entry.issue_date,
-          entry.date,
-          entry.due_date,
-          entry.amount,
-          entry.status
-        );
-      }),
-    [
-      scopedEntries,
-      query,
-      crdFilter,
-      invoiceNumberFilter,
-      amountFilter,
-      sectorFilter,
-      paymentFilter,
-      competenciaMonth,
-      competenciaYear,
-      issueDateFrom,
-      issueDateTo,
-      statusFilter,
-    ]
-  );
-
-  const pagination = useClientPagination(filteredEntries);
-
-  const filteredAmountTotal = useMemo(
-    () => sumAmountsByCurrency(filteredEntries, (e) => e.amount, (e) => e.currency),
-    [filteredEntries]
-  );
+  const filteredAmountTotal = useMemo(() => {
+    if (pagination.totalAmount != null && Number.isFinite(pagination.totalAmount)) {
+      return formatCurrency(pagination.totalAmount);
+    }
+    return formatCurrency(0);
+  }, [pagination.totalAmount]);
 
   const openTotal = useMemo(
     () =>
@@ -702,7 +709,7 @@ export const LancamentosManuaisPage: React.FC = () => {
                 </td>
               </tr>
             )}
-            {!loading && pagination.pageItems.map((entry) => {
+            {!loading && filteredEntries.map((entry) => {
               const meta = statusMeta(entry.status);
               const edited = Number(entry.edit_count || 0) > 0;
               return (

@@ -1,15 +1,14 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { Plus, Trash2, Archive, XCircle, BadgeCheck, RotateCcw } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { Plus, Trash2, Archive, XCircle, BadgeCheck, RotateCcw, Loader2 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { confirmCancel } from '../lib/confirmAction';
 import { useSearch } from '../context/SearchContext';
 import { useToast } from '../context/ToastContext';
-import { matchesSearch } from '../lib/search';
-import { launchStatusMeta, LAUNCH_STATUS_FILTER_OPTIONS, matchesDatePeriod } from '../lib/launchFlow';
-import { CompetenciaFilter, currentCompetencia, matchesCompetencia } from '../components/CompetenciaFilter';
+import { launchStatusMeta, LAUNCH_STATUS_FILTER_OPTIONS } from '../lib/launchFlow';
+import { CompetenciaFilter, currentCompetencia } from '../components/CompetenciaFilter';
 import { ListPagination } from '../components/ListPagination';
 import { DateBrInput } from '../components/DateBrInput';
-import { useClientPagination } from '../hooks/useClientPagination';
+import { parseListResponse, useServerPagination } from '../hooks/useServerPagination';
 
 type ComandaItemForm = {
   description: string;
@@ -33,6 +32,7 @@ export const ComandasPage: React.FC = () => {
   const { query } = useSearch();
   const { showSuccess } = useToast();
   const [comandas, setComandas] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
   const [pdvLocais, setPdvLocais] = useState<Array<{ id: number; name: string }>>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -47,11 +47,23 @@ export const ComandasPage: React.FC = () => {
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
+  const pagination = useServerPagination(20);
 
-  const loadData = async () => {
+  const loadData = async (showSpinner = true) => {
+    if (showSpinner) setLoading(true);
     try {
+      const params = new URLSearchParams(pagination.queryParams);
+      if (statusFilter !== 'all') params.set('status', statusFilter);
+      if (competenciaMonth) {
+        params.set('month', competenciaMonth);
+        params.set('year', competenciaYear);
+      }
+      if (dateFrom) params.set('from', dateFrom);
+      if (dateTo) params.set('to', dateTo);
+      if (query.trim()) params.set('q', query.trim());
+
       const [comandasRes, locaisRes] = await Promise.all([
-        fetch('/api/comandas'),
+        fetch(`/api/comandas?${params.toString()}`),
         fetch('/api/pdv-locais'),
       ]);
       const data = await comandasRes.json().catch(() => null);
@@ -63,21 +75,27 @@ export const ComandasPage: React.FC = () => {
         setPdvLocais([]);
       }
 
-      if (!comandasRes.ok || !Array.isArray(data)) {
+      if (!comandasRes.ok) {
         const message =
           (data && typeof data === 'object' && 'error' in data && String((data as any).error)) ||
           'Não foi possível carregar as comandas.';
         console.error('Falha ao carregar comandas:', data);
         setLoadError(message);
         setComandas([]);
+        pagination.applyMeta({ total: 0 });
         return;
       }
+      const parsed = parseListResponse<any>(data);
       setLoadError(null);
-      setComandas(data);
+      setComandas(parsed.items);
+      pagination.applyMeta({ total: parsed.total });
     } catch (error) {
       console.error('Falha ao carregar comandas:', error);
       setComandas([]);
       setPdvLocais([]);
+      pagination.applyMeta({ total: 0 });
+    } finally {
+      if (showSpinner) setLoading(false);
     }
   };
 
@@ -96,8 +114,16 @@ export const ComandasPage: React.FC = () => {
       }
     };
     loadUser();
-    loadData();
   }, []);
+
+  useEffect(() => {
+    pagination.resetPage();
+  }, [statusFilter, competenciaMonth, competenciaYear, dateFrom, dateTo, query, pagination.resetPage]);
+
+  useEffect(() => {
+    loadData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pagination.page, pagination.pageSize, statusFilter, competenciaMonth, competenciaYear, dateFrom, dateTo, query]);
 
   const canSwitchActingProfile = userRole === 'admin';
   const canApproveControl = actingSector === 'controle' && (userRole === 'controle' || userRole === 'admin');
@@ -211,29 +237,7 @@ export const ComandasPage: React.FC = () => {
     loadData();
   };
 
-  const filteredComandas = useMemo(
-    () =>
-      comandas.filter((comanda) => {
-        if (statusFilter !== 'all' && String(comanda.status || '') !== statusFilter) return false;
-        if (!matchesCompetencia(comanda.consumed_at, competenciaMonth, competenciaYear)) return false;
-        if (!matchesDatePeriod(comanda.consumed_at, dateFrom, dateTo)) return false;
-        return matchesSearch(
-          query,
-          comanda.protocol,
-          comanda.consumer_name,
-          comanda.provider_name,
-          comanda.location,
-          comanda.consumed_at,
-          comanda.user_name,
-          comanda.status,
-          comanda.items_count,
-          ...(comanda.items ?? []).flatMap((item: any) => [item.description, item.quantity])
-        );
-      }),
-    [comandas, query, competenciaMonth, competenciaYear, dateFrom, dateTo, statusFilter]
-  );
-
-  const pagination = useClientPagination(filteredComandas);
+  const filteredComandas = comandas;
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
@@ -353,14 +357,24 @@ export const ComandasPage: React.FC = () => {
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-50">
-            {filteredComandas.length === 0 && (
+            {loading && (
+              <tr>
+                <td colSpan={8} className="px-6 py-14 text-center">
+                  <div className="inline-flex items-center justify-center gap-2 text-slate-400">
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                    <span className="text-sm font-medium">Carregando comandas...</span>
+                  </div>
+                </td>
+              </tr>
+            )}
+            {!loading && filteredComandas.length === 0 && (
               <tr>
                 <td colSpan={8} className="px-6 py-10 text-center text-sm text-slate-400">
                   Nenhuma comanda registrada.
                 </td>
               </tr>
             )}
-            {pagination.pageItems.map((comanda) => {
+            {!loading && filteredComandas.map((comanda) => {
               const meta = statusLabel(comanda.status);
               return (
                 <tr key={comanda.id} className="hover:bg-slate-50/50 transition-colors align-top">

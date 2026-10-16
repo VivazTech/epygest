@@ -1251,41 +1251,47 @@ export const Sidebar: React.FC<SidebarProps> = ({
         )}
       </nav>
 
-      <div className="p-4 border-t border-white/10 space-y-4">
+      <div className="p-4 border-t border-white/10 space-y-3">
         <div className={cn("flex items-center gap-3 px-2", collapsed && "justify-center")}>
-          <div className="w-10 h-10 rounded-full bg-emerald-800 flex items-center justify-center border border-emerald-400/30">
-            <User className="w-5 h-5 text-emerald-300" />
-          </div>
-          <div className={cn("flex-1 min-w-0", collapsed && "hidden")}>
-            <p className="text-sm font-semibold truncate">{user?.name}</p>
-            <p className="text-[10px] text-white uppercase font-bold tracking-tighter truncate">
-              {user?.role === 'admin' ? 'Administrador' :
-               user?.role === 'finance' ? 'Financeiro' :
-               user?.role === 'controle' ? 'Controle' :
-               user?.role === 'manager' ? 'Gestor' :
-               user?.role === 'estagiario' ? 'Estagiário' :
-               user?.role === 'viewer' ? 'Visualizador' :
-               user?.role === 'diretoria' ? 'Diretoria' :
-               String(user?.role || '')}
-            </p>
-          </div>
+          {!collapsed && (
+            <>
+              <div className="w-10 h-10 rounded-full bg-emerald-800 flex items-center justify-center border border-emerald-400/30 shrink-0">
+                <User className="w-5 h-5 text-emerald-300" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold truncate">{user?.name}</p>
+                <p className="text-[10px] text-white uppercase font-bold tracking-tighter truncate">
+                  {user?.role === 'admin' ? 'Administrador' :
+                   user?.role === 'finance' ? 'Financeiro' :
+                   user?.role === 'controle' ? 'Controle' :
+                   user?.role === 'manager' ? 'Gestor' :
+                   user?.role === 'estagiario' ? 'Estagiário' :
+                   user?.role === 'viewer' ? 'Visualizador' :
+                   user?.role === 'diretoria' ? 'Diretoria' :
+                   String(user?.role || '')}
+                </p>
+              </div>
+            </>
+          )}
+          <button
+            type="button"
+            onClick={onToggleCollapsed}
+            className="shrink-0 p-1 rounded-lg text-white hover:bg-white/10 transition-colors"
+            title={collapsed ? 'Expandir menu' : 'Colapsar menu'}
+            aria-label={collapsed ? 'Expandir menu' : 'Colapsar menu'}
+          >
+            {collapsed ? (
+              <PanelLeftOpen className="w-4 h-4" />
+            ) : (
+              <PanelLeftClose className="w-4 h-4" />
+            )}
+          </button>
         </div>
 
         <button
-          onClick={onToggleCollapsed}
-          className={cn(
-            "w-full px-4 py-2 rounded-xl text-xs font-bold bg-white/10 hover:bg-white/15 transition-colors flex items-center justify-center"
-          )}
-          title={collapsed ? 'Expandir menu' : 'Colapsar menu'}
-          aria-label={collapsed ? 'Expandir menu' : 'Colapsar menu'}
-        >
-          {collapsed ? <PanelLeftOpen className="w-4 h-4 shrink-0" /> : <PanelLeftClose className="w-4 h-4 shrink-0" />}
-        </button>
-        
-        <button 
           onClick={onLogout}
           className={cn(
-            "w-full flex items-center px-4 py-3 rounded-xl text-red-300 hover:bg-red-500/10 hover:text-red-200 transition-colors",
+            "w-full flex items-center px-4 py-3 rounded-xl text-red-400 hover:bg-red-500/10 hover:text-red-300 transition-colors",
             collapsed ? "justify-center" : "gap-3"
           )}
         >

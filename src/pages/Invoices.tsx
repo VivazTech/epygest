@@ -14,7 +14,8 @@ import {
   FileCheck,
   Pencil,
   History,
-  UserRound
+  UserRound,
+  Loader2,
 } from 'lucide-react';
 import { cn, formatCurrency, formatCurrencyInput, formatDate, getCurrencyMeta, parseCurrencyInputDigits } from '../lib/utils';
 import { ValueTrace } from '../components/ValueTrace';
@@ -22,15 +23,13 @@ import { SearchableSelect } from '../components/SearchableSelect';
 import { CrdListFilter } from '../components/CrdListFilter';
 import {
   LaunchNumberAmountFilters,
-  matchesAmountFilter,
-  matchesInvoiceNumberFilter,
+  parseAmountFilter,
 } from '../components/LaunchNumberAmountFilters';
-import { buildCrdFilterOptions, matchesCrdCodeFilter, resolveCrdDisplayCodes } from '../lib/crdFilter';
+import { buildCrdFilterOptions, resolveCrdDisplayCodes } from '../lib/crdFilter';
 import { valueTrace } from '../lib/valueTraceMeta';
 import { useSearch } from '../context/SearchContext';
 import { hasPermission, type RolePermissionRow } from '../lib/permissionCatalog';
 import { useToast } from '../context/ToastContext';
-import { matchesSearch } from '../lib/search';
 import { isDirectDocumentUrl, collectBoletoPaths, type StorageDocumentField } from '../lib/storagePath';
 import { confirmCancel, confirmDelete } from '../lib/confirmAction';
 import {
@@ -38,9 +37,9 @@ import {
   isInvoiceFlowEditableBeforeControl,
 } from '../lib/launchFlow';
 import { CompetenciaFilter } from '../components/CompetenciaFilter';
-import { ListPagination, sumAmountsByCurrency } from '../components/ListPagination';
+import { ListPagination } from '../components/ListPagination';
 import { DateBrInput } from '../components/DateBrInput';
-import { useClientPagination } from '../hooks/useClientPagination';
+import { parseListResponse, useServerPagination } from '../hooks/useServerPagination';
 
 const EMPTY_INVOICE_FORM = {
   invoice_number: '',
@@ -87,6 +86,7 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
   const initialDateFrom = localStorage.getItem('invoices:dateFrom') || '';
   const initialDateTo = localStorage.getItem('invoices:dateTo') || '';
   const [invoices, setInvoices] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
   const [sectors, setSectors] = useState<any[]>([]);
   const [selectedMonth, setSelectedMonth] = useState(initialMonth);
   const [selectedYear, setSelectedYear] = useState(initialYear);
@@ -100,6 +100,7 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
       : now.getMonth() + 1;
   const [customDateFrom, setCustomDateFrom] = useState(initialDateFrom);
   const [customDateTo, setCustomDateTo] = useState(initialDateTo);
+  const pagination = useServerPagination(20);
   const [paymentMethods, setPaymentMethods] = useState<any[]>([]);
   const [currencies, setCurrencies] = useState<any[]>([]);
   const [crdOptions, setCrdOptions] = useState<any[]>([]);
@@ -143,9 +144,40 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
   const [historyLoading, setHistoryLoading] = useState(false);
 
   useEffect(() => {
+    pagination.resetPage();
+  }, [
+    selectedMonth,
+    selectedYear,
+    customDateFrom,
+    customDateTo,
+    crdFilter,
+    amountFilter,
+    invoiceNumberFilter,
+    listQuery,
+    query,
+    pagination.resetPage,
+  ]);
+
+  useEffect(() => {
     fetchInvoices();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fetchInvoices usa filtros + page
+  }, [
+    selectedMonth,
+    selectedYear,
+    customDateFrom,
+    customDateTo,
+    pagination.page,
+    pagination.pageSize,
+    crdFilter,
+    amountFilter,
+    invoiceNumberFilter,
+    listQuery,
+    query,
+  ]);
+
+  useEffect(() => {
     fetchSectors(selectedMonth, selectedYear);
-  }, [selectedMonth, selectedYear, customDateFrom, customDateTo]);
+  }, [selectedMonth, selectedYear]);
 
   useEffect(() => {
     localStorage.setItem('invoices:selectedMonth', selectedMonth);
@@ -243,7 +275,8 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
   }, [formData.sector_id]);
 
   const fetchInvoices = (month = selectedMonth, year = selectedYear, from = customDateFrom, to = customDateTo) => {
-    const params = new URLSearchParams();
+    setLoading(true);
+    const params = new URLSearchParams(pagination.queryParams);
     if (from || to) {
       if (from) params.set('from', from);
       if (to) params.set('to', to);
@@ -251,10 +284,26 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
       params.set('month', month);
       params.set('year', year);
     }
+    if (crdFilter) params.set('crd', crdFilter);
+    const parsedAmount = parseAmountFilter(amountFilter);
+    if (parsedAmount != null) params.set('amount', String(parsedAmount));
+    const searchBits = [listQuery.trim() ? listQuery : query, invoiceNumberFilter]
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (searchBits.length) params.set('q', searchBits.join(' '));
+
     fetch(`/api/invoices?${params.toString()}`)
       .then(res => res.json())
-      .then(data => setInvoices(Array.isArray(data) ? data : []))
-      .catch(() => setInvoices([]));
+      .then((data) => {
+        const parsed = parseListResponse<any>(data);
+        setInvoices(parsed.items);
+        pagination.applyMeta({ total: parsed.total, totalAmount: parsed.totalAmount ?? null });
+      })
+      .catch(() => {
+        setInvoices([]);
+        pagination.applyMeta({ total: 0, totalAmount: 0 });
+      })
+      .finally(() => setLoading(false));
   };
 
   const fetchSectors = (month = selectedMonth, year = selectedYear) => {
@@ -854,56 +903,13 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
     () => invoices.filter((invoice) => matchesSectorVisibilityFilter(invoice.sector_id)),
     [invoices, allowedSectorIds, requesterSectorId, userRole]
   );
-  const searchText = listQuery.trim() ? listQuery : query;
-  const filteredInvoices = useMemo(
-    () =>
-      sectorVisibleInvoices.filter((invoice) => {
-        const crdMeta = resolveInvoiceCrdMeta(invoice);
-        if (
-          !matchesCrdCodeFilter(
-            crdFilter,
-            invoice.crd,
-            crdMeta?.displayCode,
-            crdMeta?.name,
-            crdMeta?.internalCode
-          )
-        ) {
-          return false;
-        }
-        if (!matchesInvoiceNumberFilter(invoiceNumberFilter, invoice.invoice_number, invoice.protocol, invoice.description)) {
-          return false;
-        }
-        if (!matchesAmountFilter(amountFilter, invoice.amount)) return false;
-        return matchesSearch(
-          searchText,
-          invoice.invoice_number,
-          invoice.protocol,
-          invoice.provider_name,
-          invoice.description,
-          invoice.sector_name,
-          invoice.user_name,
-          invoice.crd,
-          crdMeta?.displayCode,
-          crdMeta?.name,
-          invoice.payment_method,
-          invoice.currency,
-          invoice.status,
-          invoice.flow_stage,
-          invoice.amount
-        );
-      }),
-    [sectorVisibleInvoices, searchText, crdFilter, invoiceNumberFilter, amountFilter, crdMetaBySectorCode]
-  );
-  const pagination = useClientPagination(filteredInvoices);
-  const filteredAmountTotal = useMemo(
-    () =>
-      sumAmountsByCurrency(
-        filteredInvoices.filter((invoice) => canSeeSectorValues(invoice.sector_id)),
-        (invoice) => invoice.amount,
-        (invoice) => invoice.currency
-      ),
-    [filteredInvoices, allowedSectorIds, requesterSectorId, userRole]
-  );
+  const filteredInvoices = sectorVisibleInvoices;
+  const filteredAmountTotal = useMemo(() => {
+    if (typeof pagination.totalAmount === 'number') {
+      return formatCurrency(pagination.totalAmount, 'BRL');
+    }
+    return '—';
+  }, [pagination.totalAmount]);
   const filteredBudgetSectors = useMemo(
     () => budgetSectors.filter((sector) => matchesSectorVisibilityFilter(sector.id)),
     [budgetSectors, visibleSectorIdSet]
@@ -1291,7 +1297,19 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50">
-              {filteredInvoices.length === 0 && (
+              {loading && (
+                <tr>
+                  <td colSpan={11} className="px-6 py-14 text-center">
+                    <div className="inline-flex items-center justify-center gap-2 text-slate-400">
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                      <span className="text-sm font-medium">
+                        {isDanfe ? 'Carregando DANFE...' : 'Carregando notas...'}
+                      </span>
+                    </div>
+                  </td>
+                </tr>
+              )}
+              {!loading && filteredInvoices.length === 0 && (
                 <tr>
                   <td colSpan={11} className="px-6 py-10 text-center text-sm text-slate-400">
                     {crdFilter
@@ -1300,7 +1318,7 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
                   </td>
                 </tr>
               )}
-              {pagination.pageItems.map((invoice) => (
+              {!loading && filteredInvoices.map((invoice) => (
                 <tr key={invoice.id} className="hover:bg-slate-50/50 transition-colors group">
                   <td className="px-6 py-4 text-xs font-mono font-bold text-emerald-800">{invoice.protocol || '—'}</td>
                   <td className="px-6 py-4">

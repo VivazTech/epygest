@@ -35,6 +35,8 @@ import {
   protocolPrefixForEmpresa,
   rowBelongsToEmpresa,
 } from "./lib/empresaScope.js";
+import { parseListPagination, paginatedPayload, sumAmounts } from "./lib/listPagination.js";
+import { DIRETORIA_AMOUNT_THRESHOLD } from "./lib/aprovacoesMeta.js";
 import { empresaAls, installEmpresaScopedSupabase } from "./lib/empresaScopedSupabase.js";
 import { COMPANY_HEADER, DEFAULT_COMPANY_KEY, type CompanyKey } from "./lib/companies.js";
 
@@ -2627,23 +2629,97 @@ export function createApp() {
   // REQUISIÇÕES
   // ====================================================
   app.get("/api/requisitions", async (req, res) => {
-    const { data, error } = await filterByEmpresa(
-      supabase.from("requisitions").select("*, sectors(name), crds(id, code, name, sector_id, sectors(name))"),
+    const pag = parseListPagination(req.query as Record<string, unknown>);
+    const q = req.query as Record<string, string | undefined>;
+    const selectOpts = pag.enabled ? ({ count: "exact" } as const) : undefined;
+
+    const applyFilters = (query: any) => {
+      let next = query;
+      if (q.status && q.status !== "all") next = next.eq("status", q.status);
+      if (q.from) next = next.gte("date", String(q.from).slice(0, 10));
+      if (q.to) next = next.lte("date", String(q.to).slice(0, 10));
+      const month = Number(q.month);
+      if (Number.isFinite(month) && month >= 1 && month <= 12) {
+        const year = Number(q.year) || new Date().getFullYear();
+        const { dateFrom, dateTo } = getMonthDateRange(year, month);
+        next = next.gte("date", dateFrom).lte("date", dateTo);
+      }
+      if (q.amount) {
+        const amt = Number(String(q.amount).replace(",", "."));
+        if (Number.isFinite(amt)) next = next.eq("amount", amt);
+      }
+      const term = String(q.q || "").replace(/[%_,]/g, " ").trim();
+      if (term) {
+        const like = `%${term}%`;
+        next = next.or(`protocol.ilike.${like},provider_name.ilike.${like},description.ilike.${like}`);
+      }
+      return next;
+    };
+
+    let query = filterByEmpresa(
+      supabase
+        .from("requisitions")
+        .select("*, sectors(name), crds(id, code, name, sector_id, sectors(name))", selectOpts),
       req,
       "requisitions"
     ).order("date", { ascending: false });
+    query = applyFilters(query);
 
-    if (error) { console.error(error); return res.status(500).json({ error: "Erro interno ao processar a solicitação." }); }
+    const crdTerm = String(q.crd || "").replace(/[%_,]/g, " ").trim();
+    if (crdTerm) {
+      const { data: crdRows } = await filterByEmpresa(
+        supabase.from("crds").select("id").or(`code.ilike.%${crdTerm}%,name.ilike.%${crdTerm}%`),
+        req,
+        "crds"
+      );
+      const crdIds = (crdRows ?? []).map((c: any) => Number(c.id)).filter((id: number) => Number.isFinite(id));
+      if (crdIds.length === 0) {
+        if (!pag.enabled) return res.json([]);
+        return res.json(paginatedPayload([], 0, pag.page, pag.pageSize, { totalAmount: 0 }));
+      }
+      query = query.in("crd_id", crdIds);
+    }
 
-    res.json(
-      (data ?? []).map((r: any) => ({
-        ...r,
-        sector_name: r.crds?.sectors?.name ?? r.sectors?.name ?? null,
-        crd_name: r.crds?.name ?? null,
-        crd_code: r.crds?.code ?? null,
-        sectors: undefined,
-        crds: undefined,
-      }))
+    if (pag.enabled) query = query.range(pag.from, pag.to);
+
+    const { data, error, count } = await query;
+    if (error) {
+      console.error(error);
+      return res.status(500).json({ error: "Erro interno ao processar a solicitação." });
+    }
+
+    const mapped = (data ?? []).map((r: any) => ({
+      ...r,
+      sector_name: r.crds?.sectors?.name ?? r.sectors?.name ?? null,
+      crd_name: r.crds?.name ?? null,
+      crd_code: r.crds?.code ?? null,
+      sectors: undefined,
+      crds: undefined,
+    }));
+
+    if (!pag.enabled) return res.json(mapped);
+
+    let totalAmount = sumAmounts(mapped, (r: any) => r.amount);
+    try {
+      let sumQuery = filterByEmpresa(supabase.from("requisitions").select("amount"), req, "requisitions");
+      sumQuery = applyFilters(sumQuery);
+      if (crdTerm) {
+        const { data: crdRows } = await filterByEmpresa(
+          supabase.from("crds").select("id").or(`code.ilike.%${crdTerm}%,name.ilike.%${crdTerm}%`),
+          req,
+          "crds"
+        );
+        const crdIds = (crdRows ?? []).map((c: any) => Number(c.id)).filter((id: number) => Number.isFinite(id));
+        if (crdIds.length) sumQuery = sumQuery.in("crd_id", crdIds);
+      }
+      const { data: amountRows } = await sumQuery;
+      if (Array.isArray(amountRows)) totalAmount = sumAmounts(amountRows, (r: any) => r.amount);
+    } catch {
+      // mantém soma da página
+    }
+
+    return res.json(
+      paginatedPayload(mapped, count ?? mapped.length, pag.page, pag.pageSize, { totalAmount })
     );
   });
 
@@ -2912,28 +2988,98 @@ export function createApp() {
   };
 
   app.get("/api/manual-entries", async (req, res) => {
-    const { data, error } = await filterByEmpresa(
-      supabase.from("manual_entries").select("*, sectors(name), crds(id, code, name), users(id, name)"),
+    const pag = parseListPagination(req.query as Record<string, unknown>);
+    const q = req.query as Record<string, string | undefined>;
+    const selectOpts = pag.enabled ? ({ count: "exact" } as const) : undefined;
+
+    const applyFilters = (query: any) => {
+      let next = query;
+      if (q.status && q.status !== "all") next = next.eq("status", q.status);
+      if (q.sector_id && q.sector_id !== "all") next = next.eq("sector_id", Number(q.sector_id));
+      if (q.payment_method && q.payment_method !== "all") next = next.eq("payment_method", q.payment_method);
+      if (q.issue_from) next = next.gte("issue_date", String(q.issue_from).slice(0, 10));
+      if (q.issue_to) next = next.lte("issue_date", String(q.issue_to).slice(0, 10));
+      const month = Number(q.month);
+      if (Number.isFinite(month) && month >= 1 && month <= 12) {
+        const year = Number(q.year) || new Date().getFullYear();
+        const { dateFrom, dateTo } = getMonthDateRange(year, month);
+        next = next.gte("date", dateFrom).lte("date", dateTo);
+      }
+      if (q.amount) {
+        const amt = Number(String(q.amount).replace(",", "."));
+        if (Number.isFinite(amt)) next = next.eq("amount", amt);
+      }
+      const term = String(q.q || "").replace(/[%_,]/g, " ").trim();
+      if (term) {
+        const like = `%${term}%`;
+        next = next.or(
+          `protocol.ilike.${like},provider_name.ilike.${like},description.ilike.${like},document_number.ilike.${like}`
+        );
+      }
+      return next;
+    };
+
+    let query = filterByEmpresa(
+      supabase
+        .from("manual_entries")
+        .select("*, sectors(name), crds(id, code, name), users(id, name)", selectOpts),
       req,
       "manual_entries"
     ).order("date", { ascending: false });
+    query = applyFilters(query);
 
+    const crdTerm = String(q.crd || "").replace(/[%_,]/g, " ").trim();
+    if (crdTerm) {
+      const { data: crdRows } = await filterByEmpresa(
+        supabase.from("crds").select("id").or(`code.ilike.%${crdTerm}%,name.ilike.%${crdTerm}%`),
+        req,
+        "crds"
+      );
+      const crdIds = (crdRows ?? []).map((c: any) => Number(c.id)).filter((id: number) => Number.isFinite(id));
+      if (crdIds.length === 0) {
+        if (!pag.enabled) return res.json([]);
+        return res.json(paginatedPayload([], 0, pag.page, pag.pageSize, { totalAmount: 0 }));
+      }
+      query = query.in("crd_id", crdIds);
+    }
+
+    if (pag.enabled) query = query.range(pag.from, pag.to);
+
+    const { data, error, count } = await query;
     if (error) {
       console.error(error);
       return res.status(500).json({ error: "Erro interno ao processar a solicitação." });
     }
 
-    res.json(
-      (data ?? []).map((row: any) => ({
-        ...row,
-        sector_name: row.sectors?.name ?? null,
-        crd_code: row.crds?.code ?? null,
-        crd_name: row.crds?.name ?? null,
-        user_name: row.users?.name ?? null,
-        sectors: undefined,
-        crds: undefined,
-        users: undefined,
-      }))
+    const mapped = (data ?? []).map((row: any) => ({
+      ...row,
+      sector_name: row.sectors?.name ?? null,
+      crd_code: row.crds?.code ?? row.crd_code ?? null,
+      crd_name: row.crds?.name ?? null,
+      user_name: row.users?.name ?? null,
+      sectors: undefined,
+      crds: undefined,
+      users: undefined,
+    }));
+
+    if (!pag.enabled) return res.json(mapped);
+
+    let totalAmount = sumAmounts(mapped, (r: any) => r.amount);
+    try {
+      let sumQuery = filterByEmpresa(
+        supabase.from("manual_entries").select("amount"),
+        req,
+        "manual_entries"
+      );
+      sumQuery = applyFilters(sumQuery);
+      const { data: amountRows } = await sumQuery;
+      if (Array.isArray(amountRows)) totalAmount = sumAmounts(amountRows, (r: any) => r.amount);
+    } catch {
+      // mantém soma da página
+    }
+
+    return res.json(
+      paginatedPayload(mapped, count ?? mapped.length, pag.page, pag.pageSize, { totalAmount })
     );
   });
 
@@ -3465,28 +3611,100 @@ export function createApp() {
   // ESTORNOS
   // ====================================================
   app.get("/api/estornos", async (req, res) => {
-    const { data, error } = await filterByEmpresa(
-      supabase.from("estornos").select("*, sectors(name), crds(id, code, name), users(id, name)"),
+    const pag = parseListPagination(req.query as Record<string, unknown>);
+    const q = req.query as Record<string, string | undefined>;
+    const selectOpts = pag.enabled ? ({ count: "exact" } as const) : undefined;
+
+    const applyFilters = (query: any) => {
+      let next = query;
+      if (q.status && q.status !== "all") next = next.eq("status", q.status);
+      if (q.sector_id && q.sector_id !== "all") next = next.eq("sector_id", Number(q.sector_id));
+      if (q.issue_from) next = next.gte("issue_date", String(q.issue_from).slice(0, 10));
+      if (q.issue_to) next = next.lte("issue_date", String(q.issue_to).slice(0, 10));
+      const month = Number(q.month);
+      if (Number.isFinite(month) && month >= 1 && month <= 12) {
+        const year = Number(q.year) || new Date().getFullYear();
+        const { dateFrom, dateTo } = getMonthDateRange(year, month);
+        next = next.gte("date", dateFrom).lte("date", dateTo);
+      }
+      if (q.amount) {
+        const amt = Number(String(q.amount).replace(",", "."));
+        if (Number.isFinite(amt)) next = next.eq("amount", amt);
+      }
+      const term = String(q.q || "").replace(/[%_,]/g, " ").trim();
+      if (term) {
+        const like = `%${term}%`;
+        next = next.or(`protocol.ilike.${like},provider_name.ilike.${like},description.ilike.${like}`);
+      }
+      return next;
+    };
+
+    let query = filterByEmpresa(
+      supabase
+        .from("estornos")
+        .select("*, sectors(name), crds(id, code, name), users(id, name)", selectOpts),
       req,
       "estornos"
     ).order("date", { ascending: false });
+    query = applyFilters(query);
 
+    const crdTerm = String(q.crd || "").replace(/[%_,]/g, " ").trim();
+    if (crdTerm) {
+      const { data: crdRows } = await filterByEmpresa(
+        supabase.from("crds").select("id").or(`code.ilike.%${crdTerm}%,name.ilike.%${crdTerm}%`),
+        req,
+        "crds"
+      );
+      const crdIds = (crdRows ?? []).map((c: any) => Number(c.id)).filter((id: number) => Number.isFinite(id));
+      if (crdIds.length === 0) {
+        if (!pag.enabled) return res.json([]);
+        return res.json(paginatedPayload([], 0, pag.page, pag.pageSize, { totalAmount: 0 }));
+      }
+      query = query.in("crd_id", crdIds);
+    }
+
+    if (pag.enabled) query = query.range(pag.from, pag.to);
+
+    const { data, error, count } = await query;
     if (error) {
       console.error(error);
       return res.status(500).json({ error: "Erro interno ao processar a solicitação." });
     }
 
-    res.json(
-      (data ?? []).map((row: any) => ({
-        ...row,
-        sector_name: row.sectors?.name ?? null,
-        crd_code: row.crds?.code ?? null,
-        crd_name: row.crds?.name ?? null,
-        user_name: row.users?.name ?? null,
-        sectors: undefined,
-        crds: undefined,
-        users: undefined,
-      }))
+    const mapped = (data ?? []).map((row: any) => ({
+      ...row,
+      sector_name: row.sectors?.name ?? null,
+      crd_code: row.crds?.code ?? null,
+      crd_name: row.crds?.name ?? null,
+      user_name: row.users?.name ?? null,
+      sectors: undefined,
+      crds: undefined,
+      users: undefined,
+    }));
+
+    if (!pag.enabled) return res.json(mapped);
+
+    let totalAmount = sumAmounts(mapped, (r: any) => r.amount);
+    try {
+      let sumQuery = filterByEmpresa(supabase.from("estornos").select("amount"), req, "estornos");
+      sumQuery = applyFilters(sumQuery);
+      if (crdTerm) {
+        const { data: crdRows } = await filterByEmpresa(
+          supabase.from("crds").select("id").or(`code.ilike.%${crdTerm}%,name.ilike.%${crdTerm}%`),
+          req,
+          "crds"
+        );
+        const crdIds = (crdRows ?? []).map((c: any) => Number(c.id)).filter((id: number) => Number.isFinite(id));
+        if (crdIds.length) sumQuery = sumQuery.in("crd_id", crdIds);
+      }
+      const { data: amountRows } = await sumQuery;
+      if (Array.isArray(amountRows)) totalAmount = sumAmounts(amountRows, (r: any) => r.amount);
+    } catch {
+      // mantém soma da página
+    }
+
+    return res.json(
+      paginatedPayload(mapped, count ?? mapped.length, pag.page, pag.pageSize, { totalAmount })
     );
   });
 
@@ -4309,6 +4527,55 @@ export function createApp() {
         }
       }
 
+      const searchQ = String((req.query as any).q || "")
+        .replace(/[%_,]/g, " ")
+        .trim()
+        .toLowerCase();
+      const amountFilter = String((req.query as any).amount || "").replace(",", ".").trim();
+      const invoiceNumberFilter = String((req.query as any).invoice_number || "")
+        .replace(/[%_,]/g, " ")
+        .trim()
+        .toLowerCase();
+      const diretoriaOnly = String((req.query as any).diretoria || "") === "1";
+
+      if (diretoriaOnly) {
+        items = items.filter((i) => Number(i.amount) > DIRETORIA_AMOUNT_THRESHOLD);
+      }
+      if (amountFilter) {
+        const amt = Number(amountFilter);
+        if (Number.isFinite(amt)) items = items.filter((i) => Number(i.amount) === amt);
+      }
+      if (invoiceNumberFilter) {
+        items = items.filter((i) => {
+          const hay = [i.invoice_number, i.protocol, i.subtitle, i.title, i.description]
+            .map((v) => String(v || "").toLowerCase())
+            .join(" ");
+          return hay.includes(invoiceNumberFilter);
+        });
+      }
+      if (searchQ) {
+        items = items.filter((i) => {
+          const hay = [
+            i.type,
+            i.title,
+            i.subtitle,
+            i.protocol,
+            i.invoice_number,
+            i.description,
+            i.sector_name,
+            i.crd_code,
+            i.crd_name,
+            i.user_name,
+            i.fornecedor,
+            i.amount,
+            i.status,
+          ]
+            .map((v) => String(v || "").toLowerCase())
+            .join(" ");
+          return hay.includes(searchQ);
+        });
+      }
+
       const summary = {
         total: items.length,
         pending: items.filter((i) => isPendingApprovalItem(i)).length,
@@ -4316,9 +4583,36 @@ export function createApp() {
           acc[i.type] = (acc[i.type] || 0) + 1;
           return acc;
         }, {}),
+        pending_gestor: items.filter((i) => {
+          if (i.type === "manual" || i.type === "estorno" || i.type === "requisicao" || i.type === "comanda") {
+            return i.status === "pending_manager";
+          }
+          if (i.type === "nota" || i.type === "danfe") return (i.flow_stage || "") === "manager_pending";
+          return false;
+        }).length,
+        pending_controle: items.filter((i) => isPendingApprovalItem(i) && i.status !== "pending_manager").length,
+        pending_financeiro: items.filter((i) => {
+          if (i.type === "manual" || i.type === "estorno") return i.status === "approved";
+          if (i.type === "nota" || i.type === "danfe") return (i.flow_stage || "") === "control_approved";
+          if (i.type === "comanda" || i.type === "requisicao") return i.status === "approved";
+          return false;
+        }).length,
+        pending_diretoria: items.filter((i) => Number(i.amount) > DIRETORIA_AMOUNT_THRESHOLD).length,
+        total_valor: sumAmounts(items, (i) => i.amount, (i) => (i.type === "estorno" ? -1 : 1)),
       };
 
-      res.json({ items, summary });
+      const pag = parseListPagination(req.query as Record<string, unknown>);
+      const totalAmount = summary.total_valor;
+
+      if (!pag.enabled) {
+        return res.json({ items, summary, total: items.length, totalAmount });
+      }
+
+      const pageItems = items.slice(pag.from, pag.to + 1);
+      return res.json({
+        ...paginatedPayload(pageItems, items.length, pag.page, pag.pageSize, { totalAmount }),
+        summary,
+      });
     } catch (error) {
       console.error(error);
       res.status(500).json({ error: "Erro ao carregar aprovações." });
@@ -4490,21 +4784,48 @@ export function createApp() {
   };
 
   app.get("/api/comandas", async (req, res) => {
-    const { data: comandas, error } = await filterByEmpresa(
-      supabase.from("comandas").select("*, users(id, name)"),
+    const pag = parseListPagination(req.query as Record<string, unknown>);
+    const q = req.query as Record<string, string | undefined>;
+    const selectOpts = pag.enabled ? ({ count: "exact" } as const) : undefined;
+
+    let query = filterByEmpresa(
+      supabase.from("comandas").select("*, users(id, name)", selectOpts),
       req,
       "comandas"
     )
       .order("consumed_at", { ascending: false })
       .order("created_at", { ascending: false });
 
+    if (q.status && q.status !== "all") query = query.eq("status", q.status);
+    if (q.from) query = query.gte("consumed_at", String(q.from).slice(0, 10));
+    if (q.to) query = query.lte("consumed_at", String(q.to).slice(0, 10));
+    const month = Number(q.month);
+    if (Number.isFinite(month) && month >= 1 && month <= 12) {
+      const year = Number(q.year) || new Date().getFullYear();
+      const { dateFrom, dateTo } = getMonthDateRange(year, month);
+      query = query.gte("consumed_at", dateFrom).lte("consumed_at", dateTo);
+    }
+    const term = String(q.q || "").replace(/[%_,]/g, " ").trim();
+    if (term) {
+      const like = `%${term}%`;
+      query = query.or(
+        `protocol.ilike.${like},consumer_name.ilike.${like},provider_name.ilike.${like},location.ilike.${like}`
+      );
+    }
+
+    if (pag.enabled) query = query.range(pag.from, pag.to);
+
+    const { data: comandas, error, count } = await query;
     if (error) {
       console.error(error);
       return res.status(500).json({ error: "Erro interno ao processar a solicitação." });
     }
 
     const ids = (comandas ?? []).map((row: any) => Number(row.id)).filter((id) => Number.isFinite(id));
-    if (!ids.length) return res.json([]);
+    if (!ids.length) {
+      if (!pag.enabled) return res.json([]);
+      return res.json(paginatedPayload([], count ?? 0, pag.page, pag.pageSize));
+    }
 
     const { data: items, error: itemsError } = await supabase
       .from("comanda_items")
@@ -4517,7 +4838,9 @@ export function createApp() {
       return res.status(500).json({ error: "Erro interno ao processar a solicitação." });
     }
 
-    res.json(mapComandaRows(comandas ?? [], items ?? []));
+    const mapped = mapComandaRows(comandas ?? [], items ?? []);
+    if (!pag.enabled) return res.json(mapped);
+    return res.json(paginatedPayload(mapped, count ?? mapped.length, pag.page, pag.pageSize));
   });
 
   app.post("/api/comandas", async (req, res) => {
@@ -4622,16 +4945,22 @@ export function createApp() {
   // INVOICES
   // ====================================================
   app.get("/api/invoices", async (req, res) => {
-    const { month, year, from, to } = req.query as {
+    const { month, year, from, to, q: searchQ, amount, crd, doc_type } = req.query as {
       month?: string;
       year?: string;
       from?: string;
       to?: string;
+      q?: string;
+      amount?: string;
+      crd?: string;
+      doc_type?: string;
     };
     const now = new Date();
+    const pag = parseListPagination(req.query as Record<string, unknown>);
+    const selectOpts = pag.enabled ? ({ count: "exact" } as const) : undefined;
 
     let query = filterByEmpresa(
-      supabase.from("invoices").select("*, sectors(name), users(name)"),
+      supabase.from("invoices").select("*, sectors(name), users(name)", selectOpts),
       req,
       "invoices"
     ).order("created_at", { ascending: false });
@@ -4648,20 +4977,68 @@ export function createApp() {
     }
     // Sem month/from/to: retorna todas as notas (competência "Todos").
 
-    const { data, error } = await query;
+    // DANFE vs serviço: inferido pelo nº da nota (44 dígitos), filtrado no front/pós-query se necessário.
+    void doc_type;
+    if (amount) {
+      const amt = Number(String(amount).replace(",", "."));
+      if (Number.isFinite(amt)) query = query.eq("amount", amt);
+    }
+    const crdTerm = String(crd || "").replace(/[%_,]/g, " ").trim();
+    if (crdTerm) query = query.ilike("crd", `%${crdTerm}%`);
+    const term = String(searchQ || "").replace(/[%_,]/g, " ").trim();
+    if (term) {
+      const like = `%${term}%`;
+      query = query.or(
+        `protocol.ilike.${like},invoice_number.ilike.${like},provider_name.ilike.${like},description.ilike.${like}`
+      );
+    }
+
+    if (pag.enabled) query = query.range(pag.from, pag.to);
+
+    const { data, error, count } = await query;
 
     if (error) { console.error(error); return res.status(500).json({ error: "Erro interno ao processar a solicitação." }); }
 
-    res.json(
-      (data ?? []).map((i: any) => ({
-        ...i,
-        sector_name: i.sectors?.name ?? null,
-        user_name: i.users?.name ?? null,
-        boleto_paths: collectBoletoPaths(i),
-        edit_count: Number(i.edit_count || 0),
-        sectors: undefined,
-        users: undefined,
-      }))
+    const mapped = (data ?? []).map((i: any) => ({
+      ...i,
+      sector_name: i.sectors?.name ?? null,
+      user_name: i.users?.name ?? null,
+      boleto_paths: collectBoletoPaths(i),
+      edit_count: Number(i.edit_count || 0),
+      sectors: undefined,
+      users: undefined,
+    }));
+
+    if (!pag.enabled) return res.json(mapped);
+
+    let totalAmount = sumAmounts(mapped, (r: any) => r.amount);
+    try {
+      let sumQuery = filterByEmpresa(supabase.from("invoices").select("amount"), req, "invoices");
+      if (from || to) {
+        sumQuery = applyProvisionDateRange(sumQuery, from || to!, to || from!);
+      } else if (month && Number(month) >= 1 && Number(month) <= 12) {
+        const { dateFrom, dateTo } = getMonthDateRange(Number(year) || now.getFullYear(), Number(month));
+        sumQuery = applyProvisionDateRange(sumQuery, dateFrom, dateTo);
+      }
+      if (amount) {
+        const amt = Number(String(amount).replace(",", "."));
+        if (Number.isFinite(amt)) sumQuery = sumQuery.eq("amount", amt);
+      }
+      if (crdTerm) sumQuery = sumQuery.ilike("crd", `%${crdTerm}%`);
+      if (term) {
+        const like = `%${term}%`;
+        sumQuery = sumQuery.or(
+          `protocol.ilike.${like},invoice_number.ilike.${like},provider_name.ilike.${like},description.ilike.${like}`
+        );
+      }
+      const { data: amountRows } = await sumQuery;
+      if (Array.isArray(amountRows)) totalAmount = sumAmounts(amountRows, (r: any) => r.amount);
+    } catch {
+      // mantém soma da página
+    }
+
+    return res.json(
+      paginatedPayload(mapped, count ?? mapped.length, pag.page, pag.pageSize, { totalAmount })
     );
   });
 

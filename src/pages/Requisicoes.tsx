@@ -1,32 +1,26 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Plus, Archive, XCircle, BadgeCheck, RotateCcw, Pencil, History } from 'lucide-react';
+import { Plus, Archive, XCircle, BadgeCheck, RotateCcw, Pencil, History, Loader2 } from 'lucide-react';
 import { cn, formatCurrency, formatDate } from '../lib/utils';
 import { confirmCancel } from '../lib/confirmAction';
 import { ValueTrace } from '../components/ValueTrace';
 import { valueTrace } from '../lib/valueTraceMeta';
 import { useSearch } from '../context/SearchContext';
 import { useToast } from '../context/ToastContext';
-import { matchesSearch } from '../lib/search';
 import { isSharedCrdCode } from '../lib/sharedCrds';
 import { SearchableSelect } from '../components/SearchableSelect';
 import { CrdListFilter } from '../components/CrdListFilter';
-import {
-  LaunchNumberAmountFilters,
-  matchesAmountFilter,
-  matchesInvoiceNumberFilter,
-} from '../components/LaunchNumberAmountFilters';
-import { buildCrdFilterOptions, matchesCrdCodeFilter } from '../lib/crdFilter';
+import { LaunchNumberAmountFilters } from '../components/LaunchNumberAmountFilters';
+import { buildCrdFilterOptions } from '../lib/crdFilter';
 import {
   canEditLaunchRole,
   isLaunchStatusEditableBeforeControl,
   launchStatusMeta,
   LAUNCH_STATUS_FILTER_OPTIONS,
-  matchesDatePeriod,
 } from '../lib/launchFlow';
-import { CompetenciaFilter, currentCompetencia, matchesCompetencia } from '../components/CompetenciaFilter';
-import { ListPagination, sumAmountsByCurrency } from '../components/ListPagination';
+import { CompetenciaFilter, currentCompetencia } from '../components/CompetenciaFilter';
+import { ListPagination } from '../components/ListPagination';
 import { DateBrInput } from '../components/DateBrInput';
-import { useClientPagination } from '../hooks/useClientPagination';
+import { parseListResponse, useServerPagination } from '../hooks/useServerPagination';
 
 const EMPTY_FORM = {
   crd_id: '',
@@ -40,6 +34,7 @@ export const RequisicoesPage: React.FC = () => {
   const { query } = useSearch();
   const { showSuccess } = useToast();
   const [requisitions, setRequisitions] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
   const [crds, setCrds] = useState<any[]>([]);
   const [crdFilter, setCrdFilter] = useState('');
   const [invoiceNumberFilter, setInvoiceNumberFilter] = useState('');
@@ -62,10 +57,37 @@ export const RequisicoesPage: React.FC = () => {
   const [historyRows, setHistoryRows] = useState<any[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const pagination = useServerPagination(20);
 
-  const loadData = () => {
-    fetch('/api/requisitions').then((res) => res.json()).then(setRequisitions);
-    fetch('/api/crds').then((res) => res.json()).then(setCrds);
+  const loadData = (showSpinner = true) => {
+    if (showSpinner) setLoading(true);
+    const params = new URLSearchParams(pagination.queryParams);
+    if (statusFilter !== 'all') params.set('status', statusFilter);
+    if (competenciaMonth) {
+      params.set('month', competenciaMonth);
+      params.set('year', competenciaYear);
+    }
+    if (dateFrom) params.set('from', dateFrom);
+    if (dateTo) params.set('to', dateTo);
+    if (crdFilter) params.set('crd', crdFilter);
+    if (amountFilter.trim()) params.set('amount', amountFilter.trim());
+    const searchBits = [query, invoiceNumberFilter].map((s) => s.trim()).filter(Boolean);
+    if (searchBits.length) params.set('q', searchBits.join(' '));
+
+    fetch(`/api/requisitions?${params.toString()}`)
+      .then((res) => res.json())
+      .then((data) => {
+        const parsed = parseListResponse<any>(data);
+        setRequisitions(parsed.items);
+        pagination.applyMeta({ total: parsed.total, totalAmount: parsed.totalAmount ?? null });
+      })
+      .catch(() => {
+        setRequisitions([]);
+        pagination.applyMeta({ total: 0, totalAmount: 0 });
+      })
+      .finally(() => {
+        if (showSpinner) setLoading(false);
+      });
   };
 
   useEffect(() => {
@@ -101,8 +123,40 @@ export const RequisicoesPage: React.FC = () => {
     };
 
     loadUserScope();
-    loadData();
+    fetch('/api/crds').then((res) => res.json()).then(setCrds).catch(() => setCrds([]));
   }, []);
+
+  useEffect(() => {
+    pagination.resetPage();
+  }, [
+    statusFilter,
+    competenciaMonth,
+    competenciaYear,
+    dateFrom,
+    dateTo,
+    crdFilter,
+    amountFilter,
+    query,
+    invoiceNumberFilter,
+    pagination.resetPage,
+  ]);
+
+  useEffect(() => {
+    loadData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    pagination.page,
+    pagination.pageSize,
+    statusFilter,
+    competenciaMonth,
+    competenciaYear,
+    dateFrom,
+    dateTo,
+    crdFilter,
+    amountFilter,
+    query,
+    invoiceNumberFilter,
+  ]);
 
   const hasGlobalSectorView =
     userRole === 'admin' || userRole === 'finance' || userRole === 'controle';
@@ -269,39 +323,14 @@ export const RequisicoesPage: React.FC = () => {
     loadData();
   };
 
-  const filteredRequisitions = useMemo(
-    () =>
-      scopedRequisitions.filter((r) => {
-        if (statusFilter !== 'all' && String(r.status || '') !== statusFilter) return false;
-        if (!matchesCompetencia(r.date, competenciaMonth, competenciaYear)) return false;
-        if (!matchesDatePeriod(r.date, dateFrom, dateTo)) return false;
-        if (!matchesCrdCodeFilter(crdFilter, r.crd_code, r.crd_name)) return false;
-        if (!matchesInvoiceNumberFilter(invoiceNumberFilter, r.protocol, r.description, r.provider_name)) {
-          return false;
-        }
-        if (!matchesAmountFilter(amountFilter, r.amount)) return false;
-        return matchesSearch(
-          query,
-          r.protocol,
-          r.crd_code,
-          r.crd_name,
-          r.sector_name,
-          r.description,
-          r.provider_name,
-          r.date,
-          r.amount,
-          r.status
-        );
-      }),
-    [scopedRequisitions, query, crdFilter, invoiceNumberFilter, amountFilter, competenciaMonth, competenciaYear, dateFrom, dateTo, statusFilter]
-  );
+  const filteredRequisitions = scopedRequisitions;
 
-  const pagination = useClientPagination(filteredRequisitions);
-
-  const filteredAmountTotal = useMemo(
-    () => sumAmountsByCurrency(filteredRequisitions, (r) => r.amount),
-    [filteredRequisitions]
-  );
+  const filteredAmountTotal = useMemo(() => {
+    if (pagination.totalAmount != null && Number.isFinite(pagination.totalAmount)) {
+      return formatCurrency(pagination.totalAmount);
+    }
+    return formatCurrency(0);
+  }, [pagination.totalAmount]);
 
   const crdFilterOptions = useMemo(() => buildCrdFilterOptions(crds), [crds]);
 
@@ -407,14 +436,24 @@ export const RequisicoesPage: React.FC = () => {
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-50">
-            {filteredRequisitions.length === 0 && (
+            {loading && (
+              <tr>
+                <td colSpan={8} className="px-6 py-14 text-center">
+                  <div className="inline-flex items-center justify-center gap-2 text-slate-400">
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                    <span className="text-sm font-medium">Carregando requisições...</span>
+                  </div>
+                </td>
+              </tr>
+            )}
+            {!loading && filteredRequisitions.length === 0 && (
               <tr>
                 <td colSpan={8} className="px-6 py-10 text-center text-sm text-slate-400">
                   {crdFilter ? `Nenhuma requisição com CRD ${crdFilter}.` : 'Nenhuma requisição encontrada.'}
                 </td>
               </tr>
             )}
-            {pagination.pageItems.map((r) => {
+            {!loading && filteredRequisitions.map((r) => {
               const meta = statusLabel(r.status);
               const edited = Number(r.edit_count || 0) > 0;
               return (

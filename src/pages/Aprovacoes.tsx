@@ -12,15 +12,10 @@ import {
 import { cn, formatCurrency, formatDate } from '../lib/utils';
 import { useSearch } from '../context/SearchContext';
 import { useToast } from '../context/ToastContext';
-import { matchesSearch } from '../lib/search';
-import {
-  LaunchNumberAmountFilters,
-  matchesAmountFilter,
-  matchesInvoiceNumberFilter,
-} from '../components/LaunchNumberAmountFilters';
+import { LaunchNumberAmountFilters } from '../components/LaunchNumberAmountFilters';
 import { DateBrInput } from '../components/DateBrInput';
 import { ListPagination } from '../components/ListPagination';
-import { useClientPagination } from '../hooks/useClientPagination';
+import { parseListResponse, useServerPagination } from '../hooks/useServerPagination';
 import { isDirectDocumentUrl } from '../lib/storagePath';
 import { confirmCancel } from '../lib/confirmAction';
 import {
@@ -30,7 +25,6 @@ import {
   exceedsDiretoriaThreshold,
   type AprovacaoActingSector,
   type AprovacaoItem,
-  isPendingForRole,
   statusMeta,
   tipoBadgeClass,
   tipoLabel,
@@ -42,6 +36,15 @@ export const AprovacoesPage: React.FC = () => {
   const [items, setItems] = useState<AprovacaoItem[]>([]);
   const [sectors, setSectors] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [summary, setSummary] = useState<{
+    total?: number;
+    pending_gestor?: number;
+    pending_controle?: number;
+    pending_financeiro?: number;
+    pending_diretoria?: number;
+    total_valor?: number;
+  } | null>(null);
+  const pagination = useServerPagination(20);
   const [userRole, setUserRole] = useState('viewer');
   const [allowedSectorIds, setAllowedSectorIds] = useState<string[]>([]);
   const [actingSector, setActingSector] = useState<AprovacaoActingSector>('controle');
@@ -76,12 +79,16 @@ export const AprovacoesPage: React.FC = () => {
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const params = new URLSearchParams();
+      const params = new URLSearchParams(pagination.queryParams);
       if (typeFilter !== 'all') params.set('type', typeFilter);
       if (sectorFilter !== 'all') params.set('sector_id', sectorFilter);
       if (dateFrom) params.set('from', dateFrom);
       if (dateTo) params.set('to', dateTo);
       if (statusFilter !== 'all') params.set('status', statusFilter);
+      if (viewTab === 'diretoria') params.set('diretoria', '1');
+      if (query.trim()) params.set('q', query.trim());
+      if (invoiceNumberFilter.trim()) params.set('invoice_number', invoiceNumberFilter.trim());
+      if (amountFilter.trim()) params.set('amount', amountFilter.trim());
 
       const [aprovRes, sectorsRes] = await Promise.all([
         fetch(`/api/aprovacoes?${params.toString()}`),
@@ -89,14 +96,31 @@ export const AprovacoesPage: React.FC = () => {
       ]);
       const data = await aprovRes.json().catch(() => ({}));
       const sectorsData = await sectorsRes.json().catch(() => []);
-      setItems(Array.isArray(data?.items) ? data.items : []);
+      const parsed = parseListResponse<AprovacaoItem>(data);
+      setItems(parsed.items);
+      pagination.applyMeta({ total: parsed.total, totalAmount: parsed.totalAmount ?? null });
+      setSummary(data?.summary && typeof data.summary === 'object' ? data.summary : null);
       setSectors(Array.isArray(sectorsData) ? sectorsData : []);
     } catch {
       setItems([]);
+      pagination.applyMeta({ total: 0, totalAmount: 0 });
+      setSummary(null);
     } finally {
       setLoading(false);
     }
-  }, [typeFilter, sectorFilter, dateFrom, dateTo, statusFilter]);
+  }, [
+    typeFilter,
+    sectorFilter,
+    dateFrom,
+    dateTo,
+    statusFilter,
+    viewTab,
+    query,
+    invoiceNumberFilter,
+    amountFilter,
+    pagination.queryParams,
+    pagination.applyMeta,
+  ]);
 
   useEffect(() => {
     const loadUser = async () => {
@@ -142,87 +166,43 @@ export const AprovacoesPage: React.FC = () => {
   }, [userRole, allowedSectorIds, sectorFilter]);
 
   useEffect(() => {
+    pagination.resetPage();
+  }, [
+    typeFilter,
+    sectorFilter,
+    dateFrom,
+    dateTo,
+    statusFilter,
+    viewTab,
+    query,
+    invoiceNumberFilter,
+    amountFilter,
+    pagination.resetPage,
+  ]);
+
+  useEffect(() => {
     loadData();
   }, [loadData]);
 
-  const scopedItems = useMemo(() => {
-    if (viewTab !== 'diretoria') return items;
-    return items.filter((item) => exceedsDiretoriaThreshold(item.amount));
-  }, [items, viewTab]);
-
-  const filteredItems = useMemo(
-    () =>
-      scopedItems.filter((item) => {
-        if (
-          !matchesInvoiceNumberFilter(
-            invoiceNumberFilter,
-            item.invoice_number,
-            item.protocol,
-            item.subtitle,
-            item.title,
-            item.description
-          )
-        ) {
-          return false;
-        }
-        if (!matchesAmountFilter(amountFilter, item.amount)) return false;
-        return matchesSearch(
-          query,
-          tipoLabel(item.type),
-          item.title,
-          item.subtitle,
-          item.protocol,
-          item.invoice_number,
-          item.description,
-          item.sector_name,
-          item.crd_code,
-          item.crd_name,
-          item.user_name,
-          item.fornecedor,
-          item.vencimento,
-          item.reference_date,
-          item.issue_date,
-          item.amount,
-          item.status
-        );
-      }),
-    [scopedItems, query, invoiceNumberFilter, amountFilter]
-  );
-
-  const pagination = useClientPagination(filteredItems);
-
   const filteredAmountTotal = useMemo(() => {
-    const sum = filteredItems.reduce((acc, item) => {
-      const value = Number(item.amount) || 0;
-      return acc + (item.type === 'estorno' ? -value : value);
-    }, 0);
-    return formatCurrency(sum);
-  }, [filteredItems]);
+    if (pagination.totalAmount != null && Number.isFinite(pagination.totalAmount)) {
+      return formatCurrency(pagination.totalAmount);
+    }
+    return formatCurrency(0);
+  }, [pagination.totalAmount]);
 
   const metrics = useMemo(() => {
-    const base = scopedItems;
-    const pendingGestor = base.filter((i) => isPendingForRole(i, 'gestor')).length;
-    const pendingControle = base.filter((i) => isPendingForRole(i, 'controle')).length;
-    const pendingFinanceiro = base.filter((i) => isPendingForRole(i, 'financeiro')).length;
-    const pendingDiretoria = base.filter((i) => exceedsDiretoriaThreshold(i.amount)).length;
-    const totalValor = base.reduce((sum, i) => {
-      const value = Number(i.amount) || 0;
-      return sum + (i.type === 'estorno' ? -value : value);
-    }, 0);
     return {
-      pendingGestor,
-      pendingControle,
-      pendingFinanceiro,
-      pendingDiretoria,
-      totalValor,
-      total: base.length,
+      pendingGestor: Number(summary?.pending_gestor) || 0,
+      pendingControle: Number(summary?.pending_controle) || 0,
+      pendingFinanceiro: Number(summary?.pending_financeiro) || 0,
+      pendingDiretoria: Number(summary?.pending_diretoria) || 0,
+      totalValor: Number(summary?.total_valor) || Number(pagination.totalAmount) || 0,
+      total: Number(summary?.total) || pagination.total || 0,
     };
-  }, [scopedItems]);
+  }, [summary, pagination.total, pagination.totalAmount]);
 
-  const diretoriaCount = useMemo(
-    () => items.filter((i) => exceedsDiretoriaThreshold(i.amount)).length,
-    [items]
-  );
+  const diretoriaCount = metrics.pendingDiretoria;
 
   const updateManualStatus = async (id: number, status: 'open' | 'approved' | 'posted' | 'cancelled') => {
     if (status === 'cancelled' && !confirmCancel('este lançamento manual')) return;
@@ -844,7 +824,7 @@ export const AprovacoesPage: React.FC = () => {
                 </td>
               </tr>
             )}
-            {!loading && filteredItems.length === 0 && (
+            {!loading && items.length === 0 && (
               <tr>
                 <td colSpan={9} className="px-6 py-10 text-center text-sm text-slate-400">
                   Nenhum lançamento encontrado com os filtros atuais.
@@ -852,7 +832,7 @@ export const AprovacoesPage: React.FC = () => {
               </tr>
             )}
             {!loading &&
-              pagination.pageItems.map((item) => {
+              items.map((item) => {
                 const meta = statusMeta(item);
                 return (
                   <tr key={item.key} className="hover:bg-slate-50/50 transition-colors align-top">
