@@ -7,6 +7,7 @@ type SearchBarProps = {
   onChange: (value: string) => void;
   placeholder?: string;
   className?: string;
+  dataTour?: string;
 };
 
 export const SearchBar: React.FC<SearchBarProps> = ({
@@ -14,8 +15,9 @@ export const SearchBar: React.FC<SearchBarProps> = ({
   onChange,
   placeholder = 'Buscar...',
   className,
+  dataTour,
 }) => (
-  <div className={cn('relative', className)}>
+  <div className={cn('relative', className)} data-tour={dataTour}>
     <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
     <input
       type="search"

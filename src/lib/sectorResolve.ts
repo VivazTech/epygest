@@ -1,0 +1,288 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
+import type { CompanyKey } from "./companies.js";
+import { DEFAULT_COMPANY_KEY } from "./companies.js";
+import { filterByEmpresaKey, withEmpresaKeyValue } from "./empresaScope.js";
+
+export type SectorRow = {
+  id: number;
+  name: string;
+  code: string | null;
+  active?: boolean;
+  budget_limit?: number;
+  empresa_key?: string;
+};
+
+export type ResolvedSector = {
+  id: number;
+  code: string;
+  name: string;
+};
+
+export type SectorResolveInput = {
+  code?: string | number | null;
+  name?: string | null;
+  /** Cria setor quando não encontrado (padrão: true em imports). */
+  create?: boolean;
+  /**
+   * No PDF, o centro de custo vem sem o sufixo da empresa (LANCHONETE → LANCHONETE ACQUA).
+   * exact é o padrão. prefix só escolhe um setor quando o nome começa pelo centro de custo
+   * e, havendo mais de um, prefere o que termina em "acqua".
+   */
+  nameMatch?: "exact" | "prefix";
+  budget_limit?: number;
+  empresa_key?: CompanyKey;
+};
+
+/** Normaliza nome para comparação (sem acentos, minúsculas). */
+export function normalizeSectorName(value: string): string {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase();
+}
+
+/** Normaliza código do setor (string trim, sem espaços extras). */
+export function normalizeSectorCode(value: string | number | null | undefined): string | null {
+  if (value === null || value === undefined) return null;
+  const raw = String(value).trim();
+  if (!raw) return null;
+  return raw;
+}
+
+/** Gera código slug a partir do nome quando o ERP não fornece código. */
+export function slugSectorCodeFromName(name: string): string {
+  return normalizeSectorName(name)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .toUpperCase();
+}
+
+/** Extrai código e nome de textos do extrato (ex.: "01 - RH", "RH (01)"). */
+export function parseSectorText(raw: string): { code: string | null; name: string } {
+  const text = String(raw || "").trim();
+  if (!text) return { code: null, name: "" };
+
+  const paren = text.match(/^(.+?)\s*\((\d+)\)\s*$/);
+  if (paren) {
+    return { name: paren[1].trim(), code: paren[2] };
+  }
+
+  const prefix = text.match(/^(\d+)\s*[-–—/\\.:]\s*(.+)$/);
+  if (prefix) {
+    return { code: prefix[1], name: prefix[2].trim() };
+  }
+
+  const suffix = text.match(/^(.+?)\s*[-–—/\\.:]\s*(\d+)$/);
+  if (suffix) {
+    return { name: suffix[1].trim(), code: suffix[2] };
+  }
+
+  if (/^\d+$/.test(text)) {
+    return { code: text, name: text };
+  }
+
+  return { code: null, name: text };
+}
+
+export class SectorCache {
+  private byCode = new Map<string, SectorRow>();
+  private byName = new Map<string, SectorRow>();
+  private loadedAt = 0;
+  private empresaKey: CompanyKey;
+
+  constructor(
+    private readonly supabase: SupabaseClient,
+    empresaKey: CompanyKey = DEFAULT_COMPANY_KEY
+  ) {
+    this.empresaKey = empresaKey;
+  }
+
+  getEmpresaKey(): CompanyKey {
+    return this.empresaKey;
+  }
+
+  async reload(force = false): Promise<void> {
+    const staleMs = 30_000;
+    if (!force && this.loadedAt && Date.now() - this.loadedAt < staleMs) return;
+
+    const { data, error } = await filterByEmpresaKey(
+      this.supabase.from("sectors").select("id, name, code, active, budget_limit, empresa_key"),
+      this.empresaKey,
+      "sectors"
+    );
+    if (error) throw error;
+
+    this.byCode.clear();
+    this.byName.clear();
+    for (const row of data ?? []) {
+      const sector: SectorRow = {
+        id: Number((row as any).id),
+        name: String((row as any).name ?? "").trim(),
+        code: normalizeSectorCode((row as any).code),
+        active: (row as any).active !== false,
+        budget_limit: Number((row as any).budget_limit) || 0,
+        empresa_key: String((row as any).empresa_key || this.empresaKey),
+      };
+      if (!sector.id || !sector.name) continue;
+      this.byName.set(normalizeSectorName(sector.name), sector);
+      if (sector.code) this.byCode.set(sector.code, sector);
+    }
+    this.loadedAt = Date.now();
+  }
+
+  getByCode(code: string | null | undefined): SectorRow | undefined {
+    const key = normalizeSectorCode(code);
+    return key ? this.byCode.get(key) : undefined;
+  }
+
+  getByName(name: string | null | undefined): SectorRow | undefined {
+    const key = normalizeSectorName(String(name || ""));
+    return key ? this.byName.get(key) : undefined;
+  }
+
+  list(): SectorRow[] {
+    return Array.from(this.byName.values());
+  }
+
+  remember(sector: SectorRow): void {
+    this.byName.set(normalizeSectorName(sector.name), sector);
+    if (sector.code) this.byCode.set(sector.code, sector);
+  }
+}
+
+const cachesByEmpresa = new Map<CompanyKey, SectorCache>();
+
+export function getSectorCache(
+  supabase: SupabaseClient,
+  empresaKey: CompanyKey = DEFAULT_COMPANY_KEY
+): SectorCache {
+  const key = empresaKey || DEFAULT_COMPANY_KEY;
+  let cache = cachesByEmpresa.get(key);
+  if (!cache) {
+    cache = new SectorCache(supabase, key);
+    cachesByEmpresa.set(key, cache);
+  }
+  return cache;
+}
+
+/** Resolve (ou cria) setor priorizando código; nome é fallback e rótulo exibível. */
+export async function resolveSector(
+  supabase: SupabaseClient,
+  input: SectorResolveInput,
+  cache?: SectorCache
+): Promise<ResolvedSector | null> {
+  const empresaKey = (input.empresa_key || cache?.getEmpresaKey() || DEFAULT_COMPANY_KEY) as CompanyKey;
+  const sectorCache = cache && cache.getEmpresaKey() === empresaKey
+    ? cache
+    : getSectorCache(supabase, empresaKey);
+  await sectorCache.reload();
+
+  const explicitCode = normalizeSectorCode(input.code);
+  const name = String(input.name ?? "").trim();
+  const parsed = name ? parseSectorText(name) : { code: null, name: "" };
+  const code = explicitCode ?? normalizeSectorCode(parsed.code);
+  const displayName = name ? parsed.name || name : "";
+
+  if (code) {
+    const byCode = sectorCache.getByCode(code);
+    if (byCode) {
+      return { id: byCode.id, code: byCode.code!, name: byCode.name };
+    }
+  }
+
+  if (displayName) {
+    const byName = sectorCache.getByName(displayName);
+    if (byName) {
+      const resolvedCode = byName.code ?? code ?? slugSectorCodeFromName(displayName);
+      if (!byName.code && resolvedCode) {
+        await filterByEmpresaKey(
+          supabase.from("sectors").update({ code: resolvedCode }).eq("id", byName.id),
+          empresaKey,
+          "sectors"
+        );
+        sectorCache.remember({ ...byName, code: resolvedCode });
+      }
+      return { id: byName.id, code: resolvedCode, name: byName.name };
+    }
+
+    if (input.nameMatch === "prefix") {
+      const key = normalizeSectorName(displayName);
+      const candidates = sectorCache.list().filter((row) => {
+        const normalized = normalizeSectorName(row.name);
+        return normalized === key || normalized.startsWith(`${key} `);
+      });
+      const preferred =
+        candidates.find((row) => normalizeSectorName(row.name) === `${key} acqua`) ||
+        (candidates.length === 1 ? candidates[0] : undefined);
+      if (preferred) {
+        return {
+          id: preferred.id,
+          code: preferred.code ?? slugSectorCodeFromName(preferred.name),
+          name: preferred.name,
+        };
+      }
+    }
+  }
+
+  if (input.create === false) return null;
+
+  const finalName = displayName || (code ? `Setor ${code}` : "");
+  if (!finalName) return null;
+
+  const finalCode = code ?? slugSectorCodeFromName(finalName);
+  const budget = Number.isFinite(Number(input.budget_limit)) ? Number(input.budget_limit) : 0;
+
+  const { data: created, error } = await supabase
+    .from("sectors")
+    .insert(
+      withEmpresaKeyValue(
+        { name: finalName, code: finalCode, budget_limit: budget, active: true },
+        empresaKey
+      )
+    )
+    .select("id, name, code")
+    .single();
+
+  if (error) {
+    if (String(error.message || "").toLowerCase().includes("unique") && finalCode) {
+      await sectorCache.reload(true);
+      const retry = sectorCache.getByCode(finalCode);
+      if (retry) return { id: retry.id, code: retry.code!, name: retry.name };
+    }
+    console.error("Falha ao criar setor:", finalName, finalCode, empresaKey, error);
+    return null;
+  }
+
+  const sector: SectorRow = {
+    id: Number(created.id),
+    name: String(created.name),
+    code: normalizeSectorCode(created.code) ?? finalCode,
+    empresa_key: empresaKey,
+  };
+  sectorCache.remember(sector);
+  return { id: sector.id, code: sector.code!, name: sector.name };
+}
+
+/** Atalho: resolve setor por código com nome opcional para criação. */
+export async function resolveSectorByCode(
+  supabase: SupabaseClient,
+  code: string | number,
+  name?: string | null,
+  cache?: SectorCache,
+  empresaKey?: CompanyKey
+): Promise<ResolvedSector | null> {
+  return resolveSector(supabase, { code, name, create: true, empresa_key: empresaKey }, cache);
+}
+
+/** Atalho: resolve setor por nome (fallback legado). */
+export async function resolveSectorByName(
+  supabase: SupabaseClient,
+  name: string,
+  cache?: SectorCache,
+  empresaKey?: CompanyKey
+): Promise<ResolvedSector | null> {
+  return resolveSector(supabase, { name, create: true, empresa_key: empresaKey }, cache);
+}

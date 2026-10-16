@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Eye, EyeOff } from 'lucide-react';
+import { Eye, EyeOff, ArrowLeft } from 'lucide-react';
 import { Sidebar } from './components/Sidebar';
 import { Dashboard } from './pages/Dashboard';
+import { DashboardDiretoria } from './pages/DashboardDiretoria';
 import { Invoices } from './pages/Invoices';
 
 // Mock Pages for now to avoid empty imports
@@ -12,6 +13,7 @@ import { ImportacaoPage as Importacao } from './pages/Importacao';
 import { CadastrosPage as Cadastros } from './pages/Cadastros';
 import { RequisicoesPage as Requisicoes } from './pages/Requisicoes';
 import { LancamentosManuaisPage as LancamentosManuais } from './pages/LancamentosManuais';
+import { EstornosPage as Estornos } from './pages/Estornos';
 import { ComandasPage as Comandas } from './pages/Comandas';
 import { SupabaseConnectionTestPage as SupabaseTeste } from './pages/SupabaseConnectionTest';
 import { SintasePage as Sintase } from './pages/Sintase';
@@ -19,28 +21,131 @@ import { PrevRealPage as PrevReal } from './pages/PrevReal';
 import { IndicadoresPage as Indicadores } from './pages/Indicadores';
 import { ConfiguracoesPage as Configuracoes } from './pages/Configuracoes';
 import { UsuariosPage as Usuarios } from './pages/Usuarios';
+import { SugestoesPage as Sugestoes } from './pages/Sugestoes';
+import { NomesSistemaPage as NomesSistema } from './pages/NomesSistema';
+import { SystemNamePrompt } from './components/SystemNamePrompt';
 import { PlanilhasPage } from './pages/Planilhas';
 import { PLANILHAS, APURACAO_RECEITA_ITENS, BASE_ORCAMENTO_ITENS, isApuracaoReceitaPlanilha, isBaseOrcamentoTab } from './lib/planilhas';
 import { FolhaPagamentoPage, MESES_FOLHA } from './pages/FolhaPagamento';
 import { FolhaApuracaoPage } from './pages/FolhaApuracao';
+import { PainelRhPage } from './pages/PainelRh';
+import { AbsenteismoPage } from './pages/Absenteismo';
+import { TurnoverPage } from './pages/Turnover';
+import { TangerinoPontoPage } from './pages/TangerinoPonto';
+import { EmprestimosPage } from './pages/Emprestimos';
 import { RelatorioCrdPage, RelatorioCrdMesPage, MESES_REL_CRD } from './pages/RelatorioCrd';
 import { RelatorioRequisicoesPage, RelatorioRequisicoesMesPage, MESES_REL_REQ } from './pages/RelatorioRequisicoes';
 import { ConsumoInternoPage, ConsumoInternoMesPage, MESES_CONSUMO } from './pages/ConsumoInterno';
+import { VendasPdvsPage } from './pages/VendasPdvs';
+import { AquaOrcamentoPage } from './pages/AquaOrcamento';
+import { CmvPage, CmvMesPage } from './pages/Cmv';
+import { CmvTarifasPage } from './pages/CmvTarifas';
+import { MESES_CMV } from './lib/cmv';
+import { UmlPage } from './pages/Uml';
 import { RelatorioRdsPage, RelatorioRdsMesPage, MESES_RDS } from './pages/RelatorioRds';
 import { ComprasPage } from './pages/Compras';
+import { MensalidadesPage } from './pages/Mensalidades';
+import { AprovacoesPage } from './pages/Aprovacoes';
+import { InvestimentosPage } from './pages/Investimentos';
 import { PainelSetorial } from './pages/PainelSetorial';
 import { getPainelByTab, isPainelSetorialTab } from './lib/paineisSetoriais';
 import { SearchProvider, useSearch } from './context/SearchContext';
 import { ToastProvider } from './context/ToastContext';
+import { CompanyProvider, useCompany } from './context/CompanyContext';
 import { SearchBar } from './components/SearchBar';
 import { getSearchPlaceholder } from './lib/search';
+import { TutorialPage as Tutorial } from './pages/Tutorial';
+import { TutorialProvider } from './context/TutorialContext';
+import { hasPermission } from './lib/permissionCatalog';
+import { SuggestionFab } from './components/SuggestionFab';
+import { CrdLinkReminder } from './components/CrdLinkReminder';
+import { getPageLabel } from './lib/pageLabels';
 
-const PLANILHAS_ROLES = ['admin', 'finance', 'controle'] as const;
+const ACTIVE_TAB_KEY = 'app:activeTab';
+
+/** Evita tela branca total se uma aba lançar erro de render (ex.: data inválida). */
+class PageErrorBoundary extends React.Component<
+  { children: React.ReactNode; resetKey: string },
+  { error: Error | null }
+> {
+  state: { error: Error | null } = { error: null };
+
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+
+  componentDidUpdate(prevProps: { resetKey: string }) {
+    if (prevProps.resetKey !== this.props.resetKey && this.state.error) {
+      this.setState({ error: null });
+    }
+  }
+
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="bg-white border border-red-100 rounded-2xl p-8 text-center space-y-3">
+          <p className="text-sm font-bold text-red-700">Não foi possível carregar esta tela.</p>
+          <p className="text-xs text-slate-500 break-words">{this.state.error.message}</p>
+          <button
+            type="button"
+            onClick={() => this.setState({ error: null })}
+            className="px-4 py-2 rounded-xl bg-slate-900 text-white text-sm font-semibold"
+          >
+            Tentar novamente
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+const readStoredTab = () => {
+  try {
+    const saved = String(localStorage.getItem(ACTIVE_TAB_KEY) || '').trim();
+    return saved;
+  } catch {
+    return '';
+  }
+};
+
+const writeStoredTab = (tab: string) => {
+  try {
+    if (tab) localStorage.setItem(ACTIVE_TAB_KEY, tab);
+  } catch {
+    // ignore quota / private mode
+  }
+};
+
+const defaultTabForRole = (role?: string) =>
+  role === 'finance' || role === 'estagiario' ? 'notas' : 'dashboard';
+
+const readResetTokenFromUrl = () => {
+  try {
+    return String(new URLSearchParams(window.location.search).get('reset_token') || '').trim();
+  } catch {
+    return '';
+  }
+};
+
+const clearResetTokenFromUrl = () => {
+  try {
+    const url = new URL(window.location.href);
+    if (!url.searchParams.has('reset_token')) return;
+    url.searchParams.delete('reset_token');
+    const next = `${url.pathname}${url.search}${url.hash}`;
+    window.history.replaceState({}, '', next || '/');
+  } catch {
+    // ignore
+  }
+};
+
+type AuthView = 'login' | 'forgot' | 'forgot-sent' | 'reset';
 
 export default function App() {
   const isSupabaseTestRoute = window.location.pathname === '/teste-supabase';
   const [user, setUser] = useState<any | null>(null);
-  const [activeTab, setActiveTab] = useState('dashboard');
+  const [activeTab, setActiveTab] = useState(() => readStoredTab() || 'dashboard');
   const [planilhaCell, setPlanilhaCell] = useState<string | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [loginForm, setLoginForm] = useState({ email: '', password: '' });
@@ -48,6 +153,18 @@ export default function App() {
   const [loginLoading, setLoginLoading] = useState(false);
   const [loginError, setLoginError] = useState('');
   const [bootstrapping, setBootstrapping] = useState(true);
+  const [authView, setAuthView] = useState<AuthView>(() => (readResetTokenFromUrl() ? 'reset' : 'login'));
+  const [resetToken, setResetToken] = useState(readResetTokenFromUrl);
+  const [forgotEmail, setForgotEmail] = useState('');
+  const [forgotLoading, setForgotLoading] = useState(false);
+  const [forgotError, setForgotError] = useState('');
+  const [forgotSentMessage, setForgotSentMessage] = useState('');
+  const [resetForm, setResetForm] = useState({ password: '', confirm: '' });
+  const [showResetPassword, setShowResetPassword] = useState(false);
+  const [resetLoading, setResetLoading] = useState(false);
+  const [resetError, setResetError] = useState('');
+  const [resetInfo, setResetInfo] = useState('');
+  const [resetTokenValid, setResetTokenValid] = useState<boolean | null>(null);
 
   // Restaura a sessão a partir do cookie httpOnly validado pelo servidor (/api/auth/me),
   // não confiando no localStorage como fonte de verdade da autenticação.
@@ -61,7 +178,8 @@ export default function App() {
         if (!cancelled && data?.id && data?.role) {
           setUser(data);
           localStorage.setItem('user', JSON.stringify(data)); // cache só para a UI
-          if (data.role === 'finance') setActiveTab('notas');
+          const saved = readStoredTab();
+          setActiveTab(saved || defaultTabForRole(data.role));
         }
       } catch {
         if (!cancelled) {
@@ -77,13 +195,24 @@ export default function App() {
     };
   }, []);
 
-  const canAccessPlanilhas = PLANILHAS_ROLES.includes(user?.role);
+  const canAccessTab = (tabId: string) =>
+    hasPermission(user?.permissions, tabId, 'view', user?.role);
 
   useEffect(() => {
-    if (user && activeTab.startsWith('planilha-') && !canAccessPlanilhas) {
-      setActiveTab('dashboard');
+    if (!user || !activeTab) return;
+    // Não redireciona enquanto permissions ainda não vieram (login legado em cache)
+    if (!user.permissions && user.role !== 'admin') return;
+    if (!canAccessTab(activeTab)) {
+      // Escolhe a primeira tela visível razoável
+      const fallbacks = ['dashboard', 'notas', 'lancamentos-manuais', 'dre', 'tutorial'];
+      const next = fallbacks.find((id) => canAccessTab(id)) || 'dashboard';
+      if (next !== activeTab) setActiveTab(next);
     }
-  }, [user, activeTab, canAccessPlanilhas]);
+  }, [user, activeTab]);
+
+  useEffect(() => {
+    if (activeTab) writeStoredTab(activeTab);
+  }, [activeTab]);
 
   const handleLogout = async () => {
     try {
@@ -122,12 +251,112 @@ export default function App() {
       }
       setUser(data);
       localStorage.setItem('user', JSON.stringify(data));
-      if (data.role === 'finance') setActiveTab('notas');
+      const saved = readStoredTab();
+      setActiveTab(saved || defaultTabForRole(data.role));
       setLoginForm({ email: '', password: '' });
     } finally {
       setLoginLoading(false);
     }
   };
+
+  const goToLogin = () => {
+    setAuthView('login');
+    setForgotError('');
+    setForgotSentMessage('');
+    setResetError('');
+    setResetInfo('');
+    setResetForm({ password: '', confirm: '' });
+    clearResetTokenFromUrl();
+    setResetToken('');
+  };
+
+  const handleForgotPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!forgotEmail.trim()) {
+      setForgotError('Informe o e-mail da conta.');
+      return;
+    }
+    setForgotError('');
+    setForgotSentMessage('');
+    setForgotLoading(true);
+    try {
+      const res = await fetch('/api/auth/forgot-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: forgotEmail.trim() }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setForgotError(data.error || 'Não foi possível enviar o e-mail.');
+        return;
+      }
+      setForgotSentMessage(
+        data.message || `Usuário encontrado. Enviamos o link de redefinição para ${forgotEmail.trim()}.`
+      );
+      setAuthView('forgot-sent');
+    } finally {
+      setForgotLoading(false);
+    }
+  };
+
+  const handleResetPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!resetForm.password || !resetForm.confirm) {
+      setResetError('Preencha a nova senha e a confirmação.');
+      return;
+    }
+    if (resetForm.password !== resetForm.confirm) {
+      setResetError('As senhas não coincidem.');
+      return;
+    }
+    setResetError('');
+    setResetLoading(true);
+    try {
+      const res = await fetch('/api/auth/reset-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          token: resetToken,
+          password: resetForm.password,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setResetError(data.error || 'Não foi possível redefinir a senha.');
+        return;
+      }
+      setResetForm({ password: '', confirm: '' });
+      setAuthView('login');
+      setLoginError('');
+      setResetInfo(data.message || 'Senha redefinida. Faça login com a nova senha.');
+      clearResetTokenFromUrl();
+      setResetToken('');
+    } finally {
+      setResetLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (authView !== 'reset' || !resetToken) {
+      setResetTokenValid(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const res = await fetch(`/api/auth/reset-password?token=${encodeURIComponent(resetToken)}`);
+      if (cancelled) return;
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setResetTokenValid(false);
+        setResetError(data.error || 'Link inválido ou expirado.');
+        return;
+      }
+      setResetTokenValid(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [authView, resetToken]);
 
   const getWhatsappSupportLink = () => {
     const errorText = loginError?.trim() ? loginError.trim() : 'Mensagem de erro';
@@ -144,7 +373,7 @@ export default function App() {
 
   const renderContent = () => {
     if (activeTab.startsWith('planilha-')) {
-      if (!canAccessPlanilhas) return <Dashboard />;
+      if (!canAccessTab(activeTab)) return <Dashboard />;
       const indice = Number(activeTab.slice('planilha-'.length));
       return (
         <PlanilhasPage
@@ -159,16 +388,42 @@ export default function App() {
     }
 
     if (activeTab === 'folha-apuracao') {
+      if (!canAccessTab('folha')) return <Dashboard />;
       return <FolhaApuracaoPage />;
     }
 
+    if (activeTab === 'painel-rh') {
+      if (!canAccessTab('folha')) return <Dashboard />;
+      return <PainelRhPage user={user ?? undefined} />;
+    }
+
+    if (activeTab === 'absenteismo') {
+      if (!canAccessTab('folha')) return <Dashboard />;
+      return <AbsenteismoPage />;
+    }
+
+    if (activeTab === 'turnover') {
+      if (!canAccessTab('folha')) return <Dashboard />;
+      return <TurnoverPage />;
+    }
+
+    if (activeTab === 'tangerino-ponto') {
+      if (!canAccessTab('folha')) return <Dashboard />;
+      return <TangerinoPontoPage />;
+    }
+
+    if (activeTab === 'emprestimos') {
+      if (!canAccessTab('emprestimos')) return <Dashboard />;
+      return <EmprestimosPage />;
+    }
+
     if (activeTab === 'rel-crd') {
-      if (!canAccessPlanilhas) return <Dashboard />;
+      if (!canAccessTab(activeTab)) return <Dashboard />;
       return <RelatorioCrdPage onSelectMonth={(m) => setActiveTab(`rel-crd-${m}`)} />;
     }
 
     if (activeTab.startsWith('rel-crd-')) {
-      if (!canAccessPlanilhas) return <Dashboard />;
+      if (!canAccessTab(activeTab)) return <Dashboard />;
       const mes = Number(activeTab.slice('rel-crd-'.length));
       if (mes >= 1 && mes <= 12) {
         return <RelatorioCrdMesPage key={mes} month={mes} />;
@@ -176,12 +431,12 @@ export default function App() {
     }
 
     if (activeTab === 'rel-req') {
-      if (!canAccessPlanilhas) return <Dashboard />;
+      if (!canAccessTab(activeTab)) return <Dashboard />;
       return <RelatorioRequisicoesPage onSelectMonth={(m) => setActiveTab(`rel-req-${m}`)} />;
     }
 
     if (activeTab.startsWith('rel-req-')) {
-      if (!canAccessPlanilhas) return <Dashboard />;
+      if (!canAccessTab(activeTab)) return <Dashboard />;
       const mes = Number(activeTab.slice('rel-req-'.length));
       if (mes >= 1 && mes <= 12) {
         return <RelatorioRequisicoesMesPage key={mes} month={mes} />;
@@ -189,25 +444,43 @@ export default function App() {
     }
 
     if (activeTab === 'rel-consumo') {
-      if (!canAccessPlanilhas) return <Dashboard />;
+      if (!canAccessTab(activeTab)) return <Dashboard />;
       return <ConsumoInternoPage onSelectMonth={(m) => setActiveTab(`rel-consumo-${m}`)} />;
     }
 
     if (activeTab.startsWith('rel-consumo-')) {
-      if (!canAccessPlanilhas) return <Dashboard />;
+      if (!canAccessTab(activeTab)) return <Dashboard />;
       const mes = Number(activeTab.slice('rel-consumo-'.length));
       if (mes >= 1 && mes <= 12) {
         return <ConsumoInternoMesPage key={mes} month={mes} />;
       }
     }
 
+    if (activeTab === 'cmv') {
+      if (!canAccessTab(activeTab)) return <Dashboard />;
+      return <CmvPage onSelectMonth={(m) => setActiveTab(`cmv-${m}`)} />;
+    }
+
+    if (activeTab === 'cmv-tarifas') {
+      if (!canAccessTab(activeTab)) return <Dashboard />;
+      return <CmvTarifasPage />;
+    }
+
+    if (activeTab.startsWith('cmv-')) {
+      if (!canAccessTab(activeTab)) return <Dashboard />;
+      const mes = Number(activeTab.slice('cmv-'.length));
+      if (mes >= 1 && mes <= 12) {
+        return <CmvMesPage key={mes} month={mes} />;
+      }
+    }
+
     if (activeTab === 'rel-rds') {
-      if (!canAccessPlanilhas) return <Dashboard />;
+      if (!canAccessTab(activeTab)) return <Dashboard />;
       return <RelatorioRdsPage onSelectMonth={(m) => setActiveTab(`rel-rds-${m}`)} />;
     }
 
     if (activeTab.startsWith('rel-rds-')) {
-      if (!canAccessPlanilhas) return <Dashboard />;
+      if (!canAccessTab(activeTab)) return <Dashboard />;
       const mes = Number(activeTab.slice('rel-rds-'.length));
       if (mes >= 1 && mes <= 12) {
         return <RelatorioRdsMesPage key={mes} month={mes} />;
@@ -215,6 +488,7 @@ export default function App() {
     }
 
     if (activeTab.startsWith('folha-')) {
+      if (!canAccessTab('folha')) return <Dashboard />;
       const mes = Number(activeTab.slice('folha-'.length));
       if (mes >= 1 && mes <= 12) {
         return <FolhaPagamentoPage key={mes} month={mes} />;
@@ -227,15 +501,22 @@ export default function App() {
     }
 
     switch (activeTab) {
-      case 'dashboard': return <Dashboard />;
+      case 'dashboard':
+        return user?.role === 'diretoria' ? (
+          <DashboardDiretoria onNavigate={setActiveTab} />
+        ) : (
+          <Dashboard />
+        );
       case 'analise': return <AnaliseFinanceira />;
-      case 'dre': return <DRE />;
+      case 'dre': return <DRE user={user} />;
       case 'planejamento': return <Planejamento />;
-      case 'notas': return <Invoices />;
-      case 'danfe': return <Invoices />;
+      case 'notas': return <Invoices mode="servico" />;
+      case 'danfe': return <Invoices mode="danfe" />;
       case 'requisicoes': return <Requisicoes />;
       case 'lancamentos-manuais': return <LancamentosManuais />;
+      case 'estornos': return <Estornos />;
       case 'comandas': return <Comandas />;
+      case 'aprovacoes': return <AprovacoesPage />;
       case 'importacao': return <Importacao />;
       case 'cadastros': return <Cadastros />;
       case 'sintase': return <Sintase />;
@@ -243,9 +524,24 @@ export default function App() {
       case 'indicadores': return <Indicadores />;
       case 'supabase-teste': return <SupabaseTeste />;
       case 'usuarios': return <Usuarios />;
+      case 'uml': return canAccessTab('uml') ? <UmlPage /> : <Dashboard />;
+      case 'sugestoes': return <Sugestoes />;
+      case 'nomes-sistema': return user?.role === 'admin' ? <NomesSistema /> : <Dashboard />;
       case 'configuracoes': return <Configuracoes />;
+      case 'tutorial': return <Tutorial />;
       case 'compras-ordem': return <ComprasPage />;
-      default: return <Dashboard />;
+      case 'vendas-pdvs': return <VendasPdvsPage />;
+      case 'aqua-orcamento': return canAccessTab('aqua-orcamento') ? <AquaOrcamentoPage user={user ?? undefined} /> : <Dashboard />;
+      case 'mensalidades':
+      case 'compras-mensalidades': // compatibilidade com atalho antigo
+        return <MensalidadesPage />;
+      case 'investimentos': return <InvestimentosPage />;
+      default:
+        return user?.role === 'diretoria' ? (
+          <DashboardDiretoria onNavigate={setActiveTab} />
+        ) : (
+          <Dashboard />
+        );
     }
   };
 
@@ -258,80 +554,179 @@ export default function App() {
   }
 
   if (!user) {
+    const inputClass = 'mt-1 w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm';
+    const primaryBtn =
+      'w-full px-4 py-2.5 rounded-xl bg-[#004D40] text-white text-sm font-bold hover:bg-[#003d33] disabled:opacity-60 transition-colors';
+    const errorBox =
+      'text-xs font-medium text-red-600 bg-red-50 border border-red-100 rounded-xl px-3 py-2';
+    const okBox =
+      'text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-xl px-3 py-2';
+
     return (
       <div className="min-h-screen bg-[#F8FAFC] font-sans text-slate-900 flex items-center justify-center p-6">
         <div className="w-full max-w-md">
           <div className="bg-white border border-slate-100 rounded-2xl shadow-sm p-6 space-y-5">
             <div className="text-center">
               <h1 className="text-2xl font-bold text-slate-900">Budget</h1>
-              <p className="text-sm text-slate-500 mt-1">Acesse sua conta para entrar no sistema.</p>
+              <p className="text-sm text-slate-500 mt-1">
+                {authView === 'login' && 'Acesse sua conta para entrar no sistema.'}
+                {authView === 'forgot' && 'Informe o e-mail da conta para receber o link de redefinição.'}
+                {authView === 'forgot-sent' && 'Confira sua caixa de entrada.'}
+                {authView === 'reset' && 'Defina uma nova senha para acessar o sistema.'}
+              </p>
             </div>
 
-            <form onSubmit={handleLogin} className="space-y-3">
-              <div>
-                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">E-mail</label>
-                <input
-                  type="email"
-                  value={loginForm.email}
-                  onChange={(e) => setLoginForm((p) => ({ ...p, email: e.target.value }))}
-                  className="mt-1 w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
-                  placeholder="seu@email.com"
-                />
-              </div>
-              <div>
-                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Senha</label>
-                <div className="relative mt-1">
+            {authView === 'login' && (
+              <form onSubmit={handleLogin} className="space-y-3">
+                <div>
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">E-mail</label>
                   <input
-                    type={showPassword ? 'text' : 'password'}
-                    value={loginForm.password}
-                    onChange={(e) => setLoginForm((p) => ({ ...p, password: e.target.value }))}
-                    className="w-full px-3 py-2 pr-10 bg-slate-50 border border-slate-200 rounded-xl text-sm"
-                    placeholder="••••••••"
+                    type="email"
+                    value={loginForm.email}
+                    onChange={(e) => setLoginForm((p) => ({ ...p, email: e.target.value }))}
+                    className={inputClass}
+                    placeholder="seu@email.com"
                   />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword((v) => !v)}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-slate-400 hover:text-slate-600 rounded-lg transition-colors"
-                    aria-label={showPassword ? 'Ocultar senha' : 'Mostrar senha'}
-                  >
-                    {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-                  </button>
                 </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Senha</label>
+                  <div className="relative mt-1">
+                    <input
+                      type={showPassword ? 'text' : 'password'}
+                      value={loginForm.password}
+                      onChange={(e) => setLoginForm((p) => ({ ...p, password: e.target.value }))}
+                      className="w-full px-3 py-2 pr-10 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+                      placeholder="••••••••"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword((v) => !v)}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-slate-400 hover:text-slate-600 rounded-lg transition-colors"
+                      aria-label={showPassword ? 'Ocultar senha' : 'Mostrar senha'}
+                    >
+                      {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
+                  </div>
+                </div>
+
+                {resetInfo && <div className={okBox}>{resetInfo}</div>}
+                {loginError && <div className={errorBox}>{loginError}</div>}
+
+                <button type="submit" disabled={loginLoading} className={primaryBtn}>
+                  {loginLoading ? 'Entrando...' : 'Entrar'}
+                </button>
+              </form>
+            )}
+
+            {authView === 'forgot' && (
+              <form onSubmit={handleForgotPassword} className="space-y-3">
+                <div>
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">E-mail</label>
+                  <input
+                    type="email"
+                    value={forgotEmail}
+                    onChange={(e) => setForgotEmail(e.target.value)}
+                    className={inputClass}
+                    placeholder="seu@email.com"
+                    autoFocus
+                  />
+                </div>
+                {forgotError && <div className={errorBox}>{forgotError}</div>}
+                <button type="submit" disabled={forgotLoading} className={primaryBtn}>
+                  {forgotLoading ? 'Enviando...' : 'Enviar link'}
+                </button>
+                <button
+                  type="button"
+                  onClick={goToLogin}
+                  className="w-full inline-flex items-center justify-center gap-1.5 text-sm font-semibold text-slate-500 hover:text-slate-700"
+                >
+                  <ArrowLeft size={14} /> Voltar ao login
+                </button>
+              </form>
+            )}
+
+            {authView === 'forgot-sent' && (
+              <div className="space-y-3">
+                <div className={okBox}>
+                  {forgotSentMessage || 'Enviamos o link de redefinição. O link vale por 1 hora.'}
+                </div>
+                <button type="button" onClick={goToLogin} className={primaryBtn}>
+                  Voltar ao login
+                </button>
               </div>
+            )}
 
-              {loginError && (
-                <div className="text-xs font-medium text-red-600 bg-red-50 border border-red-100 rounded-xl px-3 py-2">
-                  {loginError}
+            {authView === 'reset' && (
+              <form onSubmit={handleResetPassword} className="space-y-3">
+                <div>
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Nova senha</label>
+                  <div className="relative mt-1">
+                    <input
+                      type={showResetPassword ? 'text' : 'password'}
+                      value={resetForm.password}
+                      onChange={(e) => setResetForm((p) => ({ ...p, password: e.target.value }))}
+                      className="w-full px-3 py-2 pr-10 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+                      placeholder="Mínimo 10 caracteres, letras e números"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowResetPassword((v) => !v)}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-slate-400 hover:text-slate-600 rounded-lg transition-colors"
+                      aria-label={showResetPassword ? 'Ocultar senha' : 'Mostrar senha'}
+                    >
+                      {showResetPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
+                  </div>
                 </div>
-              )}
+                <div>
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Confirmar senha</label>
+                  <input
+                    type={showResetPassword ? 'text' : 'password'}
+                    value={resetForm.confirm}
+                    onChange={(e) => setResetForm((p) => ({ ...p, confirm: e.target.value }))}
+                    className={inputClass}
+                    placeholder="Repita a nova senha"
+                  />
+                </div>
+                {resetError && <div className={errorBox}>{resetError}</div>}
+                <button type="submit" disabled={resetLoading || resetTokenValid === false} className={primaryBtn}>
+                  {resetLoading ? 'Salvando...' : 'Salvar nova senha'}
+                </button>
+                <button
+                  type="button"
+                  onClick={goToLogin}
+                  className="w-full inline-flex items-center justify-center gap-1.5 text-sm font-semibold text-slate-500 hover:text-slate-700"
+                >
+                  <ArrowLeft size={14} /> Voltar ao login
+                </button>
+              </form>
+            )}
+          </div>
 
+          {authView === 'login' && (
+            <div className="mt-4 flex items-center justify-center gap-3">
               <button
-                type="submit"
-                disabled={loginLoading}
-                className="w-full px-4 py-2.5 rounded-xl bg-[#004D40] text-white text-sm font-bold hover:bg-[#003d33] disabled:opacity-60 transition-colors"
+                type="button"
+                className="px-4 py-2 text-sm font-semibold text-slate-600 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors"
+                onClick={() => {
+                  setForgotEmail(loginForm.email);
+                  setForgotError('');
+                  setResetInfo('');
+                  setAuthView('forgot');
+                }}
               >
-                {loginLoading ? 'Entrando...' : 'Entrar'}
+                Esqueci minha senha
               </button>
-            </form>
-          </div>
-
-          <div className="mt-4 flex items-center justify-center gap-3">
-            <button
-              type="button"
-              className="px-4 py-2 text-sm font-semibold text-slate-600 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors"
-              onClick={() => alert('Configuração de recuperação de senha será definida em breve.')}
-            >
-              Esqueci minha senha
-            </button>
-            <a
-              href={getWhatsappSupportLink()}
-              target="_blank"
-              rel="noreferrer"
-              className="px-4 py-2 text-sm font-semibold text-white bg-[#004D40] rounded-xl hover:bg-[#003d33] transition-colors"
-            >
-              Suporte
-            </a>
-          </div>
+              <a
+                href={getWhatsappSupportLink()}
+                target="_blank"
+                rel="noreferrer"
+                className="px-4 py-2 text-sm font-semibold text-white bg-[#004D40] rounded-xl hover:bg-[#003d33] transition-colors"
+              >
+                Suporte
+              </a>
+            </div>
+          )}
         </div>
       </div>
     );
@@ -346,17 +741,19 @@ export default function App() {
   }
 
   return (
-    <SearchProvider>
-      <AppShell
-        activeTab={activeTab}
-        setActiveTab={handleSetActiveTab}
-        user={user}
-        onLogout={handleLogout}
-        sidebarCollapsed={sidebarCollapsed}
-        onToggleCollapsed={() => setSidebarCollapsed((prev) => !prev)}
-        renderContent={renderContent}
-      />
-    </SearchProvider>
+    <CompanyProvider allowedKeys={['vivaz', 'aqua']}>
+      <SearchProvider>
+        <AppShell
+          activeTab={activeTab}
+          setActiveTab={handleSetActiveTab}
+          user={user}
+          onLogout={handleLogout}
+          sidebarCollapsed={sidebarCollapsed}
+          onToggleCollapsed={() => setSidebarCollapsed((prev) => !prev)}
+          renderContent={renderContent}
+        />
+      </SearchProvider>
+    </CompanyProvider>
   );
 }
 
@@ -378,13 +775,24 @@ function AppShell({
   renderContent: () => React.ReactNode;
 }) {
   const { query, setQuery } = useSearch();
+  const { companyKey, company } = useCompany();
 
   React.useEffect(() => {
     setQuery('');
-  }, [activeTab, setQuery]);
+  }, [activeTab, companyKey, setQuery]);
+
+  const prepareSidebar = React.useCallback(() => {
+    if (sidebarCollapsed) onToggleCollapsed();
+    window.dispatchEvent(new Event('vivaz-tutorial-expand'));
+  }, [sidebarCollapsed, onToggleCollapsed]);
 
   return (
     <ToastProvider>
+      <TutorialProvider
+        userRole={user?.role}
+        setActiveTab={setActiveTab}
+        prepareSidebar={prepareSidebar}
+      >
       <div className="min-h-screen bg-[#F8FAFC] font-sans text-slate-900">
           <Sidebar
             activeTab={activeTab}
@@ -394,11 +802,12 @@ function AppShell({
             collapsed={sidebarCollapsed}
             onToggleCollapsed={onToggleCollapsed}
           />
+          {user?.id ? <SystemNamePrompt userId={user.id} /> : null}
 
           <main className={sidebarCollapsed ? 'pl-20 min-h-screen' : 'pl-64 min-h-screen'}>
         <header className="h-20 bg-white/80 backdrop-blur-md border-b border-slate-100 flex items-center gap-4 px-8 sticky top-0 z-40">
           <div className="flex items-center gap-2 min-w-0 shrink-0">
-            <span className="text-slate-400 text-sm font-medium">Budget</span>
+            <span className="text-slate-400 text-sm font-medium">{company.budgetTitle}</span>
             <span className="text-slate-300">/</span>
             <span className="text-slate-900 text-sm font-bold capitalize truncate">
               {isBaseOrcamentoTab(activeTab)
@@ -415,6 +824,10 @@ function AppShell({
                 ? 'Apuração de Resultados / Consumo interno / Resumo'
                 : activeTab.startsWith('rel-consumo-')
                 ? `Apuração de Resultados / Consumo interno / ${MESES_CONSUMO[Number(activeTab.slice('rel-consumo-'.length))] ?? ''}`
+                : activeTab === 'cmv'
+                ? 'Apuração de Resultados / CMV / Resumo'
+                : activeTab.startsWith('cmv-')
+                ? `Apuração de Resultados / CMV / ${MESES_CMV[Number(activeTab.slice('cmv-'.length))] ?? ''}`
                 : activeTab === 'rel-rds'
                 ? 'Apuração de Receita / Relatório Diário de Situação / Resumo'
                 : activeTab.startsWith('rel-rds-')
@@ -425,22 +838,48 @@ function AppShell({
                 ? 'Apuração de Resultados / Prev x Real Mensal'
                 : activeTab.startsWith('planilha-')
                 ? `Apuração de Resultados / ${PLANILHAS.find((p) => `planilha-${p.indice}` === activeTab)?.nome ?? ''}`
+                : activeTab === 'absenteismo'
+                ? 'Apuração da Folha / Absenteísmo'
+                : activeTab === 'turnover'
+                ? 'Apuração da Folha / Turnover'
+                : activeTab === 'tangerino-ponto'
+                ? 'Apuração da Folha / Tangerino — Ponto'
+                : activeTab === 'painel-rh'
+                ? 'Apuração da Folha / Painel RH'
                 : activeTab === 'folha-apuracao'
                 ? 'Apuração da Folha / Apuração'
                 : activeTab.startsWith('folha-')
                 ? `Apuração da Folha / ${MESES_FOLHA[Number(activeTab.slice('folha-'.length))] ?? ''}`
-                : ['comandas', 'lancamentos-manuais', 'requisicoes', 'notas', 'danfe'].includes(activeTab)
+                : activeTab === 'aprovacoes'
+                ? 'Aprovações'
+                : ['comandas', 'lancamentos-manuais', 'estornos', 'requisicoes', 'notas', 'danfe', 'mensalidades', 'compras-mensalidades'].includes(activeTab)
                 ? `Lançamentos / ${
                     activeTab === 'comandas' ? 'Comandas'
                     : activeTab === 'lancamentos-manuais' ? 'Lançamentos Manuais'
+                    : activeTab === 'estornos' ? 'Estornos'
                     : activeTab === 'requisicoes' ? 'Requisições'
                     : activeTab === 'danfe' ? 'DANFE'
+                    : activeTab === 'mensalidades' || activeTab === 'compras-mensalidades' ? 'Mensalidades'
                     : 'Notas de Serviço'
                   }`
+                : activeTab === 'compras-ordem'
+                ? 'Compras / Ordem de Compra'
+                : activeTab === 'aqua-orcamento'
+                ? 'Orçamento Aquamania'
+                : activeTab === 'investimentos'
+                ? 'Investimentos'
                 : activeTab === 'prev-real'
                 ? 'Prev x Real Diario'
                 : isPainelSetorialTab(activeTab)
                 ? `Setores / ${getPainelByTab(activeTab)?.label ?? ''}`
+                : activeTab === 'tutorial'
+                ? 'Tutorial guiado'
+                : activeTab === 'sugestoes'
+                ? 'Sugestões'
+                : activeTab === 'nomes-sistema'
+                ? 'Nomes do sistema'
+                : activeTab === 'uml'
+                ? 'UML do Sistema'
                 : activeTab.replace('-', ' ')}
             </span>
           </div>
@@ -450,6 +889,7 @@ function AppShell({
             onChange={setQuery}
             placeholder={getSearchPlaceholder(activeTab)}
             className="flex-1 max-w-xl mx-auto hidden md:block"
+            dataTour="header-search"
           />
 
           <div className="flex items-center gap-4 shrink-0">
@@ -471,11 +911,20 @@ function AppShell({
           />
         </div>
 
-        <div className={activeTab === 'notas' || activeTab === 'danfe' || activeTab === 'comandas' || activeTab === 'lancamentos-manuais' || activeTab === 'requisicoes' || activeTab === 'cadastros' || activeTab === 'sintase' || activeTab === 'prev-real' || activeTab === 'indicadores' || activeTab === 'dre' || activeTab === 'rel-crd' || activeTab.startsWith('rel-crd-') || activeTab === 'rel-req' || activeTab.startsWith('rel-req-') || activeTab === 'rel-consumo' || activeTab.startsWith('rel-consumo-') || activeTab === 'rel-rds' || activeTab.startsWith('rel-rds-') || activeTab.startsWith('planilha-') || activeTab.startsWith('folha-') || activeTab === 'compras-ordem' || isPainelSetorialTab(activeTab) ? 'p-8 pt-4 md:pt-8 w-full max-w-none' : 'p-8 pt-4 md:pt-8 max-w-7xl mx-auto'}>
-          {renderContent()}
+        <div
+          key={companyKey}
+          data-tour="page-content"
+          className={activeTab === 'notas' || activeTab === 'danfe' || activeTab === 'comandas' || activeTab === 'lancamentos-manuais' || activeTab === 'estornos' || activeTab === 'requisicoes' || activeTab === 'mensalidades' || activeTab === 'aprovacoes' || activeTab === 'compras-mensalidades' || activeTab === 'cadastros' || activeTab === 'sintase' || activeTab === 'prev-real' || activeTab === 'indicadores' || activeTab === 'dre' || activeTab === 'rel-crd' || activeTab.startsWith('rel-crd-') || activeTab === 'rel-req' || activeTab.startsWith('rel-req-') || activeTab === 'rel-consumo' || activeTab.startsWith('rel-consumo-') || activeTab === 'rel-rds' || activeTab.startsWith('rel-rds-') || activeTab.startsWith('planilha-') || activeTab.startsWith('folha-') || activeTab === 'painel-rh' || activeTab === 'absenteismo' || activeTab === 'turnover' || activeTab === 'tangerino-ponto' || activeTab === 'folha-apuracao' || activeTab === 'compras-ordem' || activeTab === 'aqua-orcamento' || activeTab === 'investimentos' || activeTab === 'tutorial' || activeTab === 'sugestoes' || isPainelSetorialTab(activeTab) ? 'p-8 pt-4 md:pt-8 w-full max-w-none' : 'p-8 pt-4 md:pt-8 max-w-7xl mx-auto'}
+        >
+          <PageErrorBoundary resetKey={`${companyKey}:${activeTab}`}>
+            {renderContent()}
+          </PageErrorBoundary>
         </div>
       </main>
+        <SuggestionFab activeTab={activeTab} />
+        <CrdLinkReminder />
         </div>
+      </TutorialProvider>
       </ToastProvider>
   );
 }

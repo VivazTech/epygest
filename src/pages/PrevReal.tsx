@@ -134,17 +134,19 @@ export const PrevRealPage: React.FC<PrevRealPageProps> = ({ mode = 'diario' }) =
   const [usoConsumoSubgrupos, setUsoConsumoSubgrupos] = useState<UsoConsumoSubgrupo[]>([]);
   const [expandedSubgrupos, setExpandedSubgrupos] = useState<Set<number>>(new Set());
   const [allowedSectorNames, setAllowedSectorNames] = useState<string[]>([]);
-  /** Índices 0–11. Clique = só aquele mês; "Mostrar todos" volta aos 12. Só no modo mensal. */
+  const [allowedCrdCodes, setAllowedCrdCodes] = useState<string[]>([]);
+  /** Índices 0–11. Clique = só aquele mês; "Mostrar todos" volta aos 12. */
   const [selectedMonths, setSelectedMonths] = useState<number[]>(() =>
-    Array.from({ length: 12 }, (_, i) => i)
+    mode === 'diario'
+      ? [new Date().getMonth()]
+      : Array.from({ length: 12 }, (_, i) => i)
   );
 
   const visibleMonths = useMemo(() => {
-    if (mode !== 'mensal') return monthHeaders.map((_, i) => i);
     const set = new Set(selectedMonths);
     const months = monthHeaders.map((_, i) => i).filter((i) => set.has(i));
     return months.length ? months : monthHeaders.map((_, i) => i);
-  }, [mode, selectedMonths]);
+  }, [selectedMonths]);
   const allMonthsSelected = visibleMonths.length === 12;
   const selectMonth = (monthIndex: number) => setSelectedMonths([monthIndex]);
   const selectAllMonths = () => setSelectedMonths(Array.from({ length: 12 }, (_, i) => i));
@@ -177,8 +179,17 @@ export const PrevRealPage: React.FC<PrevRealPageProps> = ({ mode = 'diario' }) =
         const parsed = JSON.parse(raw);
         setUserRole(String(parsed?.role || 'viewer'));
 
-        const users = await fetch('/api/users').then((res) => res.json()).catch(() => []);
-        const freshUser = (Array.isArray(users) ? users : []).find((u: any) => String(u.id) === String(parsed?.id));
+        // Preferir /api/auth/me (inclui CRDs extras); fallback em /api/users (admin) e localStorage.
+        let freshUser: any = null;
+        const meRes = await fetch('/api/auth/me').catch(() => null);
+        if (meRes?.ok) {
+          freshUser = await meRes.json().catch(() => null);
+        }
+        if (!freshUser) {
+          const users = await fetch('/api/users').then((res) => res.json()).catch(() => []);
+          freshUser = (Array.isArray(users) ? users : []).find((u: any) => String(u.id) === String(parsed?.id));
+        }
+
         const sourceNames = Array.isArray(freshUser?.sector_names)
           ? freshUser.sector_names
           : (Array.isArray(parsed?.sector_names) ? parsed.sector_names : []);
@@ -190,6 +201,34 @@ export const PrevRealPage: React.FC<PrevRealPageProps> = ({ mode = 'diario' }) =
           )
         );
         setAllowedSectorNames(names);
+
+        const sourceCodes = Array.isArray(freshUser?.crd_codes)
+          ? freshUser.crd_codes
+          : Array.isArray(freshUser?.extra_crds)
+            ? freshUser.extra_crds.map((c: any) => c.code)
+            : (Array.isArray(parsed?.crd_codes) ? parsed.crd_codes : []);
+        const codes = Array.from(
+          new Set<string>(
+            sourceCodes
+              .map((code: any) => String(code || '').trim())
+              .filter((code: string) => Boolean(code))
+          )
+        );
+        setAllowedCrdCodes(codes);
+
+        if (freshUser) {
+          localStorage.setItem(
+            'user',
+            JSON.stringify({
+              ...parsed,
+              ...freshUser,
+              sector_ids: freshUser.sector_ids ?? parsed?.sector_ids,
+              sector_names: freshUser.sector_names ?? names,
+              crd_ids: freshUser.crd_ids ?? parsed?.crd_ids,
+              crd_codes: codes,
+            })
+          );
+        }
       } catch {
         // ignora erro de parse
       }
@@ -213,6 +252,7 @@ export const PrevRealPage: React.FC<PrevRealPageProps> = ({ mode = 'diario' }) =
 
   const canConfigureView =
     userRole === 'admin' || userRole === 'finance' || userRole === 'controle';
+  const canEditPrevisto = userRole === 'admin';
 
   const toggleSelection = (value: string, selected: string[], setter: (next: string[]) => void) => {
     setter(
@@ -225,16 +265,17 @@ export const PrevRealPage: React.FC<PrevRealPageProps> = ({ mode = 'diario' }) =
   const visibleRows = useMemo(() => {
     const allRows = data?.rows || [];
     const scoped =
-      userRole !== 'manager'
+      userRole !== 'manager' && userRole !== 'estagiario'
         ? allRows
         : allRows.filter(
             (row) =>
               allowedSectorNames.includes(String(row.crd || '').trim()) ||
-              isSharedCrdCode(row.grupo)
+              isSharedCrdCode(row.grupo) ||
+              allowedCrdCodes.includes(String(row.grupo || '').trim())
           );
     if (!query.trim()) return scoped;
     return scoped.filter((row) => matchesSearch(query, row.crd, row.grupo, row.detalhado));
-  }, [data, userRole, allowedSectorNames, query]);
+  }, [data, userRole, allowedSectorNames, allowedCrdCodes, query]);
 
   const managerSectorOptions = useMemo(() => {
     const keys = new Set(
@@ -242,13 +283,14 @@ export const PrevRealPage: React.FC<PrevRealPageProps> = ({ mode = 'diario' }) =
         .filter(
           (row) =>
             allowedSectorNames.includes(String(row.crd || '').trim()) ||
-            isSharedCrdCode(row.grupo)
+            isSharedCrdCode(row.grupo) ||
+            allowedCrdCodes.includes(String(row.grupo || '').trim())
         )
         .map((row) => String(row.crd || '').trim())
         .filter(Boolean)
     );
     return Array.from(keys).sort((a, b) => a.localeCompare(b, 'pt-BR'));
-  }, [data, allowedSectorNames]);
+  }, [data, allowedSectorNames, allowedCrdCodes]);
 
   const groupOptions = useMemo(() => {
     const keys = new Set(visibleRows.map((row) => getGroupKey(row, groupBy)));
@@ -362,6 +404,7 @@ export const PrevRealPage: React.FC<PrevRealPageProps> = ({ mode = 'diario' }) =
   };
 
   const startCellEdit = (rowId: number, monthIndex: number, value: number) => {
+    if (!canEditPrevisto) return;
     setEditingCell({ rowId, monthIndex });
     setEditingValue(String(value ?? 0));
   };
@@ -370,7 +413,7 @@ export const PrevRealPage: React.FC<PrevRealPageProps> = ({ mode = 'diario' }) =
     row: PrevRealApiResponse['rows'][number],
     monthIndex: number
   ) => {
-    if (savingCell) return;
+    if (!canEditPrevisto || savingCell) return;
     const parsedValue = Number(String(editingValue).replace(',', '.'));
     if (!Number.isFinite(parsedValue)) {
       alert('Digite um valor numérico válido.');
@@ -411,7 +454,7 @@ export const PrevRealPage: React.FC<PrevRealPageProps> = ({ mode = 'diario' }) =
         <p className="text-sm text-slate-500">
           {mode === 'mensal'
             ? 'Comparativo mensal por CRD: Previsto, Realizado e Diferença ao longo do ano.'
-            : 'Visão por CRD com Previsto, Realizado e Diferença, agrupadas por setor.'}
+            : 'Visão por CRD com Previsto, Realizado e Diferença. Use o filtro de meses para acompanhar o período.'}
         </p>
       </div>
 
@@ -576,50 +619,48 @@ export const PrevRealPage: React.FC<PrevRealPageProps> = ({ mode = 'diario' }) =
         )}
       </div>
 
-      {mode === 'mensal' && (
-        <div className="rounded-2xl border border-slate-200 bg-white shadow-sm px-4 py-3 space-y-2">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
-              Filtrar meses
-              {!allMonthsSelected && (
-                <span className="ml-2 normal-case tracking-normal text-slate-500 font-semibold">
-                  · {visibleMonths.length} selecionado{visibleMonths.length === 1 ? '' : 's'}
-                </span>
-              )}
-            </p>
+      <div className="rounded-2xl border border-slate-200 bg-white shadow-sm px-4 py-3 space-y-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+            Filtrar meses
             {!allMonthsSelected && (
-              <button
-                type="button"
-                onClick={selectAllMonths}
-                className="text-xs font-bold text-[#004D40] hover:underline"
-              >
-                Mostrar todos
-              </button>
+              <span className="ml-2 normal-case tracking-normal text-slate-500 font-semibold">
+                · {visibleMonths.length} selecionado{visibleMonths.length === 1 ? '' : 's'}
+              </span>
             )}
-          </div>
-          <div className="flex flex-wrap gap-1.5">
-            {monthHeaders.map((mes, monthIndex) => {
-              const active = visibleMonths.includes(monthIndex);
-              return (
-                <button
-                  key={mes}
-                  type="button"
-                  onClick={() => selectMonth(monthIndex)}
-                  title="Clique para ver só este mês · Use Mostrar todos para voltar"
-                  className={cn(
-                    'px-2.5 py-1.5 rounded-lg text-xs font-bold transition-colors border',
-                    active
-                      ? 'bg-[#004D40] text-white border-[#004D40] shadow-sm'
-                      : 'bg-white text-slate-400 border-slate-200 hover:border-slate-300 hover:text-slate-600'
-                  )}
-                >
-                  {mes.slice(0, 3)}
-                </button>
-              );
-            })}
-          </div>
+          </p>
+          {!allMonthsSelected && (
+            <button
+              type="button"
+              onClick={selectAllMonths}
+              className="text-xs font-bold text-[#004D40] hover:underline"
+            >
+              Mostrar todos
+            </button>
+          )}
         </div>
-      )}
+        <div className="flex flex-wrap gap-1.5">
+          {monthHeaders.map((mes, monthIndex) => {
+            const active = visibleMonths.includes(monthIndex);
+            return (
+              <button
+                key={mes}
+                type="button"
+                onClick={() => selectMonth(monthIndex)}
+                title="Clique para ver só este mês · Use Mostrar todos para voltar"
+                className={cn(
+                  'px-2.5 py-1.5 rounded-lg text-xs font-bold transition-colors border',
+                  active
+                    ? 'bg-[#004D40] text-white border-[#004D40] shadow-sm'
+                    : 'bg-white text-slate-400 border-slate-200 hover:border-slate-300 hover:text-slate-600'
+                )}
+              >
+                {mes.slice(0, 3)}
+              </button>
+            );
+          })}
+        </div>
+      </div>
 
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
         <div className="divide-y divide-slate-100">
@@ -725,7 +766,7 @@ export const PrevRealPage: React.FC<PrevRealPageProps> = ({ mode = 'diario' }) =
                                       }}
                                       className="w-24 px-2 py-1 text-right bg-white border border-emerald-300 rounded-md"
                                     />
-                                  ) : (
+                                  ) : canEditPrevisto ? (
                                     <button
                                       onClick={() => startCellEdit(row.id, idx, m.previsto || 0)}
                                       className="px-2 py-1 rounded hover:bg-emerald-50 transition-colors"
@@ -737,6 +778,12 @@ export const PrevRealPage: React.FC<PrevRealPageProps> = ({ mode = 'diario' }) =
                                         meta={valueTrace.prevReal.previsto(row.grupo, row.detalhado, idx + 1, traceYear, occPct)}
                                       />
                                     </button>
+                                  ) : (
+                                    <ValueTrace
+                                      className="text-xs text-slate-700"
+                                      displayValue={formatCurrency(m.previsto || 0)}
+                                      meta={valueTrace.prevReal.previsto(row.grupo, row.detalhado, idx + 1, traceYear, occPct)}
+                                    />
                                   )}
                                 </td>
                                 <td className="px-3 py-2 text-xs text-right text-slate-700">

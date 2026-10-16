@@ -1,8 +1,21 @@
 import type { NextFunction, Request, Response } from "express";
+import crypto from "node:crypto";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 
-export type UserRole = "admin" | "finance" | "controle" | "manager" | "viewer";
+/** Role é o slug em `app_roles` (sistema ou customizado). */
+export type UserRole = string;
+
+/** Roles de sistema legados (fallback quando a API de roles ainda não carregou). */
+export const USER_ROLES: UserRole[] = [
+  "admin",
+  "finance",
+  "controle",
+  "manager",
+  "estagiario",
+  "viewer",
+  "diretoria",
+];
 
 export interface SessionUser {
   id: number | string;
@@ -17,6 +30,8 @@ declare global {
   namespace Express {
     interface Request {
       user?: SessionUser;
+      /** Empresa ativa (Vivaz / Aquamania), vinda do header X-Empresa-Key. */
+      empresaKey?: "vivaz" | "aqua";
     }
   }
 }
@@ -24,6 +39,7 @@ declare global {
 export const SESSION_COOKIE = "epygest_session";
 const BCRYPT_ROUNDS = 12;
 const SESSION_TTL_SECONDS = 60 * 60 * 8; // 8 horas
+export const RESET_TOKEN_TTL_SECONDS = 60 * 60; // 1 hora
 
 const getJwtSecret = (): string => {
   const secret = process.env.JWT_SECRET;
@@ -59,6 +75,14 @@ export const validatePasswordStrength = (password: string): string | null => {
     return "A senha deve conter letras e números.";
   }
   return null;
+};
+
+export const hashPasswordResetToken = (raw: string): string =>
+  crypto.createHash("sha256").update(raw).digest("hex");
+
+export const createPasswordResetToken = (): { raw: string; hash: string } => {
+  const raw = crypto.randomBytes(32).toString("base64url");
+  return { raw, hash: hashPasswordResetToken(raw) };
 };
 
 // ---------- Sessão (JWT) ----------

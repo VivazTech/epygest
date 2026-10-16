@@ -249,19 +249,41 @@ export const valueTrace = {
   },
 
   dre: {
+    edited: (label: string, campo: string, mes: string, userName: string, when: string, originalValue: string): ValueTraceMeta => ({
+      source: `Ajuste — ${campo} — ${label} — ${mes}`,
+      tables: 'dre_cell_edits',
+      calculation: `Ajustado manualmente por ${userName} em ${when}. Valor anterior/planilha: ${originalValue}. Clique para ajustar novamente.`,
+    }),
+    adjusted: (
+      label: string,
+      campo: string,
+      mes: string,
+      userName: string,
+      when: string,
+      previousValue: string,
+      newValue: string,
+      motivo: string
+    ): ValueTraceMeta => ({
+      source: `Ajuste — ${campo} — ${label} — ${mes}`,
+      tables: 'dre_cell_edits · dre_cell_edit_history',
+      calculation:
+        `Registrado por ${userName} em ${when}.\n` +
+        `Valor anterior: ${previousValue}\n` +
+        `Valor novo: ${newValue}\n` +
+        `Motivo: ${motivo}`,
+    }),
     imported: (label: string, planilhaRow: number, campo: string, mes: string, source: string): ValueTraceMeta => ({
       source: `${campo} — ${label} — ${mes}`,
       tables: 'src/data/dre2026.json',
-      calculation: `Importado da planilha "${source}" (linha ${planilhaRow} da aba, coluna ${campo} de ${mes}) pelo script scripts/import-dre-prev-real.cjs. Clique na célula para editar.`,
-    }),
-    edited: (label: string, campo: string, mes: string, userName: string, when: string, originalValue: string): ValueTraceMeta => ({
-      source: `${campo} — ${label} — ${mes}`,
-      tables: 'dre_cell_edits',
-      calculation: `Editado manualmente por ${userName} em ${when}. Valor importado da planilha era ${originalValue}. Clique para editar novamente.`,
+      calculation: `Importado da planilha "${source}" (linha ${planilhaRow} da aba, coluna ${campo} de ${mes}) pelo script scripts/import-dre-prev-real.cjs. Clique na célula para abrir o ajuste.`,
     }),
     diferenca: (label: string, mes: string): ValueTraceMeta => ({
       source: `Diferença — ${label} — ${mes}`,
       calculation: 'Realizado − Previsto (negativo = abaixo do previsto, como os valores entre parênteses da planilha).',
+    }),
+    diferencaRollup: (label: string, mes: string, parts: string): ValueTraceMeta => ({
+      source: `Diferença — ${label} — ${mes}`,
+      calculation: `Soma das Diferenças de ${parts} (cada uma = Realizado − Previsto).`,
     }),
     total: (label: string, campo: string): ValueTraceMeta => ({
       source: `Total 2026 — ${campo} — ${label}`,
@@ -298,7 +320,7 @@ export const valueTrace = {
       calculation:
         `Soma Acumulado (R$) das linhas HOSPEDAGEM + HOSPEDAGEM NO-SHOW + UPGRADE / UPSELLING + Taxa de serviço na seção Hospedagem do Relatório Diário de Situação` +
         (reportDate ? ` (data do RDS: ${reportDate})` : '') +
-        '. Clique na célula para sobrescrever com edição manual.',
+        '. Clique na célula para abrir o ajuste.',
     }),
     rdsMapped: (label: string, mes: string, source: string, reportDate?: string | null): ValueTraceMeta => ({
       source: `Realizado — ${label} — ${mes}`,
@@ -306,12 +328,29 @@ export const valueTrace = {
       calculation:
         `${source}` +
         (reportDate ? ` (data do RDS: ${reportDate})` : '') +
-        '. Clique na célula para sobrescrever com edição manual.',
+        '. Clique na célula para abrir o ajuste.',
+    }),
+    crdMapped: (label: string, mes: string, codigo: string, nome?: string | null): ValueTraceMeta => ({
+      source: `Realizado — ${label} — ${mes}`,
+      tables: 'rel_crd_rows',
+      calculation:
+        `Importação › Rel. CRD › SALDO LANÇ da conta ${codigo}` +
+        (nome ? ` (${nome})` : '') +
+        '. Clique na célula para abrir o ajuste.',
     }),
     rdsRollup: (label: string, mes: string, parts: string): ValueTraceMeta => ({
       source: `Realizado — ${label} — ${mes}`,
-      tables: 'rds_snapshots (+ edições manuais dos filhos, se houver)',
-      calculation: `Soma do Realizado de ${parts}. Clique na célula para sobrescrever com edição manual.`,
+      tables: 'rds_snapshots / rel_crd_rows (+ edições manuais dos filhos, se houver)',
+      calculation: `Soma do Realizado de ${parts}. Clique na célula para abrir o ajuste.`,
+    }),
+    derived: (label: string, mes: string, formula: string): ValueTraceMeta => ({
+      source: `Realizado — ${label} — ${mes}`,
+      calculation: `${formula}. Diferença = Realizado − Previsto. Clique na célula para abrir o ajuste.`,
+    }),
+    proRataBruta: (label: string, mes: string): ValueTraceMeta => ({
+      source: `Realizado — ${label} — ${mes}`,
+      calculation:
+        'Provisório: Previsto × (Receita Bruta realizada ÷ Receita Bruta prevista). Usado até haver apuração mensal de impostos. Clique na célula para abrir o ajuste.',
     }),
   },
 

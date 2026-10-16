@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Calendar, ChevronDown, ChevronRight } from 'lucide-react';
+import { Calendar, ChevronDown, ChevronRight, History, X } from 'lucide-react';
 import { cn, formatCurrency } from '../lib/utils';
 import { useSearch } from '../context/SearchContext';
 import { filterTreeByLabel } from '../lib/search';
@@ -8,8 +8,8 @@ import { valueTrace } from '../lib/valueTraceMeta';
 import dreData from '../data/dre2026.json';
 
 // Dados-base gerados da aba "Prev x Real 2026" (linhas 52-330) pelo script
-// scripts/import-dre-prev-real.cjs. Edições manuais por célula ficam em
-// dre_cell_edits (Supabase) e sobrepõem o valor importado.
+// scripts/import-dre-prev-real.cjs. Ajustes manuais por célula ficam em
+// dre_cell_edits / dre_cell_edit_history (Supabase) e sobrepõem o valor importado.
 
 type MonthCell = {
   prev: number | null;
@@ -33,11 +33,36 @@ type CellEdit = {
   month: number;
   field: 'prev' | 'real';
   value: number;
+  previous_value?: number | null;
+  motivo?: string | null;
   user_name: string | null;
+  user_email?: string | null;
   updated_at: string;
 };
 
-type EditingCell = { row: number; month: number; field: 'prev' | 'real' };
+type AjusteHistorico = {
+  id: number;
+  year: number;
+  row_key: number;
+  row_label: string | null;
+  month: number;
+  field: 'prev' | 'real';
+  previous_value: number | null;
+  new_value: number;
+  motivo: string;
+  user_name: string | null;
+  user_email: string | null;
+  created_at: string;
+};
+
+type AdjustModal = {
+  row: DRERow;
+  monthIndex: number;
+  field: 'prev' | 'real';
+  currentValue: number | null;
+};
+
+type DreUser = { name?: string; email?: string; role?: string } | null;
 
 const MESES = [
   'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
@@ -148,6 +173,43 @@ const DRE_RDS_MAPPINGS = [
     source:
       'Apuração de Receita › Relatório Diário de Situação › Alimentos & Bebidas › EVENTOS/BANQUETES › Acumulado (R$)',
   },
+  {
+    rowId: 'l66-estacionamento',
+    sectionKey: 'diversos',
+    labels: ['ESTACIONAMENTO'],
+    source:
+      'Apuração de Receita › Relatório Diário de Situação › Diversos › ESTACIONAMENTO › Acumulado (R$)',
+  },
+  {
+    rowId: 'l67-outras',
+    sectionKey: 'diversos',
+    labels: [
+      'TAXA DE TURISMO',
+      'LAVANDERIA',
+      'DAY PASS',
+      'RECREACAO',
+      'RECEPCAO DIVERSOS',
+      'RECEPCAO SERVICOS',
+      'TARIFADOR',
+      'TAXA DE ISS',
+    ],
+    source:
+      'Apuração de Receita › Relatório Diário de Situação › Diversos › Acumulado (R$) — TAXA DE TURISMO + LAVANDERIA + DAY PASS + RECREACAO + RECEPCAO DIVERSOS + RECEPCAO SERVICOS + TARIFADOR + TAXA DE ISS',
+  },
+  {
+    rowId: 'l68-aluguel-eventos',
+    sectionKey: 'eventos',
+    labels: ['EVENTOS - SERVICOS'],
+    source:
+      'Apuração de Receita › Relatório Diário de Situação › Eventos › EVENTOS - SERVICOS › Acumulado (R$)',
+  },
+  {
+    rowId: 'l69-spa',
+    sectionKey: 'diversos',
+    labels: ['SPA'],
+    source:
+      'Apuração de Receita › Relatório Diário de Situação › Diversos › SPA › Acumulado (R$)',
+  },
 ] as const;
 
 /** Pais cujo Realizado é a soma explícita destes filhos (senão, soma todos os children da árvore). */
@@ -164,6 +226,39 @@ const DRE_RDS_ROLLUPS: Record<string, readonly string[]> = {
   ],
   'l65-outras-receitas': ['l66-estacionamento', 'l67-outras', 'l68-aluguel-eventos', 'l69-spa'],
   'l52-receita-bruta': ['l53-receita-de-diarias', 'l57-receita-de-a-b', 'l65-outras-receitas'],
+  'l71-impostos-s-faturamento': ['l72-iss', 'l73-icms', 'l74-pis', 'l75-cofins'],
+};
+
+/**
+ * Impostos s/ Faturamento (ISS/ICMS/PIS/COFINS): sem apuração mensal no RDS.
+ * Realizado provisório = Previsto × (Receita Bruta realizada ÷ Previsto).
+ */
+const DRE_PRO_RATA_BRUTA = new Set([
+  'l72-iss',
+  'l73-icms',
+  'l74-pis',
+  'l75-cofins',
+]);
+
+/** Linhas de resultado derivadas (minuendo − subtraendos). */
+const DRE_DERIVED: Record<string, { partIds: readonly string[]; formula: string }> = {
+  'l77-receita-liquida': {
+    partIds: ['l52-receita-bruta', 'l71-impostos-s-faturamento'],
+    formula: 'Receita Bruta − Impostos s/ Faturamento',
+  },
+  'l81-resultado-bruto': {
+    partIds: ['l77-receita-liquida', 'l79-cmv'],
+    formula: 'Receita Líquida − CMV',
+  },
+  'l309-resultado-operacional': {
+    partIds: ['l81-resultado-bruto', 'l83-despesas-totais'],
+    formula: 'Resultado Bruto − Despesas Totais',
+  },
+};
+
+const subDerived = (values: Array<number | null>): number | null => {
+  if (values.every((v) => v == null)) return null;
+  return values.slice(1).reduce((acc, v) => acc - (v ?? 0), values[0] ?? 0);
 };
 
 const emptyRdsByRow = (): Record<string, Array<number | null>> =>
@@ -182,14 +277,21 @@ const findDreRow = (rows: DRERow[], id: string): DRERow | null => {
   return null;
 };
 
+/** Código contábil no final do label do DRE, ex.: "ENERGIA (367)" → "367". */
+const extractCrdCode = (label: string): string | null => {
+  const m = /\((\d+)\)\s*$/.exec(String(label || '').trim());
+  return m ? m[1] : null;
+};
+
 const formatWhen = (iso: string) => {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
   return d.toLocaleDateString('pt-BR') + ' ' + d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 };
 
-export const DREPage: React.FC = () => {
+export const DREPage: React.FC<{ user?: DreUser }> = ({ user = null }) => {
   const { query } = useSearch();
+  const canAdjust = user?.role === 'admin' || user?.role === 'controle';
   const [expanded, setExpanded] = useState<Record<string, boolean>>(() => {
     const initial: Record<string, boolean> = {};
     for (const row of dreRows) {
@@ -199,6 +301,8 @@ export const DREPage: React.FC = () => {
   });
   const [edits, setEdits] = useState<Record<string, CellEdit>>({});
   const [editsError, setEditsError] = useState('');
+  const [ajustes, setAjustes] = useState<AjusteHistorico[]>([]);
+  const [ajustesError, setAjustesError] = useState('');
   const [rdsByRowId, setRdsByRowId] = useState<Record<string, Array<number | null>>>(emptyRdsByRow);
   const [rdsSources, setRdsSources] = useState<Record<string, string>>(() =>
     Object.fromEntries(DRE_RDS_MAPPINGS.map((m) => [m.rowId, m.source]))
@@ -206,8 +310,12 @@ export const DREPage: React.FC = () => {
   const [rdsReportDates, setRdsReportDates] = useState<Array<string | null>>(
     () => Array.from({ length: 12 }, () => null)
   );
-  const [editingCell, setEditingCell] = useState<EditingCell | null>(null);
-  const [editingValue, setEditingValue] = useState('');
+  /** Realizado Rel. CRD (SALDO LANÇ) por código contábil → 12 meses. */
+  const [crdByCodigo, setCrdByCodigo] = useState<Record<string, Array<number | null>>>({});
+  const [crdNomes, setCrdNomes] = useState<Record<string, string>>({});
+  const [adjustModal, setAdjustModal] = useState<AdjustModal | null>(null);
+  const [adjustValue, setAdjustValue] = useState('');
+  const [adjustMotivo, setAdjustMotivo] = useState('');
   const [savingCell, setSavingCell] = useState(false);
   /** Índices 0–11 dos meses visíveis. Vazio = todos. Multi-seleção = período acumulado. */
   const [selectedMonths, setSelectedMonths] = useState<number[]>(() =>
@@ -271,6 +379,18 @@ export const DREPage: React.FC = () => {
       setEditsError('');
     } catch (err: any) {
       setEditsError(err?.message || 'Falha ao carregar edições manuais do DRE.');
+    }
+  };
+
+  const loadAjustes = async () => {
+    try {
+      const res = await fetch(`/api/dre/ajustes?year=${dreYear}`);
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error || 'Falha ao carregar histórico de ajustes.');
+      setAjustes(Array.isArray(json.ajustes) ? json.ajustes : []);
+      setAjustesError('');
+    } catch (err: any) {
+      setAjustesError(err?.message || 'Falha ao carregar histórico de ajustes.');
     }
   };
 
@@ -360,9 +480,35 @@ export const DREPage: React.FC = () => {
     }
   };
 
+  const loadCrdRealizado = async () => {
+    try {
+      const res = await fetch(`/api/dre/realizado-crd?year=${dreYear}`);
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        console.warn('DRE realizado CRD:', json.error || res.status);
+        return;
+      }
+      const raw = json.byCodigo && typeof json.byCodigo === 'object' ? json.byCodigo : {};
+      const next: Record<string, Array<number | null>> = {};
+      for (const [codigo, arr] of Object.entries(raw)) {
+        const list = Array.isArray(arr) ? arr : [];
+        next[codigo] = Array.from({ length: 12 }, (_, i) => {
+          const v = list[i];
+          return v == null || !Number.isFinite(Number(v)) ? null : Number(v);
+        });
+      }
+      setCrdByCodigo(next);
+      setCrdNomes(json.nomes && typeof json.nomes === 'object' ? json.nomes : {});
+    } catch (err) {
+      console.warn('DRE realizado CRD falhou:', err);
+    }
+  };
+
   useEffect(() => {
     loadEdits();
+    loadAjustes();
     loadRdsRealizado();
+    loadCrdRealizado();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -396,50 +542,104 @@ export const DREPage: React.FC = () => {
     const base = row.values[monthIndex];
     const prevEdit = edits[editKey(row.row, monthIndex + 1, 'prev')];
     const realEdit = edits[editKey(row.row, monthIndex + 1, 'real')];
-    const prev = prevEdit ? prevEdit.value : base.prev;
+    const prevFromEditOrBase = prevEdit ? prevEdit.value : base.prev;
 
     if (realEdit) {
       const real = realEdit.value;
+      const dif = prevFromEditOrBase != null && real != null ? real - prevFromEditOrBase : null;
+      return { prev: prevFromEditOrBase, real, dif };
+    }
+
+    // Impostos s/ Faturamento: escala o previsto pela execução da Receita Bruta.
+    if (DRE_PRO_RATA_BRUTA.has(row.id)) {
+      const prev = prevFromEditOrBase;
+      const bruta = findDreRow(dreRows, 'l52-receita-bruta');
+      const brutaCell = bruta ? effective(bruta, monthIndex) : null;
+      if (
+        prev != null &&
+        brutaCell?.real != null &&
+        brutaCell.prev != null &&
+        brutaCell.prev !== 0
+      ) {
+        const real = prev * (brutaCell.real / brutaCell.prev);
+        const dif = real - prev;
+        return { prev, real, dif };
+      }
+    }
+
+    const derived = DRE_DERIVED[row.id];
+    if (derived) {
+      const parts = derived.partIds.map((id) => {
+        const part = findDreRow(dreRows, id);
+        return part ? effective(part, monthIndex) : { prev: null, real: null, dif: null };
+      });
+      const prev = prevEdit ? prevEdit.value : (subDerived(parts.map((p) => p.prev)) ?? base.prev);
+      const real = subDerived(parts.map((p) => p.real));
       const dif = prev != null && real != null ? real - prev : null;
       return { prev, real, dif };
     }
 
+    const prev = prevFromEditOrBase;
     const childIds = rollupChildIds(row);
     if (childIds?.length) {
-      let sum = 0;
-      let any = false;
+      let sumReal = 0;
+      let anyReal = false;
+      let sumDif = 0;
+      let anyDif = false;
       for (const childId of childIds) {
         const child = findDreRow(dreRows, childId);
         if (!child) continue;
-        const childReal = effective(child, monthIndex).real;
-        if (childReal != null) {
-          sum += childReal;
-          any = true;
+        const childCell = effective(child, monthIndex);
+        if (childCell.real != null) {
+          sumReal += childCell.real;
+          anyReal = true;
+        }
+        if (childCell.dif != null) {
+          sumDif += childCell.dif;
+          anyDif = true;
         }
       }
-      if (any) {
-        const real = sum;
-        const dif = prev != null ? real - prev : null;
+      if (anyReal || anyDif) {
+        const real = anyReal ? sumReal : null;
+        // Diferença do pai = soma das diferenças dos filhos (equivalente a real−prev quando os previstos batem).
+        const dif = anyDif ? sumDif : real != null && prev != null ? real - prev : null;
         return { prev, real, dif };
       }
     }
 
     const rdsValue = rdsByRowId[row.id]?.[monthIndex] ?? null;
     const rdsReal = rdsValue != null && Number.isFinite(rdsValue) ? rdsValue : null;
-    const real = rdsReal != null ? rdsReal : base.real;
-    const fromRds = rdsReal != null;
-    const dif = prevEdit || fromRds
+    const crdCode = extractCrdCode(row.label);
+    const crdValue = crdCode ? crdByCodigo[crdCode]?.[monthIndex] ?? null : null;
+    const crdReal = crdValue != null && Number.isFinite(crdValue) ? crdValue : null;
+    // Rel. CRD (despesas) tem prioridade sobre RDS (receitas) na mesma linha — raramente coincidem.
+    const real = crdReal != null ? crdReal : rdsReal != null ? rdsReal : base.real;
+    const fromAuto = crdReal != null || rdsReal != null;
+    const dif = prevEdit || fromAuto
       ? (prev != null && real != null ? real - prev : null)
       : base.dif;
     return { prev, real, dif };
   };
 
-  const isRdsDerivedReal = (row: DRERow, monthIndex: number): boolean => {
+  const isAutoDerivedReal = (row: DRERow, monthIndex: number): boolean => {
     if (edits[editKey(row.row, monthIndex + 1, 'real')]) return false;
+    const crdCode = extractCrdCode(row.label);
+    if (crdCode && crdByCodigo[crdCode]?.[monthIndex] != null) return true;
     if (rdsByRowId[row.id]?.[monthIndex] != null) return true;
+    if (DRE_PRO_RATA_BRUTA.has(row.id)) {
+      const bruta = findDreRow(dreRows, 'l52-receita-bruta');
+      return bruta ? isAutoDerivedReal(bruta, monthIndex) : false;
+    }
+    const derived = DRE_DERIVED[row.id];
+    if (derived) {
+      return derived.partIds.some((partId) => {
+        const part = findDreRow(dreRows, partId);
+        return part ? isAutoDerivedReal(part, monthIndex) : false;
+      });
+    }
     const childIds = rollupChildIds(row);
     if (!childIds?.length) return false;
-    // Pai com rollup: destaca se algum filho tem Realizado (RDS ou edição).
+    // Pai com rollup: destaca se algum filho tem Realizado (CRD, RDS ou edição).
     return childIds.some((childId) => {
       const child = findDreRow(dreRows, childId);
       if (!child) return false;
@@ -448,6 +648,8 @@ export const DREPage: React.FC = () => {
   };
 
   const rollupPartsLabel = (row: DRERow): string => {
+    const derived = DRE_DERIVED[row.id];
+    if (derived) return derived.formula;
     const childIds = rollupChildIds(row);
     if (!childIds?.length) return 'filhos';
     const names = childIds
@@ -459,12 +661,15 @@ export const DREPage: React.FC = () => {
   const totalOf = (row: DRERow, monthIndexes: number[] = visibleMonths): MonthCell => {
     let prev: number | null = null;
     let real: number | null = null;
+    let dif: number | null = null;
     for (const m of monthIndexes) {
       const v = effective(row, m);
       if (v.prev != null) prev = (prev ?? 0) + v.prev;
       if (v.real != null) real = (real ?? 0) + v.real;
+      // Soma as diferenças mês a mês (só entra mês com Realizado e Previsto).
+      if (v.dif != null) dif = (dif ?? 0) + v.dif;
     }
-    const dif = prev != null && real != null ? real - prev : null;
+    if (dif == null && prev != null && real != null) dif = real - prev;
     return { prev, real, dif };
   };
 
@@ -493,12 +698,14 @@ export const DREPage: React.FC = () => {
   const resultadoLiquidoTotal = (monthIndexes: number[] = visibleMonths): MonthCell => {
     let prev: number | null = null;
     let real: number | null = null;
+    let dif: number | null = null;
     for (const m of monthIndexes) {
       const v = resultadoLiquidoOf(m);
       if (v.prev != null) prev = (prev ?? 0) + v.prev;
       if (v.real != null) real = (real ?? 0) + v.real;
+      if (v.dif != null) dif = (dif ?? 0) + v.dif;
     }
-    const dif = prev != null && real != null ? real - prev : null;
+    if (dif == null && prev != null && real != null) dif = real - prev;
     return { prev, real, dif };
   };
 
@@ -568,17 +775,30 @@ export const DREPage: React.FC = () => {
 
   const monthColSpan = 3 + (showAV ? 1 : 0) + (showAH ? 1 : 0);
 
-  const startCellEdit = (row: DRERow, monthIndex: number, field: 'prev' | 'real') => {
+  const openAdjustModal = (row: DRERow, monthIndex: number, field: 'prev' | 'real') => {
+    if (!canAdjust) return;
     const current = effective(row, monthIndex)[field];
-    setEditingCell({ row: row.row, month: monthIndex + 1, field });
-    setEditingValue(current == null ? '' : String(current));
+    setAdjustModal({ row, monthIndex, field, currentValue: current });
+    setAdjustValue(current == null ? '' : String(current));
+    setAdjustMotivo('');
   };
 
-  const saveCellEdit = async (row: DRERow) => {
-    if (savingCell || !editingCell) return;
-    const raw = editingValue.trim();
+  const closeAdjustModal = () => {
+    setAdjustModal(null);
+    setAdjustValue('');
+    setAdjustMotivo('');
+  };
+
+  const saveAdjustModal = async () => {
+    if (savingCell || !adjustModal) return;
+    const motivo = adjustMotivo.trim();
+    if (!motivo) {
+      alert('Informe o motivo do ajuste.');
+      return;
+    }
+    const raw = adjustValue.trim();
     if (!raw) {
-      setEditingCell(null);
+      alert('Informe o novo valor.');
       return;
     }
     const parsed = Number(raw.replace(/\./g, '').replace(',', '.'));
@@ -595,21 +815,26 @@ export const DREPage: React.FC = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           year: dreYear,
-          row_key: editingCell.row,
-          row_label: row.label,
-          month: editingCell.month,
-          field: editingCell.field,
+          row_key: adjustModal.row.row,
+          row_label: adjustModal.row.label,
+          month: adjustModal.monthIndex + 1,
+          field: adjustModal.field,
           value,
+          previous_value: adjustModal.currentValue,
+          motivo,
         }),
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) {
-        alert(json.error || 'Erro ao salvar a célula.');
+        alert(json.error || 'Erro ao registrar o ajuste.');
         return;
       }
       const saved = json.edit as CellEdit;
       setEdits((prev) => ({ ...prev, [editKey(saved.row_key, saved.month, saved.field)]: saved }));
-      setEditingCell(null);
+      await loadAjustes();
+      setAdjustModal(null);
+      setAdjustValue('');
+      setAdjustMotivo('');
     } catch (err: any) {
       alert(err?.message || 'Erro inesperado ao salvar.');
     } finally {
@@ -638,74 +863,103 @@ export const DREPage: React.FC = () => {
       atingimento: number | null;
     }>;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [edits, visibleMonths, showResultadoLiquido, rdsByRowId]);
+  }, [edits, visibleMonths, showResultadoLiquido, rdsByRowId, crdByCodigo]);
 
   const resultadoOperacional = resultadosFooter.find((r) => r.id === 'l309-resultado-operacional');
   const resultadoLiquidoFooter = resultadosFooter.find((r) => r.id === 'resultado-liquido');
 
   const renderEditableCell = (row: DRERow, monthIndex: number, field: 'prev' | 'real') => {
-    const isEditing =
-      editingCell?.row === row.row && editingCell.month === monthIndex + 1 && editingCell.field === field;
-    if (isEditing) {
-      return (
-        <input
-          autoFocus
-          type="text"
-          inputMode="decimal"
-          value={editingValue}
-          onChange={(e) => setEditingValue(e.target.value)}
-          onBlur={() => saveCellEdit(row)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') saveCellEdit(row);
-            if (e.key === 'Escape') setEditingCell(null);
-          }}
-          disabled={savingCell}
-          className="w-24 px-2 py-1 text-right text-xs bg-white border border-emerald-300 rounded-md"
-        />
-      );
-    }
-
     const cell = effective(row, monthIndex);
     const value = cell[field];
     const campo = field === 'prev' ? 'Previsto' : 'Realizado';
     const mes = `${MESES[monthIndex]}/${dreYear}`;
     const edit = edits[editKey(row.row, monthIndex + 1, field)];
     const base = row.values[monthIndex][field];
-    const fromRds = field === 'real' && isRdsDerivedReal(row, monthIndex);
+    const fromAuto = field === 'real' && isAutoDerivedReal(row, monthIndex);
+    const crdCode = extractCrdCode(row.label);
+    const fromCrd =
+      field === 'real' &&
+      !edit &&
+      Boolean(crdCode) &&
+      crdByCodigo[crdCode!]?.[monthIndex] != null;
+    const fromRds =
+      field === 'real' &&
+      !edit &&
+      !fromCrd &&
+      fromAuto &&
+      (rdsByRowId[row.id]?.[monthIndex] != null ||
+        Boolean(DRE_DERIVED[row.id]) ||
+        Boolean(rollupChildIds(row)?.length) ||
+        DRE_PRO_RATA_BRUTA.has(row.id));
+    const derived = DRE_DERIVED[row.id];
+    const isProRata = field === 'real' && !edit && DRE_PRO_RATA_BRUTA.has(row.id) && fromAuto;
     const isRollup =
       field === 'real' &&
       !edit &&
       Boolean(rollupChildIds(row)?.length) &&
-      fromRds;
+      fromAuto &&
+      !fromCrd;
+    const isDerivedReal = field === 'real' && !edit && Boolean(derived) && fromAuto;
+    const previousDisplay =
+      edit?.previous_value != null
+        ? formatCurrency(edit.previous_value)
+        : base == null
+          ? '—'
+          : formatCurrency(base);
     const meta = edit
-      ? valueTrace.dre.edited(
-          row.label,
-          campo,
-          mes,
-          edit.user_name || 'usuário não identificado',
-          formatWhen(edit.updated_at),
-          base == null ? '—' : formatCurrency(base)
-        )
-      : isRollup
-        ? valueTrace.dre.rdsRollup(row.label, mes, rollupPartsLabel(row))
-        : fromRds
-          ? valueTrace.dre.rdsMapped(
-              row.label,
-              mes,
-              rdsSources[row.id] || 'Relatório Diário de Situação',
-              rdsReportDates[monthIndex]
-            )
-          : valueTrace.dre.imported(row.label, row.row, campo, mes, dreSource);
+      ? edit.motivo
+        ? valueTrace.dre.adjusted(
+            row.label,
+            campo,
+            mes,
+            edit.user_name || 'usuário não identificado',
+            formatWhen(edit.updated_at),
+            previousDisplay,
+            formatCurrency(edit.value),
+            edit.motivo
+          )
+        : valueTrace.dre.edited(
+            row.label,
+            campo,
+            mes,
+            edit.user_name || 'usuário não identificado',
+            formatWhen(edit.updated_at),
+            previousDisplay
+          )
+      : isProRata
+        ? valueTrace.dre.proRataBruta(row.label, mes)
+        : isDerivedReal
+          ? valueTrace.dre.derived(row.label, mes, derived!.formula)
+          : isRollup
+            ? valueTrace.dre.rdsRollup(row.label, mes, rollupPartsLabel(row))
+            : fromCrd
+              ? valueTrace.dre.crdMapped(
+                  row.label,
+                  mes,
+                  crdCode!,
+                  crdNomes[crdCode!] ?? null
+                )
+              : fromRds
+                ? valueTrace.dre.rdsMapped(
+                    row.label,
+                    mes,
+                    rdsSources[row.id] || 'Relatório Diário de Situação',
+                    rdsReportDates[monthIndex]
+                  )
+                : valueTrace.dre.imported(row.label, row.row, campo, mes, dreSource);
 
     return (
       <button
-        onClick={() => startCellEdit(row, monthIndex, field)}
+        type="button"
+        onClick={() => openAdjustModal(row, monthIndex, field)}
+        disabled={!canAdjust}
         className={cn(
-          'px-1 py-0.5 rounded hover:bg-emerald-50 transition-colors',
+          'px-1 py-0.5 rounded transition-colors',
+          canAdjust ? 'hover:bg-emerald-50' : 'cursor-default',
           edit && 'bg-amber-50/70',
-          fromRds && 'bg-sky-50/80'
+          (fromRds || fromCrd) && !edit && 'bg-sky-50/80'
         )}
-        title="Clique para editar"
+        title={canAdjust ? 'Clique para ajustar' : 'Somente visualização'}
       >
         <ValueTrace
           className={cn(
@@ -781,7 +1035,11 @@ export const DREPage: React.FC = () => {
                   <ValueTrace
                     className={cn('text-xs tabular-nums font-semibold', difClass(kind, cell.dif))}
                     displayValue={cell.dif == null ? '—' : formatCurrency(cell.dif)}
-                    meta={valueTrace.dre.diferenca(row.label, mes)}
+                    meta={
+                      rollupChildIds(row)?.length
+                        ? valueTrace.dre.diferencaRollup(row.label, mes, rollupPartsLabel(row))
+                        : valueTrace.dre.diferenca(row.label, mes)
+                    }
                   />
                 </td>
                 {showAV && (
@@ -889,7 +1147,7 @@ export const DREPage: React.FC = () => {
         <div>
           <h2 className="text-2xl font-bold text-slate-900">DRE Gerencial</h2>
           <p className="text-sm text-slate-500">
-            Previsto da planilha Prev x Real {dreYear}. Realizado de Diárias e A&B alimentado pelo RDS. Clique em uma célula para editar; passe o mouse para ver a origem do valor.
+            Previsto da planilha Prev x Real {dreYear}. Realizado de Diárias/A&B pelo RDS; despesas com código (ex.: ENERGIA (367)) pelo Rel. CRD (SALDO LANÇ). Clique em Previsto/Realizado para abrir o ajuste (com motivo); passe o mouse para ver a origem do valor.
           </p>
         </div>
         <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 shadow-sm shrink-0">
@@ -1208,29 +1466,35 @@ export const DREPage: React.FC = () => {
                     <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500 leading-tight">
                       {item.short}
                     </p>
-                    {dif != null && (
-                      <span
-                        className={cn(
-                          'shrink-0 text-[10px] font-bold tabular-nums px-1.5 py-0.5 rounded-md',
-                          dif < 0 ? 'bg-red-50 text-red-700' : dif > 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'
-                        )}
-                      >
-                        {dif > 0 ? '+' : ''}
-                        {formatCurrency(dif)}
+                    {item.atingimento != null && (
+                      <span className="shrink-0 text-[10px] font-bold tabular-nums px-1.5 py-0.5 rounded-md bg-slate-100 text-slate-600">
+                        {item.atingimento.toFixed(0)}%
                       </span>
                     )}
                   </div>
 
                   <div>
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">
+                      Diferença
+                    </p>
                     <p
                       className={cn(
                         'text-xl font-extrabold tabular-nums leading-none',
-                        real != null && real < 0 ? 'text-red-600' : 'text-slate-900'
+                        dif == null
+                          ? 'text-slate-900'
+                          : dif < 0
+                            ? 'text-red-600'
+                            : dif > 0
+                              ? 'text-emerald-700'
+                              : 'text-slate-900'
                       )}
                     >
-                      {real == null ? '—' : formatCurrency(real)}
+                      {dif == null ? '—' : `${dif > 0 ? '+' : ''}${formatCurrency(dif)}`}
                     </p>
-                    <p className="text-[11px] text-slate-400 mt-1.5 tabular-nums">
+                    <p className="text-[11px] text-slate-500 mt-1.5 tabular-nums">
+                      Realizado {real == null ? '—' : formatCurrency(real)}
+                    </p>
+                    <p className="text-[11px] text-slate-400 mt-0.5 tabular-nums">
                       Previsto {prev == null ? '—' : formatCurrency(prev)}
                     </p>
                   </div>
@@ -1297,6 +1561,175 @@ export const DREPage: React.FC = () => {
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+        <div className="px-5 py-4 border-b border-slate-100 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <History className="w-4 h-4 text-slate-400" />
+            <div>
+              <h3 className="text-sm font-bold text-slate-900">Ajustes</h3>
+              <p className="text-xs text-slate-500">
+                Histórico de valores alterados manualmente no DRE {dreYear}.
+              </p>
+            </div>
+          </div>
+          <span className="text-[11px] font-semibold tabular-nums text-slate-400">
+            {ajustes.length} registro{ajustes.length === 1 ? '' : 's'}
+          </span>
+        </div>
+        {ajustesError && (
+          <div className="px-5 py-3 text-sm text-amber-800 bg-amber-50 border-b border-amber-100">
+            {ajustesError}
+          </div>
+        )}
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr className="bg-slate-50/80 border-b border-slate-100">
+                <th className="px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">Data / hora</th>
+                <th className="px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">Usuário</th>
+                <th className="px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">Linha</th>
+                <th className="px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">Mês</th>
+                <th className="px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">Campo</th>
+                <th className="px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-slate-400 text-right">Anterior</th>
+                <th className="px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-slate-400 text-right">Novo</th>
+                <th className="px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">Motivo</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-50">
+              {ajustes.length === 0 && (
+                <tr>
+                  <td colSpan={8} className="px-4 py-8 text-center text-sm text-slate-400">
+                    Nenhum ajuste registrado ainda.
+                  </td>
+                </tr>
+              )}
+              {ajustes.map((a) => (
+                <tr key={a.id} className="hover:bg-slate-50/60">
+                  <td className="px-4 py-2.5 text-xs text-slate-600 whitespace-nowrap">{formatWhen(a.created_at)}</td>
+                  <td className="px-4 py-2.5 text-xs text-slate-700">
+                    {a.user_name || '—'}
+                    {a.user_email ? (
+                      <span className="block text-[10px] text-slate-400">{a.user_email}</span>
+                    ) : null}
+                  </td>
+                  <td className="px-4 py-2.5 text-xs font-medium text-slate-800">{a.row_label || `Linha ${a.row_key}`}</td>
+                  <td className="px-4 py-2.5 text-xs text-slate-600">{MESES[a.month - 1] || a.month}</td>
+                  <td className="px-4 py-2.5 text-xs text-slate-600">{a.field === 'prev' ? 'Previsto' : 'Realizado'}</td>
+                  <td className="px-4 py-2.5 text-xs tabular-nums text-right text-slate-500">
+                    {a.previous_value == null ? '—' : formatCurrency(a.previous_value)}
+                  </td>
+                  <td className="px-4 py-2.5 text-xs tabular-nums text-right font-semibold text-slate-800">
+                    {formatCurrency(a.new_value)}
+                  </td>
+                  <td className="px-4 py-2.5 text-xs text-slate-600 max-w-[280px]">{a.motivo}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {adjustModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm">
+          <div
+            role="dialog"
+            aria-modal="true"
+            className="bg-white rounded-2xl shadow-xl w-full max-w-md border border-slate-100"
+          >
+            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
+              <div>
+                <h3 className="text-base font-bold text-slate-900">Ajustar valor</h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  {adjustModal.field === 'prev' ? 'Previsto' : 'Realizado'} · {adjustModal.row.label} ·{' '}
+                  {MESES[adjustModal.monthIndex]}/{dreYear}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={closeAdjustModal}
+                disabled={savingCell}
+                className="p-2 text-slate-400 hover:text-slate-700 rounded-lg"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4">
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">Valor atual</p>
+                <p className="text-lg font-extrabold tabular-nums text-slate-800">
+                  {adjustModal.currentValue == null ? '—' : formatCurrency(adjustModal.currentValue)}
+                </p>
+              </div>
+
+              <div>
+                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1 block">
+                  Novo valor *
+                </label>
+                <input
+                  autoFocus
+                  type="text"
+                  inputMode="decimal"
+                  value={adjustValue}
+                  onChange={(e) => setAdjustValue(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') saveAdjustModal();
+                    if (e.key === 'Escape') closeAdjustModal();
+                  }}
+                  disabled={savingCell}
+                  className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm tabular-nums"
+                  placeholder="Ex.: 12500,50"
+                />
+              </div>
+
+              <div>
+                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1 block">
+                  Motivo *
+                </label>
+                <textarea
+                  value={adjustMotivo}
+                  onChange={(e) => setAdjustMotivo(e.target.value)}
+                  disabled={savingCell}
+                  rows={3}
+                  className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm resize-y"
+                  placeholder="Descreva por que este valor está sendo ajustado"
+                />
+              </div>
+
+              <div className="rounded-xl bg-slate-50 border border-slate-100 px-3 py-2.5 text-[11px] text-slate-500 space-y-0.5">
+                <p>
+                  <span className="font-semibold text-slate-600">Usuário:</span>{' '}
+                  {user?.name || 'usuário da sessão'}
+                  {user?.email ? ` (${user.email})` : ''}
+                </p>
+                <p>
+                  <span className="font-semibold text-slate-600">Registro:</span> data e hora serão gravadas ao confirmar
+                </p>
+              </div>
+            </div>
+
+            <div className="px-5 py-4 border-t border-slate-100 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={closeAdjustModal}
+                disabled={savingCell}
+                className="px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100 rounded-xl"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={saveAdjustModal}
+                disabled={savingCell}
+                className="px-4 py-2 text-sm font-bold text-white bg-[#004D40] hover:bg-[#003d33] rounded-xl disabled:opacity-60"
+              >
+                {savingCell ? 'Registrando…' : 'Registrar ajuste'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

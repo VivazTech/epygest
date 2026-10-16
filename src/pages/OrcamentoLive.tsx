@@ -129,12 +129,13 @@ export const OrcamentoLive: React.FC = () => {
   };
 
   const startCellEdit = (rowId: number, monthIndex: number, value: number) => {
+    if (userRole !== 'admin') return;
     setEditingCell({ rowId, monthIndex });
     setEditingValue(String(value ?? 0));
   };
 
   const saveCellEdit = async (row: OrcamentoRow, monthIndex: number) => {
-    if (savingCell) return;
+    if (userRole !== 'admin' || savingCell) return;
     const parsedValue = Number(String(editingValue).replace(',', '.'));
     if (!Number.isFinite(parsedValue)) {
       alert('Digite um valor numérico válido.');
@@ -334,7 +335,7 @@ export const OrcamentoLive: React.FC = () => {
                                       }}
                                       className="w-24 px-2 py-1 text-right bg-white border border-emerald-300 rounded-md"
                                     />
-                                  ) : (
+                                  ) : userRole === 'admin' ? (
                                     <button
                                       onClick={() => startCellEdit(row.id, index, value)}
                                       className="min-w-20 px-2 py-1 rounded hover:bg-emerald-50 transition-colors text-xs text-slate-900"
@@ -342,6 +343,10 @@ export const OrcamentoLive: React.FC = () => {
                                     >
                                       {formatCurrency(value || 0)}
                                     </button>
+                                  ) : (
+                                    <span className="min-w-20 px-2 py-1 text-xs text-slate-900 inline-block">
+                                      {formatCurrency(value || 0)}
+                                    </span>
                                   )}
                                 </td>
                               );

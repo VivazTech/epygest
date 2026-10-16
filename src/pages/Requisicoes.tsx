@@ -1,28 +1,93 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Plus, Archive, XCircle } from 'lucide-react';
-import { cn, formatCurrency } from '../lib/utils';
+import { Plus, Archive, XCircle, BadgeCheck, RotateCcw, Pencil, History, Loader2 } from 'lucide-react';
+import { cn, formatCurrency, formatDate } from '../lib/utils';
+import { confirmCancel } from '../lib/confirmAction';
 import { ValueTrace } from '../components/ValueTrace';
 import { valueTrace } from '../lib/valueTraceMeta';
 import { useSearch } from '../context/SearchContext';
-import { matchesSearch } from '../lib/search';
+import { useToast } from '../context/ToastContext';
 import { isSharedCrdCode } from '../lib/sharedCrds';
+import { SearchableSelect } from '../components/SearchableSelect';
+import { CrdListFilter } from '../components/CrdListFilter';
+import { LaunchNumberAmountFilters } from '../components/LaunchNumberAmountFilters';
+import { buildCrdFilterOptions } from '../lib/crdFilter';
+import {
+  canEditLaunchRole,
+  isLaunchStatusEditableBeforeControl,
+  launchStatusMeta,
+  LAUNCH_STATUS_FILTER_OPTIONS,
+} from '../lib/launchFlow';
+import { CompetenciaFilter, currentCompetencia } from '../components/CompetenciaFilter';
+import { ListPagination } from '../components/ListPagination';
+import { DateBrInput } from '../components/DateBrInput';
+import { parseListResponse, useServerPagination } from '../hooks/useServerPagination';
+
+const EMPTY_FORM = {
+  crd_id: '',
+  provider_name: '',
+  date: '',
+  amount: '',
+  description: '',
+};
 
 export const RequisicoesPage: React.FC = () => {
   const { query } = useSearch();
+  const { showSuccess } = useToast();
   const [requisitions, setRequisitions] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
   const [crds, setCrds] = useState<any[]>([]);
+  const [crdFilter, setCrdFilter] = useState('');
+  const [invoiceNumberFilter, setInvoiceNumberFilter] = useState('');
+  const [amountFilter, setAmountFilter] = useState('');
+  const initialCompetencia = currentCompetencia();
+  const [competenciaMonth, setCompetenciaMonth] = useState('');
+  const [competenciaYear, setCompetenciaYear] = useState(initialCompetencia.year);
+  const currentYear = new Date().getFullYear();
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
   const [userRole, setUserRole] = useState<string>('viewer');
   const [allowedSectorIds, setAllowedSectorIds] = useState<string[]>([]);
-  const [form, setForm] = useState({
-    crd_id: '',
-    date: '',
-    amount: '',
-    description: ''
-  });
+  const [grantedCrdIds, setGrantedCrdIds] = useState<string[]>([]);
+  const [actingSector, setActingSector] = useState<'requester' | 'controle' | 'financeiro'>('requester');
+  const [form, setForm] = useState({ ...EMPTY_FORM });
+  const [showModal, setShowModal] = useState(false);
+  const [editingEntry, setEditingEntry] = useState<any | null>(null);
+  const [historyEntry, setHistoryEntry] = useState<any | null>(null);
+  const [historyRows, setHistoryRows] = useState<any[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const pagination = useServerPagination(20);
 
-  const loadData = () => {
-    fetch('/api/requisitions').then((res) => res.json()).then(setRequisitions);
-    fetch('/api/crds').then((res) => res.json()).then(setCrds);
+  const loadData = (showSpinner = true) => {
+    if (showSpinner) setLoading(true);
+    const params = new URLSearchParams(pagination.queryParams);
+    if (statusFilter !== 'all') params.set('status', statusFilter);
+    if (competenciaMonth) {
+      params.set('month', competenciaMonth);
+      params.set('year', competenciaYear);
+    }
+    if (dateFrom) params.set('from', dateFrom);
+    if (dateTo) params.set('to', dateTo);
+    if (crdFilter) params.set('crd', crdFilter);
+    if (amountFilter.trim()) params.set('amount', amountFilter.trim());
+    const searchBits = [query, invoiceNumberFilter].map((s) => s.trim()).filter(Boolean);
+    if (searchBits.length) params.set('q', searchBits.join(' '));
+
+    fetch(`/api/requisitions?${params.toString()}`)
+      .then((res) => res.json())
+      .then((data) => {
+        const parsed = parseListResponse<any>(data);
+        setRequisitions(parsed.items);
+        pagination.applyMeta({ total: parsed.total, totalAmount: parsed.totalAmount ?? null });
+      })
+      .catch(() => {
+        setRequisitions([]);
+        pagination.applyMeta({ total: 0, totalAmount: 0 });
+      })
+      .finally(() => {
+        if (showSpinner) setLoading(false);
+      });
   };
 
   useEffect(() => {
@@ -32,6 +97,9 @@ export const RequisicoesPage: React.FC = () => {
         if (!res.ok) return;
         const user = await res.json();
         setUserRole(String(user?.role || 'viewer'));
+        const role = String(user?.role || 'viewer');
+        if (role === 'finance') setActingSector('financeiro');
+        else if (role === 'controle') setActingSector('controle');
         const ids = Array.from(
           new Set<string>(
             (Array.isArray(user?.sector_ids) ? user.sector_ids : [user?.sector_id])
@@ -40,26 +108,90 @@ export const RequisicoesPage: React.FC = () => {
           )
         );
         setAllowedSectorIds(ids);
+        setGrantedCrdIds(
+          Array.from(
+            new Set<string>(
+              (Array.isArray(user?.crd_ids) ? user.crd_ids : [])
+                .map((id: unknown) => String(id ?? '').trim())
+                .filter((id: string) => id !== '')
+            )
+          )
+        );
       } catch {
         // mantém escopo vazio
       }
     };
 
     loadUserScope();
-    loadData();
+    fetch('/api/crds').then((res) => res.json()).then(setCrds).catch(() => setCrds([]));
   }, []);
+
+  useEffect(() => {
+    pagination.resetPage();
+  }, [
+    statusFilter,
+    competenciaMonth,
+    competenciaYear,
+    dateFrom,
+    dateTo,
+    crdFilter,
+    amountFilter,
+    query,
+    invoiceNumberFilter,
+    pagination.resetPage,
+  ]);
+
+  useEffect(() => {
+    loadData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    pagination.page,
+    pagination.pageSize,
+    statusFilter,
+    competenciaMonth,
+    competenciaYear,
+    dateFrom,
+    dateTo,
+    crdFilter,
+    amountFilter,
+    query,
+    invoiceNumberFilter,
+  ]);
 
   const hasGlobalSectorView =
     userRole === 'admin' || userRole === 'finance' || userRole === 'controle';
 
+  const canSwitchActingProfile = userRole === 'admin';
+  const canApproveControl = actingSector === 'controle' && (userRole === 'controle' || userRole === 'admin');
+  const canPayFinance = actingSector === 'financeiro' && (userRole === 'finance' || userRole === 'admin');
+  const canApproveManager = userRole === 'manager' || userRole === 'admin';
+  const canCancelAsRequester =
+    actingSector === 'requester' &&
+    (userRole === 'manager' || userRole === 'estagiario' || userRole === 'admin');
+
+  const statusLabel = (status: string) => launchStatusMeta(status);
+
   const visibleCrds = useMemo(() => {
     const active = crds.filter((c) => c.active !== false);
     if (hasGlobalSectorView && allowedSectorIds.length === 0) return active;
-    if (allowedSectorIds.length === 0) return [];
+    if (allowedSectorIds.length === 0 && grantedCrdIds.length === 0) return [];
     return active.filter(
-      (c) => allowedSectorIds.includes(String(c.sector_id)) || isSharedCrdCode(c.code)
+      (c) =>
+        allowedSectorIds.includes(String(c.sector_id)) ||
+        isSharedCrdCode(c.code) ||
+        grantedCrdIds.includes(String(c.id))
     );
-  }, [crds, allowedSectorIds, hasGlobalSectorView]);
+  }, [crds, allowedSectorIds, hasGlobalSectorView, grantedCrdIds]);
+
+  const crdSelectOptions = useMemo(
+    () =>
+      visibleCrds.map((c) => ({
+        value: String(c.id),
+        label: `${c.code} - ${c.name}${c.sector_name ? ` (${c.sector_name})` : ''}`,
+        keywords: `${c.code} ${c.name} ${c.sector_name || ''}`,
+      })),
+    [visibleCrds]
+  );
 
   const matchesUserSector = (sectorId?: number | string | null) => {
     if (hasGlobalSectorView && allowedSectorIds.length === 0) return true;
@@ -67,175 +199,381 @@ export const RequisicoesPage: React.FC = () => {
     return allowedSectorIds.includes(String(sectorId ?? ''));
   };
 
+  const canEditOpenLaunches = canEditLaunchRole(userRole);
+  const canEditEntry = (entry: any) => {
+    if (!canEditOpenLaunches) return false;
+    if (!isLaunchStatusEditableBeforeControl(entry?.status)) return false;
+    return matchesUserSector(entry?.sector_id);
+  };
+
   const scopedRequisitions = useMemo(
     () => requisitions.filter((r) => matchesUserSector(r.sector_id)),
     [requisitions, allowedSectorIds, hasGlobalSectorView]
   );
 
+  const closeModal = () => {
+    setShowModal(false);
+    setEditingEntry(null);
+    setForm({ ...EMPTY_FORM });
+  };
+
+  const openCreateModal = () => {
+    setEditingEntry(null);
+    setForm({ ...EMPTY_FORM });
+    setShowModal(true);
+  };
+
+  const openEditEntry = (entry: any) => {
+    if (!canEditEntry(entry)) {
+      alert(
+        isLaunchStatusEditableBeforeControl(entry?.status)
+          ? 'Apenas administrador ou gestor do setor pode editar este lançamento.'
+          : 'Não é possível editar após a aprovação do Controle.'
+      );
+      return;
+    }
+    setEditingEntry(entry);
+    setForm({
+      crd_id: entry.crd_id ? String(entry.crd_id) : '',
+      provider_name: String(entry.provider_name || ''),
+      date: String(entry.date || '').slice(0, 10),
+      amount: entry.amount == null || entry.amount === '' ? '' : String(entry.amount),
+      description: String(entry.description || ''),
+    });
+    setShowModal(true);
+  };
+
+  const openEditHistory = async (entry: any) => {
+    setHistoryEntry(entry);
+    setHistoryRows([]);
+    setHistoryLoading(true);
+    try {
+      const res = await fetch(`/api/launch-edits/requisicao/${entry.id}`);
+      const data = await res.json().catch(() => []);
+      if (!res.ok) {
+        alert((data as any)?.error || 'Não foi possível carregar o histórico.');
+        setHistoryEntry(null);
+        return;
+      }
+      setHistoryRows(Array.isArray(data) ? data : []);
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
   const createRequisition = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!form.crd_id || !form.date || !form.amount) {
-      alert('Preencha CRD, data e valor.');
+    if (!form.crd_id || !form.provider_name.trim() || !form.date || !form.amount) {
+      alert('Preencha CRD, fornecedor, data e valor.');
       return;
     }
 
-    const res = await fetch('/api/requisitions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        crd_id: parseInt(form.crd_id),
-        date: form.date,
-        amount: parseFloat(form.amount),
-        description: form.description || null
-      })
-    });
+    const payload = {
+      crd_id: parseInt(form.crd_id),
+      provider_name: form.provider_name.trim(),
+      date: form.date,
+      amount: parseFloat(form.amount),
+      description: form.description || null,
+    };
 
-    if (!res.ok) {
-      const data = await res.json();
-      alert(data.error || 'Não foi possível lançar a requisição.');
-      return;
+    const isEdit = Boolean(editingEntry?.id);
+    setSubmitting(true);
+    try {
+      const res = await fetch(isEdit ? `/api/requisitions/${editingEntry.id}` : '/api/requisitions', {
+        method: isEdit ? 'PATCH' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) {
+        const data = await res.json();
+        alert(data.error || (isEdit ? 'Não foi possível salvar a edição.' : 'Não foi possível lançar a requisição.'));
+        return;
+      }
+
+      const saved = await res.json().catch(() => ({}));
+      if (isEdit) {
+        showSuccess('Requisição atualizada. A edição foi registrada no histórico.');
+      } else {
+        showSuccess(
+          saved?.protocol
+            ? `Requisição ${saved.protocol} lançada. Aguardando aprovação do Controle.`
+            : 'Requisição lançada. Aguardando aprovação do Controle.'
+        );
+      }
+      closeModal();
+      loadData();
+    } finally {
+      setSubmitting(false);
     }
-
-    setForm({ crd_id: '', date: '', amount: '', description: '' });
-    loadData();
   };
 
-  const updateStatus = async (id: number, status: 'posted' | 'cancelled') => {
-    await fetch(`/api/requisitions/${id}/status`, {
+  const updateStatus = async (id: number, status: 'open' | 'approved' | 'posted' | 'cancelled') => {
+    if (status === 'cancelled' && !confirmCancel('esta requisição')) return;
+    const res = await fetch(`/api/requisitions/${id}/status`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status })
+      body: JSON.stringify({ status }),
     });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      alert(data.error || 'Não foi possível atualizar a requisição.');
+      return;
+    }
     loadData();
   };
 
-  const filteredRequisitions = useMemo(
-    () =>
-      scopedRequisitions.filter((r) =>
-        matchesSearch(
-          query,
-          r.crd_code,
-          r.crd_name,
-          r.sector_name,
-          r.description,
-          r.date,
-          r.amount,
-          r.status
-        )
-      ),
-    [scopedRequisitions, query]
-  );
+  const filteredRequisitions = scopedRequisitions;
+
+  const filteredAmountTotal = useMemo(() => {
+    if (pagination.totalAmount != null && Number.isFinite(pagination.totalAmount)) {
+      return formatCurrency(pagination.totalAmount);
+    }
+    return formatCurrency(0);
+  }, [pagination.totalAmount]);
+
+  const crdFilterOptions = useMemo(() => buildCrdFilterOptions(crds), [crds]);
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
-      <div>
-        <h2 className="text-2xl font-bold text-slate-900">Requisições Internas</h2>
-        <p className="text-slate-500 text-sm">
-          Registre compras internas por CRD para compor o orçamento do CRD na competência da requisição.
-        </p>
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <h2 className="text-2xl font-bold text-slate-900">Requisições Internas</h2>
+          <p className="text-slate-500 text-sm">
+            Registre compras internas por CRD para compor o orçamento do CRD na competência da requisição.
+          </p>
+        </div>
+        <div className="flex items-center gap-3 self-start">
+          {canSwitchActingProfile && (
+            <select
+              value={actingSector}
+              onChange={(e) => setActingSector(e.target.value as 'requester' | 'controle' | 'financeiro')}
+              className="px-3 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-semibold text-slate-700 shadow-sm"
+            >
+              <option value="requester">Visão solicitante</option>
+              <option value="controle">Atuar como Controle</option>
+              <option value="financeiro">Atuar como Financeiro</option>
+            </select>
+          )}
+          <button
+            type="button"
+            onClick={openCreateModal}
+            className="flex items-center gap-2 bg-[#004D40] text-white px-4 py-2.5 rounded-xl shadow-lg shadow-emerald-900/10 hover:bg-[#003d33] transition-colors"
+          >
+            <Plus className="w-4 h-4" />
+            <span className="font-bold text-sm">Nova requisição</span>
+          </button>
+        </div>
       </div>
 
-      <form onSubmit={createRequisition} className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5 grid grid-cols-1 md:grid-cols-5 gap-3">
-        <select
-          required
-          value={form.crd_id}
-          onChange={(e) => setForm((p) => ({ ...p, crd_id: e.target.value }))}
-          className="px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm"
-        >
-          <option value="">CRD</option>
-          {visibleCrds.map((c) => (
-            <option key={c.id} value={c.id}>{c.code} - {c.name}{c.sector_name ? ` (${c.sector_name})` : ''}</option>
-          ))}
-        </select>
-        {visibleCrds.length === 0 && (
-          <p className="md:col-span-5 text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-xl px-3 py-2">
-            Nenhum CRD disponível para os setores vinculados ao seu usuário.
-          </p>
-        )}
-
-        <input
-          required
-          type="date"
-          value={form.date}
-          onChange={(e) => setForm((p) => ({ ...p, date: e.target.value }))}
-          className="px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 space-y-4">
+        <CompetenciaFilter
+          month={competenciaMonth}
+          year={competenciaYear}
+          onMonthChange={setCompetenciaMonth}
+          onYearChange={setCompetenciaYear}
+          allowAll
+          hint="Filtra pela data da requisição. Em 'Todos', a lista mostra todos os períodos."
         />
+        <div className="flex flex-wrap items-end gap-4 border-t border-slate-100 pt-4">
+          <CrdListFilter value={crdFilter} onChange={setCrdFilter} options={crdFilterOptions} />
+          <LaunchNumberAmountFilters
+            invoiceNumber={invoiceNumberFilter}
+            onInvoiceNumberChange={setInvoiceNumberFilter}
+            amount={amountFilter}
+            onAmountChange={setAmountFilter}
+            numberLabel="Nº / protocolo"
+          />
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div>
+            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Vencimento de</label>
+            <DateBrInput
+              value={dateFrom}
+              onChange={setDateFrom}
+              suggestYear={currentYear}
+              className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+            />
+          </div>
+          <div>
+            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Vencimento até</label>
+            <DateBrInput
+              value={dateTo}
+              min={dateFrom || undefined}
+              onChange={setDateTo}
+              suggestYear={currentYear}
+              className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+            />
+          </div>
+          <div>
+            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Status</label>
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+            >
+              {LAUNCH_STATUS_FILTER_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+      </div>
 
-        <input
-          required
-          type="number"
-          step="0.01"
-          placeholder="Valor"
-          value={form.amount}
-          onChange={(e) => setForm((p) => ({ ...p, amount: e.target.value }))}
-          className="px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm"
-        />
-
-        <input
-          placeholder="Descrição (opcional)"
-          value={form.description}
-          onChange={(e) => setForm((p) => ({ ...p, description: e.target.value }))}
-          className="px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm"
-        />
-
-        <button
-          type="submit"
-          className="flex items-center justify-center gap-2 bg-[#004D40] text-white px-4 py-2.5 rounded-xl shadow-lg shadow-emerald-900/10 hover:bg-[#003d33] transition-colors"
-        >
-          <Plus className="w-4 h-4" />
-          <span className="font-bold text-sm">Lançar requisição</span>
-        </button>
-      </form>
-
-      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-x-auto">
+      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+        <div className="overflow-x-auto">
         <table className="w-full text-left border-collapse">
           <thead>
             <tr className="bg-slate-50/50">
+              <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Protocolo</th>
               <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">CRD</th>
+              <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Fornecedor</th>
               <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Data</th>
-              <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Descrição</th>
+              <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Vencimento</th>
               <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Valor</th>
               <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Status</th>
               <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-right">Ações</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-50">
-            {filteredRequisitions.map((r) => (
-              <tr key={r.id} className="hover:bg-slate-50/50 transition-colors">
-                <td className="px-6 py-4 text-sm font-medium text-slate-700">
-                  {(r.crd_code || 'CRD')} - {r.crd_name || 'Sem descrição'}
-                  <span className="block text-xs font-normal text-slate-500">{r.sector_name || 'Sem setor'}</span>
+            {loading && (
+              <tr>
+                <td colSpan={8} className="px-6 py-14 text-center">
+                  <div className="inline-flex items-center justify-center gap-2 text-slate-400">
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                    <span className="text-sm font-medium">Carregando requisições...</span>
+                  </div>
                 </td>
-                <td className="px-6 py-4 text-sm text-slate-600">{r.date}</td>
-                <td className="px-6 py-4 text-sm text-slate-600">{r.description || '—'}</td>
-                <td className="px-6 py-4">
-                  <ValueTrace
-                    className="text-sm font-bold text-slate-900"
-                    displayValue={formatCurrency(r.amount)}
-                    meta={valueTrace.requisitions.amount(r.id)}
-                  />
+              </tr>
+            )}
+            {!loading && filteredRequisitions.length === 0 && (
+              <tr>
+                <td colSpan={8} className="px-6 py-10 text-center text-sm text-slate-400">
+                  {crdFilter ? `Nenhuma requisição com CRD ${crdFilter}.` : 'Nenhuma requisição encontrada.'}
                 </td>
-                <td className="px-6 py-4">
-                  <span className={cn(
-                    "text-[10px] font-bold px-2 py-1 rounded-lg uppercase tracking-wider",
-                    r.status === 'open' ? "bg-orange-100 text-orange-700" :
-                    r.status === 'posted' ? "bg-emerald-100 text-emerald-700" :
-                    "bg-slate-200 text-slate-700"
-                  )}>
-                    {r.status === 'open' ? 'Aberta' : r.status === 'posted' ? 'Baixada' : 'Cancelada'}
-                  </span>
-                </td>
-                <td className="px-6 py-4">
-                  <div className="flex justify-end gap-2">
-                    {r.status === 'open' && (
-                      <>
+              </tr>
+            )}
+            {!loading && filteredRequisitions.map((r) => {
+              const meta = statusLabel(r.status);
+              const edited = Number(r.edit_count || 0) > 0;
+              return (
+                <tr key={r.id} className="hover:bg-slate-50/50 transition-colors">
+                  <td className="px-6 py-4 text-xs font-mono font-bold text-emerald-800">
+                    {r.protocol || '—'}
+                    {edited && (
+                      <button
+                        type="button"
+                        onClick={() => openEditHistory(r)}
+                        className="mt-1 flex items-center gap-1 text-[10px] font-semibold text-amber-700 hover:text-amber-900"
+                        title="Ver histórico de edições"
+                      >
+                        <History className="w-3 h-3" />
+                        Editado{Number(r.edit_count) > 1 ? ` (${r.edit_count}x)` : ''}
+                      </button>
+                    )}
+                  </td>
+                  <td className="px-6 py-4 text-sm font-medium text-slate-700">
+                    {(r.crd_code || 'CRD')} - {r.crd_name || 'Sem descrição'}
+                    <span className="block text-xs font-normal text-slate-500">{r.sector_name || 'Sem setor'}</span>
+                  </td>
+                  <td className="px-6 py-4 text-sm text-slate-600">
+                    {r.provider_name || r.description || '—'}
+                    {r.provider_name && r.description ? (
+                      <span className="block text-xs font-normal text-slate-400 mt-0.5">{r.description}</span>
+                    ) : null}
+                  </td>
+                  <td className="px-6 py-4 text-sm text-slate-600">{r.date}</td>
+                  <td className="px-6 py-4 text-sm text-slate-400">—</td>
+                  <td className="px-6 py-4">
+                    <ValueTrace
+                      className="text-sm font-bold text-slate-900"
+                      displayValue={formatCurrency(r.amount)}
+                      meta={valueTrace.requisitions.amount(r.id)}
+                    />
+                  </td>
+                  <td className="px-6 py-4">
+                    <span className={cn(
+                      'text-[10px] font-bold px-2 py-1 rounded-lg uppercase tracking-wider',
+                      meta.classes
+                    )}>
+                      {meta.label}
+                    </span>
+                  </td>
+                  <td className="px-6 py-4">
+                    <div className="flex justify-end gap-2">
+                      {canEditEntry(r) && (
+                        <button
+                          onClick={() => openEditEntry(r)}
+                          className="p-2 text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+                          title="Editar requisição"
+                        >
+                          <Pencil className="w-4 h-4" />
+                        </button>
+                      )}
+                      {edited && (
+                        <button
+                          onClick={() => openEditHistory(r)}
+                          className="p-2 text-amber-600 hover:bg-amber-50 rounded-lg transition-colors"
+                          title="Histórico de edições"
+                        >
+                          <History className="w-4 h-4" />
+                        </button>
+                      )}
+                      {canApproveManager && r.status === 'pending_manager' && (
+                        <>
+                          <button
+                            onClick={() => updateStatus(r.id, 'open')}
+                            className="p-2 text-violet-600 hover:bg-violet-50 rounded-lg transition-colors"
+                            title="Aprovar (Gestor do setor)"
+                          >
+                            <BadgeCheck className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => updateStatus(r.id, 'cancelled')}
+                            className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                            title="Reprovar (Gestor)"
+                          >
+                            <XCircle className="w-4 h-4" />
+                          </button>
+                        </>
+                      )}
+                      {canApproveControl && r.status === 'open' && (
+                        <>
+                          <button
+                            onClick={() => updateStatus(r.id, 'approved')}
+                            className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                            title="Aprovar no Controle"
+                          >
+                            <BadgeCheck className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => updateStatus(r.id, 'cancelled')}
+                            className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                            title="Reprovar"
+                          >
+                            <XCircle className="w-4 h-4" />
+                          </button>
+                        </>
+                      )}
+                      {canApproveControl && r.status === 'approved' && (
+                        <button
+                          onClick={() => updateStatus(r.id, 'open')}
+                          className="p-2 text-amber-600 hover:bg-amber-50 rounded-lg transition-colors"
+                          title="Desaprovar"
+                        >
+                          <RotateCcw className="w-4 h-4" />
+                        </button>
+                      )}
+                      {canPayFinance && r.status === 'approved' && (
                         <button
                           onClick={() => updateStatus(r.id, 'posted')}
                           className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"
-                          title="Baixar requisição"
+                          title="Registrar pagamento"
                         >
                           <Archive className="w-4 h-4" />
                         </button>
+                      )}
+                      {canCancelAsRequester && (r.status === 'pending_manager' || r.status === 'open' || r.status === 'approved') && (
                         <button
                           onClick={() => updateStatus(r.id, 'cancelled')}
                           className="p-2 text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
@@ -243,16 +581,190 @@ export const RequisicoesPage: React.FC = () => {
                         >
                           <XCircle className="w-4 h-4" />
                         </button>
-                      </>
-                    )}
-                  </div>
-                </td>
-              </tr>
-            ))}
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
+        </div>
+        <ListPagination
+          page={pagination.page}
+          totalPages={pagination.totalPages}
+          total={pagination.total}
+          from={pagination.from}
+          to={pagination.to}
+          pageSize={pagination.pageSize}
+          onPageChange={pagination.setPage}
+          onPageSizeChange={pagination.setPageSize}
+          label="requisições"
+          amountTotal={filteredAmountTotal}
+        />
       </div>
+
+      {showModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white w-full max-w-lg max-h-[calc(100dvh-2rem)] rounded-3xl shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="p-6 border-b border-slate-100 flex justify-between items-center shrink-0">
+              <h3 className="text-xl font-bold text-slate-900">
+                {editingEntry ? `Editar requisição ${editingEntry.protocol || `#${editingEntry.id}`}` : 'Nova requisição interna'}
+              </h3>
+              <button type="button" onClick={closeModal} className="text-slate-400 hover:text-slate-600 transition-colors">
+                <Plus className="w-6 h-6 rotate-45" />
+              </button>
+            </div>
+
+            <form onSubmit={createRequisition} className="flex flex-col min-h-0 flex-1">
+              <div className="p-6 space-y-4 overflow-y-auto flex-1 min-h-0">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">CRD</label>
+                  <SearchableSelect
+                    value={form.crd_id}
+                    onChange={(crd_id) => setForm((p) => ({ ...p, crd_id }))}
+                    options={crdSelectOptions}
+                    placeholder="Digite para buscar CRD..."
+                    emptyMessage="Nenhum CRD disponível para os setores vinculados ao seu usuário."
+                    noResultsMessage="Nenhum CRD encontrado"
+                  />
+                </div>
+
+                {visibleCrds.length === 0 && (
+                  <p className="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-xl px-3 py-2">
+                    Nenhum CRD disponível para os setores vinculados ao seu usuário.
+                  </p>
+                )}
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Fornecedor</label>
+                  <input
+                    required
+                    value={form.provider_name}
+                    onChange={(e) => setForm((p) => ({ ...p, provider_name: e.target.value }))}
+                    placeholder="Nome do fornecedor"
+                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Data</label>
+                    <input
+                      required
+                      type="date"
+                      value={form.date}
+                      onChange={(e) => setForm((p) => ({ ...p, date: e.target.value }))}
+                      className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Valor (R$)</label>
+                    <input
+                      required
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={form.amount}
+                      onChange={(e) => setForm((p) => ({ ...p, amount: e.target.value }))}
+                      className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Descrição (opcional)</label>
+                  <input
+                    value={form.description}
+                    onChange={(e) => setForm((p) => ({ ...p, description: e.target.value }))}
+                    placeholder="Observação da requisição"
+                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+                  />
+                </div>
+              </div>
+
+              <div className="p-6 pt-4 border-t border-slate-100 flex gap-3 shrink-0 bg-white">
+                <button
+                  type="button"
+                  onClick={closeModal}
+                  className="flex-1 px-4 py-3 bg-slate-100 text-slate-600 font-bold rounded-xl hover:bg-slate-200 transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={submitting}
+                  className="flex-1 px-4 py-3 bg-[#004D40] text-white font-bold rounded-xl hover:bg-[#003d33] shadow-lg shadow-emerald-900/10 transition-colors disabled:opacity-70"
+                >
+                  {submitting ? 'Salvando...' : editingEntry ? 'Salvar edição' : 'Lançar'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {historyEntry && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white w-full max-w-lg max-h-[calc(100dvh-2rem)] rounded-3xl shadow-2xl overflow-hidden flex flex-col animate-in zoom-in-95 duration-200">
+            <div className="p-6 border-b border-slate-100 flex justify-between items-center shrink-0">
+              <div>
+                <h3 className="text-xl font-bold text-slate-900">Histórico de edições</h3>
+                <p className="text-sm text-slate-500 mt-0.5">
+                  {historyEntry.protocol || `Requisição #${historyEntry.id}`}
+                </p>
+              </div>
+              <button
+                onClick={() => setHistoryEntry(null)}
+                className="text-slate-400 hover:text-slate-600 transition-colors"
+              >
+                <Plus className="w-6 h-6 rotate-45" />
+              </button>
+            </div>
+            <div className="p-6 space-y-4 overflow-y-auto flex-1 min-h-0">
+              {historyLoading && <p className="text-sm text-slate-400">Carregando histórico...</p>}
+              {!historyLoading && historyRows.length === 0 && (
+                <p className="text-sm text-slate-400">Nenhuma edição registrada nesta requisição.</p>
+              )}
+              {!historyLoading && historyRows.map((row) => (
+                <div key={row.id} className="border border-slate-100 rounded-2xl p-4 space-y-2">
+                  <div className="flex items-start justify-between gap-3">
+                    <p className="text-sm font-bold text-slate-800">{row.editor_name || 'Usuário'}</p>
+                    <p className="text-[11px] text-slate-400 whitespace-nowrap">
+                      {row.created_at ? formatDate(row.created_at) : ''}
+                    </p>
+                  </div>
+                  <ul className="space-y-1.5">
+                    {(Array.isArray(row.changes) ? row.changes : []).map((change: any, idx: number) => {
+                      const label = String(change.label || change.field || 'Campo');
+                      const formatVal = (raw: unknown) => {
+                        const value = String(raw ?? '').trim();
+                        if (!value) return '—';
+                        if (label === 'Valor') {
+                          const n = Number(value);
+                          return Number.isFinite(n) ? formatCurrency(n) : value;
+                        }
+                        if (label === 'Data') {
+                          try { return formatDate(value); } catch { return value; }
+                        }
+                        return value;
+                      };
+                      return (
+                        <li key={`${row.id}-${idx}`} className="text-xs text-slate-600">
+                          <span className="font-bold text-slate-700">{label}:</span>{' '}
+                          <span className="text-slate-400 line-through">{formatVal(change.from)}</span>
+                          {' → '}
+                          <span className="font-semibold text-slate-800">{formatVal(change.to)}</span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
-

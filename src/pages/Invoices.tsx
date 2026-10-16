@@ -10,26 +10,72 @@ import {
   Upload,
   BadgeCheck,
   XCircle,
-  Trash2
+  Trash2,
+  FileCheck,
+  Pencil,
+  History,
+  UserRound,
+  Loader2,
 } from 'lucide-react';
-import { cn, formatCurrency, formatDate } from '../lib/utils';
+import { cn, formatCurrency, formatCurrencyInput, formatDate, getCurrencyMeta, parseCurrencyInputDigits } from '../lib/utils';
 import { ValueTrace } from '../components/ValueTrace';
 import { SearchableSelect } from '../components/SearchableSelect';
+import { CrdListFilter } from '../components/CrdListFilter';
+import {
+  LaunchNumberAmountFilters,
+  parseAmountFilter,
+} from '../components/LaunchNumberAmountFilters';
+import { buildCrdFilterOptions, resolveCrdDisplayCodes } from '../lib/crdFilter';
 import { valueTrace } from '../lib/valueTraceMeta';
 import { useSearch } from '../context/SearchContext';
+import { hasPermission, type RolePermissionRow } from '../lib/permissionCatalog';
 import { useToast } from '../context/ToastContext';
-import { matchesSearch } from '../lib/search';
-import { isDirectDocumentUrl, type StorageDocumentField } from '../lib/storagePath';
+import { isDirectDocumentUrl, collectBoletoPaths, type StorageDocumentField } from '../lib/storagePath';
+import { confirmCancel, confirmDelete } from '../lib/confirmAction';
+import {
+  canEditLaunchRole,
+  isInvoiceFlowEditableBeforeControl,
+} from '../lib/launchFlow';
+import { CompetenciaFilter } from '../components/CompetenciaFilter';
+import { ListPagination } from '../components/ListPagination';
+import { DateBrInput } from '../components/DateBrInput';
+import { parseListResponse, useServerPagination } from '../hooks/useServerPagination';
 
-export const Invoices: React.FC = () => {
+const EMPTY_INVOICE_FORM = {
+  invoice_number: '',
+  provider_name: '',
+  amount: '',
+  issue_date: '',
+  due_date: '',
+  sector_id: '',
+  file_path: '',
+  boleto_file_path: '',
+  natureza: 'O',
+  crd: '',
+  payment_method: '',
+  pix_key: '',
+  currency: 'BRL',
+  description: '',
+};
+
+export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'servico' }) => {
   const { query } = useSearch();
+  const [listQuery, setListQuery] = useState('');
+  const [invoiceNumberFilter, setInvoiceNumberFilter] = useState('');
+  const [amountFilter, setAmountFilter] = useState('');
+  const isDanfe = mode === 'danfe';
+  const pageTitle = isDanfe ? 'DANFE' : 'Notas de Serviço';
+  const pageSubtitle = isDanfe
+    ? 'Fluxo DANFE: Setor solicita → (estagiário: gestor do setor) → Controle aprova → Financeiro paga.'
+    : 'Fluxo: Setor solicita → (estagiário: gestor do setor) → Controle aprova → Financeiro paga.';
   const { showSuccess } = useToast();
   const now = new Date();
   const initialMonth = (() => {
     const saved = localStorage.getItem('invoices:selectedMonth');
+    if (saved === '') return '';
     return saved && Number(saved) >= 1 && Number(saved) <= 12
       ? String(Number(saved))
-      : String(now.getMonth() + 1);
+      : '';
   })();
   const initialYear = (() => {
     const saved = localStorage.getItem('invoices:selectedYear');
@@ -40,52 +86,98 @@ export const Invoices: React.FC = () => {
   const initialDateFrom = localStorage.getItem('invoices:dateFrom') || '';
   const initialDateTo = localStorage.getItem('invoices:dateTo') || '';
   const [invoices, setInvoices] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
   const [sectors, setSectors] = useState<any[]>([]);
   const [selectedMonth, setSelectedMonth] = useState(initialMonth);
   const [selectedYear, setSelectedYear] = useState(initialYear);
+  const budgetMonthLabel =
+    selectedMonth && Number(selectedMonth) >= 1 && Number(selectedMonth) <= 12
+      ? String(selectedMonth).padStart(2, '0')
+      : String(now.getMonth() + 1).padStart(2, '0');
+  const budgetMonthNum =
+    selectedMonth && Number(selectedMonth) >= 1 && Number(selectedMonth) <= 12
+      ? Number(selectedMonth)
+      : now.getMonth() + 1;
   const [customDateFrom, setCustomDateFrom] = useState(initialDateFrom);
   const [customDateTo, setCustomDateTo] = useState(initialDateTo);
+  const pagination = useServerPagination(20);
   const [paymentMethods, setPaymentMethods] = useState<any[]>([]);
+  const [currencies, setCurrencies] = useState<any[]>([]);
   const [crdOptions, setCrdOptions] = useState<any[]>([]);
+  const [crdCatalog, setCrdCatalog] = useState<any[]>([]);
+  const [crdFilter, setCrdFilter] = useState('');
   const [actingSector, setActingSector] = useState<'requester' | 'controle' | 'financeiro'>('requester');
   const [requesterSectorId, setRequesterSectorId] = useState<string>('');
   const [userRole, setUserRole] = useState<string>('viewer');
+  const [userPermissions, setUserPermissions] = useState<RolePermissionRow[] | null>(null);
   const [allowedSectorIds, setAllowedSectorIds] = useState<string[]>([]);
-  const [selectedSectorIds, setSelectedSectorIds] = useState<string[]>([]);
   const [showModal, setShowModal] = useState(false);
   const [showReceiptModal, setShowReceiptModal] = useState(false);
   const [selectedInvoiceId, setSelectedInvoiceId] = useState<number | null>(null);
   const [receiptFile, setReceiptFile] = useState<File | null>(null);
   const [uploadingReceipt, setUploadingReceipt] = useState(false);
   const [extractingPdf, setExtractingPdf] = useState(false);
-  const [uploadingBoleto, setUploadingBoleto] = useState(false);
+  const [invoicePdfName, setInvoicePdfName] = useState('');
+  const [boletos, setBoletos] = useState<Array<{ path: string; name: string }>>([{ path: '', name: '' }]);
+  const [uploadingBoletoIndex, setUploadingBoletoIndex] = useState<number | null>(null);
   const [semBoleto, setSemBoleto] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
+  const [showCompetencyWarning, setShowCompetencyWarning] = useState(false);
+  const [confirmModal, setConfirmModal] = useState<null | { kind: 'cancel' | 'delete'; invoice: any }>(null);
+  const [duplicateNotice, setDuplicateNotice] = useState<null | {
+    invoiceNumber: string;
+    protocol: string;
+    providerName: string;
+  }>(null);
+  const [confirmBusy, setConfirmBusy] = useState(false);
+  const [submittingInvoice, setSubmittingInvoice] = useState(false);
   const [exportingReport, setExportingReport] = useState<'csv' | 'pdf' | null>(null);
   const [reportFilters, setReportFilters] = useState({
     from: '',
     to: '',
     payment_method: ''
   });
-  const [formData, setFormData] = useState({
-    invoice_number: '',
-    provider_name: '',
-    amount: '',
-    issue_date: '',
-    due_date: '',
-    sector_id: '',
-    file_path: '',
-    boleto_file_path: '',
-    natureza: 'O',
-    crd: '',
-    payment_method: '',
-    pix_key: ''
-  });
+  const [formData, setFormData] = useState({ ...EMPTY_INVOICE_FORM });
+  const [editingInvoice, setEditingInvoice] = useState<any | null>(null);
+  const [historyInvoice, setHistoryInvoice] = useState<any | null>(null);
+  const [historyRows, setHistoryRows] = useState<any[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+
+  useEffect(() => {
+    pagination.resetPage();
+  }, [
+    selectedMonth,
+    selectedYear,
+    customDateFrom,
+    customDateTo,
+    crdFilter,
+    amountFilter,
+    invoiceNumberFilter,
+    listQuery,
+    query,
+    pagination.resetPage,
+  ]);
 
   useEffect(() => {
     fetchInvoices();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fetchInvoices usa filtros + page
+  }, [
+    selectedMonth,
+    selectedYear,
+    customDateFrom,
+    customDateTo,
+    pagination.page,
+    pagination.pageSize,
+    crdFilter,
+    amountFilter,
+    invoiceNumberFilter,
+    listQuery,
+    query,
+  ]);
+
+  useEffect(() => {
     fetchSectors(selectedMonth, selectedYear);
-  }, [selectedMonth, selectedYear, customDateFrom, customDateTo]);
+  }, [selectedMonth, selectedYear]);
 
   useEffect(() => {
     localStorage.setItem('invoices:selectedMonth', selectedMonth);
@@ -96,7 +188,12 @@ export const Invoices: React.FC = () => {
 
   useEffect(() => {
     fetch('/api/payment-methods').then(res => res.json()).then(setPaymentMethods);
-    fetch('/api/crds').then(res => res.json()).then(setCrdOptions);
+    fetch('/api/currencies').then(res => res.json()).then((data) => setCurrencies(Array.isArray(data) ? data : []));
+    fetch('/api/crds').then(res => res.json()).then((data) => {
+      const list = Array.isArray(data) ? data : [];
+      setCrdOptions(list);
+      setCrdCatalog(list);
+    });
   }, []);
 
   useEffect(() => {
@@ -106,31 +203,42 @@ export const Invoices: React.FC = () => {
       try {
         const user = JSON.parse(userRaw);
         setUserRole(String(user?.role || 'viewer'));
+        setUserPermissions(Array.isArray(user?.permissions) ? user.permissions : null);
         if (user?.role === 'finance') setActingSector('financeiro');
         else if (user?.role === 'controle') setActingSector('controle');
         else setActingSector('requester');
 
-        // Recarrega dados atuais do usuário no backend para refletir
-        // vínculos novos de setores sem depender da sessão antiga.
-        const users = await fetch('/api/users').then((res) => res.json()).catch(() => []);
-        const freshUser = (Array.isArray(users) ? users : []).find((u: any) => String(u.id) === String(user.id));
+        // /api/auth/me traz todos os setores de user_sectors. /api/users é só admin:
+        // para gestor a chamada falha e o fallback antigo ficava só com users.sector_id.
+        const meRes = await fetch('/api/auth/me').catch(() => null);
+        const me = meRes?.ok ? await meRes.json().catch(() => null) : null;
+        if (me) {
+          setUserRole(String(me.role || user?.role || 'viewer'));
+          setUserPermissions(Array.isArray(me.permissions) ? me.permissions : null);
+        }
+
+        const sourceSectorIds = Array.isArray(me?.sector_ids)
+          ? me.sector_ids
+          : (Array.isArray(user?.sector_ids) && user.sector_ids.length > 0
+              ? user.sector_ids
+              : [user?.sector_id]);
         const normalizedSectorIds = Array.from(
           new Set<string>(
-            (Array.isArray(freshUser?.sector_ids) ? freshUser.sector_ids : [freshUser?.sector_id ?? user?.sector_id])
-              .map((id) => String(id ?? '').trim())
-              .filter((id) => id !== '')
+            sourceSectorIds
+              .map((id: unknown) => String(id ?? '').trim())
+              .filter((id: string) => id !== '')
           )
         );
         setAllowedSectorIds(normalizedSectorIds);
 
-        if (freshUser) {
-          const updatedUser = {
+        if (me) {
+          localStorage.setItem('user', JSON.stringify({
             ...user,
-            sector_ids: freshUser.sector_ids ?? [],
-            sector_names: freshUser.sector_names ?? [],
-            sector_id: freshUser.sector_id ?? user?.sector_id ?? null,
-          };
-          localStorage.setItem('user', JSON.stringify(updatedUser));
+            ...me,
+            sector_ids: me.sector_ids ?? user?.sector_ids ?? [],
+            sector_names: me.sector_names ?? user?.sector_names ?? [],
+            sector_id: me.sector_id ?? user?.sector_id ?? null,
+          }));
         }
       } catch {
         // fallback mantém requester
@@ -166,25 +274,48 @@ export const Invoices: React.FC = () => {
     fetch(`/api/crds?sector_id=${formData.sector_id}`).then(res => res.json()).then(setCrdOptions);
   }, [formData.sector_id]);
 
-  const fetchInvoices = () => {
-    const params = new URLSearchParams();
-    if (customDateFrom || customDateTo) {
-      if (customDateFrom) params.set('from', customDateFrom);
-      if (customDateTo) params.set('to', customDateTo);
-    } else {
-      params.set('month', selectedMonth);
-      params.set('year', selectedYear);
+  const fetchInvoices = (month = selectedMonth, year = selectedYear, from = customDateFrom, to = customDateTo) => {
+    setLoading(true);
+    const params = new URLSearchParams(pagination.queryParams);
+    if (from || to) {
+      if (from) params.set('from', from);
+      if (to) params.set('to', to);
+    } else if (month && Number(month) >= 1 && Number(month) <= 12) {
+      params.set('month', month);
+      params.set('year', year);
     }
+    if (crdFilter) params.set('crd', crdFilter);
+    const parsedAmount = parseAmountFilter(amountFilter);
+    if (parsedAmount != null) params.set('amount', String(parsedAmount));
+    const searchBits = [listQuery.trim() ? listQuery : query, invoiceNumberFilter]
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (searchBits.length) params.set('q', searchBits.join(' '));
+
     fetch(`/api/invoices?${params.toString()}`)
       .then(res => res.json())
-      .then(data => setInvoices(Array.isArray(data) ? data : []))
-      .catch(() => setInvoices([]));
+      .then((data) => {
+        const parsed = parseListResponse<any>(data);
+        setInvoices(parsed.items);
+        pagination.applyMeta({ total: parsed.total, totalAmount: parsed.totalAmount ?? null });
+      })
+      .catch(() => {
+        setInvoices([]);
+        pagination.applyMeta({ total: 0, totalAmount: 0 });
+      })
+      .finally(() => setLoading(false));
   };
 
   const fetchSectors = (month = selectedMonth, year = selectedYear) => {
     const params = new URLSearchParams();
-    params.set('month', month);
-    params.set('year', year);
+    // Cards de orçamento precisam de um mês; se competência = Todos, usa o mês atual.
+    const budgetMonth =
+      month && Number(month) >= 1 && Number(month) <= 12
+        ? month
+        : String(now.getMonth() + 1);
+    const budgetYear = year || String(now.getFullYear());
+    params.set('month', budgetMonth);
+    params.set('year', budgetYear);
     fetch(`/api/sectors?${params.toString()}`)
       .then(res => res.json())
       .then(data => setSectors(Array.isArray(data) ? data : []))
@@ -212,13 +343,17 @@ export const Invoices: React.FC = () => {
         due_date: data.extracted?.due_date || prev.due_date,
         pix_key: data.extracted?.pix_key || prev.pix_key,
         payment_method: data.extracted?.payment_method || prev.payment_method,
+        description: prev.description || data.extracted?.description || '',
         file_path: data.file_path || prev.file_path,
       }));
+
+      setInvoicePdfName(file.name);
 
       if (data.warning) {
         alert(`${data.warning}${data.parse_error ? `\nDetalhe técnico: ${data.parse_error}` : ''}`);
       }
     } catch (error: any) {
+      setInvoicePdfName('');
       alert(error.message || 'Não foi possível processar o PDF.');
     } finally {
       setExtractingPdf(false);
@@ -227,55 +362,177 @@ export const Invoices: React.FC = () => {
 
   const closeInvoiceModal = () => {
     setShowModal(false);
+    setEditingInvoice(null);
     setSemBoleto(false);
+    setInvoicePdfName('');
+    setBoletos([{ path: '', name: '' }]);
+    setUploadingBoletoIndex(null);
+    setFormData({ ...EMPTY_INVOICE_FORM });
+  };
+
+  const openNewInvoiceModal = () => {
+    setEditingInvoice(null);
+    setFormData({ ...EMPTY_INVOICE_FORM });
+    setSemBoleto(false);
+    setInvoicePdfName('');
+    setBoletos([{ path: '', name: '' }]);
+    setShowModal(true);
+  };
+
+  const openEditInvoice = (invoice: any) => {
+    const flow = invoice.flow_stage || (invoice.status === 'paid' ? 'paid' : 'control_pending');
+    if (flow === 'cancelled') {
+      alert('Não é possível editar uma nota cancelada.');
+      return;
+    }
+    if (!isInvoiceFlowEditableBeforeControl(flow)) {
+      alert('Não é possível editar após a aprovação do Controle.');
+      return;
+    }
+    if (!canEditInvoice(invoice)) {
+      alert('Apenas administrador ou gestor do setor pode editar este lançamento.');
+      return;
+    }
+    const paths = collectBoletoPaths(invoice);
+    setEditingInvoice(invoice);
+    setFormData({
+      invoice_number: String(invoice.invoice_number || ''),
+      provider_name: String(invoice.provider_name || ''),
+      amount: invoice.amount == null || invoice.amount === '' ? '' : String(invoice.amount),
+      issue_date: String(invoice.issue_date || '').slice(0, 10),
+      due_date: String(invoice.due_date || '').slice(0, 10),
+      sector_id: String(invoice.sector_id || ''),
+      file_path: String(invoice.file_path || ''),
+      boleto_file_path: String(invoice.boleto_file_path || paths[0] || ''),
+      natureza: String(invoice.natureza || 'O'),
+      crd: String(invoice.crd || ''),
+      payment_method: String(invoice.payment_method || ''),
+      pix_key: String(invoice.pix_key || ''),
+      currency: String(invoice.currency || 'BRL'),
+      description: String(invoice.description || ''),
+    });
+    setInvoicePdfName(invoice.file_path ? 'PDF anexado' : '');
+    setBoletos(paths.length ? paths.map((path, index) => ({ path, name: `Boleto ${index + 1}` })) : [{ path: '', name: '' }]);
+    setSemBoleto(paths.length === 0);
+    setShowModal(true);
+  };
+
+  const openEditHistory = async (invoice: any) => {
+    setHistoryInvoice(invoice);
+    setHistoryRows([]);
+    setHistoryLoading(true);
+    try {
+      const res = await fetch(`/api/invoices/${invoice.id}/edits`);
+      const data = await res.json().catch(() => []);
+      if (!res.ok) {
+        alert(data.error || 'Não foi possível carregar o histórico.');
+        setHistoryInvoice(null);
+        return;
+      }
+      setHistoryRows(Array.isArray(data) ? data : []);
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
+  const isDueDateInSelectedCompetency = () => {
+    // Competência "Todos": não alerta por mês.
+    if (!selectedMonth || Number(selectedMonth) < 1 || Number(selectedMonth) > 12) return true;
+    const [dueYear, dueMonth] = formData.due_date.split('-');
+    return (
+      String(Number(dueMonth)) === String(Number(selectedMonth)) &&
+      String(Number(dueYear)) === String(Number(selectedYear))
+    );
+  };
+
+  const submitInvoice = async () => {
+    const boletoPaths = semBoleto ? [] : boletos.map((b) => b.path).filter(Boolean);
+    setSubmittingInvoice(true);
+    const isEdit = Boolean(editingInvoice?.id);
+    try {
+      const response = await fetch(isEdit ? `/api/invoices/${editingInvoice.id}` : '/api/invoices', {
+        method: isEdit ? 'PATCH' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...formData,
+          amount: parseFloat(formData.amount),
+          sector_id: parseInt(formData.sector_id),
+          boleto_file_path: boletoPaths[0] || '',
+          boleto_file_paths: boletoPaths,
+        }),
+      });
+      if (response.ok) {
+        const saved = await response.json().catch(() => ({}));
+        showSuccess(
+          isEdit
+            ? 'Lançamento atualizado. O histórico da edição foi registrado.'
+            : saved?.protocol
+              ? `Nota ${saved.protocol} lançada. Aguardando aprovação do Controle.`
+              : 'Nota lançada. Aguardando aprovação do Controle.'
+        );
+        setShowCompetencyWarning(false);
+        closeInvoiceModal();
+        const [dueYear, dueMonth] = String(formData.due_date).split('-');
+        const nextMonth = String(Number(dueMonth) || selectedMonth);
+        const nextYear = String(Number(dueYear) || selectedYear);
+        setListQuery('');
+        setCustomDateFrom('');
+        setCustomDateTo('');
+        setSelectedMonth(nextMonth);
+        setSelectedYear(nextYear);
+        fetchInvoices(nextMonth, nextYear, '', '');
+        fetchSectors(nextMonth, nextYear);
+        if (!isEdit && saved?.id) {
+          setInvoices((prev) => (prev.some((row) => Number(row.id) === Number(saved.id)) ? prev : [saved, ...prev]));
+        }
+      } else {
+        const data = await response.json().catch(() => ({}));
+        if (data.code === 'duplicate_invoice') {
+          setDuplicateNotice({
+            invoiceNumber: String(data.duplicate?.invoice_number || formData.invoice_number || ''),
+            protocol: String(data.duplicate?.protocol || ''),
+            providerName: String(data.duplicate?.provider_name || formData.provider_name || ''),
+          });
+          return;
+        }
+        alert(data.error || (isEdit ? 'Não foi possível salvar a edição.' : 'Não foi possível lançar a nota fiscal.'));
+      }
+    } finally {
+      setSubmittingInvoice(false);
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.file_path) {
-      alert('Anexe o PDF da nota fiscal para continuar.');
-      return;
-    }
     if (!formData.payment_method) {
       alert('Selecione a forma de pagamento.');
+      return;
+    }
+    if (!formData.currency) {
+      alert('Selecione a moeda.');
       return;
     }
     if (formData.payment_method === 'pix' && !formData.pix_key) {
       alert('Informe a chave Pix.');
       return;
     }
+    if (!formData.crd) {
+      alert('Selecione o CRD.');
+      return;
+    }
     if (!formData.due_date) {
       alert('Informe a data de vencimento.');
       return;
     }
-    const [dueYear, dueMonth] = formData.due_date.split('-');
-    if (String(Number(dueMonth)) !== String(Number(selectedMonth)) || String(Number(dueYear)) !== String(Number(selectedYear))) {
-      alert(`A data de vencimento deve estar na competência selecionada (${String(selectedMonth).padStart(2, '0')}/${selectedYear}).`);
+    if (!isDueDateInSelectedCompetency()) {
+      setShowCompetencyWarning(true);
       return;
     }
-    const response = await fetch('/api/invoices', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        ...formData,
-        amount: parseFloat(formData.amount),
-        sector_id: parseInt(formData.sector_id),
-      })
-    });
-    if (response.ok) {
-      showSuccess('Nota fiscal lançada com sucesso.');
-      closeInvoiceModal();
-      setFormData({ invoice_number: '', provider_name: '', amount: '', issue_date: '', due_date: '', sector_id: '', file_path: '', boleto_file_path: '', natureza: 'O', crd: '', payment_method: '', pix_key: '' });
-      fetchInvoices();
-      fetchSectors();
-    } else {
-      const data = await response.json().catch(() => ({}));
-      alert(data.error || 'Não foi possível lançar a nota fiscal.');
-    }
+    await submitInvoice();
   };
 
-  const handleBoletoUpload = async (file: File) => {
-    setUploadingBoleto(true);
+  const handleBoletoUpload = async (file: File, index: number) => {
+    setUploadingBoletoIndex(index);
     try {
       const payload = new FormData();
       payload.append('boleto_file', file);
@@ -285,22 +542,47 @@ export const Invoices: React.FC = () => {
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'Falha ao enviar boleto');
+      const path = String(data.file_path || '');
+      setBoletos((prev) =>
+        prev.map((slot, i) => (i === index ? { path, name: file.name } : slot))
+      );
       setFormData((prev) => ({
         ...prev,
-        boleto_file_path: data.file_path || prev.boleto_file_path
+        boleto_file_path: index === 0 ? path || prev.boleto_file_path : prev.boleto_file_path,
       }));
       showSuccess('Boleto anexado com sucesso.');
     } catch (error: any) {
       alert(error.message || 'Não foi possível enviar o boleto.');
     } finally {
-      setUploadingBoleto(false);
+      setUploadingBoletoIndex(null);
     }
   };
 
+  const addBoletoSlot = () => {
+    setBoletos((prev) => [...prev, { path: '', name: '' }]);
+  };
+
+  const removeBoletoSlot = (index: number) => {
+    const slot = boletos[index];
+    if (slot?.path && !confirmDelete('este boleto anexado')) return;
+    setBoletos((prev) => {
+      if (prev.length === 1) return [{ path: '', name: '' }];
+      return prev.filter((_, i) => i !== index);
+    });
+  };
+
   const flowSuccessMessages: Record<
-    'approve_control' | 'reject_control' | 'disapprove_control' | 'mark_paid' | 'cancel_request',
+    | 'approve_manager'
+    | 'reject_manager'
+    | 'approve_control'
+    | 'reject_control'
+    | 'disapprove_control'
+    | 'mark_paid'
+    | 'cancel_request',
     string
   > = {
+    approve_manager: 'Nota aprovada pelo gestor do setor.',
+    reject_manager: 'Nota reprovada pelo gestor do setor.',
     approve_control: 'Nota aprovada pelo Controle.',
     reject_control: 'Nota reprovada pelo Controle.',
     disapprove_control: 'Nota devolvida para análise do setor.',
@@ -310,7 +592,14 @@ export const Invoices: React.FC = () => {
 
   const runFlowAction = async (
     id: number,
-    action: 'approve_control' | 'reject_control' | 'disapprove_control' | 'mark_paid' | 'cancel_request',
+    action:
+      | 'approve_manager'
+      | 'reject_manager'
+      | 'approve_control'
+      | 'reject_control'
+      | 'disapprove_control'
+      | 'mark_paid'
+      | 'cancel_request',
     payment_receipt_path?: string,
     cancel_reason?: string
   ) => {
@@ -319,7 +608,10 @@ export const Invoices: React.FC = () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         action,
-        actorSector: actingSector.toUpperCase(),
+        actorSector:
+          action === 'approve_manager' || action === 'reject_manager'
+            ? 'GESTOR'
+            : actingSector.toUpperCase(),
         payment_receipt_path,
         cancel_reason
       })
@@ -336,7 +628,13 @@ export const Invoices: React.FC = () => {
   };
 
   const approveByControl = (id: number) => runFlowAction(id, 'approve_control');
+  const approveByManager = (id: number) => runFlowAction(id, 'approve_manager');
+  const rejectByManager = async (id: number) => {
+    if (!confirmCancel('esta nota (reprovação pelo gestor do setor)')) return;
+    await runFlowAction(id, 'reject_manager', undefined, 'Reprovada pelo gestor do setor');
+  };
   const rejectByControl = async (id: number) => {
+    if (!confirmCancel('esta nota (reprovação pelo Controle)')) return;
     const reason = window.prompt('Motivo da reprovação pelo Controle (opcional):');
     if (reason === null) return;
     await runFlowAction(id, 'reject_control', undefined, reason || 'Reprovada pelo Controle');
@@ -345,30 +643,46 @@ export const Invoices: React.FC = () => {
     if (!window.confirm('Desaprovar esta nota e devolvê-la para análise do setor solicitante?')) return;
     await runFlowAction(id, 'disapprove_control');
   };
-  const cancelRequest = async (id: number) => {
-    const reason = window.prompt('Motivo do cancelamento (opcional):') || '';
-    await runFlowAction(id, 'cancel_request', undefined, reason);
+  const cancelRequest = (invoice: any) => {
+    setConfirmModal({ kind: 'cancel', invoice });
   };
 
-  const deleteInvoice = async (invoice: any) => {
+  const deleteInvoice = (invoice: any) => {
     if (userRole !== 'admin') {
       alert('Apenas administradores podem excluir notas.');
       return;
     }
-    const label = invoice.invoice_number
-      ? `nota ${invoice.invoice_number}`
-      : `nota #${invoice.id}`;
-    if (!window.confirm(`Deseja realmente excluir a ${label}? Esta ação não pode ser desfeita.`)) return;
+    setConfirmModal({ kind: 'delete', invoice });
+  };
 
-    const res = await fetch(`/api/invoices/${invoice.id}`, { method: 'DELETE' });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      alert(data.error || 'Não foi possível excluir a nota.');
-      return;
+  const closeConfirmModal = () => {
+    if (confirmBusy) return;
+    setConfirmModal(null);
+  };
+
+  const executeConfirmModal = async () => {
+    if (!confirmModal || confirmBusy) return;
+    const invoice = confirmModal.invoice;
+    setConfirmBusy(true);
+    try {
+      if (confirmModal.kind === 'cancel') {
+        const ok = await runFlowAction(invoice.id, 'cancel_request');
+        if (!ok) return;
+      } else {
+        const res = await fetch(`/api/invoices/${invoice.id}`, { method: 'DELETE' });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          alert(data.error || 'Não foi possível excluir a nota.');
+          return;
+        }
+        showSuccess('Nota excluída com sucesso.');
+        fetchInvoices();
+        fetchSectors();
+      }
+      setConfirmModal(null);
+    } finally {
+      setConfirmBusy(false);
     }
-    showSuccess('Nota excluída com sucesso.');
-    fetchInvoices();
-    fetchSectors();
   };
 
   const markAsPaid = (id: number) => {
@@ -381,14 +695,19 @@ export const Invoices: React.FC = () => {
   const openInvoiceDocument = async (
     invoiceId: number,
     field: StorageDocumentField,
-    storedPath?: string | null
+    storedPath?: string | null,
+    boletoIndex?: number
   ) => {
     if (storedPath && isDirectDocumentUrl(storedPath)) {
       window.open(storedPath, '_blank', 'noopener');
       return;
     }
     try {
-      const res = await fetch(`/api/invoices/${invoiceId}/document-url?field=${field}`);
+      const params = new URLSearchParams({ field });
+      if (field === 'boleto_file_path' && boletoIndex != null) {
+        params.set('index', String(boletoIndex));
+      }
+      const res = await fetch(`/api/invoices/${invoiceId}/document-url?${params.toString()}`);
       const data = await res.json();
       if (!res.ok || !data?.url) throw new Error(data?.error || 'Arquivo indisponível');
       window.open(data.url, '_blank', 'noopener');
@@ -400,25 +719,25 @@ export const Invoices: React.FC = () => {
   const submitReceiptAndPay = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedInvoiceId) return;
-    if (!receiptFile) {
-      alert('Selecione o arquivo do comprovante.');
-      return;
-    }
 
     setUploadingReceipt(true);
     try {
-      const payload = new FormData();
-      payload.append('receipt_file', receiptFile);
-      const uploadRes = await fetch('/api/invoices/receipt', {
-        method: 'POST',
-        body: payload
-      });
-      const uploadData = await uploadRes.json();
-      if (!uploadRes.ok) {
-        throw new Error(uploadData.error || 'Falha ao enviar comprovante');
+      let receiptPath: string | undefined;
+      if (receiptFile) {
+        const payload = new FormData();
+        payload.append('receipt_file', receiptFile);
+        const uploadRes = await fetch('/api/invoices/receipt', {
+          method: 'POST',
+          body: payload
+        });
+        const uploadData = await uploadRes.json();
+        if (!uploadRes.ok) {
+          throw new Error(uploadData.error || 'Falha ao enviar comprovante');
+        }
+        receiptPath = uploadData.file_path;
       }
 
-      const ok = await runFlowAction(selectedInvoiceId, 'mark_paid', uploadData.file_path);
+      const ok = await runFlowAction(selectedInvoiceId, 'mark_paid', receiptPath);
       if (ok) {
         setShowReceiptModal(false);
         setSelectedInvoiceId(null);
@@ -439,12 +758,15 @@ export const Invoices: React.FC = () => {
       return { label: 'Cancelado', icon: XCircle, classes: 'bg-slate-200 text-slate-700' };
     }
     if (flowStage === 'control_approved') {
-      return { label: 'Aprovado Controle', icon: BadgeCheck, classes: 'bg-blue-100 text-blue-700' };
+      return { label: 'Aprovado', icon: BadgeCheck, classes: 'bg-blue-100 text-blue-700' };
+    }
+    if (flowStage === 'manager_pending') {
+      return { label: 'Aguardando Gestor', icon: UserRound, classes: 'bg-violet-100 text-violet-700' };
     }
     if (status === 'overdue') {
       return { label: 'Atrasado', icon: AlertCircle, classes: 'bg-red-100 text-red-700' };
     }
-    return { label: 'Aguardando Controle', icon: Clock, classes: 'bg-orange-100 text-orange-700' };
+    return { label: 'Aguardando', icon: Clock, classes: 'bg-orange-100 text-orange-700' };
   };
 
   const downloadInvoiceReport = async (format: 'csv' | 'pdf') => {
@@ -493,18 +815,18 @@ export const Invoices: React.FC = () => {
   const canSwitchActingProfile = userRole === 'admin';
   const canApproveControl = actingSector === 'controle' && (userRole === 'controle' || userRole === 'admin');
   const canPayFinance = actingSector === 'financeiro' && (userRole === 'finance' || userRole === 'admin');
+  const canApproveManager = userRole === 'manager' || userRole === 'admin';
   const showImportButton =
-    userRole === 'manager' ||
-    (userRole === 'admin' && actingSector === 'requester');
+    hasPermission(userPermissions, 'notas', 'create', userRole) &&
+    (userRole !== 'admin' || actingSector === 'requester');
   const canCancelAsRequester =
     actingSector === 'requester' &&
-    (userRole === 'manager' || userRole === 'admin' || userRole === 'viewer');
-  const toggleSectorSelection = (sectorId: string) => {
-    setSelectedSectorIds((prev) =>
-      prev.includes(sectorId)
-        ? prev.filter((id) => id !== sectorId)
-        : [...prev, sectorId]
-    );
+    (userRole === 'manager' || userRole === 'estagiario' || userRole === 'admin' || userRole === 'viewer');
+  /** Gestor/admin podem editar só antes da aprovação do Controle. */
+  const canEditOpenLaunches = canEditLaunchRole(userRole);
+  const isInvoiceOpenForEdit = (invoice: any) => {
+    const flow = invoice.flow_stage || (invoice.status === 'paid' ? 'paid' : 'control_pending');
+    return isInvoiceFlowEditableBeforeControl(flow);
   };
   const budgetSectors = isManager
     ? sectors.filter((s) => allowedSectorIds.includes(String(s.id)))
@@ -517,17 +839,50 @@ export const Invoices: React.FC = () => {
     if (allowedSectorIds.length > 0) return allowedSectorIds.includes(currentSectorId);
     return currentSectorId === requesterSectorId;
   };
+  const canEditInvoice = (invoice: any) => {
+    if (!canEditOpenLaunches) return false;
+    if (!isInvoiceOpenForEdit(invoice)) return false;
+    return canSeeSectorValues(invoice.sector_id);
+  };
   const getSectorBudget = (sector: any) => Number(sector?.budget_month ?? sector?.budget_limit ?? 0);
   const crdSelectOptions = useMemo(
     () =>
       crdOptions
-        .filter((c) => c.active)
-        .map((c) => ({
-          value: String(c.code || ''),
-          label: `${c.name}${c.sector_name ? ` (${c.sector_name})` : ''}`,
-          keywords: `${c.code} ${c.name} ${c.sector_name || ''}`,
-        })),
+        .filter((c) => c.active !== false)
+        .map((c) => {
+          const { displayCode, name } = resolveCrdDisplayCodes(c);
+          return {
+            // Continua gravando o code interno (compatível com realizado por setor:code)
+            value: String(c.code || ''),
+            label: `${displayCode} — ${name || c.name || ''}${c.sector_name ? ` (${c.sector_name})` : ''}${c.granted_extra ? ' · liberado' : ''}`,
+            keywords: `${displayCode} ${c.code} ${c.name} ${c.sector_name || ''} ${c.granted_extra ? 'liberado extra' : ''}`,
+          };
+        }),
     [crdOptions]
+  );
+  const crdFilterOptions = useMemo(() => buildCrdFilterOptions(crdCatalog), [crdCatalog]);
+  /** Lookup setor+código interno → código contábil (parênteses) + nome correto. */
+  const crdMetaBySectorCode = useMemo(() => {
+    const map = new Map<string, { displayCode: string; name: string; internalCode: string }>();
+    for (const c of crdCatalog) {
+      const { internalCode, displayCode, name } = resolveCrdDisplayCodes(c);
+      if (!internalCode) continue;
+      const sectorId = String(c.sector_id ?? '').trim();
+      map.set(`${sectorId}:${internalCode.toLowerCase()}`, { displayCode, name, internalCode });
+    }
+    return map;
+  }, [crdCatalog]);
+  const resolveInvoiceCrdMeta = (invoice: { crd?: unknown; sector_id?: unknown }) => {
+    const code = String(invoice.crd || '').trim();
+    if (!code) return null;
+    return (
+      crdMetaBySectorCode.get(`${String(invoice.sector_id ?? '').trim()}:${code.toLowerCase()}`) ||
+      null
+    );
+  };
+  const currencyMeta = useMemo(
+    () => getCurrencyMeta(formData.currency || 'BRL'),
+    [formData.currency]
   );
   const visibleSectorOptions = useMemo(
     () => sectors.filter((sector) => canSeeSectorValues(sector.id)),
@@ -537,48 +892,29 @@ export const Invoices: React.FC = () => {
     () => new Set(visibleSectorOptions.map((s) => String(s.id))),
     [visibleSectorOptions]
   );
-  const canFilterSectors = visibleSectorOptions.length > 1;
-  const selectedSectorSet = useMemo(
-    () => new Set(selectedSectorIds),
-    [selectedSectorIds]
-  );
   const matchesSectorVisibilityFilter = (sectorId?: number | string | null) => {
     const id = String(sectorId ?? '');
-    if (!id || !visibleSectorIdSet.has(id)) return false;
-    if (selectedSectorIds.length > 0 && !selectedSectorSet.has(id)) return false;
-    return true;
+    if (!id) return false;
+    if (hasGlobalSectorView) return true;
+    if (allowedSectorIds.length > 0) return allowedSectorIds.includes(id);
+    return requesterSectorId !== '' && id === requesterSectorId;
   };
-  const filteredInvoices = useMemo(
-    () =>
-      invoices.filter((invoice) => {
-        if (!matchesSectorVisibilityFilter(invoice.sector_id)) return false;
-        return matchesSearch(
-          query,
-          invoice.invoice_number,
-          invoice.provider_name,
-          invoice.sector_name,
-          invoice.user_name,
-          invoice.crd,
-          invoice.payment_method,
-          invoice.status,
-          invoice.flow_stage,
-          invoice.amount
-        );
-      }),
-    [invoices, visibleSectorIdSet, selectedSectorIds, selectedSectorSet, query]
+  const sectorVisibleInvoices = useMemo(
+    () => invoices.filter((invoice) => matchesSectorVisibilityFilter(invoice.sector_id)),
+    [invoices, allowedSectorIds, requesterSectorId, userRole]
   );
+  const filteredInvoices = sectorVisibleInvoices;
+  const filteredAmountTotal = useMemo(() => {
+    if (typeof pagination.totalAmount === 'number') {
+      return formatCurrency(pagination.totalAmount, 'BRL');
+    }
+    return '—';
+  }, [pagination.totalAmount]);
   const filteredBudgetSectors = useMemo(
-    () =>
-      budgetSectors.filter((sector) => {
-        if (!matchesSectorVisibilityFilter(sector.id)) return false;
-        return matchesSearch(query, sector.name);
-      }),
-    [budgetSectors, visibleSectorIdSet, selectedSectorIds, selectedSectorSet, query]
+    () => budgetSectors.filter((sector) => matchesSectorVisibilityFilter(sector.id)),
+    [budgetSectors, visibleSectorIdSet]
   );
-  const scopedInvoices = useMemo(
-    () => filteredInvoices,
-    [filteredInvoices]
-  );
+  const scopedInvoices = sectorVisibleInvoices;
 
   const metrics = useMemo(() => {
     const withFlow = scopedInvoices.map((invoice) => ({
@@ -609,6 +945,7 @@ export const Invoices: React.FC = () => {
       perfilLabel = userRole === 'manager' ? 'Gestor' : 'Solicitante';
     }
 
+
     return {
       perfilLabel,
       pendentesParaVoce,
@@ -638,8 +975,8 @@ export const Invoices: React.FC = () => {
     <div className="space-y-6 animate-in fade-in duration-500">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-2xl font-bold text-slate-900">Notas de Serviço</h2>
-          <p className="text-slate-500 text-sm">Fluxo: Setor solicitante importa → Controle aprova → Financeiro paga e anexa comprovante.</p>
+          <h2 className="text-2xl font-bold text-slate-900">{pageTitle}</h2>
+          <p className="text-slate-500 text-sm">{pageSubtitle}</p>
         </div>
         
         <div className="flex items-center gap-3">
@@ -657,7 +994,7 @@ export const Invoices: React.FC = () => {
           )}
           {showImportButton && (
             <button
-              onClick={() => setShowModal(true)}
+              onClick={openNewInvoiceModal}
               className="flex items-center gap-2 bg-[#004D40] text-white px-4 py-2.5 rounded-xl shadow-lg shadow-emerald-900/10 hover:bg-[#003d33] transition-colors"
             >
               <Plus className="w-4 h-4" />
@@ -691,52 +1028,34 @@ export const Invoices: React.FC = () => {
       </div>
 
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 space-y-4">
-        <div className="flex flex-wrap items-center gap-3">
-          <span className="text-xs font-bold uppercase tracking-wider text-slate-500">Competência</span>
-          <select
-            value={selectedMonth}
-            onChange={(e) => setSelectedMonth(e.target.value)}
-            className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
-          >
-            {Array.from({ length: 12 }, (_, idx) => {
-              const monthNumber = idx + 1;
-              return (
-                <option key={monthNumber} value={String(monthNumber)}>
-                  {String(monthNumber).padStart(2, '0')}
-                </option>
-              );
-            })}
-          </select>
-          <input
-            type="number"
-            min={2000}
-            max={2100}
-            value={selectedYear}
-            onChange={(e) => setSelectedYear(e.target.value)}
-            className="w-28 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
-          />
-          <span className="text-xs text-slate-400">Orçamento usa esta competência.</span>
-        </div>
+        <CompetenciaFilter
+          month={selectedMonth}
+          year={selectedYear}
+          onMonthChange={setSelectedMonth}
+          onYearChange={setSelectedYear}
+          allowAll
+          hint="Lista filtra pelo vencimento. Em 'Todos', mostra todas as notas; o orçamento dos cards usa o mês atual."
+        />
 
         <div className="flex flex-wrap items-center gap-3 border-t border-slate-100 pt-4">
           <span className="text-xs font-bold uppercase tracking-wider text-slate-500">Provisão</span>
           <label className="flex items-center gap-2 text-xs text-slate-600">
-            <span className="font-medium">De</span>
-            <input
-              type="date"
+            <span className="font-medium shrink-0">De</span>
+            <DateBrInput
               value={customDateFrom}
-              onChange={(e) => setCustomDateFrom(e.target.value)}
-              className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+              onChange={setCustomDateFrom}
+              suggestYear={Number(selectedYear) || new Date().getFullYear()}
+              className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm w-[11.5rem]"
             />
           </label>
           <label className="flex items-center gap-2 text-xs text-slate-600">
-            <span className="font-medium">Até</span>
-            <input
-              type="date"
+            <span className="font-medium shrink-0">Até</span>
+            <DateBrInput
               value={customDateTo}
               min={customDateFrom || undefined}
-              onChange={(e) => setCustomDateTo(e.target.value)}
-              className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+              onChange={setCustomDateTo}
+              suggestYear={Number(selectedYear) || new Date().getFullYear()}
+              className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm w-[11.5rem]"
             />
           </label>
           {(customDateFrom || customDateTo) && (
@@ -753,47 +1072,11 @@ export const Invoices: React.FC = () => {
           )}
           <span className="text-xs text-slate-400">
             {customDateFrom || customDateTo
-              ? 'Lista e indicadores filtram pela data de provisão (lançamento) no período informado.'
-              : 'Sem datas personalizadas, a lista usa a competência pela data de provisão (lançamento).'}
+              ? 'Lista filtra pela data de vencimento no período informado.'
+              : 'Sem datas personalizadas, a lista usa a competência pela data de vencimento.'}
           </span>
         </div>
       </div>
-
-      {canFilterSectors && (
-        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs font-bold uppercase tracking-wider text-slate-500">Setores visíveis</span>
-            {visibleSectorOptions.map((sector) => {
-              const id = String(sector.id);
-              const active = selectedSectorIds.length === 0 || selectedSectorSet.has(id);
-              return (
-                <button
-                  key={id}
-                  onClick={() => toggleSectorSelection(id)}
-                  className={cn(
-                    "px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors",
-                    active
-                      ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                      : "bg-white text-slate-500 border-slate-200 hover:bg-slate-50"
-                  )}
-                >
-                  {sector.name}
-                </button>
-              );
-            })}
-            <button
-              onClick={() => setSelectedSectorIds([])}
-              className="ml-auto px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 transition-colors"
-            >
-              Limpar seleção
-            </button>
-          </div>
-          <p className="mt-2 text-[11px] text-slate-400">
-            Com nenhum setor selecionado, o sistema mostra todos os setores do seu perfil no orçamento e na lista de notas.
-            Selecione um ou mais setores para filtrar cards e tabela.
-          </p>
-        </div>
-      )}
 
       {canSeeAnnualTotal && (
       <div className="bg-[#004D40] rounded-2xl border border-emerald-900/20 shadow-lg p-5 text-white">
@@ -854,12 +1137,12 @@ export const Invoices: React.FC = () => {
                   <>
                     <ValueTrace
                       displayValue={formatCurrency(sector.pending_amount || 0)}
-                      meta={valueTrace.sectors.pendingAmount(sector.name, Number(selectedMonth), Number(selectedYear))}
+                      meta={valueTrace.sectors.pendingAmount(sector.name, budgetMonthNum, Number(selectedYear))}
                     /> <span className="text-slate-300 font-normal">/ <ValueTrace
                       displayValue={formatCurrency(getSectorBudget(sector))}
                       meta={valueTrace.sectors.budgetMonth(
                         sector.name,
-                        Number(selectedMonth),
+                        budgetMonthNum,
                         Number(selectedYear),
                         Number(sector.occupancy_percent ?? 100)
                       )}
@@ -877,7 +1160,7 @@ export const Invoices: React.FC = () => {
                   <ValueTrace
                     className="font-semibold text-slate-700"
                     displayValue={formatCurrency(sector.pending_invoices || 0)}
-                    meta={valueTrace.sectors.pendingInvoices(sector.name, Number(selectedMonth), Number(selectedYear))}
+                    meta={valueTrace.sectors.pendingInvoices(sector.name, budgetMonthNum, Number(selectedYear))}
                   />
                 </p>
                 <p>
@@ -885,7 +1168,7 @@ export const Invoices: React.FC = () => {
                   <ValueTrace
                     className="font-semibold text-slate-700"
                     displayValue={formatCurrency(sector.pending_requisitions || 0)}
-                    meta={valueTrace.sectors.pendingRequisitions(sector.name, Number(selectedMonth), Number(selectedYear))}
+                    meta={valueTrace.sectors.pendingRequisitions(sector.name, budgetMonthNum, Number(selectedYear))}
                   />
                 </p>
                 <p>
@@ -893,17 +1176,17 @@ export const Invoices: React.FC = () => {
                   <ValueTrace
                     className="font-semibold text-slate-700"
                     displayValue={formatCurrency(sector.pending_manual_entries || 0)}
-                    meta={valueTrace.sectors.pendingManualEntries(sector.name, Number(selectedMonth), Number(selectedYear))}
+                    meta={valueTrace.sectors.pendingManualEntries(sector.name, budgetMonthNum, Number(selectedYear))}
                   />
                 </p>
                 <p>
-                  Orçamento da Síntase ({String(selectedMonth).padStart(2, '0')}/{selectedYear}):{' '}
+                  Orçamento da Síntase ({budgetMonthLabel}/{selectedYear}):{' '}
                   <ValueTrace
                     className="font-semibold text-slate-700"
                     displayValue={formatCurrency(getSectorBudget(sector))}
                     meta={valueTrace.sectors.budgetMonth(
                       sector.name,
-                      Number(selectedMonth),
+                      budgetMonthNum,
                       Number(selectedYear),
                       Number(sector.occupancy_percent ?? 100)
                     )}
@@ -963,17 +1246,29 @@ export const Invoices: React.FC = () => {
         ))}
       </div>}
 
-      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-        <div className="p-4 border-b border-slate-50 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm">
+        <div className="p-4 border-b border-slate-50 flex flex-col lg:flex-row lg:items-end justify-between gap-4 sticky top-20 z-30 bg-white rounded-t-2xl">
           <div className="relative flex-1 max-w-md">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 block">
+              Busca
+            </label>
+            <Search className="absolute left-3 bottom-2.5 w-4 h-4 text-slate-400" />
             <input 
-              type="text" 
+              type="text"
+              value={listQuery}
+              onChange={(e) => setListQuery(e.target.value)}
               placeholder="Buscar por fornecedor, número ou setor..."
-              className="w-full pl-10 pr-4 py-2 bg-slate-50 border-none rounded-xl text-sm focus:ring-2 focus:ring-emerald-500/20 transition-all"
+              className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500/20 transition-all"
             />
           </div>
-          <div className="flex items-center gap-2">
+          <CrdListFilter value={crdFilter} onChange={setCrdFilter} options={crdFilterOptions} />
+          <LaunchNumberAmountFilters
+            invoiceNumber={invoiceNumberFilter}
+            onInvoiceNumberChange={setInvoiceNumberFilter}
+            amount={amountFilter}
+            onAmountChange={setAmountFilter}
+          />
+          <div className="flex items-center gap-2 pb-0.5">
             <button
               onClick={() => setShowReportModal(true)}
               className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 rounded-lg transition-colors"
@@ -988,19 +1283,44 @@ export const Invoices: React.FC = () => {
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-slate-50/50">
-                <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Nota / Fornecedor</th>
+                <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Protocolo</th>
+                <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Nota</th>
+                <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Fornecedor</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Setor</th>
+                <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">CRD</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Lançado por</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Valor</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Vencimento</th>
-                <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Status</th>
+                <th className="px-3 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest w-28">Status</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Comprovante</th>
                 <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Ações</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50">
-              {filteredInvoices.map((invoice) => (
+              {loading && (
+                <tr>
+                  <td colSpan={11} className="px-6 py-14 text-center">
+                    <div className="inline-flex items-center justify-center gap-2 text-slate-400">
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                      <span className="text-sm font-medium">
+                        {isDanfe ? 'Carregando DANFE...' : 'Carregando notas...'}
+                      </span>
+                    </div>
+                  </td>
+                </tr>
+              )}
+              {!loading && filteredInvoices.length === 0 && (
+                <tr>
+                  <td colSpan={11} className="px-6 py-10 text-center text-sm text-slate-400">
+                    {crdFilter
+                      ? `Nenhuma nota com CRD ${crdFilter} nesta competência.`
+                      : 'Nenhuma nota nesta competência. Confira mês/ano e a data de vencimento do lançamento.'}
+                  </td>
+                </tr>
+              )}
+              {!loading && filteredInvoices.map((invoice) => (
                 <tr key={invoice.id} className="hover:bg-slate-50/50 transition-colors group">
+                  <td className="px-6 py-4 text-xs font-mono font-bold text-emerald-800">{invoice.protocol || '—'}</td>
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-3">
                       <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center text-slate-500">
@@ -1008,14 +1328,42 @@ export const Invoices: React.FC = () => {
                       </div>
                       <div>
                         <p className="text-sm font-bold text-slate-900">#{invoice.invoice_number}</p>
-                        <p className="text-xs text-slate-500">{invoice.provider_name}</p>
                       </div>
                     </div>
+                  </td>
+                  <td className="px-6 py-4">
+                    <p className="text-sm font-medium text-slate-700">{invoice.provider_name || '—'}</p>
+                    {invoice.description ? (
+                      <p className="text-xs text-slate-400 mt-0.5 line-clamp-2" title={invoice.description}>
+                        {invoice.description}
+                      </p>
+                    ) : null}
                   </td>
                   <td className="px-6 py-4">
                     <span className="text-xs font-medium text-slate-600 bg-slate-100 px-2 py-1 rounded-lg">
                       {invoice.sector_name}
                     </span>
+                  </td>
+                  <td className="px-6 py-4">
+                    {invoice.crd ? (
+                      (() => {
+                        const meta = resolveInvoiceCrdMeta(invoice);
+                        const shownCode = meta?.displayCode || String(invoice.crd);
+                        const shownName = meta?.name || '';
+                        return (
+                          <div>
+                            <p className="text-sm font-bold text-slate-800">{shownCode}</p>
+                            {shownName ? (
+                              <p className="text-[10px] text-slate-400 mt-0.5 max-w-[160px] truncate" title={shownName}>
+                                {shownName}
+                              </p>
+                            ) : null}
+                          </div>
+                        );
+                      })()
+                    ) : (
+                      <span className="text-xs text-slate-400">—</span>
+                    )}
                   </td>
                   <td className="px-6 py-4">
                     <p className="text-sm font-medium text-slate-700">{invoice.user_name || '—'}</p>
@@ -1027,7 +1375,7 @@ export const Invoices: React.FC = () => {
                     {canSeeSectorValues(invoice.sector_id) ? (
                       <ValueTrace
                         className="text-sm font-bold text-slate-900"
-                        displayValue={formatCurrency(invoice.amount)}
+                        displayValue={formatCurrency(invoice.amount, invoice.currency || 'BRL')}
                         meta={valueTrace.invoices.amount(String(invoice.invoice_number), invoice.provider_name)}
                       />
                     ) : (
@@ -1035,20 +1383,48 @@ export const Invoices: React.FC = () => {
                     )}
                   </td>
                   <td className="px-6 py-4">
-                    <p className="text-sm text-slate-600">{formatDate(invoice.due_date)}</p>
+                    <p className="text-sm text-slate-600">{invoice.due_date ? formatDate(invoice.due_date) : '—'}</p>
                   </td>
-                  <td className="px-6 py-4">
+                  <td className="px-3 py-4">
                     {(() => {
                       const flowStage = invoice.flow_stage || (invoice.status === 'paid' ? 'paid' : 'control_pending');
                       const statusUI = getStatusUI(flowStage, invoice.status);
                       const StatusIcon = statusUI.icon;
+                      const edited = Number(invoice.edit_count || 0) > 0;
                       return (
-                        <div className={cn(
-                          "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider",
-                          statusUI.classes
-                        )}>
-                          <StatusIcon className="w-3 h-3" />
-                          {statusUI.label}
+                        <div className="flex flex-col items-start gap-1 min-w-0">
+                          {edited && (
+                            <button
+                              type="button"
+                              onClick={() => openEditHistory(invoice)}
+                              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[9px] font-bold uppercase tracking-wider bg-amber-100 text-amber-800 hover:bg-amber-200 transition-colors"
+                              title="Ver histórico de edições"
+                            >
+                              <History className="w-3 h-3" />
+                              Editado
+                            </button>
+                          )}
+                          <div
+                            title={
+                              flowStage === 'paid' || invoice.status === 'paid'
+                                ? 'Pago'
+                                : flowStage === 'cancelled'
+                                  ? 'Cancelado'
+                                  : flowStage === 'control_approved'
+                                    ? 'Aprovado Controle'
+                                    : flowStage === 'manager_pending'
+                                      ? 'Aguardando Gestor'
+                                      : invoice.status === 'overdue'
+                                      ? 'Atrasado'
+                                      : 'Aguardando Controle'
+                            }
+                            className={cn(
+                            "inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[9px] font-bold uppercase tracking-wider whitespace-nowrap",
+                            statusUI.classes
+                          )}>
+                            <StatusIcon className="w-3 h-3 shrink-0" />
+                            {statusUI.label}
+                          </div>
                         </div>
                       );
                     })()}
@@ -1063,8 +1439,19 @@ export const Invoices: React.FC = () => {
                           Ver NF
                         </button>
                       ) : (
-                        <span className="text-xs text-slate-400">NF --</span>
+                        <span className="text-xs font-medium text-amber-700 bg-amber-50 px-2 py-1 rounded-lg">
+                          Sem NF
+                        </span>
                       )}
+                      {collectBoletoPaths(invoice).map((path, boletoIndex, all) => (
+                        <button
+                          key={`${invoice.id}-boleto-${boletoIndex}`}
+                          onClick={() => openInvoiceDocument(invoice.id, 'boleto_file_path', path, boletoIndex)}
+                          className="text-xs font-medium text-sky-700 bg-sky-50 px-2 py-1 rounded-lg hover:bg-sky-100 transition-colors"
+                        >
+                          {all.length > 1 ? `Boleto ${boletoIndex + 1}` : 'Boleto'}
+                        </button>
+                      ))}
                       {invoice.payment_receipt_path ? (
                         <button
                           onClick={() => openInvoiceDocument(invoice.id, 'payment_receipt_path', invoice.payment_receipt_path)}
@@ -1079,6 +1466,16 @@ export const Invoices: React.FC = () => {
                   </td>
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-2">
+                      {canEditInvoice(invoice) && (
+                        <button
+                          onClick={() => openEditInvoice(invoice)}
+                          className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors"
+                          title={invoice.file_path ? 'Editar lançamento' : 'Editar e anexar nota fiscal'}
+                        >
+                          <Pencil className="w-3.5 h-3.5" />
+                          {invoice.file_path ? 'Editar' : 'Anexar NF'}
+                        </button>
+                      )}
                       {(invoice.file_path && (actingSector === 'controle' || actingSector === 'financeiro')) && (
                         <button
                           onClick={() => openInvoiceDocument(invoice.id, 'file_path', invoice.file_path)}
@@ -1087,6 +1484,24 @@ export const Invoices: React.FC = () => {
                         >
                           Ver Nota Fiscal
                         </button>
+                      )}
+                      {(canApproveManager && (invoice.flow_stage || '') === 'manager_pending') && (
+                        <>
+                          <button
+                            onClick={() => approveByManager(invoice.id)}
+                            className="inline-flex items-center px-3 py-1.5 text-xs font-semibold text-violet-700 bg-violet-50 hover:bg-violet-100 rounded-lg transition-colors"
+                            title="Aprovar no gestor do setor"
+                          >
+                            Aprovar (Gestor)
+                          </button>
+                          <button
+                            onClick={() => rejectByManager(invoice.id)}
+                            className="inline-flex items-center px-3 py-1.5 text-xs font-semibold text-red-700 bg-red-50 hover:bg-red-100 rounded-lg transition-colors"
+                            title="Reprovar nota (gestor do setor)"
+                          >
+                            Reprovar (Gestor)
+                          </button>
+                        </>
                       )}
                       {(canApproveControl && (invoice.flow_stage || 'control_pending') === 'control_pending') && (
                         <>
@@ -1129,7 +1544,7 @@ export const Invoices: React.FC = () => {
                         (invoice.flow_stage || 'control_pending') !== 'cancelled' &&
                         invoice.status !== 'paid') && (
                         <button
-                          onClick={() => cancelRequest(invoice.id)}
+                          onClick={() => cancelRequest(invoice)}
                           className="inline-flex items-center px-3 py-1.5 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors"
                           title="Cancelar solicitação (para corrigir e lançar novamente)"
                         >
@@ -1148,6 +1563,8 @@ export const Invoices: React.FC = () => {
                       )}
                       {!(
                         userRole === 'admin' ||
+                        canEditInvoice(invoice) ||
+                        (canApproveManager && (invoice.flow_stage || '') === 'manager_pending') ||
                         (canApproveControl && (invoice.flow_stage || 'control_pending') === 'control_pending') ||
                         (canApproveControl && (invoice.flow_stage || 'control_pending') === 'control_approved') ||
                         (canPayFinance && (invoice.flow_stage || 'control_pending') === 'control_approved') ||
@@ -1162,13 +1579,27 @@ export const Invoices: React.FC = () => {
             </tbody>
           </table>
         </div>
+        <ListPagination
+          page={pagination.page}
+          totalPages={pagination.totalPages}
+          total={pagination.total}
+          from={pagination.from}
+          to={pagination.to}
+          pageSize={pagination.pageSize}
+          onPageChange={pagination.setPage}
+          onPageSizeChange={pagination.setPageSize}
+          label="notas"
+          amountTotal={filteredAmountTotal}
+        />
       </div>
 
       {showModal && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-white w-full max-w-lg max-h-[calc(100dvh-2rem)] rounded-3xl shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
             <div className="p-6 border-b border-slate-100 flex justify-between items-center shrink-0">
-              <h3 className="text-xl font-bold text-slate-900">Lançar Nota Fiscal</h3>
+              <h3 className="text-xl font-bold text-slate-900">
+                {editingInvoice ? `Editar lançamento #${editingInvoice.invoice_number}` : 'Lançar Nota Fiscal'}
+              </h3>
               <button onClick={closeInvoiceModal} className="text-slate-400 hover:text-slate-600 transition-colors">
                 <Plus className="w-6 h-6 rotate-45" />
               </button>
@@ -1177,10 +1608,37 @@ export const Invoices: React.FC = () => {
             <form onSubmit={handleSubmit} className="flex flex-col min-h-0 flex-1">
               <div className="p-6 space-y-4 overflow-y-auto flex-1 min-h-0">
               <div className="space-y-1.5">
-                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">PDF da Nota Fiscal</label>
-                <label className="flex items-center justify-center gap-2 w-full px-4 py-3 bg-slate-50 border border-dashed border-slate-300 rounded-xl text-sm text-slate-600 cursor-pointer hover:bg-slate-100 transition-colors">
-                  <Upload className="w-4 h-4" />
-                  <span>{extractingPdf ? 'Lendo PDF...' : 'Selecionar PDF e preencher automaticamente'}</span>
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+                  PDF da Nota Fiscal
+                  <span className="ml-1 font-medium normal-case text-slate-400">(opcional)</span>
+                </label>
+                <p className="text-[11px] text-slate-400 -mt-0.5 mb-1">
+                  Pode abrir o processo sem a nota (ex.: Mercado Livre) e anexar depois na edição.
+                </p>
+                <label
+                  className={cn(
+                    'flex items-center justify-center gap-2 w-full px-4 py-3 border border-dashed rounded-xl text-sm cursor-pointer transition-colors',
+                    extractingPdf
+                      ? 'bg-slate-50 border-slate-300 text-slate-600'
+                      : formData.file_path
+                        ? 'bg-sky-50 border-sky-300 text-sky-800 hover:bg-sky-100'
+                        : 'bg-slate-50 border-slate-300 text-slate-600 hover:bg-slate-100'
+                  )}
+                  title={invoicePdfName || undefined}
+                >
+                  {formData.file_path && !extractingPdf ? (
+                    <FileCheck className="w-4 h-4 shrink-0 text-sky-600" />
+                  ) : (
+                    <Upload className="w-4 h-4 shrink-0" />
+                  )}
+                  <span className="truncate">
+                    {extractingPdf
+                      ? 'Lendo PDF...'
+                      : invoicePdfName ||
+                        (editingInvoice
+                          ? 'Anexar PDF da nota (quando disponível)'
+                          : 'Selecionar PDF agora ou anexar depois')}
+                  </span>
                   <input
                     type="file"
                     accept="application/pdf"
@@ -1188,55 +1646,108 @@ export const Invoices: React.FC = () => {
                     onChange={(e) => {
                       const file = e.target.files?.[0];
                       if (file) handlePdfUpload(file);
+                      e.target.value = '';
                     }}
                   />
                 </label>
-                {formData.file_path && (
-                  <p className="text-[11px] text-emerald-700 font-medium">PDF processado com sucesso.</p>
-                )}
               </div>
 
               <div className="space-y-1.5">
-                <div className="flex items-center justify-between gap-2">
-                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Boleto (PDF)</label>
-                  <label className="inline-flex items-center gap-2 text-xs font-medium text-slate-600 cursor-pointer select-none">
-                    <input
-                      type="checkbox"
-                      checked={semBoleto}
-                      onChange={(e) => {
-                        const checked = e.target.checked;
-                        setSemBoleto(checked);
-                        if (checked) {
-                          setFormData((prev) => ({ ...prev, boleto_file_path: '' }));
-                        }
-                      }}
-                      className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
-                    />
-                    Sem boleto
-                  </label>
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Boleto (PDF)</label>
+                <div className="space-y-2">
+                  {boletos.map((boleto, index) => {
+                    const uploading = uploadingBoletoIndex === index;
+                    const attached = Boolean(boleto.path);
+                    const isFirst = index === 0;
+                    return (
+                      <div key={index} className="flex items-center gap-2">
+                        <label
+                          className={cn(
+                            'flex items-center justify-center gap-2 min-w-0 flex-1 px-3 py-2.5 border border-dashed rounded-xl text-sm cursor-pointer transition-colors',
+                            semBoleto && isFirst
+                              ? 'bg-slate-50 border-slate-200 text-slate-400 pointer-events-none'
+                              : uploading
+                                ? 'bg-slate-50 border-slate-300 text-slate-600'
+                                : attached
+                                  ? 'bg-sky-50 border-sky-300 text-sky-800 hover:bg-sky-100'
+                                  : 'bg-slate-50 border-slate-300 text-slate-600 hover:bg-slate-100'
+                          )}
+                          title={boleto.name || undefined}
+                        >
+                          {attached && !uploading && !semBoleto ? (
+                            <FileCheck className="w-4 h-4 shrink-0 text-sky-600" />
+                          ) : (
+                            <Upload className="w-4 h-4 shrink-0" />
+                          )}
+                          <span className="truncate">
+                            {semBoleto && isFirst
+                              ? 'Sem boleto'
+                              : uploading
+                                ? 'Enviando boleto...'
+                                : boleto.name
+                                  ? boleto.name
+                                  : boletos.length > 1
+                                    ? `Boleto ${index + 1} em PDF`
+                                    : 'Importar boleto'}
+                          </span>
+                          <input
+                            type="file"
+                            accept="application/pdf"
+                            className="hidden"
+                            disabled={semBoleto}
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (file) handleBoletoUpload(file, index);
+                              e.target.value = '';
+                            }}
+                          />
+                        </label>
+                        {isFirst && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const next = !semBoleto;
+                                setSemBoleto(next);
+                                if (next) {
+                                  setBoletos([{ path: '', name: '' }]);
+                                  setFormData((prev) => ({ ...prev, boleto_file_path: '' }));
+                                }
+                              }}
+                              className={cn(
+                                'shrink-0 whitespace-nowrap px-2.5 py-2.5 rounded-xl border text-[11px] font-bold transition-colors',
+                                semBoleto
+                                  ? 'border-emerald-300 bg-emerald-50 text-emerald-800'
+                                  : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                              )}
+                            >
+                              Sem boleto
+                            </button>
+                            <button
+                              type="button"
+                              onClick={addBoletoSlot}
+                              disabled={semBoleto}
+                              className="shrink-0 whitespace-nowrap inline-flex items-center gap-1 px-2.5 py-2.5 rounded-xl border border-sky-200 bg-sky-50 text-[11px] font-bold text-sky-800 hover:bg-sky-100 transition-colors disabled:opacity-40 disabled:pointer-events-none"
+                            >
+                              <Plus className="w-3.5 h-3.5" />
+                              Adicionar boleto
+                            </button>
+                          </>
+                        )}
+                        {!semBoleto && (boletos.length > 1 || (attached && !isFirst)) && (
+                          <button
+                            type="button"
+                            onClick={() => removeBoletoSlot(index)}
+                            className="shrink-0 p-2 rounded-xl text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+                            title="Remover boleto"
+                          >
+                            <Plus className="w-4 h-4 rotate-45" />
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
-                {semBoleto ? (
-                  <p className="text-[11px] text-slate-500">Pagamento sem boleto anexo (ex.: Pix, cartão ou dinheiro).</p>
-                ) : (
-                  <>
-                    <label className="flex items-center justify-center gap-2 w-full px-4 py-3 bg-slate-50 border border-dashed border-slate-300 rounded-xl text-sm text-slate-600 cursor-pointer hover:bg-slate-100 transition-colors">
-                      <Upload className="w-4 h-4" />
-                      <span>{uploadingBoleto ? 'Enviando boleto...' : 'Selecionar boleto em PDF (opcional)'}</span>
-                      <input
-                        type="file"
-                        accept="application/pdf"
-                        className="hidden"
-                        onChange={(e) => {
-                          const file = e.target.files?.[0];
-                          if (file) handleBoletoUpload(file);
-                        }}
-                      />
-                    </label>
-                    {formData.boleto_file_path && (
-                      <p className="text-[11px] text-emerald-700 font-medium">Boleto anexado com sucesso.</p>
-                    )}
-                  </>
-                )}
               </div>
 
               <div className="space-y-1.5">
@@ -1248,7 +1759,7 @@ export const Invoices: React.FC = () => {
                   className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
                 >
                   <option value="">Selecione um setor</option>
-                  {sectors.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  {visibleSectorOptions.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                 </select>
               </div>
 
@@ -1278,19 +1789,35 @@ export const Invoices: React.FC = () => {
                 </div>
               </div>
 
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Forma de pagamento</label>
-                <select
-                  required
-                  value={formData.payment_method}
-                  onChange={(e) => setFormData({ ...formData, payment_method: e.target.value, pix_key: e.target.value === 'pix' ? formData.pix_key : '' })}
-                  className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
-                >
-                  <option value="">Selecione</option>
-                  {paymentMethods.filter((pm) => pm.active).map((pm) => (
-                    <option key={pm.id} value={pm.key}>{pm.name}</option>
-                  ))}
-                </select>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Forma de pagamento</label>
+                  <select
+                    required
+                    value={formData.payment_method}
+                    onChange={(e) => setFormData({ ...formData, payment_method: e.target.value, pix_key: e.target.value === 'pix' ? formData.pix_key : '' })}
+                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+                  >
+                    <option value="">Selecione</option>
+                    {paymentMethods.filter((pm) => pm.active).map((pm) => (
+                      <option key={pm.id} value={pm.key}>{pm.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Moeda</label>
+                  <select
+                    required
+                    value={formData.currency}
+                    onChange={(e) => setFormData({ ...formData, currency: e.target.value })}
+                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+                  >
+                    <option value="">Selecione</option>
+                    {currencies.filter((c) => c.active).map((c) => (
+                      <option key={c.id} value={c.key}>{c.key} — {c.name}</option>
+                    ))}
+                  </select>
+                </div>
               </div>
 
               {formData.payment_method === 'pix' && (
@@ -1308,24 +1835,36 @@ export const Invoices: React.FC = () => {
 
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1.5">
-                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Número da Nota</label>
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Número da Nota / Pedido</label>
                   <input 
                     required
                     value={formData.invoice_number}
                     onChange={e => setFormData({...formData, invoice_number: e.target.value})}
+                    placeholder="Nº da NF ou pedido (ex.: ML-123)"
                     className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
                   />
                 </div>
                 <div className="space-y-1.5">
-                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Valor (R$)</label>
-                  <input 
-                    required
-                    type="number"
-                    step="0.01"
-                    value={formData.amount}
-                    onChange={e => setFormData({...formData, amount: e.target.value})}
-                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
-                  />
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+                    Valor ({currencyMeta.symbol})
+                  </label>
+                  <div className="flex">
+                    <span className="shrink-0 inline-flex items-center px-3 rounded-l-xl border border-r-0 border-slate-200 bg-slate-100 text-sm font-bold text-slate-600">
+                      {currencyMeta.symbol}
+                    </span>
+                    <input
+                      required
+                      type="text"
+                      inputMode="decimal"
+                      value={formatCurrencyInput(formData.amount, formData.currency)}
+                      onChange={(e) => setFormData({
+                        ...formData,
+                        amount: parseCurrencyInputDigits(e.target.value, formData.currency),
+                      })}
+                      placeholder={formatCurrencyInput(0, formData.currency)}
+                      className="w-full min-w-0 px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-r-xl text-sm focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+                    />
+                  </div>
                 </div>
               </div>
 
@@ -1335,6 +1874,16 @@ export const Invoices: React.FC = () => {
                   required
                   value={formData.provider_name}
                   onChange={e => setFormData({...formData, provider_name: e.target.value})}
+                  className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Descrição (opcional)</label>
+                <input
+                  value={formData.description}
+                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                  placeholder="Do que se trata esta nota / boleto"
                   className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
                 />
               </div>
@@ -1373,12 +1922,62 @@ export const Invoices: React.FC = () => {
                 </button>
                 <button 
                   type="submit"
-                  className="flex-1 px-4 py-3 bg-[#004D40] text-white font-bold rounded-xl hover:bg-[#003d33] shadow-lg shadow-emerald-900/10 transition-colors"
+                  disabled={submittingInvoice}
+                  className="flex-1 px-4 py-3 bg-[#004D40] text-white font-bold rounded-xl hover:bg-[#003d33] shadow-lg shadow-emerald-900/10 transition-colors disabled:opacity-70"
                 >
-                  Salvar Nota
+                  {submittingInvoice ? 'Salvando...' : editingInvoice ? 'Salvar edição' : 'Salvar Nota'}
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {showCompetencyWarning && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="p-6 border-b border-slate-100 flex justify-between items-center">
+              <h3 className="text-xl font-bold text-slate-900">Atenção</h3>
+              <button
+                onClick={() => setShowCompetencyWarning(false)}
+                className="text-slate-400 hover:text-slate-600 transition-colors"
+              >
+                <Plus className="w-6 h-6 rotate-45" />
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div className="flex gap-3 items-start">
+                <AlertCircle className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
+                <p className="text-sm text-slate-600 leading-relaxed">
+                  A data de vencimento informada (
+                  <span className="font-semibold text-slate-800">
+                    {formatDate(formData.due_date)}
+                  </span>
+                  ) está fora da competência selecionada (
+                  <span className="font-semibold text-slate-800">
+                    {budgetMonthLabel}/{selectedYear}
+                  </span>
+                  ). O lançamento pode não aparecer na listagem atual. Deseja continuar mesmo assim?
+                </p>
+              </div>
+              <div className="pt-2 flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => setShowCompetencyWarning(false)}
+                  className="flex-1 px-4 py-3 bg-slate-100 text-slate-600 font-bold rounded-xl hover:bg-slate-200 transition-colors"
+                >
+                  Voltar
+                </button>
+                <button
+                  type="button"
+                  disabled={submittingInvoice}
+                  onClick={() => submitInvoice()}
+                  className="flex-1 px-4 py-3 bg-[#004D40] text-white font-bold rounded-xl hover:bg-[#003d33] shadow-lg shadow-emerald-900/10 transition-colors disabled:opacity-70"
+                >
+                  {submittingInvoice ? 'Lançando...' : 'Continuar'}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}
@@ -1399,12 +1998,11 @@ export const Invoices: React.FC = () => {
             <form onSubmit={submitReceiptAndPay} className="p-6 space-y-4">
               <div className="space-y-1.5">
                 <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">
-                  Arquivo do comprovante (PDF, PNG ou JPG)
+                  Arquivo do comprovante (PDF, PNG ou JPG) — opcional
                 </label>
                 <input
                   type="file"
                   accept="application/pdf,image/png,image/jpeg"
-                  required
                   onChange={(e) => setReceiptFile(e.target.files?.[0] || null)}
                   className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm"
                 />
@@ -1426,10 +2024,75 @@ export const Invoices: React.FC = () => {
                   disabled={uploadingReceipt}
                   className="flex-1 px-4 py-3 bg-[#004D40] text-white font-bold rounded-xl hover:bg-[#003d33] shadow-lg shadow-emerald-900/10 transition-colors disabled:opacity-70"
                 >
-                  {uploadingReceipt ? 'Enviando...' : 'Salvar e marcar como pago'}
+                  {uploadingReceipt
+                    ? (receiptFile ? 'Enviando...' : 'Salvando...')
+                    : 'Salvar e marcar como pago'}
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {historyInvoice && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white w-full max-w-lg max-h-[calc(100dvh-2rem)] rounded-3xl shadow-2xl overflow-hidden flex flex-col animate-in zoom-in-95 duration-200">
+            <div className="p-6 border-b border-slate-100 flex justify-between items-center shrink-0">
+              <div>
+                <h3 className="text-xl font-bold text-slate-900">Histórico de edições</h3>
+                <p className="text-sm text-slate-500 mt-0.5">Nota #{historyInvoice.invoice_number}</p>
+              </div>
+              <button
+                onClick={() => setHistoryInvoice(null)}
+                className="text-slate-400 hover:text-slate-600 transition-colors"
+              >
+                <Plus className="w-6 h-6 rotate-45" />
+              </button>
+            </div>
+            <div className="p-6 space-y-4 overflow-y-auto flex-1 min-h-0">
+              {historyLoading && <p className="text-sm text-slate-400">Carregando histórico...</p>}
+              {!historyLoading && historyRows.length === 0 && (
+                <p className="text-sm text-slate-400">Nenhuma edição registrada nesta nota.</p>
+              )}
+              {!historyLoading && historyRows.map((row) => (
+                <div key={row.id} className="border border-slate-100 rounded-2xl p-4 space-y-2">
+                  <div className="flex items-start justify-between gap-3">
+                    <p className="text-sm font-bold text-slate-800">{row.editor_name || 'Usuário'}</p>
+                    <p className="text-[11px] text-slate-400 whitespace-nowrap">
+                      {row.created_at ? formatDate(row.created_at) : ''}
+                    </p>
+                  </div>
+                  <ul className="space-y-1.5">
+                    {(Array.isArray(row.changes) ? row.changes : []).map((change: any, idx: number) => {
+                      const label = String(change.label || change.field || 'Campo');
+                      const formatVal = (raw: unknown) => {
+                        const value = String(raw ?? '').trim();
+                        if (!value) return '—';
+                        if (label === 'Valor') {
+                          const n = Number(value);
+                          return Number.isFinite(n) ? formatCurrency(n) : value;
+                        }
+                        if (label === 'Emissão' || label === 'Vencimento') {
+                          try { return formatDate(value); } catch { return value; }
+                        }
+                        if (label === 'Forma de pagamento') {
+                          return paymentMethods.find((pm) => pm.key === value)?.name || value;
+                        }
+                        return value;
+                      };
+                      return (
+                        <li key={`${row.id}-${idx}`} className="text-xs text-slate-600">
+                          <span className="font-bold text-slate-700">{label}:</span>{' '}
+                          <span className="text-slate-400 line-through">{formatVal(change.from)}</span>
+                          {' → '}
+                          <span className="font-semibold text-slate-800">{formatVal(change.to)}</span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       )}
@@ -1451,19 +2114,19 @@ export const Invoices: React.FC = () => {
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1.5">
                   <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Vencimento (de)</label>
-                  <input
-                    type="date"
+                  <DateBrInput
                     value={reportFilters.from}
-                    onChange={(e) => setReportFilters((p) => ({ ...p, from: e.target.value }))}
+                    onChange={(from) => setReportFilters((p) => ({ ...p, from }))}
+                    suggestYear={Number(selectedYear) || new Date().getFullYear()}
                     className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm"
                   />
                 </div>
                 <div className="space-y-1.5">
                   <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Vencimento (até)</label>
-                  <input
-                    type="date"
+                  <DateBrInput
                     value={reportFilters.to}
-                    onChange={(e) => setReportFilters((p) => ({ ...p, to: e.target.value }))}
+                    onChange={(to) => setReportFilters((p) => ({ ...p, to }))}
+                    suggestYear={Number(selectedYear) || new Date().getFullYear()}
                     className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm"
                   />
                 </div>
@@ -1507,6 +2170,118 @@ export const Invoices: React.FC = () => {
                   className="flex-1 px-4 py-3 bg-[#004D40] text-white font-bold rounded-xl hover:bg-[#003d33] shadow-lg shadow-emerald-900/10 transition-colors disabled:opacity-60"
                 >
                   {exportingReport === 'pdf' ? 'Exportando PDF...' : 'Exportar PDF'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {duplicateNotice && (
+        <div className="fixed inset-0 z-[130] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="p-6 border-b border-slate-100 flex justify-between items-center">
+              <h3 className="text-xl font-bold text-slate-900">Lançamento duplicado</h3>
+              <button
+                type="button"
+                onClick={() => setDuplicateNotice(null)}
+                className="text-slate-400 hover:text-slate-600 transition-colors"
+              >
+                <Plus className="w-6 h-6 rotate-45" />
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div className="flex gap-3 items-start">
+                <AlertCircle className="w-5 h-5 shrink-0 mt-0.5 text-red-500" />
+                <div className="space-y-2">
+                  <p className="text-sm text-slate-700 leading-relaxed">
+                    Não é possível lançar duplicado.
+                  </p>
+                  <p className="text-sm text-slate-600 leading-relaxed">
+                    A nota{' '}
+                    <span className="font-semibold text-slate-800">#{duplicateNotice.invoiceNumber || '—'}</span>
+                    {duplicateNotice.providerName ? (
+                      <>
+                        {' '}de{' '}
+                        <span className="font-semibold text-slate-800">{duplicateNotice.providerName}</span>
+                      </>
+                    ) : null}{' '}
+                    já está lançada
+                    {duplicateNotice.protocol ? (
+                      <>
+                        {' '}no protocolo{' '}
+                        <span className="font-semibold text-slate-800">{duplicateNotice.protocol}</span>
+                      </>
+                    ) : null}
+                    .
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setDuplicateNotice(null)}
+                className="w-full px-4 py-3 bg-[#004D40] text-white font-bold rounded-xl hover:bg-[#003d33] transition-colors"
+              >
+                Entendi
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {confirmModal && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="p-6 border-b border-slate-100 flex justify-between items-center">
+              <h3 className="text-xl font-bold text-slate-900">
+                {confirmModal.kind === 'cancel' ? 'Cancelar solicitação' : 'Excluir nota'}
+              </h3>
+              <button
+                type="button"
+                onClick={closeConfirmModal}
+                className="text-slate-400 hover:text-slate-600 transition-colors"
+              >
+                <Plus className="w-6 h-6 rotate-45" />
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div className="flex gap-3 items-start">
+                <AlertCircle className={`w-5 h-5 shrink-0 mt-0.5 ${confirmModal.kind === 'delete' ? 'text-red-500' : 'text-amber-500'}`} />
+                <p className="text-sm text-slate-600 leading-relaxed">
+                  Tem certeza que deseja {confirmModal.kind === 'cancel' ? 'cancelar' : 'excluir'}
+                  {confirmModal.invoice?.invoice_number ? (
+                    <>
+                      {' '}a nota{' '}
+                      <span className="font-semibold text-slate-800">#{confirmModal.invoice.invoice_number}</span>
+                    </>
+                  ) : null}
+                  ?
+                </p>
+              </div>
+              <div className="pt-2 flex gap-3">
+                <button
+                  type="button"
+                  disabled={confirmBusy}
+                  onClick={closeConfirmModal}
+                  className="flex-1 px-4 py-3 bg-slate-100 text-slate-600 font-bold rounded-xl hover:bg-slate-200 transition-colors disabled:opacity-70"
+                >
+                  Não
+                </button>
+                <button
+                  type="button"
+                  disabled={confirmBusy}
+                  onClick={executeConfirmModal}
+                  className={
+                    confirmModal.kind === 'delete'
+                      ? 'flex-1 px-4 py-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 shadow-lg shadow-red-900/10 transition-colors disabled:opacity-70'
+                      : 'flex-1 px-4 py-3 bg-[#004D40] text-white font-bold rounded-xl hover:bg-[#003d33] shadow-lg shadow-emerald-900/10 transition-colors disabled:opacity-70'
+                  }
+                >
+                  {confirmBusy
+                    ? 'Aguarde...'
+                    : confirmModal.kind === 'cancel'
+                      ? 'Sim, cancelar'
+                      : 'Sim, excluir'}
                 </button>
               </div>
             </div>

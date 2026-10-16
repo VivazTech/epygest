@@ -10,7 +10,8 @@ CREATE TABLE IF NOT EXISTS public.requisicoes_rows (
   grupo_codigo INTEGER NOT NULL,
   grupo_nome TEXT NOT NULL,
   valor NUMERIC NOT NULL DEFAULT 0,
-  destino TEXT, -- cmv | uso_consumo | investimento | NULL (não classificado)
+  destino TEXT, -- cmv | uso_consumo | investimento | credito_cmv | NULL (não classificado)
+  cmv_subtipo TEXT, -- alimentos | bebidas (quando destino = cmv ou credito_cmv)
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE (year, month, setor_codigo, grupo_codigo)
 );

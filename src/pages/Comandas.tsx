@@ -1,8 +1,14 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { Plus, Trash2, Archive, XCircle } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { Plus, Trash2, Archive, XCircle, BadgeCheck, RotateCcw, Loader2 } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { confirmCancel } from '../lib/confirmAction';
 import { useSearch } from '../context/SearchContext';
-import { matchesSearch } from '../lib/search';
+import { useToast } from '../context/ToastContext';
+import { launchStatusMeta, LAUNCH_STATUS_FILTER_OPTIONS } from '../lib/launchFlow';
+import { CompetenciaFilter, currentCompetencia } from '../components/CompetenciaFilter';
+import { ListPagination } from '../components/ListPagination';
+import { DateBrInput } from '../components/DateBrInput';
+import { parseListResponse, useServerPagination } from '../hooks/useServerPagination';
 
 type ComandaItemForm = {
   description: string;
@@ -14,23 +20,50 @@ const emptyItem = (): ComandaItemForm => ({
   quantity: '',
 });
 
+const EMPTY_FORM = {
+  consumer_name: '',
+  provider_name: '',
+  consumed_at: '',
+  location: '',
+  items: [emptyItem()],
+};
+
 export const ComandasPage: React.FC = () => {
   const { query } = useSearch();
+  const { showSuccess } = useToast();
   const [comandas, setComandas] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
   const [pdvLocais, setPdvLocais] = useState<Array<{ id: number; name: string }>>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [form, setForm] = useState({
-    consumer_name: '',
-    consumed_at: '',
-    location: '',
-    items: [emptyItem()],
-  });
+  const [userRole, setUserRole] = useState('viewer');
+  const [actingSector, setActingSector] = useState<'requester' | 'controle' | 'financeiro'>('requester');
+  const [form, setForm] = useState({ ...EMPTY_FORM, items: [emptyItem()] });
+  const [showModal, setShowModal] = useState(false);
+  const initialCompetencia = currentCompetencia();
+  const [competenciaMonth, setCompetenciaMonth] = useState('');
+  const [competenciaYear, setCompetenciaYear] = useState(initialCompetencia.year);
+  const currentYear = new Date().getFullYear();
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const pagination = useServerPagination(20);
 
-  const loadData = async () => {
+  const loadData = async (showSpinner = true) => {
+    if (showSpinner) setLoading(true);
     try {
+      const params = new URLSearchParams(pagination.queryParams);
+      if (statusFilter !== 'all') params.set('status', statusFilter);
+      if (competenciaMonth) {
+        params.set('month', competenciaMonth);
+        params.set('year', competenciaYear);
+      }
+      if (dateFrom) params.set('from', dateFrom);
+      if (dateTo) params.set('to', dateTo);
+      if (query.trim()) params.set('q', query.trim());
+
       const [comandasRes, locaisRes] = await Promise.all([
-        fetch('/api/comandas'),
+        fetch(`/api/comandas?${params.toString()}`),
         fetch('/api/pdv-locais'),
       ]);
       const data = await comandasRes.json().catch(() => null);
@@ -42,27 +75,65 @@ export const ComandasPage: React.FC = () => {
         setPdvLocais([]);
       }
 
-      if (!comandasRes.ok || !Array.isArray(data)) {
+      if (!comandasRes.ok) {
         const message =
           (data && typeof data === 'object' && 'error' in data && String((data as any).error)) ||
           'Não foi possível carregar as comandas.';
         console.error('Falha ao carregar comandas:', data);
         setLoadError(message);
         setComandas([]);
+        pagination.applyMeta({ total: 0 });
         return;
       }
+      const parsed = parseListResponse<any>(data);
       setLoadError(null);
-      setComandas(data);
+      setComandas(parsed.items);
+      pagination.applyMeta({ total: parsed.total });
     } catch (error) {
       console.error('Falha ao carregar comandas:', error);
       setComandas([]);
       setPdvLocais([]);
+      pagination.applyMeta({ total: 0 });
+    } finally {
+      if (showSpinner) setLoading(false);
     }
   };
 
   useEffect(() => {
-    loadData();
+    const loadUser = async () => {
+      try {
+        const res = await fetch('/api/auth/me');
+        if (!res.ok) return;
+        const user = await res.json();
+        const role = String(user?.role || 'viewer');
+        setUserRole(role);
+        if (role === 'finance') setActingSector('financeiro');
+        else if (role === 'controle') setActingSector('controle');
+      } catch {
+        // ignore
+      }
+    };
+    loadUser();
   }, []);
+
+  useEffect(() => {
+    pagination.resetPage();
+  }, [statusFilter, competenciaMonth, competenciaYear, dateFrom, dateTo, query, pagination.resetPage]);
+
+  useEffect(() => {
+    loadData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pagination.page, pagination.pageSize, statusFilter, competenciaMonth, competenciaYear, dateFrom, dateTo, query]);
+
+  const canSwitchActingProfile = userRole === 'admin';
+  const canApproveControl = actingSector === 'controle' && (userRole === 'controle' || userRole === 'admin');
+  const canPayFinance = actingSector === 'financeiro' && (userRole === 'finance' || userRole === 'admin');
+  const canApproveManager = userRole === 'manager' || userRole === 'admin';
+  const canCancelAsRequester =
+    actingSector === 'requester' &&
+    (userRole === 'manager' || userRole === 'estagiario' || userRole === 'admin');
+
+  const statusLabel = (status: string) => launchStatusMeta(status);
 
   const addItem = () => {
     setForm((prev) => ({ ...prev, items: [...prev.items, emptyItem()] }));
@@ -82,22 +153,19 @@ export const ComandasPage: React.FC = () => {
     }));
   };
 
-  const resetForm = () => {
-    setForm({
-      consumer_name: '',
-      consumed_at: '',
-      location: '',
-      items: [emptyItem()],
-    });
+  const closeModal = () => {
+    setShowModal(false);
+    setForm({ ...EMPTY_FORM, items: [emptyItem()] });
   };
 
   const createComanda = async (e: React.FormEvent) => {
     e.preventDefault();
 
     const consumerName = form.consumer_name.trim();
+    const providerName = form.provider_name.trim();
     const location = form.location.trim();
-    if (!consumerName || !form.consumed_at || !location) {
-      alert('Preencha todos os campos obrigatórios da comanda.');
+    if (!consumerName || !providerName || !form.consumed_at || !location) {
+      alert('Preencha consumidor, fornecedor, data e local da comanda.');
       return;
     }
     if (!pdvLocais.some((l) => l.name === location)) {
@@ -125,6 +193,7 @@ export const ComandasPage: React.FC = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           consumer_name: consumerName,
+          provider_name: providerName,
           consumed_at: form.consumed_at,
           location,
           items: form.items.map((item) => ({
@@ -140,46 +209,66 @@ export const ComandasPage: React.FC = () => {
         return;
       }
 
-      resetForm();
+      const created = await res.json().catch(() => ({}));
+      showSuccess(
+        created?.protocol
+          ? `Comanda ${created.protocol} registrada. Aguardando aprovação do Controle.`
+          : 'Comanda registrada. Aguardando aprovação do Controle.'
+      );
+      closeModal();
       loadData();
     } finally {
       setSubmitting(false);
     }
   };
 
-  const updateStatus = async (id: number, status: 'posted' | 'cancelled') => {
-    await fetch(`/api/comandas/${id}/status`, {
+  const updateStatus = async (id: number, status: 'open' | 'approved' | 'posted' | 'cancelled') => {
+    if (status === 'cancelled' && !confirmCancel('esta comanda')) return;
+    const res = await fetch(`/api/comandas/${id}/status`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status }),
     });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      alert(data.error || 'Não foi possível atualizar a comanda.');
+      return;
+    }
     loadData();
   };
 
-  const filteredComandas = useMemo(
-    () =>
-      comandas.filter((comanda) =>
-        matchesSearch(
-          query,
-          comanda.consumer_name,
-          comanda.location,
-          comanda.consumed_at,
-          comanda.user_name,
-          comanda.status,
-          comanda.items_count,
-          ...(comanda.items ?? []).flatMap((item: any) => [item.description, item.quantity])
-        )
-      ),
-    [comandas, query]
-  );
+  const filteredComandas = comandas;
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
-      <div>
-        <h2 className="text-2xl font-bold text-slate-900">Lançamento de Comanda</h2>
-        <p className="text-slate-500 text-sm">
-          Registre manualmente o consumo informando consumidor, data, local e itens consumidos.
-        </p>
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <h2 className="text-2xl font-bold text-slate-900">Lançamento de Comanda</h2>
+          <p className="text-slate-500 text-sm">
+            Registre manualmente o consumo informando consumidor, data, local e itens consumidos.
+          </p>
+        </div>
+        <div className="flex items-center gap-3 self-start">
+          {canSwitchActingProfile && (
+            <select
+              value={actingSector}
+              onChange={(e) => setActingSector(e.target.value as 'requester' | 'controle' | 'financeiro')}
+              className="px-3 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-semibold text-slate-700 shadow-sm"
+            >
+              <option value="requester">Visão solicitante</option>
+              <option value="controle">Atuar como Controle</option>
+              <option value="financeiro">Atuar como Financeiro</option>
+            </select>
+          )}
+          <button
+            type="button"
+            onClick={() => setShowModal(true)}
+            className="flex items-center gap-2 bg-[#004D40] text-white px-4 py-2.5 rounded-xl shadow-lg shadow-emerald-900/10 hover:bg-[#003d33] transition-colors"
+          >
+            <Plus className="w-4 h-4" />
+            <span className="font-bold text-sm">Nova comanda</span>
+          </button>
+        </div>
       </div>
 
       {loadError && (
@@ -193,208 +282,194 @@ export const ComandasPage: React.FC = () => {
         </div>
       )}
 
-      <form
-        onSubmit={createComanda}
-        className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6 space-y-5"
-      >
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="space-y-1.5">
-            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">
-              Nome do Consumidor <span className="text-red-500">*</span>
-            </label>
-            <input
-              required
-              value={form.consumer_name}
-              onChange={(e) => setForm((p) => ({ ...p, consumer_name: e.target.value }))}
-              placeholder="Nome completo"
-              className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm"
-            />
-          </div>
-
-          <div className="space-y-1.5">
-            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">
-              Data do consumo <span className="text-red-500">*</span>
-            </label>
-            <input
-              required
-              type="date"
-              value={form.consumed_at}
-              onChange={(e) => setForm((p) => ({ ...p, consumed_at: e.target.value }))}
-              className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm"
-            />
-          </div>
-
-          <div className="space-y-1.5">
-            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">
-              Local do consumo <span className="text-red-500">*</span>
-            </label>
-            <select
-              required
-              value={form.location}
-              onChange={(e) => setForm((p) => ({ ...p, location: e.target.value }))}
-              className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm"
-            >
-              <option value="">
-                {pdvLocais.length === 0 ? 'Cadastre locais em Configurações' : 'Selecione o local'}
-              </option>
-              {pdvLocais.map((local) => (
-                <option key={local.id} value={local.name}>
-                  {local.name}
-                </option>
-              ))}
-            </select>
-            {pdvLocais.length === 0 && (
-              <p className="text-[11px] text-amber-700">
-                Nenhum local PDV ativo. Peça ao administrador para cadastrar em Configurações → Locais PDV.
-              </p>
-            )}
-          </div>
+      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 space-y-4">
+        <CompetenciaFilter
+          month={competenciaMonth}
+          year={competenciaYear}
+          onMonthChange={setCompetenciaMonth}
+          onYearChange={setCompetenciaYear}
+          allowAll
+          hint="Filtra pela data de consumo. Em 'Todos', a lista mostra todos os períodos."
+        />
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-3 border-t border-slate-100 pt-4">
+        <div>
+          <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Período de</label>
+          <DateBrInput
+            value={dateFrom}
+            onChange={setDateFrom}
+            suggestYear={currentYear}
+            className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+          />
         </div>
-
-        <div className="space-y-3 border-t border-slate-100 pt-5">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h3 className="text-sm font-bold text-slate-800">Itens consumidos</h3>
-              <p className="text-xs text-slate-500">Informe descrição e quantidade de cada item.</p>
-            </div>
+        <div>
+          <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Período até</label>
+          <DateBrInput
+            value={dateTo}
+            min={dateFrom || undefined}
+            onChange={setDateTo}
+            suggestYear={currentYear}
+            className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+          />
+        </div>
+        <div>
+          <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Status</label>
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+          >
+            {LAUNCH_STATUS_FILTER_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
+          </select>
+        </div>
+        {(dateFrom || dateTo || statusFilter !== 'all') && (
+          <div className="flex items-end">
             <button
               type="button"
-              onClick={addItem}
-              className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 text-sm font-bold text-slate-700 hover:bg-slate-50 transition-colors"
+              onClick={() => {
+                setDateFrom('');
+                setDateTo('');
+                setStatusFilter('all');
+              }}
+              className="px-3 py-2.5 text-sm font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl"
             >
-              <Plus className="w-4 h-4" />
-              Adicionar item
+              Limpar filtros
             </button>
           </div>
-
-          <div className="space-y-3">
-            {form.items.map((item, index) => (
-              <div
-                key={index}
-                className="grid grid-cols-1 md:grid-cols-[1fr_140px_auto] gap-3 items-end bg-slate-50/70 border border-slate-100 rounded-xl p-4"
-              >
-                <div className="space-y-1.5">
-                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
-                    Item <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    required
-                    value={item.description}
-                    onChange={(e) => updateItem(index, { description: e.target.value })}
-                    placeholder="Descrição do item"
-                    className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm"
-                  />
-                </div>
-
-                <div className="space-y-1.5">
-                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
-                    Qtd. <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    required
-                    type="number"
-                    min="0.01"
-                    step="0.01"
-                    value={item.quantity}
-                    onChange={(e) => updateItem(index, { quantity: e.target.value })}
-                    className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm"
-                  />
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => removeItem(index)}
-                  disabled={form.items.length <= 1}
-                  className="p-2 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-slate-500"
-                  title="Remover item"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
-              </div>
-            ))}
-          </div>
-
-          <div className="flex justify-end pt-2">
-            <button
-              type="submit"
-              disabled={submitting}
-              className="inline-flex items-center justify-center gap-2 bg-[#004D40] text-white px-5 py-3 rounded-xl shadow-lg shadow-emerald-900/10 hover:bg-[#003d33] transition-colors disabled:opacity-60"
-            >
-              <Plus className="w-4 h-4" />
-              <span className="font-bold text-sm">{submitting ? 'Salvando...' : 'Registrar comanda'}</span>
-            </button>
-          </div>
+        )}
         </div>
-      </form>
+      </div>
 
-      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-x-auto">
+      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+        <div className="overflow-x-auto">
         <table className="w-full text-left border-collapse">
           <thead>
             <tr className="bg-slate-50/50">
+              <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Protocolo</th>
               <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Consumidor</th>
+              <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Fornecedor</th>
               <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Data / Local</th>
+              <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Vencimento</th>
               <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Itens</th>
               <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Status</th>
               <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-right">Ações</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-50">
-            {filteredComandas.length === 0 && (
+            {loading && (
               <tr>
-                <td colSpan={5} className="px-6 py-10 text-center text-sm text-slate-400">
+                <td colSpan={8} className="px-6 py-14 text-center">
+                  <div className="inline-flex items-center justify-center gap-2 text-slate-400">
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                    <span className="text-sm font-medium">Carregando comandas...</span>
+                  </div>
+                </td>
+              </tr>
+            )}
+            {!loading && filteredComandas.length === 0 && (
+              <tr>
+                <td colSpan={8} className="px-6 py-10 text-center text-sm text-slate-400">
                   Nenhuma comanda registrada.
                 </td>
               </tr>
             )}
-            {filteredComandas.map((comanda) => (
-              <tr key={comanda.id} className="hover:bg-slate-50/50 transition-colors align-top">
-                <td className="px-6 py-4 text-sm font-medium text-slate-800">
-                  {comanda.consumer_name}
-                  {comanda.user_name ? (
-                    <span className="block text-[10px] font-normal text-slate-400 mt-0.5">
-                      registrado por {comanda.user_name}
+            {!loading && filteredComandas.map((comanda) => {
+              const meta = statusLabel(comanda.status);
+              return (
+                <tr key={comanda.id} className="hover:bg-slate-50/50 transition-colors align-top">
+                  <td className="px-6 py-4 text-xs font-mono font-bold text-emerald-800">{comanda.protocol || '—'}</td>
+                  <td className="px-6 py-4 text-sm font-medium text-slate-800">
+                    {comanda.consumer_name}
+                    {comanda.user_name ? (
+                      <span className="block text-[10px] font-normal text-slate-400 mt-0.5">
+                        registrado por {comanda.user_name}
+                      </span>
+                    ) : null}
+                  </td>
+                  <td className="px-6 py-4 text-sm text-slate-600">{comanda.provider_name || '—'}</td>
+                  <td className="px-6 py-4 text-sm text-slate-600">
+                    <span className="font-medium text-slate-700">{comanda.consumed_at}</span>
+                    <span className="block text-xs text-slate-500 mt-0.5">{comanda.location}</span>
+                  </td>
+                  <td className="px-6 py-4 text-sm text-slate-400">—</td>
+                  <td className="px-6 py-4 text-sm text-slate-600">
+                    <ul className="space-y-1">
+                      {(comanda.items ?? []).map((item: any) => (
+                        <li key={item.id} className="text-xs">
+                          <span className="font-medium text-slate-700">{item.description}</span>
+                          <span className="text-slate-500"> · qtd. {item.quantity}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </td>
+                  <td className="px-6 py-4">
+                    <span
+                      className={cn(
+                        'text-[10px] font-bold px-2 py-1 rounded-lg uppercase tracking-wider',
+                        meta.classes
+                      )}
+                    >
+                      {meta.label}
                     </span>
-                  ) : null}
-                </td>
-                <td className="px-6 py-4 text-sm text-slate-600">
-                  <span className="font-medium text-slate-700">{comanda.consumed_at}</span>
-                  <span className="block text-xs text-slate-500 mt-0.5">{comanda.location}</span>
-                </td>
-                <td className="px-6 py-4 text-sm text-slate-600">
-                  <ul className="space-y-1">
-                    {(comanda.items ?? []).map((item: any) => (
-                      <li key={item.id} className="text-xs">
-                        <span className="font-medium text-slate-700">{item.description}</span>
-                        <span className="text-slate-500"> · qtd. {item.quantity}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </td>
-                <td className="px-6 py-4">
-                  <span
-                    className={cn(
-                      'text-[10px] font-bold px-2 py-1 rounded-lg uppercase tracking-wider',
-                      comanda.status === 'open'
-                        ? 'bg-orange-100 text-orange-700'
-                        : comanda.status === 'posted'
-                          ? 'bg-emerald-100 text-emerald-700'
-                          : 'bg-slate-200 text-slate-700'
-                    )}
-                  >
-                    {comanda.status === 'open' ? 'Aberta' : comanda.status === 'posted' ? 'Baixada' : 'Cancelada'}
-                  </span>
-                </td>
-                <td className="px-6 py-4">
-                  <div className="flex justify-end gap-2">
-                    {comanda.status === 'open' && (
-                      <>
+                  </td>
+                  <td className="px-6 py-4">
+                    <div className="flex justify-end gap-2">
+                      {canApproveManager && comanda.status === 'pending_manager' && (
+                        <>
+                          <button
+                            onClick={() => updateStatus(comanda.id, 'open')}
+                            className="p-2 text-violet-600 hover:bg-violet-50 rounded-lg transition-colors"
+                            title="Aprovar (Gestor do setor)"
+                          >
+                            <BadgeCheck className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => updateStatus(comanda.id, 'cancelled')}
+                            className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                            title="Reprovar (Gestor)"
+                          >
+                            <XCircle className="w-4 h-4" />
+                          </button>
+                        </>
+                      )}
+                      {canApproveControl && comanda.status === 'open' && (
+                        <>
+                          <button
+                            onClick={() => updateStatus(comanda.id, 'approved')}
+                            className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                            title="Aprovar no Controle"
+                          >
+                            <BadgeCheck className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => updateStatus(comanda.id, 'cancelled')}
+                            className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                            title="Reprovar"
+                          >
+                            <XCircle className="w-4 h-4" />
+                          </button>
+                        </>
+                      )}
+                      {canApproveControl && comanda.status === 'approved' && (
+                        <button
+                          onClick={() => updateStatus(comanda.id, 'open')}
+                          className="p-2 text-amber-600 hover:bg-amber-50 rounded-lg transition-colors"
+                          title="Desaprovar"
+                        >
+                          <RotateCcw className="w-4 h-4" />
+                        </button>
+                      )}
+                      {canPayFinance && comanda.status === 'approved' && (
                         <button
                           onClick={() => updateStatus(comanda.id, 'posted')}
                           className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"
-                          title="Baixar comanda"
+                          title="Registrar pagamento"
                         >
                           <Archive className="w-4 h-4" />
                         </button>
+                      )}
+                      {canCancelAsRequester && (comanda.status === 'pending_manager' || comanda.status === 'open' || comanda.status === 'approved') && (
                         <button
                           onClick={() => updateStatus(comanda.id, 'cancelled')}
                           className="p-2 text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
@@ -402,15 +477,180 @@ export const ComandasPage: React.FC = () => {
                         >
                           <XCircle className="w-4 h-4" />
                         </button>
-                      </>
-                    )}
-                  </div>
-                </td>
-              </tr>
-            ))}
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
+        </div>
+        <ListPagination
+          page={pagination.page}
+          totalPages={pagination.totalPages}
+          total={pagination.total}
+          from={pagination.from}
+          to={pagination.to}
+          pageSize={pagination.pageSize}
+          onPageChange={pagination.setPage}
+          onPageSizeChange={pagination.setPageSize}
+          label="comandas"
+        />
       </div>
+
+      {showModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white w-full max-w-lg max-h-[calc(100dvh-2rem)] rounded-3xl shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="p-6 border-b border-slate-100 flex justify-between items-center shrink-0">
+              <h3 className="text-xl font-bold text-slate-900">Nova comanda</h3>
+              <button type="button" onClick={closeModal} className="text-slate-400 hover:text-slate-600 transition-colors">
+                <Plus className="w-6 h-6 rotate-45" />
+              </button>
+            </div>
+
+            <form onSubmit={createComanda} className="flex flex-col min-h-0 flex-1">
+              <div className="p-6 space-y-4 overflow-y-auto flex-1 min-h-0">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Nome do consumidor</label>
+                  <input
+                    required
+                    value={form.consumer_name}
+                    onChange={(e) => setForm((p) => ({ ...p, consumer_name: e.target.value }))}
+                    placeholder="Nome completo"
+                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Fornecedor</label>
+                  <input
+                    required
+                    value={form.provider_name}
+                    onChange={(e) => setForm((p) => ({ ...p, provider_name: e.target.value }))}
+                    placeholder="Nome do fornecedor"
+                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Data do consumo</label>
+                    <input
+                      required
+                      type="date"
+                      value={form.consumed_at}
+                      onChange={(e) => setForm((p) => ({ ...p, consumed_at: e.target.value }))}
+                      className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Local do consumo</label>
+                    <select
+                      required
+                      value={form.location}
+                      onChange={(e) => setForm((p) => ({ ...p, location: e.target.value }))}
+                      className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+                    >
+                      <option value="">
+                        {pdvLocais.length === 0 ? 'Cadastre locais em Configurações' : 'Selecione o local'}
+                      </option>
+                      {pdvLocais.map((local) => (
+                        <option key={local.id} value={local.name}>
+                          {local.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                {pdvLocais.length === 0 && (
+                  <p className="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-xl px-3 py-2">
+                    Nenhum local PDV ativo. Peça ao administrador para cadastrar em Configurações → Locais PDV.
+                  </p>
+                )}
+
+                <div className="space-y-3 border-t border-slate-100 pt-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider">Itens consumidos</h4>
+                      <p className="text-xs text-slate-500 mt-0.5">Informe descrição e quantidade de cada item.</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={addItem}
+                      className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 text-sm font-bold text-slate-700 hover:bg-slate-50 transition-colors"
+                    >
+                      <Plus className="w-4 h-4" />
+                      Adicionar item
+                    </button>
+                  </div>
+
+                  <div className="space-y-3">
+                    {form.items.map((item, index) => (
+                      <div
+                        key={index}
+                        className="grid grid-cols-1 sm:grid-cols-[1fr_110px_auto] gap-3 items-end bg-slate-50/70 border border-slate-100 rounded-xl p-3"
+                      >
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Item</label>
+                          <input
+                            required
+                            value={item.description}
+                            onChange={(e) => updateItem(index, { description: e.target.value })}
+                            placeholder="Descrição do item"
+                            className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm"
+                          />
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Qtd.</label>
+                          <input
+                            required
+                            type="number"
+                            min="0.01"
+                            step="0.01"
+                            value={item.quantity}
+                            onChange={(e) => updateItem(index, { quantity: e.target.value })}
+                            className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm"
+                          />
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => removeItem(index)}
+                          disabled={form.items.length <= 1}
+                          className="p-2 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-slate-500"
+                          title="Remover item"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-6 pt-4 border-t border-slate-100 flex gap-3 shrink-0 bg-white">
+                <button
+                  type="button"
+                  onClick={closeModal}
+                  className="flex-1 px-4 py-3 bg-slate-100 text-slate-600 font-bold rounded-xl hover:bg-slate-200 transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={submitting}
+                  className="flex-1 px-4 py-3 bg-[#004D40] text-white font-bold rounded-xl hover:bg-[#003d33] shadow-lg shadow-emerald-900/10 transition-colors disabled:opacity-70"
+                >
+                  {submitting ? 'Salvando...' : 'Lançar'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

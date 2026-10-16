@@ -334,7 +334,7 @@ export const FolhaPagamentoPage: React.FC<FolhaPagamentoPageProps> = ({ month })
               {importing ? 'Importando...' : `Importar Extrato de ${MESES_FOLHA[month]}`}
               <input
                 type="file"
-                accept=".xls,.xlsx,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                accept=".xls,.xlsx,.pdf,application/pdf,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 onChange={importExtrato}
                 disabled={importing}
                 className="hidden"

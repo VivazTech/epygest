@@ -19,8 +19,68 @@ import {
   sessionCookieOptions,
   requireAuth,
   requireRole,
+  hashPasswordResetToken,
+  createPasswordResetToken,
+  RESET_TOKEN_TTL_SECONDS,
+  type SessionUser,
 } from "./lib/auth.js";
+import {
+  filterByEmpresa,
+  filterByEmpresaKey,
+  readEmpresaKeyFromRequest,
+  withEmpresaKey,
+  withEmpresaKeyValue,
+  scopeByEmpresa,
+  empresaKeyOf,
+  protocolPrefixForEmpresa,
+  rowBelongsToEmpresa,
+} from "./lib/empresaScope.js";
+import { parseListPagination, paginatedPayload, sumAmounts } from "./lib/listPagination.js";
+import { DIRETORIA_AMOUNT_THRESHOLD } from "./lib/aprovacoesMeta.js";
+import { empresaAls, installEmpresaScopedSupabase } from "./lib/empresaScopedSupabase.js";
+import { COMPANY_HEADER, DEFAULT_COMPANY_KEY, type CompanyKey } from "./lib/companies.js";
+
+// Garante isolamento multi-tenant em todo supabase.from() do processo
+installEmpresaScopedSupabase(supabase);
+import { sendEmail } from "./lib/mail.js";
+import {
+  PERMISSION_RESOURCES,
+  PERMISSION_RESOURCE_KEYS,
+  DEFAULT_ROLE_PERMISSIONS,
+  actionsToFlags,
+  buildDefaultPermissionRows,
+  slugifyRole,
+  SYSTEM_ROLES,
+  type RolePermissionRow,
+} from "./lib/permissionCatalog.js";
 import { logImportHistory } from "./lib/importHistory.js";
+import { registerAquaOrcamentoRoutes } from "./aquaOrcamentoRoutes.js";
+import { PROTOCOL_PREFIX, invoiceProtocolPrefix } from "./lib/launchProtocol.js";
+import { findInvoiceDuplicate, type InvoiceDuplicateRow } from "./lib/invoiceDuplicate.js";
+import { buildPeriodKey, parseImportPeriodInput, type ImportScope } from "./lib/importPeriod.js";
+import { computeCmv, toCmvInputs } from "./lib/cmv.js";
+import { parseCmvApuracaoPeriod } from "./lib/cmvHistorico.js";
+import { parseVendasAmbienteGrid, parseVendasAmbientePdf } from "./lib/vendasAmbiente.js";
+import {
+  applyFieldCorrection,
+  isImportCorrectionField,
+  isImportCorrectionSource,
+  parseCorrectionNumber,
+} from "./lib/importCorrections.js";
+import {
+  canEditLaunchRole,
+  initialInvoiceFlowStage,
+  initialLaunchStatus,
+  isInvoiceFlowEditableBeforeControl,
+  isLaunchStatusEditableBeforeControl,
+  validateLaunchFlowStatus,
+} from "./lib/launchFlow.js";
+import {
+  fetchCorrectionsForCompetencia,
+  fetchCorrectionsForRows,
+  getCorrectionFromMap,
+  mapCorrectionRow,
+} from "./lib/importCorrectionsDb.js";
 import {
   classificarLancamentosImportacao,
   calcularApuracaoMensal,
@@ -32,13 +92,110 @@ import {
   type EncargosParametro,
   type FolhaConfig,
 } from "./lib/folhaApuracao.js";
+import {
+  aggregateLancamentosPorSetor,
+  allocateValorPorSetor,
+  buildStatusLabel,
+  calcPctDesvio,
+  componentesFromApuracao,
+  componentesFromCustoLinhas,
+  matchFolhaSetor,
+  normalizeFolhaFilterText,
+  resolveSectorMonthlyBudget,
+} from "./lib/folhaPainel.js";
+import {
+  buildCadastroSetorMap,
+  buildEmployeeCostWeights,
+  buildFuncionariosDrilldown,
+  calcularCustoPorSetor,
+  enrichLancamentosComCadastroSetor,
+  normalizeSetorKey,
+} from "./lib/folhaCustoSetor.js";
+import { buildComposicaoCusto } from "./lib/folhaComposicao.js";
+import { buildTaxaServicoAnalise, extractCreditoTaxaRds } from "./lib/folhaTaxaServico.js";
+import { buildFgtsAnalise, sanitizeFgtsEmprestimosDetalhe } from "./lib/folhaFgts.js";
+import {
+  canViewEmprestimosConfidenciais,
+  EMPRESTIMOS_ACESSO_NEGADO_MSG,
+} from "./lib/emprestimosAccess.js";
+import {
+  aggregateEmprestimoLancamentos,
+  buildEmprestimosListResponse,
+  buildEmprestimoDivergencias,
+  buildEmprestimoHistorico,
+  classifyEmprestimoLancamento,
+  computePrevisaoTermino,
+  emprestimoConciliacaoKey,
+  extractInstituicaoFromRubrica,
+  inferStatusFromParcelas,
+  mapEmprestimoRow,
+  REGRAS_RESCISAO_PENDENTES,
+  resolveEmprestimoHistoricoPeriodo,
+  shouldProjectEmprestimoParcelas,
+  sumConciliacao,
+  type EmprestimoDivergenciaMotivo,
+  type EmprestimoResponsabilidade,
+  type EmprestimoStatus,
+} from "./lib/folhaEmprestimos.js";
+import {
+  extractHorasValorFromCells,
+  formatHorasCell,
+  summarizeAbsenteismo,
+} from "./lib/absenteismo.js";
+import { loadAbsenteismoConfig, syncAbsenteismoCompetencia } from "./lib/absenteismoDb.js";
+import { parseExtratoFolhaPdf } from "./lib/extratoFolhaPdf.js";
+import {
+  calcularTurnoverPct,
+  FORMULA_OPTIONS,
+  isSituacaoDesligamento,
+  summarizeTurnoverPeriodo,
+  type TurnoverFormula,
+} from "./lib/turnover.js";
+import { loadTurnoverConfig, syncTurnoverCompetencia } from "./lib/turnoverDb.js";
+import {
+  calcularRemuneracaoTotal,
+  empresaNomeFromKey,
+  parseOutrosAdicionais,
+  resolveEmpresaKey,
+} from "./lib/colaboradorCadastro.js";
+import {
+  applyTangerinoToAbsenteismo,
+  commitTangerinoImport,
+  upsertVinculo,
+} from "./lib/tangerinoDb.js";
+import {
+  empresaNomeFromKey as tangerinoEmpresaNomeFromKey,
+  parseTangerinoCsv,
+  summarizeTangerino,
+  type TangerinoEmpresaKey,
+  TANGERINO_EMPRESAS,
+} from "./lib/tangerino.js";
 
-import { parseInvoicePdfText } from "./lib/parseInvoicePdf.js";
+import { isDanfseNacional, parseInvoicePdfText } from "./lib/parseInvoicePdf.js";
 import { isSharedCrdCode } from "./lib/sharedCrds.js";
+import {
+  addReqDestinoTotal,
+  addReqCmvSubtipoTotal,
+  emptyReqDestinoTotals,
+  emptyReqCmvSubtipoTotals,
+  isReqCmvSubtipoValid,
+  isReqDestinoCmv,
+  isReqDestinoValid,
+  resolveReqCmvSubtipo,
+} from "./lib/requisicoesDestino.js";
+import {
+  getSectorCache,
+  normalizeSectorName,
+  parseSectorText,
+  resolveSector,
+  resolveSectorByCode,
+  slugSectorCodeFromName,
+} from "./lib/sectorResolve.js";
 import {
   STORAGE_BUCKET,
   STORAGE_PREFIXES,
   normalizeStorageObjectPath,
+  collectBoletoPaths,
   type StorageDocumentField,
 } from "./lib/storagePath.js";
 
@@ -46,6 +203,33 @@ import {
 const loadPdfParse = async () => {
   const mod = await import("pdf-parse/lib/pdf-parse.js");
   return (mod as any).default ?? (mod as any);
+};
+
+// Render de página para o pdf-parse que preserva o espaçamento entre palavras.
+// Alguns PDFs (ex.: DANFSe do portal nacional) gravam cada palavra como um item
+// separado e o render padrão cola tudo ("VIVAZCATARATASHOTEL"). Aqui o vão
+// horizontal entre itens da mesma linha vira espaço, e um vão grande (outra
+// coluna) vira quebra de linha.
+const renderPdfPageWithSpaces = async (pageData: any): Promise<string> => {
+  const content = await pageData.getTextContent();
+  let lastY: number | undefined;
+  let lastEndX = 0;
+  let text = "";
+  for (const item of content.items as any[]) {
+    const x = item.transform[4];
+    const y = item.transform[5];
+    if (lastY === undefined) {
+      text += item.str;
+    } else if (Math.abs(lastY - y) < 1) {
+      const gap = x - lastEndX;
+      text += (gap > 15 ? "\n" : gap > 1 ? " " : "") + item.str;
+    } else {
+      text += "\n" + item.str;
+    }
+    lastY = y;
+    lastEndX = x + item.width;
+  }
+  return text;
 };
 
 // pdfjs (vendorizado dentro do pdf-parse) dá acesso à posição (x,y) de cada
@@ -149,17 +333,21 @@ const normalizeCrdFilterText = (value: string) =>
     .replace(/^crd\s+/, "")
     .trim();
 
-const fetchMonthlyValuesByYear = async (year: number) => {
+const fetchMonthlyValuesByYear = async (year: number, empresaKey?: CompanyKey) => {
   const pageSize = 1000;
   let from = 0;
   const rows: CrdMonthlyValueRow[] = [];
 
   while (true) {
     const to = from + pageSize - 1;
-    const { data, error } = await supabase
+    let query = supabase
       .from("crd_monthly_values")
       .select("crd_id, year, month, value")
-      .eq("year", year)
+      .eq("year", year);
+    if (empresaKey) {
+      query = filterByEmpresaKey(query, empresaKey, "crd_monthly_values");
+    }
+    const { data, error } = await query
       .order("crd_id", { ascending: true })
       .range(from, to);
 
@@ -175,6 +363,31 @@ const fetchMonthlyValuesByYear = async (year: number) => {
   }
 
   return { rows, error: null as any };
+};
+
+const seedCrdMonthlyBudget = async (
+  req: express.Request,
+  crdId: number,
+  monthlyValue: number,
+  year = new Date().getFullYear()
+) => {
+  const value = sanitizeMonthBudget(monthlyValue);
+  if (!Number.isFinite(crdId) || crdId <= 0 || value <= 0) return;
+  const payload = Array.from({ length: 12 }, (_, index) =>
+    withEmpresaKey(
+      {
+        crd_id: crdId,
+        year,
+        month: index + 1,
+        value,
+      },
+      req
+    )
+  );
+  const { error } = await supabase
+    .from("crd_monthly_values")
+    .upsert(payload, { onConflict: "crd_id,year,month", ignoreDuplicates: true });
+  if (error) console.error("Erro ao inicializar previsto mensal do CRD:", error);
 };
 
 const parseHierarchyLine = (raw: string): ParsedNode | null => {
@@ -205,6 +418,20 @@ const getAncestors = (code: string): string[] => {
 const sanitizeMonthBudget = (value: any) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
+};
+
+/** Gera protocolo diário atômico via RPC (ex.: REQ-20260916-0042). Aqua usa prefixo A-*. */
+const allocateLaunchProtocol = async (prefix: string, req?: express.Request): Promise<string | null> => {
+  const empresa = req ? empresaKeyOf(req) : "vivaz";
+  const scopedPrefix = protocolPrefixForEmpresa(prefix, empresa);
+  const { data, error } = await supabase.rpc("allocate_document_protocol", {
+    p_prefix: String(scopedPrefix || "").trim().toUpperCase(),
+  });
+  if (error || !data) {
+    console.error("Falha ao gerar protocolo:", error);
+    return null;
+  }
+  return String(data);
 };
 
 const parseDesbravadorPdfLines = (rawText: string) => {
@@ -371,9 +598,7 @@ const getMonthDateRange = (year: number, month: number) => {
 };
 
 const applyProvisionDateRange = (query: any, dateFrom: string, dateTo: string) =>
-  query
-    .gte("created_at", `${dateFrom}T00:00:00`)
-    .lte("created_at", `${dateTo}T23:59:59.999`);
+  query.gte("due_date", dateFrom).lte("due_date", dateTo);
 
 // Diretório de upload: /tmp no Vercel (serverless), local no dev
 const uploadDir = process.env.VERCEL
@@ -382,11 +607,21 @@ const uploadDir = process.env.VERCEL
 
 export function createApp() {
   const app = express();
+  const sectorCacheFor = (empresaKey?: CompanyKey) =>
+    getSectorCache(supabase, empresaKey || DEFAULT_COMPANY_KEY);
+  /** @deprecated use sectorCacheFor(empresaKeyOf(req)) — default Vivaz for imports legado */
+  const sectorCache = sectorCacheFor(DEFAULT_COMPANY_KEY);
 
   if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
   // Limite de tamanho para evitar DoS/esgotamento de disco. Excel/PDF grandes cabem em 20MB.
   const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
   const upload = multer({ dest: uploadDir, limits: { fileSize: MAX_UPLOAD_BYTES } });
+  const ORDEM_ANEXO_MAX_BYTES = 10 * 1024 * 1024;
+  const ORDEM_ANEXO_MAX_FILES = 6;
+  const uploadOrdemAnexos = multer({
+    dest: uploadDir,
+    limits: { fileSize: ORDEM_ANEXO_MAX_BYTES, files: ORDEM_ANEXO_MAX_FILES + 3 },
+  });
 
   // ---------- Storage de documentos (bucket privado + signed URLs) ----------
   // O bucket "invoice-files" deve estar configurado como PRIVADO no Supabase.
@@ -436,7 +671,7 @@ export function createApp() {
       res.setHeader("Access-Control-Allow-Credentials", "true");
       res.setHeader("Vary", "Origin");
       res.setHeader("Access-Control-Allow-Methods", "GET,POST,PATCH,PUT,DELETE,OPTIONS");
-      res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+      res.setHeader("Access-Control-Allow-Headers", `Content-Type, ${COMPANY_HEADER}`);
     }
     if (req.method === "OPTIONS") return res.sendStatus(204);
     next();
@@ -444,16 +679,98 @@ export function createApp() {
 
   app.use(express.json());
   app.use(cookieParser());
+  app.use((req, _res, next) => {
+    const key = readEmpresaKeyFromRequest(req);
+    req.empresaKey = key;
+    empresaAls.run(key, () => next());
+  });
   app.use("/uploads", express.static(uploadDir));
 
   // Helper para montar os setores do usuário (usado em login e /me).
-  const buildUserSession = async (user: any) => {
+  const loadRolePermissions = async (roleSlug: string): Promise<RolePermissionRow[]> => {
+    if (!roleSlug) return [];
+    if (roleSlug === "admin") {
+      return buildDefaultPermissionRows("admin");
+    }
+    const { data, error } = await supabase
+      .from("role_permissions")
+      .select("resource_key, can_view, can_create, can_edit, can_delete")
+      .eq("role_slug", roleSlug);
+    if (error) {
+      console.error("Erro ao carregar permissões do perfil:", error);
+      return buildDefaultPermissionRows(roleSlug);
+    }
+    if (!data?.length) return buildDefaultPermissionRows(roleSlug);
+    const mapped: RolePermissionRow[] = data.map((row: any) => ({
+      resource_key: String(row.resource_key),
+      can_view: Boolean(row.can_view),
+      can_create: Boolean(row.can_create),
+      can_edit: Boolean(row.can_edit),
+      can_delete: Boolean(row.can_delete),
+    }));
+    const byKey = new Map(mapped.map((row) => [row.resource_key, row]));
+    const defaults = DEFAULT_ROLE_PERMISSIONS[roleSlug] || {};
+    return PERMISSION_RESOURCE_KEYS.map((key) => {
+      const existing = byKey.get(key);
+      if (existing) return existing;
+      return {
+        resource_key: key,
+        ...actionsToFlags(defaults[key] || []),
+      };
+    });
+  };
+
+  const roleExists = async (roleSlug: string): Promise<boolean> => {
+    const { data, error } = await supabase
+      .from("app_roles")
+      .select("slug")
+      .eq("slug", roleSlug)
+      .maybeSingle();
+    if (error) {
+      console.error("Erro ao validar role:", error);
+      return SYSTEM_ROLES.some((r) => r.slug === roleSlug);
+    }
+    return Boolean(data?.slug);
+  };
+
+  const ensureUserHasBothEmpresas = async (userId: number | string) => {
+    const rows = [
+      { user_id: Number(userId), empresa_key: "vivaz" as const },
+      { user_id: Number(userId), empresa_key: "aqua" as const },
+    ];
+    const { error } = await supabase
+      .from("user_empresas")
+      .upsert(rows, { onConflict: "user_id,empresa_key", ignoreDuplicates: true });
+    if (error) console.error("Falha ao vincular empresas do usuário:", error);
+  };
+
+  const buildUserSession = async (user: any, empresaKey?: CompanyKey) => {
+    const activeEmpresa = empresaKey || DEFAULT_COMPANY_KEY;
+
+    // Todo login deve ter Vivaz e Aqua
+    await ensureUserHasBothEmpresas(user.id);
+
+    const { data: empresaLinks } = await supabase
+      .from("user_empresas")
+      .select("empresa_key")
+      .eq("user_id", user.id);
+    let empresaKeys = Array.from(
+      new Set(
+        (empresaLinks ?? [])
+          .map((row: any) => String(row.empresa_key || "").trim())
+          .filter((k): k is CompanyKey => k === "vivaz" || k === "aqua")
+      )
+    );
+    if (!empresaKeys.includes("vivaz") || !empresaKeys.includes("aqua")) {
+      empresaKeys = ["vivaz", "aqua"];
+    }
+
     const { data: userSectorLinks } = await supabase
       .from("user_sectors")
       .select("sector_id")
       .eq("user_id", user.id);
 
-    const sectorIds = Array.from(
+    const linkedIds = Array.from(
       new Set(
         (userSectorLinks ?? [])
           .map((link: any) => Number(link.sector_id))
@@ -461,17 +778,62 @@ export function createApp() {
       )
     );
 
-    const fallbackSectorIds = sectorIds.length
-      ? sectorIds
+    const fallbackIds = linkedIds.length
+      ? linkedIds
       : (Number.isFinite(Number(user.sector_id)) ? [Number(user.sector_id)] : []);
 
-    const { data: sectorRows } = fallbackSectorIds.length
-      ? await supabase.from("sectors").select("id, name").in("id", fallbackSectorIds)
-      : { data: [] as any[] };
+    // Só setores da empresa ativa (evita vazar setores Vivaz no Aqua)
+    let sectorIds: number[] = [];
+    let sectorNames: string[] = [];
+    if (fallbackIds.length) {
+      const { data: sectorRows } = await filterByEmpresaKey(
+        supabase.from("sectors").select("id, name").in("id", fallbackIds),
+        activeEmpresa,
+        "sectors"
+      );
+      sectorIds = (sectorRows ?? []).map((row: any) => Number(row.id)).filter((id) => Number.isFinite(id));
+      sectorNames = (sectorRows ?? []).map((row: any) => String(row.name || ""));
+    }
 
-    const sectorNames = (sectorRows ?? []).map((row: any) => String(row.name || ""));
+    // CRDs extras liberados fora dos setores do usuário (ex.: CRD 399)
+    const { data: userCrdLinks } = await supabase
+      .from("user_crds")
+      .select("crd_id, crds(id, code, name, sector_id, active)")
+      .eq("user_id", user.id);
+
+    const extraCrds = (userCrdLinks ?? [])
+      .map((link: any) => {
+        const crd = link?.crds;
+        const id = Number(crd?.id ?? link?.crd_id);
+        if (!Number.isFinite(id)) return null;
+        if (crd && crd.active === false) return null;
+        return {
+          id,
+          code: String(crd?.code || "").trim(),
+          name: String(crd?.name || "").trim(),
+          sector_id: Number(crd?.sector_id) || null,
+        };
+      })
+      .filter(Boolean) as Array<{ id: number; code: string; name: string; sector_id: number | null }>;
+
+    const crdIds = Array.from(new Set(extraCrds.map((c) => c.id)));
+    const crdCodes = Array.from(
+      new Set(extraCrds.map((c) => c.code).filter((code) => Boolean(code)))
+    );
+
     const { password: _pwd, ...userWithoutPassword } = user;
-    return { ...userWithoutPassword, sector_ids: fallbackSectorIds, sector_names: sectorNames };
+    const permissions = await loadRolePermissions(String(user.role || ""));
+    return {
+      ...userWithoutPassword,
+      sector_ids: sectorIds,
+      sector_names: sectorNames,
+      crd_ids: crdIds,
+      crd_codes: crdCodes,
+      extra_crds: extraCrds,
+      empresa_keys: empresaKeys,
+      empresa_key: activeEmpresa,
+      permissions,
+    };
   };
 
   // ====================================================
@@ -524,7 +886,7 @@ export function createApp() {
         }
       }
 
-      const sessionData = await buildUserSession(user);
+      const sessionData = await buildUserSession(user, empresaKeyOf(req));
       res.cookie(SESSION_COOKIE, token, sessionCookieOptions());
       res.json(sessionData);
     } catch (err) {
@@ -532,6 +894,180 @@ export function createApp() {
       res.status(500).json({
         error: "Erro interno na autenticação. Verifique se JWT_SECRET está configurado no servidor.",
       });
+    }
+  });
+
+  const forgotLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 5,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: "Muitas tentativas. Tente novamente em alguns minutos." },
+  });
+
+  const resolveAppBaseUrl = (req: express.Request): string => {
+    const origin = String(req.headers.origin || "").replace(/\/$/, "");
+    if (origin && corsOrigins.includes(origin)) return origin;
+    const proto = String(req.headers["x-forwarded-proto"] || req.protocol || "http")
+      .split(",")[0]
+      .trim();
+    const host = String(req.headers["x-forwarded-host"] || req.headers.host || "localhost:3000")
+      .split(",")[0]
+      .trim();
+    return `${proto}://${host}`;
+  };
+
+  const findValidResetToken = async (rawToken: string) => {
+    if (!rawToken) return null;
+    const tokenHash = hashPasswordResetToken(rawToken);
+    const { data, error } = await supabase
+      .from("password_reset_tokens")
+      .select("id, user_id, expires_at, used_at")
+      .eq("token_hash", tokenHash)
+      .maybeSingle();
+    if (error || !data) return null;
+    if (data.used_at) return null;
+    if (new Date(data.expires_at).getTime() <= Date.now()) return null;
+    return data;
+  };
+
+  const buildResetEmailHtml = (name: string, accountEmail: string, resetUrl: string) => `
+    <div style="font-family:Arial,sans-serif;background:#F8FAFC;padding:32px 16px;">
+      <div style="max-width:480px;margin:0 auto;background:#ffffff;border:1px solid #e2e8f0;border-radius:16px;padding:28px;">
+        <p style="margin:0 0 4px;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:#64748b;font-weight:700;">Budget</p>
+        <h1 style="margin:0 0 16px;font-size:22px;color:#0f172a;">Redefinir senha</h1>
+        <p style="margin:0 0 12px;font-size:14px;line-height:1.6;color:#334155;">
+          Olá${name ? `, ${name}` : ""}. Recebemos um pedido para redefinir a senha da conta <strong>${accountEmail}</strong>.
+        </p>
+        <p style="margin:0 0 24px;font-size:14px;line-height:1.6;color:#334155;">
+          O link é válido por 1 hora e pode ser usado uma única vez.
+        </p>
+        <p style="margin:0 0 24px;">
+          <a href="${resetUrl}" style="display:inline-block;background:#004D40;color:#ffffff;text-decoration:none;font-size:14px;font-weight:700;padding:12px 18px;border-radius:12px;">
+            Escolher nova senha
+          </a>
+        </p>
+        <p style="margin:0;font-size:12px;line-height:1.5;color:#94a3b8;">
+          Se você não pediu essa alteração, ignore este e-mail. A senha atual continua válida.
+        </p>
+      </div>
+    </div>
+  `;
+
+  app.post("/api/auth/forgot-password", forgotLimiter, async (req, res) => {
+    const email = String(req.body?.email || "").trim().toLowerCase();
+    if (!email) {
+      return res.status(400).json({ error: "Informe o e-mail." });
+    }
+
+    try {
+      const { data: user } = await supabase
+        .from("users")
+        .select("id, name, email")
+        .eq("email", email)
+        .maybeSingle();
+
+      if (!user?.id) {
+        return res.status(404).json({
+          error: "Não há usuário cadastrado com este e-mail.",
+        });
+      }
+
+      const { raw, hash } = createPasswordResetToken();
+      const nowIso = new Date().toISOString();
+      const expiresAt = new Date(Date.now() + RESET_TOKEN_TTL_SECONDS * 1000).toISOString();
+
+      await supabase
+        .from("password_reset_tokens")
+        .update({ used_at: nowIso })
+        .eq("user_id", user.id)
+        .is("used_at", null);
+
+      const { error: insertError } = await supabase.from("password_reset_tokens").insert({
+        user_id: user.id,
+        token_hash: hash,
+        expires_at: expiresAt,
+      });
+
+      if (insertError) {
+        console.error("Erro ao gravar token de reset:", insertError);
+        return res.status(500).json({ error: "Não foi possível gerar o link de redefinição." });
+      }
+
+      const resetUrl = `${resolveAppBaseUrl(req)}/?reset_token=${encodeURIComponent(raw)}`;
+      try {
+        await sendEmail({
+          to: String(user.email),
+          subject: "Redefinir senha — Budget",
+          html: buildResetEmailHtml(String(user.name || ""), String(user.email), resetUrl),
+          text: `Olá${user.name ? `, ${user.name}` : ""}. Para redefinir a senha da conta ${user.email}, acesse: ${resetUrl}. O link vale por 1 hora.`,
+        });
+      } catch (err) {
+        console.error("Erro ao enviar e-mail de reset:", err);
+        const code = err instanceof Error ? err.message : "";
+        if (code === "RESEND_DOMAIN_REQUIRED") {
+          return res.status(502).json({
+            error:
+              "Usuário encontrado, mas o Resend só envia para este e-mail depois de verificar um domínio em resend.com/domains.",
+          });
+        }
+        return res.status(502).json({
+          error: "Usuário encontrado, mas o e-mail não pôde ser enviado. Tente novamente em alguns minutos.",
+        });
+      }
+
+      return res.json({
+        ok: true,
+        message: `Usuário encontrado. Enviamos o link de redefinição para ${user.email}.`,
+      });
+    } catch (err) {
+      console.error("Erro em forgot-password:", err);
+      return res.status(500).json({ error: "Não foi possível processar a recuperação de senha." });
+    }
+  });
+
+  app.get("/api/auth/reset-password", async (req, res) => {
+    const token = String(req.query.token || "");
+    const row = await findValidResetToken(token);
+    if (!row) {
+      return res.status(400).json({ error: "Link inválido ou expirado." });
+    }
+    return res.json({ ok: true });
+  });
+
+  app.post("/api/auth/reset-password", forgotLimiter, async (req, res) => {
+    const token = String(req.body?.token || "");
+    const password = String(req.body?.password || "");
+    const pwdError = validatePasswordStrength(password);
+    if (pwdError) {
+      return res.status(400).json({ error: pwdError });
+    }
+
+    const row = await findValidResetToken(token);
+    if (!row) {
+      return res.status(400).json({ error: "Link inválido ou expirado." });
+    }
+
+    try {
+      const hashed = await hashPassword(password);
+      const { error: updErr } = await supabase
+        .from("users")
+        .update({ password: hashed })
+        .eq("id", row.user_id);
+      if (updErr) {
+        console.error("Erro ao atualizar senha:", updErr);
+        return res.status(500).json({ error: "Não foi possível atualizar a senha." });
+      }
+
+      await supabase
+        .from("password_reset_tokens")
+        .update({ used_at: new Date().toISOString() })
+        .eq("id", row.id);
+
+      return res.json({ ok: true, message: "Senha redefinida. Faça login com a nova senha." });
+    } catch (err) {
+      console.error("Erro em reset-password:", err);
+      return res.status(500).json({ error: "Não foi possível atualizar a senha." });
     }
   });
 
@@ -547,13 +1083,37 @@ export function createApp() {
       .eq("id", req.user!.id)
       .single();
     if (error || !user) return res.status(401).json({ error: "Sessão inválida" });
-    res.json(await buildUserSession(user));
+    res.json(await buildUserSession(user, empresaKeyOf(req)));
   });
 
   // ====================================================
   // A partir daqui, TODAS as rotas exigem autenticação.
   // ====================================================
   app.use("/api", requireAuth);
+  app.use("/api", async (req, res, next) => {
+    if (!req.user?.id) return next();
+    try {
+      const { data } = await supabase
+        .from("user_empresas")
+        .select("empresa_key")
+        .eq("user_id", req.user.id)
+        .eq("empresa_key", empresaKeyOf(req))
+        .maybeSingle();
+      if (!data) {
+        const { count } = await supabase
+          .from("user_empresas")
+          .select("empresa_key", { count: "exact", head: true })
+          .eq("user_id", req.user.id);
+        if ((count ?? 0) > 0) {
+          return res.status(403).json({ error: "Sem acesso a esta empresa." });
+        }
+      }
+      return next();
+    } catch (err) {
+      console.error("Falha ao validar empresa do usuário:", err);
+      return next();
+    }
+  });
 
   // ====================================================
   // PLANILHAS (Extracao_Planilhas)
@@ -598,6 +1158,7 @@ export function createApp() {
     const userIds = (data ?? []).map((user: any) => user.id);
     let sectorLinksByUserId = new Map<string, Array<{ id: number; name: string }>>();
     let sectorNameById = new Map<number, string>();
+    let crdLinksByUserId = new Map<string, number[]>();
 
     if (userIds.length) {
       const { data: linksData, error: linksError } = await supabase
@@ -654,6 +1215,20 @@ export function createApp() {
           (fallbackSectors ?? []).map((sector: any) => [Number(sector.id), String(sector.name || "")])
         );
       }
+
+      const { data: crdLinks, error: crdLinksError } = await supabase
+        .from("user_crds")
+        .select("user_id, crd_id")
+        .in("user_id", userIds);
+      if (!crdLinksError) {
+        for (const link of crdLinks ?? []) {
+          const userId = String((link as any).user_id ?? "");
+          const crdId = Number((link as any).crd_id);
+          if (!userId || !Number.isFinite(crdId)) continue;
+          if (!crdLinksByUserId.has(userId)) crdLinksByUserId.set(userId, []);
+          crdLinksByUserId.get(userId)!.push(crdId);
+        }
+      }
     }
 
     res.json(
@@ -672,25 +1247,27 @@ export function createApp() {
             : (Number.isFinite(Number(user.sector_id)) && sectorNameById.get(Number(user.sector_id))
                 ? [String(sectorNameById.get(Number(user.sector_id)))]
                 : []),
+        crd_ids: crdLinksByUserId.get(String(user.id)) ?? [],
       }))
     );
   });
 
   app.post("/api/users", requireRole("admin"), async (req, res) => {
-    const { name, email, password, role, sector_id, sector_ids } = req.body as {
+    const { name, email, password, role, sector_id, sector_ids, crd_ids } = req.body as {
       name?: string;
       email?: string;
       password?: string;
-      role?: "admin" | "finance" | "controle" | "manager" | "viewer";
+      role?: string;
       sector_id?: number | null;
       sector_ids?: number[];
+      crd_ids?: number[];
     };
 
     if (!name || !email || !password || !role) {
       return res.status(400).json({ error: "name, email, password e role são obrigatórios" });
     }
 
-    if (!["admin", "finance", "controle", "manager", "viewer"].includes(role)) {
+    if (!(await roleExists(String(role)))) {
       return res.status(400).json({ error: "role inválido" });
     }
 
@@ -756,24 +1333,42 @@ export function createApp() {
       }
     }
 
+    const normalizedCrdIds = Array.from(
+      new Set(
+        (Array.isArray(crd_ids) ? crd_ids : [])
+          .map((value) => Number(value))
+          .filter((value) => Number.isFinite(value) && value > 0)
+      )
+    );
+    const crdLinksError = await replaceUserCrdLinks(data.id, normalizedCrdIds);
+    if (crdLinksError) {
+      console.error("Erro ao salvar CRDs do usuário:", crdLinksError);
+      return res.status(500).json({
+        error: "Usuário criado, mas não foi possível salvar os CRDs extras.",
+      });
+    }
+
+    await ensureUserHasBothEmpresas(data.id);
+
     res.json({ id: data.id });
   });
 
   app.patch("/api/users/:id", requireRole("admin"), async (req, res) => {
     const { id } = req.params;
-    const { name, email, password, role, sector_id, sector_ids } = req.body as {
+    const { name, email, password, role, sector_id, sector_ids, crd_ids } = req.body as {
       name?: string;
       email?: string;
       password?: string;
-      role?: "admin" | "finance" | "controle" | "manager" | "viewer";
+      role?: string;
       sector_id?: number | null;
       sector_ids?: number[];
+      crd_ids?: number[];
     };
 
     if (!name || !email || !role) {
       return res.status(400).json({ error: "name, email e role são obrigatórios" });
     }
-    if (!["admin", "finance", "controle", "manager", "viewer"].includes(role)) {
+    if (!(await roleExists(String(role)))) {
       return res.status(400).json({ error: "role inválido" });
     }
 
@@ -844,6 +1439,21 @@ export function createApp() {
       }
     }
 
+    const normalizedCrdIds = Array.from(
+      new Set(
+        (Array.isArray(crd_ids) ? crd_ids : [])
+          .map((value) => Number(value))
+          .filter((value) => Number.isFinite(value) && value > 0)
+      )
+    );
+    const crdLinksError = await replaceUserCrdLinks(id, normalizedCrdIds);
+    if (crdLinksError) {
+      console.error("Erro ao salvar CRDs do usuário:", crdLinksError);
+      return res.status(500).json({
+        error: "Usuário atualizado, mas não foi possível salvar os CRDs extras.",
+      });
+    }
+
     res.json({ success: true });
   });
 
@@ -869,6 +1479,462 @@ export function createApp() {
       return res.status(400).json({ error: "Não foi possível excluir o usuário." });
     }
     res.json({ success: true });
+  });
+
+  // ====================================================
+  // SUGESTÃO DE NOME DO SISTEMA (uma vez por usuário)
+  // ====================================================
+  app.get("/api/system-name-suggestions/me", async (req, res) => {
+    const userId = Number(req.user?.id);
+    if (!Number.isFinite(userId)) return res.status(401).json({ error: "Não autenticado" });
+    const { data, error } = await supabase
+      .from("system_name_suggestions")
+      .select("id")
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (error) {
+      console.error("Erro ao verificar sugestão de nome:", error);
+      return res.status(500).json({ error: "Não foi possível verificar a sugestão." });
+    }
+    res.json({ submitted: Boolean(data) });
+  });
+
+  app.post("/api/system-name-suggestions", async (req, res) => {
+    const suggestion = String(req.body?.suggestion || "").trim().slice(0, 80);
+    if (suggestion.length < 2) {
+      return res.status(400).json({ error: "Informe um nome para continuar." });
+    }
+    const userId = Number(req.user?.id);
+    if (!Number.isFinite(userId)) return res.status(401).json({ error: "Não autenticado" });
+
+    const { data: userRow } = await supabase
+      .from("users")
+      .select("id, name, email, role")
+      .eq("id", userId)
+      .maybeSingle();
+
+    const { data, error } = await supabase
+      .from("system_name_suggestions")
+      .insert({
+        user_id: userId,
+        user_name: userRow?.name || req.user?.name || null,
+        user_email: userRow?.email || req.user?.email || null,
+        user_role: userRow?.role || req.user?.role || null,
+        suggestion,
+      })
+      .select("id, created_at")
+      .single();
+
+    if (error) {
+      if (String((error as { code?: string }).code || "") === "23505") {
+        return res.json({ submitted: true, already: true });
+      }
+      console.error("Erro ao salvar sugestão de nome:", error);
+      return res.status(500).json({ error: "Não foi possível salvar a sugestão." });
+    }
+    res.status(201).json({ id: data.id, submitted: true, created_at: data.created_at });
+  });
+
+  app.get("/api/system-name-suggestions", requireRole("admin"), async (_req, res) => {
+    const [{ data, error }, usersCount] = await Promise.all([
+      supabase
+        .from("system_name_suggestions")
+        .select("id, user_id, user_name, user_email, user_role, suggestion, created_at")
+        .order("created_at", { ascending: false }),
+      supabase.from("users").select("id", { count: "exact", head: true }),
+    ]);
+    if (error) {
+      console.error("Erro ao listar sugestões de nome:", error);
+      return res.status(500).json({ error: "Não foi possível carregar as sugestões." });
+    }
+    if (usersCount.error) {
+      console.error("Erro ao contar usuários:", usersCount.error);
+    }
+    const suggestions = data ?? [];
+    res.json({
+      suggestions,
+      total_users: Number(usersCount.count ?? 0),
+      answered: suggestions.length,
+    });
+  });
+
+  // ====================================================
+  // SUGESTÕES DOS USUÁRIOS
+  // ====================================================
+  app.post("/api/suggestions", async (req, res) => {
+    const message = String(req.body?.message || "").trim();
+    const page_tab = String(req.body?.page_tab || "").trim().slice(0, 120) || null;
+    const page_label = String(req.body?.page_label || "").trim().slice(0, 240) || null;
+    const rawImagePath = String(req.body?.image_path || "").trim();
+    const rawImageName = String(req.body?.image_name || "").trim().slice(0, 255);
+
+    if (message.length < 5) {
+      return res.status(400).json({ error: "Escreva uma sugestão com pelo menos algumas palavras." });
+    }
+    if (message.length > 4000) {
+      return res.status(400).json({ error: "A sugestão deve ter no máximo 4000 caracteres." });
+    }
+
+    let imagePath: string | null = null;
+    let imageName: string | null = null;
+    if (rawImagePath) {
+      const objectPath = normalizeStorageObjectPath(rawImagePath);
+      if (!objectPath || !objectPath.startsWith("suggestions/")) {
+        return res.status(400).json({ error: "Imagem inválida." });
+      }
+      imagePath = objectPath;
+      imageName = rawImageName || null;
+    }
+
+    const userId = req.user?.id;
+    const { data: userRow } = userId
+      ? await supabase.from("users").select("id, name, email, role").eq("id", userId).maybeSingle()
+      : { data: null };
+
+    const { data, error } = await supabase
+      .from("user_suggestions")
+      .insert({
+        user_id: userRow?.id ?? null,
+        user_name: userRow?.name || req.user?.name || null,
+        user_email: userRow?.email || req.user?.email || null,
+        user_role: userRow?.role || req.user?.role || null,
+        message,
+        page_tab,
+        page_label,
+        image_path: imagePath,
+        image_name: imageName,
+      })
+      .select("id, created_at")
+      .single();
+
+    if (error) {
+      console.error("Erro ao salvar sugestão:", error);
+      return res.status(500).json({
+        error: "Não foi possível salvar a sugestão. Verifique a migration sql/28_user_suggestions.sql.",
+      });
+    }
+
+    res.status(201).json({ id: data.id, created_at: data.created_at });
+  });
+
+  app.get("/api/suggestions", requireRole("admin"), async (_req, res) => {
+    const { data, error } = await supabase
+      .from("user_suggestions")
+      .select("id, user_id, user_name, user_email, user_role, message, page_tab, page_label, created_at, done, done_at, image_path, image_name")
+      .order("created_at", { ascending: false })
+      .limit(500);
+
+    if (error) {
+      console.error("Erro ao listar sugestões:", error);
+      return res.status(500).json({
+        error: "Não foi possível carregar as sugestões. Verifique a migration sql/28_user_suggestions.sql.",
+      });
+    }
+    res.json(data ?? []);
+  });
+
+  app.patch("/api/suggestions/:id", requireRole("admin"), async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id) || id <= 0) {
+      return res.status(400).json({ error: "Sugestão inválida." });
+    }
+    const done = Boolean(req.body?.done);
+    const { data, error } = await supabase
+      .from("user_suggestions")
+      .update({
+        done,
+        done_at: done ? new Date().toISOString() : null,
+      })
+      .eq("id", id)
+      .select("id, done, done_at")
+      .maybeSingle();
+
+    if (error) {
+      console.error("Erro ao atualizar sugestão:", error);
+      return res.status(500).json({ error: "Não foi possível atualizar a sugestão." });
+    }
+    if (!data) return res.status(404).json({ error: "Sugestão não encontrada." });
+    res.json(data);
+  });
+
+  app.post("/api/suggestions/image", upload.single("image"), async (req, res) => {
+    if (!req.file) return res.status(400).json({ error: "Imagem não enviada" });
+    const mime = String(req.file.mimetype || "");
+    const ext = path.extname(req.file.originalname || "").toLowerCase();
+    const allowedMimes = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
+    const allowedExt = [".jpg", ".jpeg", ".png", ".webp", ".gif"];
+    if (!allowedMimes.has(mime) && !allowedExt.includes(ext)) {
+      if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+      return res.status(400).json({ error: "Formato inválido. Envie PNG, JPG, WEBP ou GIF." });
+    }
+
+    const safeExt =
+      ext.replace(".", "") ||
+      (mime === "image/jpeg" ? "jpg" : mime === "image/png" ? "png" : mime === "image/webp" ? "webp" : mime === "image/gif" ? "gif" : "png");
+
+    try {
+      const fileBuffer = fs.readFileSync(req.file.path);
+      const storagePath = await uploadDocument(
+        fileBuffer,
+        "suggestions",
+        safeExt,
+        mime || "image/png"
+      );
+      res.json({
+        image_path: storagePath,
+        image_name: String(req.file.originalname || "print.png").slice(0, 255),
+      });
+    } catch (error) {
+      console.error("Erro ao salvar imagem da sugestão:", error);
+      res.status(500).json({ error: "Não foi possível salvar a imagem." });
+    } finally {
+      if (req.file?.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+    }
+  });
+
+  app.get("/api/suggestions/:id/image-url", requireRole("admin"), async (req, res) => {
+    const { data, error } = await supabase
+      .from("user_suggestions")
+      .select("id, image_path")
+      .eq("id", Number(req.params.id))
+      .maybeSingle();
+
+    if (error) {
+      console.error(error);
+      return res.status(500).json({ error: "Erro ao buscar a imagem." });
+    }
+    if (!data) return res.status(404).json({ error: "Sugestão não encontrada" });
+    const rawPath = String((data as { image_path?: string }).image_path || "");
+    if (!rawPath) return res.status(404).json({ error: "Imagem não anexada" });
+
+    const result = await createSignedDocumentUrl(rawPath);
+    if (!("url" in result)) {
+      const status = result.error === "Caminho inválido" ? 400 : 404;
+      return res.status(status).json({ error: result.error });
+    }
+    res.json({ url: result.url });
+  });
+
+  // ====================================================
+  // ROLES / PERMISSÕES
+  // ====================================================
+  app.get("/api/permissions/catalog", requireRole("admin"), (_req, res) => {
+    res.json(PERMISSION_RESOURCES);
+  });
+
+  app.get("/api/roles", requireRole("admin"), async (_req, res) => {
+    const { data, error } = await supabase
+      .from("app_roles")
+      .select("slug, label, description, is_system, sort_order, created_at, updated_at")
+      .order("sort_order", { ascending: true })
+      .order("label", { ascending: true });
+
+    if (error) {
+      console.error("Erro ao listar roles:", error);
+      return res.status(500).json({
+        error: "Não foi possível carregar os níveis. Rode a migration sql/27_role_permissions.sql.",
+        roles: SYSTEM_ROLES.map((r) => ({ ...r, is_system: true })),
+      });
+    }
+    res.json(data ?? []);
+  });
+
+  app.post("/api/roles", requireRole("admin"), async (req, res) => {
+    const label = String(req.body?.label || "").trim();
+    const description = String(req.body?.description || "").trim();
+    let slug = String(req.body?.slug || "").trim().toLowerCase();
+    if (!label) return res.status(400).json({ error: "Informe o nome do nível." });
+    if (!slug) slug = slugifyRole(label);
+    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)) {
+      return res.status(400).json({ error: "Slug inválido. Use letras minúsculas, números e hífen." });
+    }
+    if (slug === "admin") {
+      return res.status(400).json({ error: "Não é permitido criar outro nível admin." });
+    }
+
+    const { data: existing } = await supabase.from("app_roles").select("slug").eq("slug", slug).maybeSingle();
+    if (existing) return res.status(409).json({ error: "Já existe um nível com este identificador." });
+
+    const { data: maxSort } = await supabase
+      .from("app_roles")
+      .select("sort_order")
+      .order("sort_order", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    const sort_order = Number(maxSort?.sort_order || 100) + 10;
+    const { data, error } = await supabase
+      .from("app_roles")
+      .insert({
+        slug,
+        label,
+        description: description || null,
+        is_system: false,
+        sort_order,
+      })
+      .select("slug, label, description, is_system, sort_order")
+      .single();
+
+    if (error) {
+      console.error("Erro ao criar role:", error);
+      return res.status(400).json({ error: "Não foi possível criar o nível." });
+    }
+
+    const defaults = buildDefaultPermissionRows("viewer").map((row) => ({
+      role_slug: slug,
+      ...row,
+    }));
+    const { error: permError } = await supabase.from("role_permissions").upsert(defaults, {
+      onConflict: "role_slug,resource_key",
+    });
+    if (permError) {
+      console.error("Erro ao seedar permissões do novo nível:", permError);
+    }
+
+    res.status(201).json(data);
+  });
+
+  app.patch("/api/roles/:slug", requireRole("admin"), async (req, res) => {
+    const slug = String(req.params.slug || "");
+    const label = req.body?.label != null ? String(req.body.label).trim() : undefined;
+    const description = req.body?.description != null ? String(req.body.description).trim() : undefined;
+
+    if (!slug) return res.status(400).json({ error: "slug obrigatório" });
+    const payload: Record<string, unknown> = { updated_at: new Date().toISOString() };
+    if (label !== undefined) {
+      if (label.length < 2) return res.status(400).json({ error: "Nome inválido." });
+      payload.label = label;
+    }
+    if (description !== undefined) payload.description = description || null;
+
+    const { data, error } = await supabase
+      .from("app_roles")
+      .update(payload)
+      .eq("slug", slug)
+      .select("slug, label, description, is_system, sort_order")
+      .single();
+
+    if (error) {
+      console.error("Erro ao atualizar role:", error);
+      return res.status(400).json({ error: "Não foi possível atualizar o nível." });
+    }
+    res.json(data);
+  });
+
+  app.delete("/api/roles/:slug", requireRole("admin"), async (req, res) => {
+    const slug = String(req.params.slug || "");
+    if (!slug) return res.status(400).json({ error: "slug obrigatório" });
+
+    const { data: role } = await supabase
+      .from("app_roles")
+      .select("slug, is_system")
+      .eq("slug", slug)
+      .maybeSingle();
+    if (!role) return res.status(404).json({ error: "Nível não encontrado." });
+    if (role.is_system) return res.status(400).json({ error: "Níveis de sistema não podem ser excluídos." });
+
+    const { count, error: countError } = await supabase
+      .from("users")
+      .select("id", { head: true, count: "exact" })
+      .eq("role", slug);
+    if (countError) {
+      console.error("Erro ao contar usuários do nível:", countError);
+      return res.status(500).json({ error: "Não foi possível verificar usuários do nível." });
+    }
+    if ((count ?? 0) > 0) {
+      return res.status(400).json({
+        error: `Há ${count} usuário(s) com este nível. Reatribua-os antes de excluir.`,
+      });
+    }
+
+    const { error } = await supabase.from("app_roles").delete().eq("slug", slug);
+    if (error) {
+      console.error("Erro ao excluir role:", error);
+      return res.status(400).json({ error: "Não foi possível excluir o nível." });
+    }
+    res.json({ success: true });
+  });
+
+  app.get("/api/roles/:slug/permissions", requireRole("admin"), async (req, res) => {
+    const slug = String(req.params.slug || "");
+    if (!slug) return res.status(400).json({ error: "slug obrigatório" });
+    if (!(await roleExists(slug))) return res.status(404).json({ error: "Nível não encontrado." });
+
+    const rows = await loadRolePermissions(slug);
+    // Completa com recursos faltantes (desmarcados)
+    const byKey = new Map(rows.map((r) => [r.resource_key, r]));
+    const full = PERMISSION_RESOURCE_KEYS.map((key) => {
+      const existing = byKey.get(key);
+      if (existing) return existing;
+      return {
+        resource_key: key,
+        can_view: false,
+        can_create: false,
+        can_edit: false,
+        can_delete: false,
+      };
+    });
+    res.json(full);
+  });
+
+  app.put("/api/roles/:slug/permissions", requireRole("admin"), async (req, res) => {
+    const slug = String(req.params.slug || "");
+    if (!slug) return res.status(400).json({ error: "slug obrigatório" });
+    if (!(await roleExists(slug))) return res.status(404).json({ error: "Nível não encontrado." });
+    if (slug === "admin") {
+      return res.status(400).json({
+        error: "O nível Administrador sempre tem acesso total; a matriz não é editável.",
+      });
+    }
+
+    const incoming = Array.isArray(req.body?.permissions) ? req.body.permissions : null;
+    if (!incoming) return res.status(400).json({ error: "Envie permissions[]" });
+
+    const allowed = new Set(PERMISSION_RESOURCE_KEYS);
+    const rows = incoming
+      .map((row: any) => {
+        const resource_key = String(row?.resource_key || "");
+        if (!allowed.has(resource_key)) return null;
+        const can_view = Boolean(row?.can_view);
+        return {
+          role_slug: slug,
+          resource_key,
+          can_view,
+          can_create: can_view && Boolean(row?.can_create),
+          can_edit: can_view && Boolean(row?.can_edit),
+          can_delete: can_view && Boolean(row?.can_delete),
+        };
+      })
+      .filter(Boolean) as Array<{
+      role_slug: string;
+      resource_key: string;
+      can_view: boolean;
+      can_create: boolean;
+      can_edit: boolean;
+      can_delete: boolean;
+    }>;
+
+    // Remove permissões antigas e grava o snapshot atual
+    const { error: delError } = await supabase.from("role_permissions").delete().eq("role_slug", slug);
+    if (delError) {
+      console.error("Erro ao limpar permissões:", delError);
+      return res.status(500).json({ error: "Não foi possível salvar as permissões." });
+    }
+
+    if (rows.length) {
+      const { error } = await supabase.from("role_permissions").insert(rows);
+      if (error) {
+        console.error("Erro ao salvar permissões:", error);
+        return res.status(500).json({ error: "Não foi possível salvar as permissões." });
+      }
+    }
+
+    await supabase
+      .from("app_roles")
+      .update({ updated_at: new Date().toISOString() })
+      .eq("slug", slug);
+
+    res.json({ success: true, count: rows.length });
   });
 
   // ====================================================
@@ -1198,11 +2264,12 @@ export function createApp() {
   // ====================================================
   // FINANCIAL RECORDS
   // ====================================================
-  app.get("/api/financial/records", async (_req, res) => {
-    const { data, error } = await supabase
-      .from("financial_records")
-      .select("*, categories(name), sectors(name)")
-      .order("date", { ascending: false });
+  app.get("/api/financial/records", async (req, res) => {
+    const { data, error } = await filterByEmpresa(
+      supabase.from("financial_records").select("*, categories(name), sectors(name)"),
+      req,
+      "financial_records"
+    ).order("date", { ascending: false });
 
     if (error) { console.error(error); return res.status(500).json({ error: "Erro interno ao processar a solicitação." }); }
 
@@ -1226,29 +2293,33 @@ export function createApp() {
     const selectedYear = Number(year) || now.getFullYear();
     const { dateFrom, dateTo } = getMonthDateRange(selectedYear, selectedMonth);
 
-    const { data: sectors, error } = await supabase
-      .from("sectors")
-      .select("*")
-      .order("name");
+    const { data: sectors, error } = await filterByEmpresa(
+      supabase.from("sectors").select("*"),
+      req,
+      "sectors"
+    ).order("name");
 
     if (error) { console.error(error); return res.status(500).json({ error: "Erro interno ao processar a solicitação." }); }
 
-    const { data: crdData, error: crdError } = await supabase
-      .from("crds")
-      .select("id, code, sector_id, previsto_mes")
-      .eq("active", true);
+    const { data: crdData, error: crdError } = await filterByEmpresa(
+      supabase.from("crds").select("id, code, sector_id, previsto_mes").eq("active", true),
+      req,
+      "crds"
+    );
     if (crdError) return res.status(500).json({ error: crdError.message });
 
-    const { data: allCrds } = await supabase
-      .from("crds")
-      .select("id, code, sector_id");
+    const { data: allCrds } = await filterByEmpresa(
+      supabase.from("crds").select("id, code, sector_id"),
+      req,
+      "crds"
+    );
 
     let occupancyPercent = 100;
-    const { data: occupancyRows, error: occupancyError } = await supabase
-      .from("sintase_occupancy")
-      .select("occupancy_percent")
-      .eq("year", selectedYear)
-      .limit(1);
+    const { data: occupancyRows, error: occupancyError } = await filterByEmpresa(
+      supabase.from("sintase_occupancy").select("occupancy_percent").eq("year", selectedYear),
+      req,
+      "sintase_occupancy"
+    ).limit(1);
     if (!occupancyError && occupancyRows?.length) {
       occupancyPercent = getNormalizedOccupancyPercent((occupancyRows[0] as any).occupancy_percent);
     }
@@ -1269,7 +2340,10 @@ export function createApp() {
     const allowedCrdIds = new Set(crdIds);
 
     if (crdIds.length) {
-      const { rows, error: monthlyError } = await fetchMonthlyValuesByYear(selectedYear);
+      const { rows, error: monthlyError } = await fetchMonthlyValuesByYear(
+        selectedYear,
+        empresaKeyOf(req)
+      );
       monthlyValues = rows ?? [];
 
       if (monthlyError) {
@@ -1324,24 +2398,36 @@ export function createApp() {
     const yearDateFrom = `${selectedYear}-01-01`;
     const yearDateTo = `${selectedYear}-12-31`;
     const [{ data: yearInvoices }, { data: yearReqs }, { data: yearManual }] = await Promise.all([
-      supabase
-        .from("invoices")
-        .select("sector_id, amount")
-        .gte("due_date", yearDateFrom)
-        .lte("due_date", yearDateTo)
-        .or("flow_stage.is.null,flow_stage.neq.cancelled"),
-      supabase
-        .from("requisitions")
-        .select("sector_id, amount")
-        .eq("status", "open")
-        .gte("date", yearDateFrom)
-        .lte("date", yearDateTo),
-      supabase
-        .from("manual_entries")
-        .select("sector_id, amount")
-        .in("status", ["open", "approved"])
-        .gte("date", yearDateFrom)
-        .lte("date", yearDateTo),
+      filterByEmpresa(
+        supabase
+          .from("invoices")
+          .select("sector_id, amount")
+          .gte("due_date", yearDateFrom)
+          .lte("due_date", yearDateTo)
+          .or("flow_stage.is.null,flow_stage.neq.cancelled"),
+        req,
+        "invoices"
+      ),
+      filterByEmpresa(
+        supabase
+          .from("requisitions")
+          .select("sector_id, amount")
+          .in("status", ["pending_manager", "open", "approved"])
+          .gte("date", yearDateFrom)
+          .lte("date", yearDateTo),
+        req,
+        "requisitions"
+      ),
+      filterByEmpresa(
+        supabase
+          .from("manual_entries")
+          .select("sector_id, amount")
+          .in("status", ["pending_manager", "open", "approved"])
+          .gte("date", yearDateFrom)
+          .lte("date", yearDateTo),
+        req,
+        "manual_entries"
+      ),
     ]);
 
     const annualInvoicesBySector = new Map<number, number>();
@@ -1375,27 +2461,39 @@ export function createApp() {
     const enriched = await Promise.all(
       (sectors ?? []).map(async (sector: any) => {
         const [{ data: pendingInvoices }, { data: pendingReqs }, { data: pendingManual }] = await Promise.all([
-          supabase
-            .from("invoices")
-            .select("amount")
-            .eq("sector_id", sector.id)
-            .gte("due_date", dateFrom)
-            .lte("due_date", dateTo)
-            .or("flow_stage.is.null,flow_stage.neq.cancelled"),
-          supabase
-            .from("requisitions")
-            .select("amount")
-            .eq("sector_id", sector.id)
-            .eq("status", "open")
-            .gte("date", dateFrom)
-            .lte("date", dateTo),
-          supabase
-            .from("manual_entries")
-            .select("amount")
-            .eq("sector_id", sector.id)
-            .in("status", ["open", "approved"])
-            .gte("date", dateFrom)
-            .lte("date", dateTo),
+          filterByEmpresa(
+            supabase
+              .from("invoices")
+              .select("amount")
+              .eq("sector_id", sector.id)
+              .gte("due_date", dateFrom)
+              .lte("due_date", dateTo)
+              .or("flow_stage.is.null,flow_stage.neq.cancelled"),
+            req,
+            "invoices"
+          ),
+          filterByEmpresa(
+            supabase
+              .from("requisitions")
+              .select("amount")
+              .eq("sector_id", sector.id)
+              .in("status", ["pending_manager", "open", "approved"])
+              .gte("date", dateFrom)
+              .lte("date", dateTo),
+            req,
+            "requisitions"
+          ),
+          filterByEmpresa(
+            supabase
+              .from("manual_entries")
+              .select("amount")
+              .eq("sector_id", sector.id)
+              .in("status", ["pending_manager", "open", "approved"])
+              .gte("date", dateFrom)
+              .lte("date", dateTo),
+            req,
+            "manual_entries"
+          ),
         ]);
 
         const pending_invoices = (pendingInvoices ?? []).reduce(
@@ -1435,51 +2533,221 @@ export function createApp() {
     res.json(enriched);
   });
 
+  app.post("/api/sectors", requireRole("admin", "controle"), async (req, res) => {
+    const name = String(req.body?.name ?? "").trim();
+    if (!name) return res.status(400).json({ error: "O nome do setor / centro de custo é obrigatório." });
+    const codeRaw = String(req.body?.code ?? "").trim();
+    const code = codeRaw || slugSectorCodeFromName(name);
+    const budget_limit = Number(req.body?.budget_limit);
+    const { data, error } = await supabase
+      .from("sectors")
+      .insert(withEmpresaKey({
+        name,
+        code,
+        active: true,
+        budget_limit: Number.isFinite(budget_limit) ? budget_limit : 0,
+      }, req))
+      .select("id, name, code, budget_limit, active, created_at")
+      .single();
+    if (error) {
+      console.error("Erro ao criar setor:", error);
+      const detail = String(error.message || "").toLowerCase();
+      if (detail.includes("duplicate") || detail.includes("unique")) {
+        return res.status(409).json({ error: "Já existe um setor com este nome ou código." });
+      }
+      return res.status(500).json({ error: "Não foi possível criar o setor." });
+    }
+    await sectorCacheFor(empresaKeyOf(req)).reload(true);
+    res.json(data);
+  });
+
+  app.patch("/api/sectors/:id", requireRole("admin", "controle"), async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: "id inválido." });
+    const patch: Record<string, any> = {};
+    if (req.body?.name != null) {
+      const name = String(req.body.name).trim();
+      if (!name) return res.status(400).json({ error: "Nome inválido." });
+      patch.name = name;
+    }
+    if (req.body?.budget_limit != null) {
+      const budget_limit = Number(req.body.budget_limit);
+      patch.budget_limit = Number.isFinite(budget_limit) ? budget_limit : 0;
+    }
+    if (req.body?.code != null) {
+      const code = String(req.body.code).trim();
+      if (!code) return res.status(400).json({ error: "Código inválido." });
+      patch.code = code;
+    }
+    if (req.body?.active != null) {
+      patch.active = Boolean(req.body.active);
+    }
+    if (!Object.keys(patch).length) {
+      return res.status(400).json({ error: "Nenhum campo para atualizar." });
+    }
+
+    let previousName = String(req.body?.previous_name ?? "").trim();
+    if (patch.name && !previousName) {
+      const { data: current } = await supabase.from("sectors").select("name").eq("id", id).maybeSingle();
+      previousName = current?.name ? String(current.name) : "";
+    }
+
+    const { data, error } = await supabase
+      .from("sectors")
+      .update(patch)
+      .eq("id", id)
+      .select("id, name, code, budget_limit, active, created_at")
+      .single();
+    if (error) {
+      console.error("Erro ao atualizar setor:", error);
+      return res.status(500).json({ error: "Não foi possível atualizar o setor." });
+    }
+    if (patch.name && previousName && previousName !== patch.name) {
+      await supabase
+        .from("colaboradores")
+        .update({ ccusto_descricao: patch.name, updated_at: new Date().toISOString() })
+        .eq("ccusto_descricao", previousName);
+    }
+    await sectorCacheFor(empresaKeyOf(req)).reload(true);
+    res.json(data ?? { success: true });
+  });
+
+  app.delete("/api/sectors/:id", requireRole("admin", "controle"), async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: "id inválido." });
+    const { error } = await supabase.from("sectors").delete().eq("id", id);
+    if (error) {
+      console.error("Erro ao excluir setor:", error);
+      return res.status(500).json({
+        error:
+          "Não foi possível excluir o setor. Verifique se não há CRDs, cargos ou lançamentos vinculados.",
+      });
+    }
+    res.json({ success: true });
+  });
+
   // ====================================================
   // REQUISIÇÕES
   // ====================================================
-  app.get("/api/requisitions", async (_req, res) => {
-    const { data, error } = await supabase
-      .from("requisitions")
-      .select("*, sectors(name), crds(id, code, name, sector_id, sectors(name))")
-      .order("date", { ascending: false });
+  app.get("/api/requisitions", async (req, res) => {
+    const pag = parseListPagination(req.query as Record<string, unknown>);
+    const q = req.query as Record<string, string | undefined>;
+    const selectOpts = pag.enabled ? ({ count: "exact" } as const) : undefined;
 
-    if (error) { console.error(error); return res.status(500).json({ error: "Erro interno ao processar a solicitação." }); }
+    const applyFilters = (query: any) => {
+      let next = query;
+      if (q.status && q.status !== "all") next = next.eq("status", q.status);
+      if (q.from) next = next.gte("date", String(q.from).slice(0, 10));
+      if (q.to) next = next.lte("date", String(q.to).slice(0, 10));
+      const month = Number(q.month);
+      if (Number.isFinite(month) && month >= 1 && month <= 12) {
+        const year = Number(q.year) || new Date().getFullYear();
+        const { dateFrom, dateTo } = getMonthDateRange(year, month);
+        next = next.gte("date", dateFrom).lte("date", dateTo);
+      }
+      if (q.amount) {
+        const amt = Number(String(q.amount).replace(",", "."));
+        if (Number.isFinite(amt)) next = next.eq("amount", amt);
+      }
+      const term = String(q.q || "").replace(/[%_,]/g, " ").trim();
+      if (term) {
+        const like = `%${term}%`;
+        next = next.or(`protocol.ilike.${like},provider_name.ilike.${like},description.ilike.${like}`);
+      }
+      return next;
+    };
 
-    res.json(
-      (data ?? []).map((r: any) => ({
-        ...r,
-        sector_name: r.crds?.sectors?.name ?? r.sectors?.name ?? null,
-        crd_name: r.crds?.name ?? null,
-        crd_code: r.crds?.code ?? null,
-        sectors: undefined,
-        crds: undefined,
-      }))
+    let query = filterByEmpresa(
+      supabase
+        .from("requisitions")
+        .select("*, sectors(name), crds(id, code, name, sector_id, sectors(name))", selectOpts),
+      req,
+      "requisitions"
+    ).order("date", { ascending: false });
+    query = applyFilters(query);
+
+    const crdTerm = String(q.crd || "").replace(/[%_,]/g, " ").trim();
+    if (crdTerm) {
+      const { data: crdRows } = await filterByEmpresa(
+        supabase.from("crds").select("id").or(`code.ilike.%${crdTerm}%,name.ilike.%${crdTerm}%`),
+        req,
+        "crds"
+      );
+      const crdIds = (crdRows ?? []).map((c: any) => Number(c.id)).filter((id: number) => Number.isFinite(id));
+      if (crdIds.length === 0) {
+        if (!pag.enabled) return res.json([]);
+        return res.json(paginatedPayload([], 0, pag.page, pag.pageSize, { totalAmount: 0 }));
+      }
+      query = query.in("crd_id", crdIds);
+    }
+
+    if (pag.enabled) query = query.range(pag.from, pag.to);
+
+    const { data, error, count } = await query;
+    if (error) {
+      console.error(error);
+      return res.status(500).json({ error: "Erro interno ao processar a solicitação." });
+    }
+
+    const mapped = (data ?? []).map((r: any) => ({
+      ...r,
+      sector_name: r.crds?.sectors?.name ?? r.sectors?.name ?? null,
+      crd_name: r.crds?.name ?? null,
+      crd_code: r.crds?.code ?? null,
+      sectors: undefined,
+      crds: undefined,
+    }));
+
+    if (!pag.enabled) return res.json(mapped);
+
+    let totalAmount = sumAmounts(mapped, (r: any) => r.amount);
+    try {
+      let sumQuery = filterByEmpresa(supabase.from("requisitions").select("amount"), req, "requisitions");
+      sumQuery = applyFilters(sumQuery);
+      if (crdTerm) {
+        const { data: crdRows } = await filterByEmpresa(
+          supabase.from("crds").select("id").or(`code.ilike.%${crdTerm}%,name.ilike.%${crdTerm}%`),
+          req,
+          "crds"
+        );
+        const crdIds = (crdRows ?? []).map((c: any) => Number(c.id)).filter((id: number) => Number.isFinite(id));
+        if (crdIds.length) sumQuery = sumQuery.in("crd_id", crdIds);
+      }
+      const { data: amountRows } = await sumQuery;
+      if (Array.isArray(amountRows)) totalAmount = sumAmounts(amountRows, (r: any) => r.amount);
+    } catch {
+      // mantém soma da página
+    }
+
+    return res.json(
+      paginatedPayload(mapped, count ?? mapped.length, pag.page, pag.pageSize, { totalAmount })
     );
   });
 
   app.post("/api/requisitions", async (req, res) => {
-    const { crd_id, description, amount, date } = req.body;
-    if (!crd_id || !amount || !date)
-      return res.status(400).json({ error: "crd_id, amount e date são obrigatórios" });
+    const { crd_id, description, provider_name, amount, date } = req.body;
+    const resolvedProviderName = String(provider_name || "").trim();
+    if (!crd_id || !amount || !date || !resolvedProviderName) {
+      return res.status(400).json({ error: "CRD, fornecedor, valor e data são obrigatórios" });
+    }
 
-    const { data: crd, error: crdError } = await supabase
-      .from("crds")
-      .select("id, sector_id, code")
-      .eq("id", Number(crd_id))
-      .single();
+    const { data: crd, error: crdError } = await scopeByEmpresa(
+      supabase.from("crds").select("id, sector_id, code").eq("id", Number(crd_id)),
+      req
+    ).single();
     if (crdError || !crd) {
       return res.status(400).json({ error: "CRD inválido para a requisição" });
     }
 
     const { data: userRow } = await supabase.from("users").select("*").eq("id", req.user!.id).single();
     if (userRow) {
-      const session = await buildUserSession(userRow);
+      const session = await buildUserSession(userRow, empresaKeyOf(req));
       const allowedSectorIds = session.sector_ids ?? [];
       const isGlobal = ["admin", "finance", "controle"].includes(String(userRow.role || ""));
       const shared = isSharedCrdCode((crd as any).code);
+      const granted = (session.crd_ids ?? []).includes(Number(crd.id));
 
-      if (!shared && (!isGlobal || allowedSectorIds.length > 0)) {
+      if (!shared && !isGlobal && !granted) {
         if (allowedSectorIds.length === 0) {
           return res.status(403).json({ error: "Seu usuário não possui setor vinculado para lançar requisições." });
         }
@@ -1489,31 +2757,161 @@ export function createApp() {
       }
     }
 
+    const protocol = await allocateLaunchProtocol(PROTOCOL_PREFIX.requisicao, req);
+    if (!protocol) return res.status(500).json({ error: "Não foi possível gerar o protocolo da requisição." });
     const { data, error } = await supabase
       .from("requisitions")
-      .insert({
+      .insert(withEmpresaKey({
         crd_id: Number(crd_id),
         sector_id: Number(crd.sector_id),
         description: description || null,
+        provider_name: resolvedProviderName,
         amount,
         date,
-        status: "open",
-      })
-      .select("id")
+        status: initialLaunchStatus(req.user?.role),
+        protocol,
+      }, req))
+      .select("id, protocol")
       .single();
 
     if (error) { console.error(error); return res.status(500).json({ error: "Erro interno ao processar a solicitação." }); }
-    res.json({ id: data.id });
+    res.json({ id: data.id, protocol: data.protocol });
+  });
+
+  app.patch("/api/requisitions/:id", async (req, res) => {
+    const entryId = Number(req.params.id);
+    if (!Number.isFinite(entryId)) return res.status(400).json({ error: "Requisição inválida." });
+
+    const role = String(req.user?.role || "");
+    if (!canEditLaunchRole(role)) {
+      return res.status(403).json({ error: "Apenas administrador ou gestor pode editar lançamentos." });
+    }
+
+    const { data: existing, error: fetchError } = await scopeByEmpresa(
+      supabase.from("requisitions").select("*").eq("id", entryId),
+      req
+    ).single();
+    if (fetchError || !existing) return res.status(404).json({ error: "Requisição não encontrada" });
+    if (!isLaunchStatusEditableBeforeControl(existing.status)) {
+      return res.status(400).json({ error: "Não é possível editar após a aprovação do Controle." });
+    }
+
+    const accessCurrent = await assertSectorAccessForUser(req, Number(existing.sector_id));
+    if (!accessCurrent.ok) return res.status(accessCurrent.status).json({ error: accessCurrent.error });
+
+    const { crd_id, description, provider_name, amount, date } = req.body;
+    const resolvedProviderName = String(provider_name || "").trim();
+    const resolvedAmount = Number(amount);
+    const resolvedDate = String(date || "").trim().slice(0, 10);
+    const resolvedDescription = String(description || "").trim() || null;
+    const resolvedCrdId = Number(crd_id);
+
+    if (!Number.isFinite(resolvedCrdId) || !Number.isFinite(resolvedAmount) || resolvedAmount < 0 || !resolvedDate || !resolvedProviderName) {
+      return res.status(400).json({ error: "CRD, fornecedor, valor e data são obrigatórios" });
+    }
+
+    const { data: crd, error: crdError } = await scopeByEmpresa(
+      supabase.from("crds").select("id, sector_id, code").eq("id", resolvedCrdId),
+      req
+    ).single();
+    if (crdError || !crd) return res.status(400).json({ error: "CRD inválido para a requisição" });
+
+    const accessTarget = await assertSectorAccessForUser(req, Number(crd.sector_id));
+    if (!accessTarget.ok) return res.status(accessTarget.status).json({ error: accessTarget.error });
+
+    const canUse = await userCanUseCrd(req, crd as any, Number(crd.sector_id));
+    if (!canUse) return res.status(400).json({ error: "CRD fora dos setores permitidos para seu usuário." });
+
+    const asText = (v: unknown) => String(v ?? "").trim();
+    const asAmount = (v: unknown) => {
+      const n = Number(v);
+      return Number.isFinite(n) ? n.toFixed(2) : "";
+    };
+    const asDate = (v: unknown) => String(v || "").slice(0, 10);
+
+    const candidates = [
+      { field: "provider_name", label: "Fornecedor", from: asText(existing.provider_name), to: resolvedProviderName },
+      { field: "description", label: "Descrição", from: asText(existing.description), to: asText(resolvedDescription) },
+      { field: "amount", label: "Valor", from: asAmount(existing.amount), to: asAmount(resolvedAmount) },
+      { field: "date", label: "Data", from: asDate(existing.date), to: resolvedDate },
+      { field: "crd_id", label: "CRD", from: asText(existing.crd_id), to: asText(resolvedCrdId) },
+      {
+        field: "sector_id",
+        label: "Setor",
+        from: asText(existing.sector_id),
+        to: asText(crd.sector_id),
+      },
+    ];
+    const changes = candidates.filter((c) => c.from !== c.to);
+    if (changes.length === 0) return res.status(400).json({ error: "Nenhuma alteração para salvar." });
+
+    const nowIso = new Date().toISOString();
+    const { data, error } = await scopeByEmpresa(
+      supabase
+        .from("requisitions")
+        .update({
+          crd_id: resolvedCrdId,
+          sector_id: Number(crd.sector_id),
+          description: resolvedDescription,
+          provider_name: resolvedProviderName,
+          amount: resolvedAmount,
+          date: resolvedDate,
+          edit_count: Number(existing.edit_count || 0) + 1,
+          last_edited_at: nowIso,
+        })
+        .eq("id", entryId),
+      req
+    )
+      .select("id, protocol, edit_count, last_edited_at")
+      .single();
+
+    if (error) {
+      console.error(error);
+      return res.status(500).json({ error: "Não foi possível salvar a edição." });
+    }
+
+    await recordLaunchEdit(req, {
+      source_type: "requisicao",
+      source_id: entryId,
+      user_id: req.user?.id,
+      editor_name: req.user?.name || req.user?.email || "Usuário",
+      changes,
+    });
+
+    res.json(data);
   });
 
   app.patch("/api/requisitions/:id/status", async (req, res) => {
     const { id } = req.params;
     const { status } = req.body;
-    if (!["open", "cancelled", "posted"].includes(status))
+    if (!["open", "approved", "cancelled", "posted"].includes(status)) {
       return res.status(400).json({ error: "Status inválido" });
+    }
 
-    const { error } = await supabase.from("requisitions").update({ status }).eq("id", id);
-    if (error) { console.error(error); return res.status(500).json({ error: "Erro interno ao processar a solicitação." }); }
+    const { data: existing, error: fetchError } = await scopeByEmpresa(
+      supabase.from("requisitions").select("id, sector_id, status").eq("id", id),
+      req
+    ).single();
+    if (fetchError || !existing) {
+      return res.status(404).json({ error: "Requisição não encontrada" });
+    }
+
+    const access = await assertSectorAccessForUser(req, Number(existing.sector_id));
+    if (!access.ok) return res.status(access.status).json({ error: access.error });
+
+    const role = String(req.user?.role || "");
+    const current = String((existing as any).status || "open");
+    const validation = validateLaunchFlowStatus(role, current, status);
+    if (validation.ok === false) return res.status(validation.status).json({ error: validation.error });
+
+    const { error } = await scopeByEmpresa(
+      supabase.from("requisitions").update({ status }).eq("id", id),
+      req
+    );
+    if (error) {
+      console.error(error);
+      return res.status(500).json({ error: "Erro interno ao processar a solicitação." });
+    }
     res.json({ success: true });
   });
 
@@ -1524,50 +2922,265 @@ export function createApp() {
     const { data: userRow } = await supabase.from("users").select("*").eq("id", req.user!.id).single();
     if (!userRow) return { ok: true as const };
 
-    const session = await buildUserSession(userRow);
+    const session = await buildUserSession(userRow, empresaKeyOf(req));
     const allowedSectorIds = session.sector_ids ?? [];
     const isGlobal = ["admin", "finance", "controle"].includes(String(userRow.role || ""));
 
-    if (!isGlobal || allowedSectorIds.length > 0) {
-      if (allowedSectorIds.length === 0) {
-        return { ok: false as const, status: 403, error: "Seu usuário não possui setor vinculado para este lançamento." };
-      }
-      if (!allowedSectorIds.includes(Number(sectorId))) {
-        return { ok: false as const, status: 403, error: "Setor fora dos permitidos para seu usuário." };
-      }
+    // Controle, financeiro e admin atuam em todos os setores (ex.: Aprovações).
+    // O vínculo de setor só restringe gestor/solicitante.
+    if (isGlobal) return { ok: true as const };
+
+    if (allowedSectorIds.length === 0) {
+      return { ok: false as const, status: 403, error: "Seu usuário não possui setor vinculado para este lançamento." };
+    }
+    if (!allowedSectorIds.includes(Number(sectorId))) {
+      return { ok: false as const, status: 403, error: "Setor fora dos permitidos para seu usuário." };
     }
     return { ok: true as const };
   };
 
-  app.get("/api/manual-entries", async (_req, res) => {
+  /** CRDs liberados ao usuário fora dos setores (Cadastros › Usuários › CRDs extras). */
+  const loadGrantedCrdIdsForUser = async (userId: number | string): Promise<Set<number>> => {
     const { data, error } = await supabase
-      .from("manual_entries")
-      .select("*, sectors(name), crds(id, code, name), users(id, name)")
-      .order("date", { ascending: false });
+      .from("user_crds")
+      .select("crd_id")
+      .eq("user_id", userId);
+    if (error) {
+      console.error("user_crds:", error);
+      return new Set();
+    }
+    return new Set(
+      (data ?? [])
+        .map((row: any) => Number(row.crd_id))
+        .filter((id: number) => Number.isFinite(id))
+    );
+  };
 
+  const userCanUseCrd = async (
+    req: express.Request,
+    crd: { id?: number; sector_id?: number; code?: string },
+    launchSectorId?: number
+  ) => {
+    const role = String(req.user?.role || "");
+    if (["admin", "finance", "controle"].includes(role)) return true;
+    if (isSharedCrdCode(crd.code)) return true;
+    if (
+      launchSectorId != null &&
+      Number.isFinite(Number(crd.sector_id)) &&
+      Number(crd.sector_id) === Number(launchSectorId)
+    ) {
+      return true;
+    }
+    const crdId = Number(crd.id);
+    if (!Number.isFinite(crdId) || !req.user?.id) return false;
+    const granted = await loadGrantedCrdIdsForUser(req.user.id);
+    return granted.has(crdId);
+  };
+
+  const replaceUserCrdLinks = async (userId: number | string, crdIds: number[]) => {
+    const { error: deleteError } = await supabase.from("user_crds").delete().eq("user_id", userId);
+    if (deleteError) return deleteError;
+    if (!crdIds.length) return null;
+    const { error: insertError } = await supabase.from("user_crds").upsert(
+      crdIds.map((crdId) => ({ user_id: userId, crd_id: crdId })),
+      { onConflict: "user_id,crd_id", ignoreDuplicates: true }
+    );
+    return insertError;
+  };
+
+  app.get("/api/manual-entries", async (req, res) => {
+    const pag = parseListPagination(req.query as Record<string, unknown>);
+    const q = req.query as Record<string, string | undefined>;
+    const selectOpts = pag.enabled ? ({ count: "exact" } as const) : undefined;
+
+    const applyFilters = (query: any) => {
+      let next = query;
+      if (q.status && q.status !== "all") next = next.eq("status", q.status);
+      if (q.sector_id && q.sector_id !== "all") next = next.eq("sector_id", Number(q.sector_id));
+      if (q.payment_method && q.payment_method !== "all") next = next.eq("payment_method", q.payment_method);
+      if (q.issue_from) next = next.gte("issue_date", String(q.issue_from).slice(0, 10));
+      if (q.issue_to) next = next.lte("issue_date", String(q.issue_to).slice(0, 10));
+      const month = Number(q.month);
+      if (Number.isFinite(month) && month >= 1 && month <= 12) {
+        const year = Number(q.year) || new Date().getFullYear();
+        const { dateFrom, dateTo } = getMonthDateRange(year, month);
+        next = next.gte("date", dateFrom).lte("date", dateTo);
+      }
+      if (q.amount) {
+        const amt = Number(String(q.amount).replace(",", "."));
+        if (Number.isFinite(amt)) next = next.eq("amount", amt);
+      }
+      const term = String(q.q || "").replace(/[%_,]/g, " ").trim();
+      if (term) {
+        const like = `%${term}%`;
+        next = next.or(
+          `protocol.ilike.${like},provider_name.ilike.${like},description.ilike.${like},document_number.ilike.${like}`
+        );
+      }
+      return next;
+    };
+
+    let query = filterByEmpresa(
+      supabase
+        .from("manual_entries")
+        .select("*, sectors(name), crds(id, code, name), users(id, name)", selectOpts),
+      req,
+      "manual_entries"
+    ).order("date", { ascending: false });
+    query = applyFilters(query);
+
+    const crdTerm = String(q.crd || "").replace(/[%_,]/g, " ").trim();
+    if (crdTerm) {
+      const { data: crdRows } = await filterByEmpresa(
+        supabase.from("crds").select("id").or(`code.ilike.%${crdTerm}%,name.ilike.%${crdTerm}%`),
+        req,
+        "crds"
+      );
+      const crdIds = (crdRows ?? []).map((c: any) => Number(c.id)).filter((id: number) => Number.isFinite(id));
+      if (crdIds.length === 0) {
+        if (!pag.enabled) return res.json([]);
+        return res.json(paginatedPayload([], 0, pag.page, pag.pageSize, { totalAmount: 0 }));
+      }
+      query = query.in("crd_id", crdIds);
+    }
+
+    if (pag.enabled) query = query.range(pag.from, pag.to);
+
+    const { data, error, count } = await query;
     if (error) {
       console.error(error);
       return res.status(500).json({ error: "Erro interno ao processar a solicitação." });
     }
 
-    res.json(
-      (data ?? []).map((row: any) => ({
-        ...row,
-        sector_name: row.sectors?.name ?? null,
-        crd_code: row.crds?.code ?? null,
-        crd_name: row.crds?.name ?? null,
-        user_name: row.users?.name ?? null,
-        sectors: undefined,
-        crds: undefined,
-        users: undefined,
-      }))
+    const mapped = (data ?? []).map((row: any) => ({
+      ...row,
+      sector_name: row.sectors?.name ?? null,
+      crd_code: row.crds?.code ?? row.crd_code ?? null,
+      crd_name: row.crds?.name ?? null,
+      user_name: row.users?.name ?? null,
+      sectors: undefined,
+      crds: undefined,
+      users: undefined,
+    }));
+
+    if (!pag.enabled) return res.json(mapped);
+
+    let totalAmount = sumAmounts(mapped, (r: any) => r.amount);
+    try {
+      let sumQuery = filterByEmpresa(
+        supabase.from("manual_entries").select("amount"),
+        req,
+        "manual_entries"
+      );
+      sumQuery = applyFilters(sumQuery);
+      const { data: amountRows } = await sumQuery;
+      if (Array.isArray(amountRows)) totalAmount = sumAmounts(amountRows, (r: any) => r.amount);
+    } catch {
+      // mantém soma da página
+    }
+
+    return res.json(
+      paginatedPayload(mapped, count ?? mapped.length, pag.page, pag.pageSize, { totalAmount })
     );
   });
 
+  // Lançamentos manuais do próprio usuário que ficaram SEM CRD (para o aviso de vínculo).
+  app.get("/api/manual-entries/sem-crd", async (req, res) => {
+    const userId = Number((req as any).user?.id);
+    const { data, error } = await filterByEmpresa(
+      supabase
+        .from("manual_entries")
+        .select("id, description, amount, date, sector_id, status, user_id, sectors(name)")
+        .is("crd_id", null)
+        .neq("status", "cancelled"),
+      req,
+      "manual_entries"
+    ).order("date", { ascending: false });
+    if (error) {
+      console.error("manual-entries/sem-crd:", error);
+      return res.status(500).json({ error: "Erro ao buscar lançamentos sem CRD." });
+    }
+    const mine = (data ?? []).filter((r: any) => Number.isFinite(userId) && Number(r.user_id) === userId);
+    res.json({
+      entries: mine.map((r: any) => ({
+        id: r.id,
+        description: r.description ?? null,
+        amount: Number(r.amount) || 0,
+        date: r.date,
+        sector_id: r.sector_id,
+        sector_name: r.sectors?.name ?? null,
+        status: r.status,
+      })),
+    });
+  });
+
+  // Vínculo leve de CRD a um lançamento sem CRD (quem criou, ou admin/controle).
+  app.patch("/api/manual-entries/:id/crd", async (req, res) => {
+    const entryId = Number(req.params.id);
+    if (!Number.isFinite(entryId)) return res.status(400).json({ error: "Lançamento inválido." });
+    const crdId = Number((req.body as any)?.crd_id);
+    if (!Number.isFinite(crdId)) return res.status(400).json({ error: "Informe o CRD." });
+
+    const { data: existing, error: fErr } = await scopeByEmpresa(
+      supabase.from("manual_entries").select("id, user_id, sector_id, crd_id, status").eq("id", entryId),
+      req
+    ).single();
+    if (fErr || !existing) return res.status(404).json({ error: "Lançamento não encontrado." });
+
+    const userId = Number((req as any).user?.id);
+    const role = String((req as any).user?.role || "");
+    const isOwner = Number((existing as any).user_id) === userId;
+    const isPriv = role === "admin" || role === "controle";
+    if (!isOwner && !isPriv) {
+      return res.status(403).json({ error: "Apenas quem criou o lançamento (ou admin/controle) pode vinculá-lo a um CRD." });
+    }
+    if ((existing as any).crd_id != null) return res.status(400).json({ error: "Este lançamento já possui CRD." });
+    if (String((existing as any).status) === "cancelled") return res.status(400).json({ error: "Lançamento cancelado." });
+
+    const { data: crd, error: cErr } = await scopeByEmpresa(
+      supabase.from("crds").select("id, sector_id, code, name").eq("id", crdId),
+      req
+    ).single();
+    if (cErr || !crd) return res.status(400).json({ error: "CRD inválido." });
+    if (Number((crd as any).sector_id) !== Number((existing as any).sector_id) && !isSharedCrdCode((crd as any).code)) {
+      return res.status(400).json({ error: "O CRD não pertence ao setor do lançamento." });
+    }
+
+    const { error: uErr } = await supabase.from("manual_entries").update({ crd_id: crdId }).eq("id", entryId);
+    if (uErr) {
+      console.error("manual-entries/:id/crd update:", uErr);
+      return res.status(500).json({ error: "Não foi possível vincular o CRD." });
+    }
+    res.json({ ok: true, id: entryId, crd_id: crdId, crd_code: (crd as any).code, crd_name: (crd as any).name });
+  });
+
   app.post("/api/manual-entries", async (req, res) => {
-    const { sector_id, crd_id, description, amount, date, issue_date } = req.body;
-    if (!sector_id || amount == null || !date || !issue_date) {
-      return res.status(400).json({ error: "sector_id, amount, issue_date e date são obrigatórios" });
+    const {
+      sector_id, crd_id, description, provider_name, document_number, amount, date, issue_date, due_date,
+      file_path, file_name, payment_method, pix_key, currency,
+    } = req.body;
+    const resolvedProviderName = String(provider_name || "").trim();
+    const resolvedDocumentNumber = String(document_number || "").trim().slice(0, 80) || null;
+    const resolvedDueDate = String(due_date || "").trim().slice(0, 10);
+    const resolvedPayment = String(payment_method || "").trim();
+    const resolvedCurrency = String(currency || "BRL").trim().toUpperCase() || "BRL";
+    const resolvedAmount = Number(amount);
+    if (
+      !sector_id ||
+      !Number.isFinite(resolvedAmount) ||
+      resolvedAmount < 0 ||
+      !date ||
+      !issue_date ||
+      !resolvedDueDate ||
+      !resolvedProviderName ||
+      !resolvedPayment
+    ) {
+      return res.status(400).json({
+        error: "setor, fornecedor, forma de pagamento, valor, data de emissão, data de lançamento e data de vencimento são obrigatórios",
+      });
+    }
+    if (resolvedPayment === "pix" && !String(pix_key || "").trim()) {
+      return res.status(400).json({ error: "Informe a chave Pix." });
     }
 
     const sectorId = Number(sector_id);
@@ -1580,40 +3193,284 @@ export function createApp() {
 
     let resolvedCrdId: number | null = null;
     if (crd_id) {
-      const { data: crd, error: crdError } = await supabase
-        .from("crds")
-        .select("id, sector_id, code")
-        .eq("id", Number(crd_id))
-        .single();
+      const { data: crd, error: crdError } = await scopeByEmpresa(
+        supabase.from("crds").select("id, sector_id, code").eq("id", Number(crd_id)),
+        req
+      ).single();
       if (crdError || !crd) {
         return res.status(400).json({ error: "CRD inválido para o lançamento" });
       }
-      if (Number(crd.sector_id) !== sectorId && !isSharedCrdCode((crd as any).code)) {
+      const canUse = await userCanUseCrd(req, crd as any, sectorId);
+      if (!canUse) {
         return res.status(400).json({ error: "CRD não pertence ao setor informado" });
       }
       resolvedCrdId = Number(crd.id);
     }
 
+    let resolvedFilePath: string | null = null;
+    let resolvedFileName: string | null = null;
+    const rawFilePath = String(file_path || "").trim();
+    if (rawFilePath) {
+      const objectPath = normalizeStorageObjectPath(rawFilePath);
+      if (!objectPath || !objectPath.startsWith("manual-entries/")) {
+        return res.status(400).json({ error: "Arquivo inválido" });
+      }
+      resolvedFilePath = objectPath;
+      const originalName = String(file_name || "").trim().slice(0, 255);
+      resolvedFileName = originalName || null;
+    }
+
+    const protocol = await allocateLaunchProtocol(PROTOCOL_PREFIX.manual, req);
+    if (!protocol) return res.status(500).json({ error: "Não foi possível gerar o protocolo do lançamento." });
     const { data, error } = await supabase
       .from("manual_entries")
-      .insert({
+      .insert(withEmpresaKey({
         sector_id: sectorId,
         crd_id: resolvedCrdId,
         user_id: req.user!.id,
         description: description || null,
-        amount,
+        provider_name: resolvedProviderName,
+        document_number: resolvedDocumentNumber,
+        amount: resolvedAmount,
         issue_date,
         date,
-        status: "open",
-      })
-      .select("id")
+        due_date: resolvedDueDate,
+        payment_method: resolvedPayment,
+        currency: resolvedCurrency,
+        pix_key: resolvedPayment === "pix" ? String(pix_key || "").trim() || null : null,
+        status: initialLaunchStatus(req.user?.role),
+        file_path: resolvedFilePath,
+        file_name: resolvedFileName,
+        protocol,
+      }, req))
+      .select("id, protocol")
       .single();
 
     if (error) {
       console.error(error);
       return res.status(500).json({ error: "Erro interno ao processar a solicitação." });
     }
-    res.json({ id: data.id });
+    res.json({ id: data.id, protocol: data.protocol });
+  });
+
+  const recordLaunchEdit = async (
+    req: express.Request,
+    payload: {
+      source_type: "manual" | "estorno" | "requisicao";
+      source_id: number;
+      user_id: number | string | null | undefined;
+      editor_name: string;
+      changes: Array<{ field: string; label: string; from: string; to: string }>;
+    }
+  ) => {
+    const { error } = await supabase.from("launch_edit_history").insert(
+      withEmpresaKey(
+        {
+          source_type: payload.source_type,
+          source_id: payload.source_id,
+          user_id: payload.user_id ?? null,
+          editor_name: payload.editor_name,
+          changes: payload.changes,
+        },
+        req
+      )
+    );
+    if (error) console.error("launch_edit_history insert:", error);
+  };
+
+  app.get("/api/launch-edits/:sourceType/:sourceId", async (req, res) => {
+    const sourceType = String(req.params.sourceType || "");
+    const sourceId = Number(req.params.sourceId);
+    if (!["manual", "estorno", "requisicao"].includes(sourceType) || !Number.isFinite(sourceId)) {
+      return res.status(400).json({ error: "Parâmetros inválidos." });
+    }
+    const table =
+      sourceType === "manual" ? "manual_entries" : sourceType === "estorno" ? "estornos" : "requisitions";
+    const { data: parent, error: parentErr } = await scopeByEmpresa(
+      supabase.from(table).select("id").eq("id", sourceId),
+      req
+    ).maybeSingle();
+    if (parentErr || !parent) return res.status(404).json({ error: "Lançamento não encontrado." });
+
+    const { data, error } = await scopeByEmpresa(
+      supabase
+        .from("launch_edit_history")
+        .select("id, editor_name, changes, created_at, user_id")
+        .eq("source_type", sourceType)
+        .eq("source_id", sourceId)
+        .order("created_at", { ascending: false }),
+      req
+    );
+    if (error) {
+      console.error(error);
+      return res.status(500).json({ error: "Não foi possível carregar o histórico." });
+    }
+    res.json(data ?? []);
+  });
+
+  app.patch("/api/manual-entries/:id", async (req, res) => {
+    const entryId = Number(req.params.id);
+    if (!Number.isFinite(entryId)) return res.status(400).json({ error: "Lançamento inválido." });
+
+    const role = String(req.user?.role || "");
+    if (!canEditLaunchRole(role)) {
+      return res.status(403).json({ error: "Apenas administrador ou gestor pode editar lançamentos." });
+    }
+
+    const { data: existing, error: fetchError } = await scopeByEmpresa(
+      supabase.from("manual_entries").select("*").eq("id", entryId),
+      req
+    ).single();
+    if (fetchError || !existing) return res.status(404).json({ error: "Lançamento não encontrado" });
+    if (!isLaunchStatusEditableBeforeControl(existing.status)) {
+      return res.status(400).json({ error: "Não é possível editar após a aprovação do Controle." });
+    }
+
+    const accessCurrent = await assertSectorAccessForUser(req, Number(existing.sector_id));
+    if (!accessCurrent.ok) return res.status(accessCurrent.status).json({ error: accessCurrent.error });
+
+    const {
+      sector_id, crd_id, description, provider_name, document_number, amount, date, issue_date, due_date,
+      file_path, file_name, payment_method, pix_key, currency,
+    } = req.body;
+
+    const resolvedProviderName = String(provider_name || "").trim();
+    const resolvedDocumentNumber = String(document_number || "").trim().slice(0, 80) || null;
+    const resolvedDueDate = String(due_date || "").trim().slice(0, 10);
+    const resolvedIssue = String(issue_date || "").trim().slice(0, 10);
+    const resolvedDate = String(date || "").trim().slice(0, 10);
+    const resolvedPayment = String(payment_method || "").trim();
+    const resolvedCurrency = String(currency || "BRL").trim().toUpperCase() || "BRL";
+    const resolvedAmount = Number(amount);
+    const resolvedSectorId = Number(sector_id);
+    const resolvedDescription = String(description || "").trim() || null;
+    const resolvedFilePath = String(file_path || "").trim() || null;
+    const resolvedFileName = String(file_name || "").trim() || null;
+
+    if (
+      !Number.isFinite(resolvedSectorId) ||
+      !Number.isFinite(resolvedAmount) ||
+      resolvedAmount < 0 ||
+      !resolvedDate ||
+      !resolvedIssue ||
+      !resolvedDueDate ||
+      !resolvedProviderName ||
+      !resolvedPayment
+    ) {
+      return res.status(400).json({
+        error: "setor, fornecedor, forma de pagamento, valor, emissão, lançamento e vencimento são obrigatórios",
+      });
+    }
+    if (resolvedPayment === "pix" && !String(pix_key || "").trim()) {
+      return res.status(400).json({ error: "Informe a chave Pix." });
+    }
+
+    const accessTarget = await assertSectorAccessForUser(req, resolvedSectorId);
+    if (!accessTarget.ok) return res.status(accessTarget.status).json({ error: accessTarget.error });
+
+    let resolvedCrdId: number | null = null;
+    let resolvedCrdCode = "";
+    if (crd_id) {
+      const { data: crd, error: crdError } = await scopeByEmpresa(
+        supabase.from("crds").select("id, sector_id, code, name").eq("id", Number(crd_id)),
+        req
+      ).single();
+      if (crdError || !crd) return res.status(400).json({ error: "CRD inválido para o lançamento" });
+      const canUse = await userCanUseCrd(req, crd as any, resolvedSectorId);
+      if (!canUse) return res.status(400).json({ error: "CRD não pertence ao setor informado" });
+      resolvedCrdId = Number(crd.id);
+      resolvedCrdCode = String((crd as any).code || "");
+    }
+
+    const asText = (v: unknown) => String(v ?? "").trim();
+    const asAmount = (v: unknown) => {
+      const n = Number(v);
+      return Number.isFinite(n) ? n.toFixed(2) : "";
+    };
+    const asDate = (v: unknown) => String(v || "").slice(0, 10);
+
+    let sectorFrom = asText(existing.sector_id);
+    let sectorTo = String(resolvedSectorId);
+    if (String(existing.sector_id) !== String(resolvedSectorId)) {
+      const { data: sectorRows } = await supabase
+        .from("sectors")
+        .select("id, name")
+        .in("id", [existing.sector_id, resolvedSectorId].filter(Boolean));
+      const nameById = new Map((sectorRows || []).map((s: any) => [String(s.id), String(s.name || s.id)]));
+      sectorFrom = nameById.get(String(existing.sector_id)) || sectorFrom;
+      sectorTo = nameById.get(String(resolvedSectorId)) || sectorTo;
+    }
+
+    const candidates = [
+      { field: "provider_name", label: "Fornecedor", from: asText(existing.provider_name), to: resolvedProviderName },
+      { field: "description", label: "Descrição", from: asText(existing.description), to: asText(resolvedDescription) },
+      { field: "amount", label: "Valor", from: asAmount(existing.amount), to: asAmount(resolvedAmount) },
+      { field: "issue_date", label: "Emissão", from: asDate(existing.issue_date), to: resolvedIssue },
+      { field: "date", label: "Lançamento", from: asDate(existing.date), to: resolvedDate },
+      { field: "due_date", label: "Vencimento", from: asDate(existing.due_date), to: resolvedDueDate },
+      { field: "document_number", label: "Nº do documento", from: asText(existing.document_number), to: asText(resolvedDocumentNumber) },
+      { field: "sector_id", label: "Setor", from: sectorFrom, to: sectorTo },
+      { field: "crd_id", label: "CRD", from: asText(existing.crd_id), to: asText(resolvedCrdId) },
+      { field: "payment_method", label: "Pagamento", from: asText(existing.payment_method), to: resolvedPayment },
+      {
+        field: "pix_key",
+        label: "Chave Pix",
+        from: asText(existing.pix_key),
+        to: resolvedPayment === "pix" ? asText(pix_key) : "",
+      },
+      { field: "currency", label: "Moeda", from: asText(existing.currency || "BRL"), to: resolvedCurrency },
+      {
+        field: "file_path",
+        label: "Anexo",
+        from: asText(existing.file_path) ? "anexado" : "sem anexo",
+        to: resolvedFilePath ? "anexado" : "sem anexo",
+      },
+    ];
+    const changes = candidates.filter((c) => c.from !== c.to);
+    if (changes.length === 0) return res.status(400).json({ error: "Nenhuma alteração para salvar." });
+
+    const nowIso = new Date().toISOString();
+    const { data, error } = await scopeByEmpresa(
+      supabase
+        .from("manual_entries")
+        .update({
+          sector_id: resolvedSectorId,
+          crd_id: resolvedCrdId,
+          description: resolvedDescription,
+          provider_name: resolvedProviderName,
+          document_number: resolvedDocumentNumber,
+          amount: resolvedAmount,
+          date: resolvedDate,
+          issue_date: resolvedIssue,
+          due_date: resolvedDueDate,
+          payment_method: resolvedPayment,
+          currency: resolvedCurrency,
+          pix_key: resolvedPayment === "pix" ? String(pix_key || "").trim() || null : null,
+          file_path: resolvedFilePath,
+          file_name: resolvedFileName,
+          edit_count: Number(existing.edit_count || 0) + 1,
+          last_edited_at: nowIso,
+        })
+        .eq("id", entryId),
+      req
+    )
+      .select("id, protocol, edit_count, last_edited_at")
+      .single();
+
+    if (error) {
+      console.error(error);
+      return res.status(500).json({ error: "Não foi possível salvar a edição." });
+    }
+
+    await recordLaunchEdit(req, {
+      source_type: "manual",
+      source_id: entryId,
+      user_id: req.user?.id,
+      editor_name: req.user?.name || req.user?.email || "Usuário",
+      changes,
+    });
+
+    res.json({ ...data, crd_code: resolvedCrdCode || undefined });
   });
 
   app.patch("/api/manual-entries/:id/status", async (req, res) => {
@@ -1623,11 +3480,10 @@ export function createApp() {
       return res.status(400).json({ error: "Status inválido" });
     }
 
-    const { data: existing, error: fetchError } = await supabase
-      .from("manual_entries")
-      .select("id, sector_id, status")
-      .eq("id", id)
-      .single();
+    const { data: existing, error: fetchError } = await scopeByEmpresa(
+      supabase.from("manual_entries").select("id, sector_id, status").eq("id", id),
+      req
+    ).single();
     if (fetchError || !existing) {
       return res.status(404).json({ error: "Lançamento não encontrado" });
     }
@@ -1636,36 +3492,14 @@ export function createApp() {
     if (!access.ok) return res.status(access.status).json({ error: access.error });
 
     const role = String(req.user?.role || "");
-    const isAdmin = role === "admin";
-    const isControle = role === "controle" || isAdmin;
-    const isFinance = role === "finance" || isAdmin;
     const current = String((existing as any).status || "open");
+    const validation = validateLaunchFlowStatus(role, current, status);
+    if (validation.ok === false) return res.status(validation.status).json({ error: validation.error });
 
-    // Fluxo: open → approved (Controle) → posted (Financeiro)
-    // Cancelamento permitido em open/approved.
-    if (status === "approved") {
-      if (!isControle) return res.status(403).json({ error: "Apenas Controle (ou admin) pode aprovar." });
-      if (current !== "open") return res.status(400).json({ error: "Só é possível aprovar lançamentos em aberto." });
-    } else if (status === "posted") {
-      if (!isFinance) return res.status(403).json({ error: "Apenas Financeiro (ou admin) pode baixar/pagar." });
-      if (current !== "approved") return res.status(400).json({ error: "O lançamento precisa ser aprovado pelo Controle antes do pagamento." });
-    } else if (status === "cancelled") {
-      if (current === "posted") return res.status(400).json({ error: "Não é possível cancelar um lançamento já baixado." });
-      if (!["open", "approved"].includes(current)) {
-        return res.status(400).json({ error: "Este lançamento já está cancelado." });
-      }
-      // Controle pode reprovar (open→cancelled); solicitante/admin também podem cancelar.
-      if (!(isControle || isAdmin || ["manager"].includes(role))) {
-        // finance não cancela; managers and controle/admin ok
-        if (role === "finance") return res.status(403).json({ error: "Financeiro não cancela lançamentos manuais." });
-      }
-    } else if (status === "open") {
-      // Desaprovar: devolver approved → open (só Controle/admin)
-      if (!isControle) return res.status(403).json({ error: "Apenas Controle (ou admin) pode devolver o lançamento." });
-      if (current !== "approved") return res.status(400).json({ error: "Só é possível devolver lançamentos aprovados." });
-    }
-
-    const { error } = await supabase.from("manual_entries").update({ status }).eq("id", id);
+    const { error } = await scopeByEmpresa(
+      supabase.from("manual_entries").update({ status }).eq("id", id),
+      req
+    );
     if (error) {
       console.error(error);
       return res.status(500).json({ error: "Erro interno ao processar a solicitação." });
@@ -1673,21 +3507,100 @@ export function createApp() {
     res.json({ success: true });
   });
 
+  const MANUAL_ENTRY_ALLOWED_MIMES = new Set([
+    "application/pdf",
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.ms-excel",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/msword",
+  ]);
+
+  const manualEntryExtFromFile = (file: Express.Multer.File) => {
+    const fromName = path.extname(file.originalname || "").replace(".", "").toLowerCase();
+    if (fromName) return fromName;
+    const mime = String(file.mimetype || "");
+    if (mime === "application/pdf") return "pdf";
+    if (mime === "image/jpeg") return "jpg";
+    if (mime === "image/png") return "png";
+    if (mime === "image/webp") return "webp";
+    if (mime.includes("spreadsheet") || mime === "application/vnd.ms-excel") return "xlsx";
+    if (mime.includes("wordprocessing") || mime === "application/msword") return "docx";
+    return "bin";
+  };
+
+  app.post("/api/manual-entries/file", upload.single("file"), async (req, res) => {
+    if (!req.file) return res.status(400).json({ error: "Arquivo não enviado" });
+    const mime = String(req.file.mimetype || "");
+    const ext = path.extname(req.file.originalname || "").toLowerCase();
+    const allowedExt = [".pdf", ".jpg", ".jpeg", ".png", ".webp", ".xls", ".xlsx", ".doc", ".docx"];
+    if (!MANUAL_ENTRY_ALLOWED_MIMES.has(mime) && !allowedExt.includes(ext)) {
+      if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+      return res.status(400).json({ error: "Formato inválido. Envie PDF, imagem, Excel ou Word." });
+    }
+
+    try {
+      const fileBuffer = fs.readFileSync(req.file.path);
+      const storagePath = await uploadDocument(
+        fileBuffer,
+        "manual-entries",
+        manualEntryExtFromFile(req.file),
+        mime || "application/octet-stream"
+      );
+      res.json({
+        file_path: storagePath,
+        file_name: String(req.file.originalname || "").slice(0, 255),
+      });
+    } catch (error) {
+      console.error("Erro ao salvar anexo do lançamento manual:", error);
+      res.status(500).json({ error: "Não foi possível salvar o arquivo." });
+    } finally {
+      if (req.file?.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+    }
+  });
+
+  app.get("/api/manual-entries/:id/document-url", async (req, res) => {
+    const { data, error } = await supabase
+      .from("manual_entries")
+      .select("id, file_path")
+      .eq("id", Number(req.params.id))
+      .maybeSingle();
+
+    if (error) {
+      console.error(error);
+      return res.status(500).json({ error: "Erro ao buscar o anexo." });
+    }
+    if (!data) return res.status(404).json({ error: "Lançamento não encontrado" });
+    const rawPath = String((data as { file_path?: string }).file_path || "");
+    if (!rawPath) return res.status(404).json({ error: "Documento não anexado" });
+
+    const result = await createSignedDocumentUrl(rawPath);
+    if (!("url" in result)) {
+      const status = result.error === "Caminho inválido" ? 400 : 404;
+      return res.status(status).json({ error: result.error });
+    }
+    res.json({ url: result.url });
+  });
+
   // Exclusão definitiva de lançamento manual (apenas admin)
   app.delete("/api/manual-entries/:id", requireRole("admin"), async (req, res) => {
     const { id } = req.params;
-    const { data: existing, error: fetchError } = await supabase
-      .from("manual_entries")
-      .select("id")
-      .eq("id", id)
-      .maybeSingle();
+    const { data: existing, error: fetchError } = await scopeByEmpresa(
+      supabase.from("manual_entries").select("id").eq("id", id),
+      req
+    ).maybeSingle();
     if (fetchError) {
       console.error(fetchError);
       return res.status(500).json({ error: "Erro interno ao processar a solicitação." });
     }
     if (!existing) return res.status(404).json({ error: "Lançamento não encontrado" });
 
-    const { error } = await supabase.from("manual_entries").delete().eq("id", id);
+    const { error } = await scopeByEmpresa(
+      supabase.from("manual_entries").delete().eq("id", id),
+      req
+    );
     if (error) {
       console.error(error);
       return res.status(500).json({ error: "Não foi possível excluir o lançamento." });
@@ -1696,13 +3609,1027 @@ export function createApp() {
   });
 
   // ====================================================
+  // ESTORNOS
+  // ====================================================
+  app.get("/api/estornos", async (req, res) => {
+    const pag = parseListPagination(req.query as Record<string, unknown>);
+    const q = req.query as Record<string, string | undefined>;
+    const selectOpts = pag.enabled ? ({ count: "exact" } as const) : undefined;
+
+    const applyFilters = (query: any) => {
+      let next = query;
+      if (q.status && q.status !== "all") next = next.eq("status", q.status);
+      if (q.sector_id && q.sector_id !== "all") next = next.eq("sector_id", Number(q.sector_id));
+      if (q.issue_from) next = next.gte("issue_date", String(q.issue_from).slice(0, 10));
+      if (q.issue_to) next = next.lte("issue_date", String(q.issue_to).slice(0, 10));
+      const month = Number(q.month);
+      if (Number.isFinite(month) && month >= 1 && month <= 12) {
+        const year = Number(q.year) || new Date().getFullYear();
+        const { dateFrom, dateTo } = getMonthDateRange(year, month);
+        next = next.gte("date", dateFrom).lte("date", dateTo);
+      }
+      if (q.amount) {
+        const amt = Number(String(q.amount).replace(",", "."));
+        if (Number.isFinite(amt)) next = next.eq("amount", amt);
+      }
+      const term = String(q.q || "").replace(/[%_,]/g, " ").trim();
+      if (term) {
+        const like = `%${term}%`;
+        next = next.or(`protocol.ilike.${like},provider_name.ilike.${like},description.ilike.${like}`);
+      }
+      return next;
+    };
+
+    let query = filterByEmpresa(
+      supabase
+        .from("estornos")
+        .select("*, sectors(name), crds(id, code, name), users(id, name)", selectOpts),
+      req,
+      "estornos"
+    ).order("date", { ascending: false });
+    query = applyFilters(query);
+
+    const crdTerm = String(q.crd || "").replace(/[%_,]/g, " ").trim();
+    if (crdTerm) {
+      const { data: crdRows } = await filterByEmpresa(
+        supabase.from("crds").select("id").or(`code.ilike.%${crdTerm}%,name.ilike.%${crdTerm}%`),
+        req,
+        "crds"
+      );
+      const crdIds = (crdRows ?? []).map((c: any) => Number(c.id)).filter((id: number) => Number.isFinite(id));
+      if (crdIds.length === 0) {
+        if (!pag.enabled) return res.json([]);
+        return res.json(paginatedPayload([], 0, pag.page, pag.pageSize, { totalAmount: 0 }));
+      }
+      query = query.in("crd_id", crdIds);
+    }
+
+    if (pag.enabled) query = query.range(pag.from, pag.to);
+
+    const { data, error, count } = await query;
+    if (error) {
+      console.error(error);
+      return res.status(500).json({ error: "Erro interno ao processar a solicitação." });
+    }
+
+    const mapped = (data ?? []).map((row: any) => ({
+      ...row,
+      sector_name: row.sectors?.name ?? null,
+      crd_code: row.crds?.code ?? null,
+      crd_name: row.crds?.name ?? null,
+      user_name: row.users?.name ?? null,
+      sectors: undefined,
+      crds: undefined,
+      users: undefined,
+    }));
+
+    if (!pag.enabled) return res.json(mapped);
+
+    let totalAmount = sumAmounts(mapped, (r: any) => r.amount);
+    try {
+      let sumQuery = filterByEmpresa(supabase.from("estornos").select("amount"), req, "estornos");
+      sumQuery = applyFilters(sumQuery);
+      if (crdTerm) {
+        const { data: crdRows } = await filterByEmpresa(
+          supabase.from("crds").select("id").or(`code.ilike.%${crdTerm}%,name.ilike.%${crdTerm}%`),
+          req,
+          "crds"
+        );
+        const crdIds = (crdRows ?? []).map((c: any) => Number(c.id)).filter((id: number) => Number.isFinite(id));
+        if (crdIds.length) sumQuery = sumQuery.in("crd_id", crdIds);
+      }
+      const { data: amountRows } = await sumQuery;
+      if (Array.isArray(amountRows)) totalAmount = sumAmounts(amountRows, (r: any) => r.amount);
+    } catch {
+      // mantém soma da página
+    }
+
+    return res.json(
+      paginatedPayload(mapped, count ?? mapped.length, pag.page, pag.pageSize, { totalAmount })
+    );
+  });
+
+  app.post("/api/estornos", async (req, res) => {
+    const { sector_id, crd_id, description, provider_name, amount, date, issue_date, file_path, file_name } = req.body;
+    const resolvedProviderName = String(provider_name || "").trim();
+    if (!sector_id || amount == null || !date || !issue_date || !resolvedProviderName) {
+      return res.status(400).json({ error: "setor, fornecedor, valor, data de emissão e data de lançamento são obrigatórios" });
+    }
+
+    const sectorId = Number(sector_id);
+    if (!Number.isFinite(sectorId)) {
+      return res.status(400).json({ error: "Setor inválido" });
+    }
+
+    const access = await assertSectorAccessForUser(req, sectorId);
+    if (!access.ok) return res.status(access.status).json({ error: access.error });
+
+    let resolvedCrdId: number | null = null;
+    if (crd_id) {
+      const { data: crd, error: crdError } = await scopeByEmpresa(
+        supabase.from("crds").select("id, sector_id, code").eq("id", Number(crd_id)),
+        req
+      ).single();
+      if (crdError || !crd) {
+        return res.status(400).json({ error: "CRD inválido para o estorno" });
+      }
+      const canUse = await userCanUseCrd(req, crd as any, sectorId);
+      if (!canUse) {
+        return res.status(400).json({ error: "CRD não pertence ao setor informado" });
+      }
+      resolvedCrdId = Number(crd.id);
+    }
+
+    let resolvedFilePath: string | null = null;
+    let resolvedFileName: string | null = null;
+    const rawFilePath = String(file_path || "").trim();
+    if (rawFilePath) {
+      const objectPath = normalizeStorageObjectPath(rawFilePath);
+      if (!objectPath || !objectPath.startsWith("estornos/")) {
+        return res.status(400).json({ error: "Arquivo inválido" });
+      }
+      resolvedFilePath = objectPath;
+      const originalName = String(file_name || "").trim().slice(0, 255);
+      resolvedFileName = originalName || null;
+    }
+
+    const protocol = await allocateLaunchProtocol(PROTOCOL_PREFIX.estorno, req);
+    if (!protocol) return res.status(500).json({ error: "Não foi possível gerar o protocolo do estorno." });
+    const { data, error } = await supabase
+      .from("estornos")
+      .insert(withEmpresaKey({
+        sector_id: sectorId,
+        crd_id: resolvedCrdId,
+        user_id: req.user!.id,
+        description: description || null,
+        provider_name: resolvedProviderName,
+        amount,
+        issue_date,
+        date,
+        status: initialLaunchStatus(req.user?.role),
+        file_path: resolvedFilePath,
+        file_name: resolvedFileName,
+        protocol,
+      }, req))
+      .select("id, protocol")
+      .single();
+
+    if (error) {
+      console.error(error);
+      return res.status(500).json({ error: "Não foi possível registrar o estorno." });
+    }
+    res.json({ id: data.id, protocol: data.protocol });
+  });
+
+  app.patch("/api/estornos/:id", async (req, res) => {
+    const entryId = Number(req.params.id);
+    if (!Number.isFinite(entryId)) return res.status(400).json({ error: "Estorno inválido." });
+
+    const role = String(req.user?.role || "");
+    if (!canEditLaunchRole(role)) {
+      return res.status(403).json({ error: "Apenas administrador ou gestor pode editar lançamentos." });
+    }
+
+    const { data: existing, error: fetchError } = await scopeByEmpresa(
+      supabase.from("estornos").select("*").eq("id", entryId),
+      req
+    ).single();
+    if (fetchError || !existing) return res.status(404).json({ error: "Estorno não encontrado" });
+    if (!isLaunchStatusEditableBeforeControl(existing.status)) {
+      return res.status(400).json({ error: "Não é possível editar após a aprovação do Controle." });
+    }
+
+    const accessCurrent = await assertSectorAccessForUser(req, Number(existing.sector_id));
+    if (!accessCurrent.ok) return res.status(accessCurrent.status).json({ error: accessCurrent.error });
+
+    const { sector_id, crd_id, description, provider_name, amount, date, issue_date, file_path, file_name } = req.body;
+    const resolvedProviderName = String(provider_name || "").trim();
+    const resolvedAmount = Number(amount);
+    const resolvedSectorId = Number(sector_id);
+    const resolvedDate = String(date || "").trim().slice(0, 10);
+    const resolvedIssue = String(issue_date || "").trim().slice(0, 10);
+    const resolvedDescription = String(description || "").trim() || null;
+
+    if (
+      !Number.isFinite(resolvedSectorId) ||
+      !Number.isFinite(resolvedAmount) ||
+      resolvedAmount < 0 ||
+      !resolvedDate ||
+      !resolvedIssue ||
+      !resolvedProviderName
+    ) {
+      return res.status(400).json({
+        error: "setor, fornecedor, valor, data de emissão e data de lançamento são obrigatórios",
+      });
+    }
+
+    const accessTarget = await assertSectorAccessForUser(req, resolvedSectorId);
+    if (!accessTarget.ok) return res.status(accessTarget.status).json({ error: accessTarget.error });
+
+    let resolvedCrdId: number | null = null;
+    if (crd_id) {
+      const { data: crd, error: crdError } = await scopeByEmpresa(
+        supabase.from("crds").select("id, sector_id, code").eq("id", Number(crd_id)),
+        req
+      ).single();
+      if (crdError || !crd) return res.status(400).json({ error: "CRD inválido para o estorno" });
+      const canUse = await userCanUseCrd(req, crd as any, resolvedSectorId);
+      if (!canUse) return res.status(400).json({ error: "CRD não pertence ao setor informado" });
+      resolvedCrdId = Number(crd.id);
+    }
+
+    let resolvedFilePath: string | null = null;
+    let resolvedFileName: string | null = null;
+    const rawFilePath = String(file_path || "").trim();
+    if (rawFilePath) {
+      const objectPath = normalizeStorageObjectPath(rawFilePath);
+      if (!objectPath || !objectPath.startsWith("estornos/")) {
+        return res.status(400).json({ error: "Arquivo inválido" });
+      }
+      resolvedFilePath = objectPath;
+      resolvedFileName = String(file_name || "").trim().slice(0, 255) || null;
+    }
+
+    const asText = (v: unknown) => String(v ?? "").trim();
+    const asAmount = (v: unknown) => {
+      const n = Number(v);
+      return Number.isFinite(n) ? n.toFixed(2) : "";
+    };
+    const asDate = (v: unknown) => String(v || "").slice(0, 10);
+
+    let sectorFrom = asText(existing.sector_id);
+    let sectorTo = String(resolvedSectorId);
+    if (String(existing.sector_id) !== String(resolvedSectorId)) {
+      const { data: sectorRows } = await supabase
+        .from("sectors")
+        .select("id, name")
+        .in("id", [existing.sector_id, resolvedSectorId].filter(Boolean));
+      const nameById = new Map((sectorRows || []).map((s: any) => [String(s.id), String(s.name || s.id)]));
+      sectorFrom = nameById.get(String(existing.sector_id)) || sectorFrom;
+      sectorTo = nameById.get(String(resolvedSectorId)) || sectorTo;
+    }
+
+    const candidates = [
+      { field: "provider_name", label: "Fornecedor", from: asText(existing.provider_name), to: resolvedProviderName },
+      { field: "description", label: "Descrição", from: asText(existing.description), to: asText(resolvedDescription) },
+      { field: "amount", label: "Valor", from: asAmount(existing.amount), to: asAmount(resolvedAmount) },
+      { field: "issue_date", label: "Emissão", from: asDate(existing.issue_date), to: resolvedIssue },
+      { field: "date", label: "Lançamento", from: asDate(existing.date), to: resolvedDate },
+      { field: "sector_id", label: "Setor", from: sectorFrom, to: sectorTo },
+      { field: "crd_id", label: "CRD", from: asText(existing.crd_id), to: asText(resolvedCrdId) },
+      {
+        field: "file_path",
+        label: "Anexo",
+        from: asText(existing.file_path) ? "anexado" : "sem anexo",
+        to: resolvedFilePath ? "anexado" : "sem anexo",
+      },
+    ];
+    const changes = candidates.filter((c) => c.from !== c.to);
+    if (changes.length === 0) return res.status(400).json({ error: "Nenhuma alteração para salvar." });
+
+    const nowIso = new Date().toISOString();
+    const { data, error } = await scopeByEmpresa(
+      supabase
+        .from("estornos")
+        .update({
+          sector_id: resolvedSectorId,
+          crd_id: resolvedCrdId,
+          description: resolvedDescription,
+          provider_name: resolvedProviderName,
+          amount: resolvedAmount,
+          date: resolvedDate,
+          issue_date: resolvedIssue,
+          file_path: resolvedFilePath,
+          file_name: resolvedFileName,
+          edit_count: Number(existing.edit_count || 0) + 1,
+          last_edited_at: nowIso,
+        })
+        .eq("id", entryId),
+      req
+    )
+      .select("id, protocol, edit_count, last_edited_at")
+      .single();
+
+    if (error) {
+      console.error(error);
+      return res.status(500).json({ error: "Não foi possível salvar a edição." });
+    }
+
+    await recordLaunchEdit(req, {
+      source_type: "estorno",
+      source_id: entryId,
+      user_id: req.user?.id,
+      editor_name: req.user?.name || req.user?.email || "Usuário",
+      changes,
+    });
+
+    res.json(data);
+  });
+
+  app.patch("/api/estornos/:id/status", async (req, res) => {
+    const { id } = req.params;
+    const { status } = req.body;
+    if (!["open", "approved", "cancelled", "posted"].includes(status)) {
+      return res.status(400).json({ error: "Status inválido" });
+    }
+
+    const { data: existing, error: fetchError } = await scopeByEmpresa(
+      supabase.from("estornos").select("id, sector_id, status").eq("id", id),
+      req
+    ).single();
+    if (fetchError || !existing) {
+      return res.status(404).json({ error: "Estorno não encontrado" });
+    }
+
+    const access = await assertSectorAccessForUser(req, Number(existing.sector_id));
+    if (!access.ok) return res.status(access.status).json({ error: access.error });
+
+    const role = String(req.user?.role || "");
+    const current = String((existing as any).status || "open");
+    const validation = validateLaunchFlowStatus(role, current, status);
+    if (validation.ok === false) return res.status(validation.status).json({ error: validation.error });
+
+    const { error } = await scopeByEmpresa(
+      supabase.from("estornos").update({ status }).eq("id", id),
+      req
+    );
+    if (error) {
+      console.error(error);
+      return res.status(500).json({ error: "Erro interno ao processar a solicitação." });
+    }
+    res.json({ success: true });
+  });
+
+  app.post("/api/estornos/file", upload.single("file"), async (req, res) => {
+    if (!req.file) return res.status(400).json({ error: "Arquivo não enviado" });
+    const mime = String(req.file.mimetype || "");
+    const ext = path.extname(req.file.originalname || "").toLowerCase();
+    const allowedExt = [".pdf", ".jpg", ".jpeg", ".png", ".webp", ".xls", ".xlsx", ".doc", ".docx"];
+    if (!MANUAL_ENTRY_ALLOWED_MIMES.has(mime) && !allowedExt.includes(ext)) {
+      if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+      return res.status(400).json({ error: "Formato inválido. Envie PDF, imagem, Excel ou Word." });
+    }
+
+    try {
+      const fileBuffer = fs.readFileSync(req.file.path);
+      const storagePath = await uploadDocument(
+        fileBuffer,
+        "estornos",
+        manualEntryExtFromFile(req.file),
+        mime || "application/octet-stream"
+      );
+      res.json({
+        file_path: storagePath,
+        file_name: String(req.file.originalname || "").slice(0, 255),
+      });
+    } catch (error) {
+      console.error("Erro ao salvar anexo do estorno:", error);
+      res.status(500).json({ error: "Não foi possível salvar o arquivo." });
+    } finally {
+      if (req.file?.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+    }
+  });
+
+  app.get("/api/estornos/:id/document-url", async (req, res) => {
+    const { data, error } = await supabase
+      .from("estornos")
+      .select("id, file_path")
+      .eq("id", Number(req.params.id))
+      .maybeSingle();
+
+    if (error) {
+      console.error(error);
+      return res.status(500).json({ error: "Erro ao buscar o anexo." });
+    }
+    if (!data) return res.status(404).json({ error: "Estorno não encontrado" });
+    const rawPath = String((data as { file_path?: string }).file_path || "");
+    if (!rawPath) return res.status(404).json({ error: "Documento não anexado" });
+
+    const result = await createSignedDocumentUrl(rawPath);
+    if (!("url" in result)) {
+      const status = result.error === "Caminho inválido" ? 400 : 404;
+      return res.status(status).json({ error: result.error });
+    }
+    res.json({ url: result.url });
+  });
+
+  app.delete("/api/estornos/:id", requireRole("admin"), async (req, res) => {
+    const { id } = req.params;
+    const { data: existing, error: fetchError } = await scopeByEmpresa(
+      supabase.from("estornos").select("id").eq("id", id),
+      req
+    ).maybeSingle();
+    if (fetchError) {
+      console.error(fetchError);
+      return res.status(500).json({ error: "Erro interno ao processar a solicitação." });
+    }
+    if (!existing) return res.status(404).json({ error: "Estorno não encontrado" });
+
+    const { error } = await scopeByEmpresa(
+      supabase.from("estornos").delete().eq("id", id),
+      req
+    );
+    if (error) {
+      console.error(error);
+      return res.status(500).json({ error: "Não foi possível excluir o estorno." });
+    }
+    res.json({ success: true });
+  });
+
+  // ====================================================
+  // APROVAÇÕES (visão unificada — Controle / Financeiro)
+  // ====================================================
+  const inferInvoiceDocType = (invoice: { invoice_number?: unknown }) => {
+    const digits = String(invoice.invoice_number ?? "").replace(/\D/g, "");
+    return digits.length === 44 ? "danfe" : "nota";
+  };
+
+  const isPendingApprovalItem = (item: {
+    type: string;
+    status: string;
+    flow_stage?: string | null;
+    alerta_vencimento?: boolean;
+    assinado?: boolean;
+  }) => {
+    if (item.type === "manual" || item.type === "estorno") {
+      return item.status === "pending_manager" || item.status === "open" || item.status === "approved";
+    }
+    if (item.type === "nota" || item.type === "danfe") {
+      const flow = item.flow_stage || "control_pending";
+      return flow !== "paid" && flow !== "cancelled" && item.status !== "paid";
+    }
+    if (item.type === "comanda" || item.type === "requisicao") {
+      return item.status === "pending_manager" || item.status === "open" || item.status === "approved";
+    }
+    if (item.type === "mensalidade" || item.type === "ordem") {
+      return item.status === "pending_manager" || item.status === "open" || item.status === "approved";
+    }
+    return false;
+  };
+
+  app.get("/api/aprovacoes", requireRole("admin", "controle", "finance", "manager", "diretoria"), async (req, res) => {
+    const q = req.query as {
+      type?: string;
+      sector_id?: string;
+      from?: string;
+      to?: string;
+      status?: string;
+    };
+    const typeFilter = String(q.type || "all");
+    const sectorFilter = q.sector_id != null && q.sector_id !== "" ? Number(q.sector_id) : null;
+    const fromDate = q.from ? String(q.from).slice(0, 10) : "";
+    const toDate = q.to ? String(q.to).slice(0, 10) : "";
+    const statusFilter = String(q.status || "all");
+
+    const includeType = (t: string) => typeFilter === "all" || typeFilter === t;
+    const inDateRange = (dateStr: string | null | undefined) => {
+      if (!fromDate && !toDate) return true;
+      const d = String(dateStr || "").slice(0, 10);
+      if (!d) return !fromDate && !toDate;
+      if (fromDate && d < fromDate) return false;
+      if (toDate && d > toDate) return false;
+      return true;
+    };
+    const matchesSector = (sectorId: number | null | undefined, type: string) => {
+      if (sectorFilter == null || !Number.isFinite(sectorFilter)) return true;
+      if (type === "comanda") return false;
+      return Number(sectorId) === sectorFilter;
+    };
+    const matchesStatus = (item: {
+      type: string;
+      status: string;
+      flow_stage?: string | null;
+      alerta_vencimento?: boolean;
+      assinado?: boolean;
+    }) => {
+      if (statusFilter === "all") return true;
+      if (statusFilter === "pending") return isPendingApprovalItem(item);
+      if (statusFilter === "done") {
+        if (item.type === "manual" || item.type === "estorno") return item.status === "posted";
+        if (item.type === "nota" || item.type === "danfe") {
+          const flow = item.flow_stage || "";
+          return flow === "paid" || item.status === "paid";
+        }
+        if (item.type === "comanda" || item.type === "requisicao") return item.status === "posted";
+        if (item.type === "mensalidade" || item.type === "ordem") return item.status === "posted";
+        return false;
+      }
+      if (statusFilter === "cancelled") {
+        if (item.type === "manual" || item.type === "estorno") return item.status === "cancelled";
+        if (item.type === "nota" || item.type === "danfe") {
+          return (item.flow_stage || "") === "cancelled";
+        }
+        if (item.type === "comanda" || item.type === "requisicao") return item.status === "cancelled";
+        if (item.type === "mensalidade" || item.type === "ordem") return item.status === "cancelled";
+      }
+      return true;
+    };
+
+    try {
+      const [
+        manualRes,
+        estornoRes,
+        reqRes,
+        invoiceRes,
+        comandaRes,
+        contratoRes,
+        ordemRes,
+      ] = await Promise.all([
+        includeType("manual")
+          ? filterByEmpresa(
+              supabase.from("manual_entries").select("*, sectors(name), crds(id, code, name), users(id, name)"),
+              req,
+              "manual_entries"
+            ).order("date", { ascending: false })
+          : Promise.resolve({ data: [], error: null }),
+        includeType("estorno")
+          ? filterByEmpresa(
+              supabase.from("estornos").select("*, sectors(name), crds(id, code, name), users(id, name)"),
+              req,
+              "estornos"
+            ).order("date", { ascending: false })
+          : Promise.resolve({ data: [], error: null }),
+        includeType("requisicao")
+          ? filterByEmpresa(
+              supabase.from("requisitions").select("*, sectors(name), crds(id, code, name, sector_id, sectors(name))"),
+              req,
+              "requisitions"
+            ).order("date", { ascending: false })
+          : Promise.resolve({ data: [], error: null }),
+        includeType("nota") || includeType("danfe")
+          ? filterByEmpresa(
+              supabase.from("invoices").select("*, sectors(name), users(id, name)"),
+              req,
+              "invoices"
+            ).order("due_date", { ascending: false })
+          : Promise.resolve({ data: [], error: null }),
+        includeType("comanda")
+          ? filterByEmpresa(
+              supabase.from("comandas").select("*, users(id, name)"),
+              req,
+              "comandas"
+            ).order("consumed_at", { ascending: false })
+          : Promise.resolve({ data: [], error: null }),
+        includeType("mensalidade")
+          ? filterByEmpresa(
+              supabase
+                .from("contrato_lancamentos")
+                .select("*, contratos(fornecedor, sector_id, vencimento, periodicidade, responsavel, sectors(name), crds(id, code, name)), users(id, name)"),
+              req,
+              "contrato_lancamentos"
+            ).order("competencia", { ascending: false })
+          : Promise.resolve({ data: [], error: null }),
+        includeType("ordem")
+          ? filterByEmpresa(
+              supabase.from("ordens_compra").select("*, users(id, name)"),
+              req,
+              "ordens_compra"
+            ).order("created_at", { ascending: false })
+          : Promise.resolve({ data: [], error: null }),
+      ]);
+
+      for (const result of [manualRes, estornoRes, reqRes, invoiceRes, comandaRes, contratoRes, ordemRes]) {
+        if (result.error) {
+          console.error(result.error);
+          return res.status(500).json({ error: "Erro ao carregar lançamentos para aprovação." });
+        }
+      }
+
+      let items: any[] = [];
+
+      for (const row of manualRes.data ?? []) {
+        const item = {
+          key: `manual-${row.id}`,
+          type: "manual",
+          source_id: Number(row.id),
+          sector_id: row.sector_id != null ? Number(row.sector_id) : null,
+          sector_name: row.sectors?.name ?? null,
+          crd_code: row.crds?.code ?? null,
+          crd_name: row.crds?.name ?? null,
+          title: row.provider_name || row.description || `Lançamento #${row.id}`,
+          subtitle: row.protocol || row.users?.name || null,
+          description: row.description ?? null,
+          protocol: row.protocol ?? null,
+          reference_date: String(row.date || row.issue_date || "").slice(0, 10),
+          issue_date: row.issue_date ? String(row.issue_date).slice(0, 10) : null,
+          amount: Number(row.amount) || 0,
+          status: String(row.status || "open"),
+          flow_stage: null,
+          user_name: row.users?.name ?? null,
+          file_path: row.file_path ?? null,
+          file_name: row.file_name ?? null,
+          fornecedor: row.provider_name
+            ? String(row.provider_name)
+            : row.description
+              ? String(row.description)
+              : null,
+          vencimento: row.due_date ? String(row.due_date).slice(0, 10) : null,
+        };
+        if (!matchesSector(item.sector_id, item.type)) continue;
+        if (!inDateRange(item.reference_date)) continue;
+        if (!matchesStatus(item)) continue;
+        items.push(item);
+      }
+
+      for (const row of estornoRes.data ?? []) {
+        const item = {
+          key: `estorno-${row.id}`,
+          type: "estorno",
+          source_id: Number(row.id),
+          sector_id: row.sector_id != null ? Number(row.sector_id) : null,
+          sector_name: row.sectors?.name ?? null,
+          crd_code: row.crds?.code ?? null,
+          crd_name: row.crds?.name ?? null,
+          title: row.provider_name || row.description || `Estorno #${row.id}`,
+          subtitle: row.protocol || row.users?.name || null,
+          description: row.description ?? null,
+          protocol: row.protocol ?? null,
+          reference_date: String(row.date || row.issue_date || "").slice(0, 10),
+          issue_date: row.issue_date ? String(row.issue_date).slice(0, 10) : null,
+          amount: Number(row.amount) || 0,
+          status: String(row.status || "open"),
+          flow_stage: null,
+          user_name: row.users?.name ?? null,
+          file_path: row.file_path ?? null,
+          file_name: row.file_name ?? null,
+          fornecedor: row.provider_name
+            ? String(row.provider_name)
+            : row.description
+              ? String(row.description)
+              : null,
+          vencimento: row.due_date ? String(row.due_date).slice(0, 10) : null,
+        };
+        if (!matchesSector(item.sector_id, item.type)) continue;
+        if (!inDateRange(item.reference_date)) continue;
+        if (!matchesStatus(item)) continue;
+        items.push(item);
+      }
+
+      for (const row of reqRes.data ?? []) {
+        const item = {
+          key: `requisicao-${row.id}`,
+          type: "requisicao",
+          source_id: Number(row.id),
+          sector_id: row.sector_id != null ? Number(row.sector_id) : Number(row.crds?.sector_id) || null,
+          sector_name: row.crds?.sectors?.name ?? row.sectors?.name ?? null,
+          crd_code: row.crds?.code ?? null,
+          crd_name: row.crds?.name ?? null,
+          title: row.provider_name || row.description || `Requisição #${row.id}`,
+          subtitle: row.protocol || null,
+          description: row.description ?? null,
+          protocol: row.protocol ?? null,
+          reference_date: String(row.date || "").slice(0, 10),
+          issue_date: null,
+          amount: Number(row.amount) || 0,
+          status: String(row.status || "open"),
+          flow_stage: null,
+          user_name: null,
+          file_path: null,
+          file_name: null,
+          fornecedor: row.provider_name
+            ? String(row.provider_name)
+            : row.description
+              ? String(row.description)
+              : null,
+          vencimento: null,
+        };
+        if (!matchesSector(item.sector_id, item.type)) continue;
+        if (!inDateRange(item.reference_date)) continue;
+        if (!matchesStatus(item)) continue;
+        items.push(item);
+      }
+
+      for (const row of invoiceRes.data ?? []) {
+        const docType = inferInvoiceDocType(row);
+        if (!includeType(docType)) continue;
+        const item = {
+          key: `${docType}-${row.id}`,
+          type: docType,
+          source_id: Number(row.id),
+          sector_id: row.sector_id != null ? Number(row.sector_id) : null,
+          sector_name: row.sectors?.name ?? null,
+          crd_code: row.crd ?? null,
+          crd_name: null,
+          title: row.provider_name || `Nota #${row.id}`,
+          subtitle: [row.protocol, row.invoice_number ? `Nº ${row.invoice_number}` : null].filter(Boolean).join(" · ") || null,
+          description: row.description ?? null,
+          protocol: row.protocol ?? null,
+          invoice_number: row.invoice_number != null ? String(row.invoice_number) : null,
+          reference_date: String(row.due_date || row.issue_date || "").slice(0, 10),
+          issue_date: row.issue_date ? String(row.issue_date).slice(0, 10) : null,
+          amount: Number(row.amount) || 0,
+          status: String(row.status || "control_pending"),
+          flow_stage: String(row.flow_stage || "control_pending"),
+          user_name: row.users?.name ?? null,
+          file_path: row.file_path ?? null,
+          file_name: null,
+          fornecedor: row.provider_name ? String(row.provider_name) : null,
+          vencimento: row.due_date ? String(row.due_date).slice(0, 10) : null,
+        };
+        if (!matchesSector(item.sector_id, item.type)) continue;
+        if (!inDateRange(item.reference_date)) continue;
+        if (!matchesStatus(item)) continue;
+        items.push(item);
+      }
+
+      if (includeType("comanda")) {
+        const comandaIds = (comandaRes.data ?? [])
+          .map((r: any) => Number(r.id))
+          .filter((id: number) => Number.isFinite(id));
+        let comandaItems: any[] = [];
+        if (comandaIds.length > 0) {
+          const { data: itemRows } = await supabase
+            .from("comanda_items")
+            .select("*")
+            .in("comanda_id", comandaIds);
+          comandaItems = itemRows ?? [];
+        }
+        const itemsByComanda = new Map<number, any[]>();
+        for (const ci of comandaItems) {
+          const cid = Number(ci.comanda_id);
+          const list = itemsByComanda.get(cid) ?? [];
+          list.push(ci);
+          itemsByComanda.set(cid, list);
+        }
+
+        for (const row of comandaRes.data ?? []) {
+          const comandaItemRows = itemsByComanda.get(Number(row.id)) ?? [];
+          const itemsSummary = comandaItemRows
+            .map((i) => `${i.description} (${i.quantity})`)
+            .join(", ");
+          const comandaAmount = comandaItemRows.reduce((sum, i) => {
+            const qty = Number(i.quantity) || 0;
+            const price = Number(i.unit_price) || 0;
+            return sum + qty * price;
+          }, 0);
+          const item = {
+            key: `comanda-${row.id}`,
+            type: "comanda",
+            source_id: Number(row.id),
+            sector_id: null,
+            sector_name: row.location ?? null,
+            crd_code: null,
+            crd_name: null,
+            title: row.consumer_name || `Comanda #${row.id}`,
+            subtitle: [row.protocol, row.location].filter(Boolean).join(" · ") || null,
+            description: itemsSummary || null,
+            protocol: row.protocol ?? null,
+            reference_date: String(row.consumed_at || row.created_at || "").slice(0, 10),
+            issue_date: null,
+            amount: Number.isFinite(comandaAmount) ? comandaAmount : null,
+            status: String(row.status || "open"),
+            flow_stage: null,
+            user_name: row.users?.name ?? null,
+            file_path: null,
+            file_name: null,
+            items_count: comandaItemRows.length,
+            fornecedor: row.provider_name ? String(row.provider_name) : null,
+            vencimento: null,
+          };
+          if (!matchesSector(item.sector_id, item.type)) continue;
+          if (!inDateRange(item.reference_date)) continue;
+          if (!matchesStatus(item)) continue;
+          items.push(item);
+        }
+      }
+
+      for (const row of contratoRes.data ?? []) {
+        const contrato = row.contratos;
+        const crd = contrato?.crds;
+        const vencimento = contrato?.vencimento ? String(contrato.vencimento).slice(0, 10) : null;
+        const item = {
+          key: `mensalidade-${row.id}`,
+          type: "mensalidade",
+          source_id: Number(row.id),
+          sector_id: contrato?.sector_id != null ? Number(contrato.sector_id) : null,
+          sector_name: contrato?.sectors?.name ?? null,
+          crd_code: crd?.code ?? null,
+          crd_name: crd?.name ?? null,
+          title: String(contrato?.fornecedor || `Mensalidade #${row.id}`),
+          subtitle: [row.protocol, String(contrato?.periodicidade || "mensal")].filter(Boolean).join(" · "),
+          description: row.observacao ?? contrato?.observacoes ?? null,
+          protocol: row.protocol ?? null,
+          reference_date: String(row.competencia || "").slice(0, 10),
+          issue_date: null,
+          amount: Number(row.valor) || 0,
+          status: String(row.status || "open"),
+          flow_stage: null,
+          user_name: row.users?.name ?? contrato?.responsavel ?? null,
+          file_path: null,
+          file_name: null,
+          assinado: undefined,
+          alerta_vencimento: false,
+          fornecedor: contrato?.fornecedor ? String(contrato.fornecedor) : null,
+          vencimento,
+        };
+        if (!matchesSector(item.sector_id, item.type)) continue;
+        if (!inDateRange(item.reference_date)) continue;
+        if (!matchesStatus(item)) continue;
+        items.push(item);
+      }
+
+      const ordemRows = ordemRes.data ?? [];
+      const ordemSectorIds = [
+        ...new Set(
+          ordemRows
+            .flatMap((row: any) => [row.servico_sector_id, row.materiais_sector_id])
+            .map((id: unknown) => Number(id))
+            .filter((id: number) => Number.isFinite(id) && id > 0)
+        ),
+      ];
+      const ordemCrdIds = [
+        ...new Set(
+          ordemRows
+            .flatMap((row: any) => [row.servico_crd_id, row.materiais_crd_id])
+            .map((id: unknown) => Number(id))
+            .filter((id: number) => Number.isFinite(id) && id > 0)
+        ),
+      ];
+      const ordemSectorMap = new Map<number, string>();
+      const ordemCrdMap = new Map<number, { code: string | null; name: string | null }>();
+      if (ordemSectorIds.length) {
+        const { data: sectorRows } = await supabase.from("sectors").select("id, name").in("id", ordemSectorIds);
+        for (const sector of sectorRows ?? []) ordemSectorMap.set(Number(sector.id), String(sector.name || ""));
+      }
+      if (ordemCrdIds.length) {
+        const { data: crdRows } = await supabase.from("crds").select("id, code, name").in("id", ordemCrdIds);
+        for (const crd of crdRows ?? []) {
+          ordemCrdMap.set(Number(crd.id), { code: crd.code ?? null, name: crd.name ?? null });
+        }
+      }
+      const pagamentoLabel: Record<string, string> = {
+        cartao: "Cartão",
+        avista: "À vista",
+        boleto: "Boleto",
+        pix: "PIX",
+        transferencia: "Transferência",
+      };
+
+      for (const row of ordemRows) {
+        const servicoSectorId = row.servico_sector_id != null ? Number(row.servico_sector_id) : null;
+        const materiaisSectorId = row.materiais_sector_id != null ? Number(row.materiais_sector_id) : null;
+        const sectorId = servicoSectorId ?? materiaisSectorId;
+        const sectorNames = [
+          ...new Set(
+            [servicoSectorId, materiaisSectorId]
+              .map((id) => (id != null ? ordemSectorMap.get(id) : null))
+              .filter(Boolean)
+          ),
+        ];
+        const primaryCrdId = row.servico_crd_id != null ? Number(row.servico_crd_id) : row.materiais_crd_id != null ? Number(row.materiais_crd_id) : null;
+        const primaryCrd = primaryCrdId != null ? ordemCrdMap.get(primaryCrdId) : null;
+        const descriptionParts = [
+          row.servico_executado ? `Serviço: ${row.servico_executado}` : null,
+          row.materiais_descricao ? `Materiais: ${row.materiais_descricao}` : null,
+        ].filter(Boolean);
+        const item = {
+          key: `ordem-${row.id}`,
+          type: "ordem",
+          source_id: Number(row.id),
+          sector_id: sectorId,
+          sector_name: sectorNames.join(" / ") || null,
+          crd_code: primaryCrd?.code ?? null,
+          crd_name: primaryCrd?.name ?? null,
+          title: String(row.prestador || `Ordem #${row.id}`),
+          subtitle: [row.protocol, pagamentoLabel[String(row.pagamento || "")] || null].filter(Boolean).join(" · ") || null,
+          description: descriptionParts.join(" · ") || row.observacao || null,
+          protocol: row.protocol ?? null,
+          reference_date: String(row.data_execucao || row.created_at || "").slice(0, 10),
+          issue_date: row.data_execucao ? String(row.data_execucao).slice(0, 10) : null,
+          amount: Number(row.valor) || 0,
+          status: String(row.status || "open"),
+          flow_stage: null,
+          user_name: row.users?.name ?? row.solicitado_por ?? null,
+          file_path: row.nota_file_path ?? null,
+          file_name: row.nota_file_name ?? null,
+          fornecedor: row.prestador ? String(row.prestador) : null,
+          vencimento: null,
+          recibo_file_path: row.recibo_file_path ?? null,
+          recibo_file_name: row.recibo_file_name ?? null,
+          boleto_file_path: row.boleto_file_path ?? null,
+          boleto_file_name: row.boleto_file_name ?? null,
+        };
+        if (!matchesSector(item.sector_id, item.type)) continue;
+        if (!inDateRange(item.reference_date)) continue;
+        if (!matchesStatus(item)) continue;
+        items.push(item);
+      }
+
+      items.sort((a, b) => String(b.reference_date).localeCompare(String(a.reference_date)));
+
+      if (String(req.user?.role || "") === "manager") {
+        const { data: userRow } = await supabase.from("users").select("*").eq("id", req.user!.id).single();
+        if (userRow) {
+          const session = await buildUserSession(userRow, empresaKeyOf(req));
+          const allowed = new Set((session.sector_ids ?? []).map((id: number) => Number(id)));
+          items = items.filter(
+            (i) => i.type === "comanda" || (i.sector_id != null && allowed.has(Number(i.sector_id)))
+          );
+        }
+      }
+
+      const searchQ = String((req.query as any).q || "")
+        .replace(/[%_,]/g, " ")
+        .trim()
+        .toLowerCase();
+      const amountFilter = String((req.query as any).amount || "").replace(",", ".").trim();
+      const invoiceNumberFilter = String((req.query as any).invoice_number || "")
+        .replace(/[%_,]/g, " ")
+        .trim()
+        .toLowerCase();
+      const diretoriaOnly = String((req.query as any).diretoria || "") === "1";
+
+      if (diretoriaOnly) {
+        items = items.filter((i) => Number(i.amount) > DIRETORIA_AMOUNT_THRESHOLD);
+      }
+      if (amountFilter) {
+        const amt = Number(amountFilter);
+        if (Number.isFinite(amt)) items = items.filter((i) => Number(i.amount) === amt);
+      }
+      if (invoiceNumberFilter) {
+        items = items.filter((i) => {
+          const hay = [i.invoice_number, i.protocol, i.subtitle, i.title, i.description]
+            .map((v) => String(v || "").toLowerCase())
+            .join(" ");
+          return hay.includes(invoiceNumberFilter);
+        });
+      }
+      if (searchQ) {
+        items = items.filter((i) => {
+          const hay = [
+            i.type,
+            i.title,
+            i.subtitle,
+            i.protocol,
+            i.invoice_number,
+            i.description,
+            i.sector_name,
+            i.crd_code,
+            i.crd_name,
+            i.user_name,
+            i.fornecedor,
+            i.amount,
+            i.status,
+          ]
+            .map((v) => String(v || "").toLowerCase())
+            .join(" ");
+          return hay.includes(searchQ);
+        });
+      }
+
+      const summary = {
+        total: items.length,
+        pending: items.filter((i) => isPendingApprovalItem(i)).length,
+        by_type: items.reduce((acc: Record<string, number>, i) => {
+          acc[i.type] = (acc[i.type] || 0) + 1;
+          return acc;
+        }, {}),
+        pending_gestor: items.filter((i) => {
+          if (i.type === "manual" || i.type === "estorno" || i.type === "requisicao" || i.type === "comanda") {
+            return i.status === "pending_manager";
+          }
+          if (i.type === "nota" || i.type === "danfe") return (i.flow_stage || "") === "manager_pending";
+          return false;
+        }).length,
+        pending_controle: items.filter((i) => isPendingApprovalItem(i) && i.status !== "pending_manager").length,
+        pending_financeiro: items.filter((i) => {
+          if (i.type === "manual" || i.type === "estorno") return i.status === "approved";
+          if (i.type === "nota" || i.type === "danfe") return (i.flow_stage || "") === "control_approved";
+          if (i.type === "comanda" || i.type === "requisicao") return i.status === "approved";
+          return false;
+        }).length,
+        pending_diretoria: items.filter((i) => Number(i.amount) > DIRETORIA_AMOUNT_THRESHOLD).length,
+        total_valor: sumAmounts(items, (i) => i.amount, (i) => (i.type === "estorno" ? -1 : 1)),
+      };
+
+      const pag = parseListPagination(req.query as Record<string, unknown>);
+      const totalAmount = summary.total_valor;
+
+      if (!pag.enabled) {
+        return res.json({ items, summary, total: items.length, totalAmount });
+      }
+
+      const pageItems = items.slice(pag.from, pag.to + 1);
+      return res.json({
+        ...paginatedPayload(pageItems, items.length, pag.page, pag.pageSize, { totalAmount }),
+        summary,
+      });
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: "Erro ao carregar aprovações." });
+    }
+  });
+
+  // ====================================================
   // LOCAIS PDV (configurações / comandas)
   // ====================================================
   app.get("/api/pdv-locais", async (req, res) => {
     const includeInactive = String(req.query.all || "") === "1";
-    let query = supabase
-      .from("pdv_locais")
-      .select("*")
+    let query = filterByEmpresa(
+      supabase.from("pdv_locais").select("*"),
+      req,
+      "pdv_locais"
+    )
       .order("sort_order", { ascending: true })
       .order("name", { ascending: true });
     if (!includeInactive) query = query.eq("active", true);
@@ -1719,24 +4646,23 @@ export function createApp() {
     const name = String(req.body?.name ?? "").trim();
     if (!name) return res.status(400).json({ error: "Nome do local é obrigatório." });
 
-    const { data: existing } = await supabase
-      .from("pdv_locais")
-      .select("id")
-      .ilike("name", name)
-      .maybeSingle();
+    const { data: existing } = await filterByEmpresa(
+      supabase.from("pdv_locais").select("id").ilike("name", name),
+      req,
+      "pdv_locais"
+    ).maybeSingle();
     if (existing) return res.status(400).json({ error: "Já existe um local com este nome." });
 
-    const { data: last } = await supabase
-      .from("pdv_locais")
-      .select("sort_order")
-      .order("sort_order", { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    const { data: last } = await filterByEmpresa(
+      supabase.from("pdv_locais").select("sort_order").order("sort_order", { ascending: false }).limit(1),
+      req,
+      "pdv_locais"
+    ).maybeSingle();
     const sortOrder = Number((last as any)?.sort_order ?? 0) + 1;
 
     const { data, error } = await supabase
       .from("pdv_locais")
-      .insert({ name, active: true, sort_order: sortOrder })
+      .insert(withEmpresaKey({ name, active: true, sort_order: sortOrder }, req))
       .select("id, name, active, sort_order")
       .single();
 
@@ -1762,7 +4688,10 @@ export function createApp() {
       return res.status(400).json({ error: "Nenhum campo para atualizar." });
     }
 
-    const { error } = await supabase.from("pdv_locais").update(patch).eq("id", id);
+    const { error } = await scopeByEmpresa(
+      supabase.from("pdv_locais").update(patch).eq("id", id),
+      req
+    );
     if (error) {
       console.error(error);
       return res.status(500).json({ error: "Erro interno ao processar a solicitação." });
@@ -1772,7 +4701,10 @@ export function createApp() {
 
   app.delete("/api/pdv-locais/:id", requireRole("admin"), async (req, res) => {
     const { id } = req.params;
-    const { error } = await supabase.from("pdv_locais").delete().eq("id", id);
+    const { error } = await scopeByEmpresa(
+      supabase.from("pdv_locais").delete().eq("id", id),
+      req
+    );
     if (error) {
       console.error(error);
       return res.status(500).json({ error: "Erro interno ao processar a solicitação." });
@@ -1852,20 +4784,49 @@ export function createApp() {
     });
   };
 
-  app.get("/api/comandas", async (_req, res) => {
-    const { data: comandas, error } = await supabase
-      .from("comandas")
-      .select("*, users(id, name)")
+  app.get("/api/comandas", async (req, res) => {
+    const pag = parseListPagination(req.query as Record<string, unknown>);
+    const q = req.query as Record<string, string | undefined>;
+    const selectOpts = pag.enabled ? ({ count: "exact" } as const) : undefined;
+
+    let query = filterByEmpresa(
+      supabase.from("comandas").select("*, users(id, name)", selectOpts),
+      req,
+      "comandas"
+    )
       .order("consumed_at", { ascending: false })
       .order("created_at", { ascending: false });
 
+    if (q.status && q.status !== "all") query = query.eq("status", q.status);
+    if (q.from) query = query.gte("consumed_at", String(q.from).slice(0, 10));
+    if (q.to) query = query.lte("consumed_at", String(q.to).slice(0, 10));
+    const month = Number(q.month);
+    if (Number.isFinite(month) && month >= 1 && month <= 12) {
+      const year = Number(q.year) || new Date().getFullYear();
+      const { dateFrom, dateTo } = getMonthDateRange(year, month);
+      query = query.gte("consumed_at", dateFrom).lte("consumed_at", dateTo);
+    }
+    const term = String(q.q || "").replace(/[%_,]/g, " ").trim();
+    if (term) {
+      const like = `%${term}%`;
+      query = query.or(
+        `protocol.ilike.${like},consumer_name.ilike.${like},provider_name.ilike.${like},location.ilike.${like}`
+      );
+    }
+
+    if (pag.enabled) query = query.range(pag.from, pag.to);
+
+    const { data: comandas, error, count } = await query;
     if (error) {
       console.error(error);
       return res.status(500).json({ error: "Erro interno ao processar a solicitação." });
     }
 
     const ids = (comandas ?? []).map((row: any) => Number(row.id)).filter((id) => Number.isFinite(id));
-    if (!ids.length) return res.json([]);
+    if (!ids.length) {
+      if (!pag.enabled) return res.json([]);
+      return res.json(paginatedPayload([], count ?? 0, pag.page, pag.pageSize));
+    }
 
     const { data: items, error: itemsError } = await supabase
       .from("comanda_items")
@@ -1878,31 +4839,35 @@ export function createApp() {
       return res.status(500).json({ error: "Erro interno ao processar a solicitação." });
     }
 
-    res.json(mapComandaRows(comandas ?? [], items ?? []));
+    const mapped = mapComandaRows(comandas ?? [], items ?? []);
+    if (!pag.enabled) return res.json(mapped);
+    return res.json(paginatedPayload(mapped, count ?? mapped.length, pag.page, pag.pageSize));
   });
 
   app.post("/api/comandas", async (req, res) => {
-    const { consumer_name, consumed_at, location, items } = req.body as {
+    const { consumer_name, consumed_at, location, provider_name, items } = req.body as {
       consumer_name?: string;
       consumed_at?: string;
       location?: string;
+      provider_name?: string;
       items?: ComandaItemInput[];
     };
 
     const name = String(consumer_name ?? "").trim();
     const consumedDate = String(consumed_at ?? "").trim();
     const consumedLocation = String(location ?? "").trim();
+    const resolvedProviderName = String(provider_name ?? "").trim();
 
     if (!name) return res.status(400).json({ error: "Nome do consumidor é obrigatório." });
+    if (!resolvedProviderName) return res.status(400).json({ error: "Fornecedor é obrigatório." });
     if (!consumedDate) return res.status(400).json({ error: "Data do consumo é obrigatória." });
     if (!consumedLocation) return res.status(400).json({ error: "Local do consumo é obrigatório." });
 
-    const { data: pdvLocal } = await supabase
-      .from("pdv_locais")
-      .select("id, name")
-      .eq("active", true)
-      .ilike("name", consumedLocation)
-      .maybeSingle();
+    const { data: pdvLocal } = await filterByEmpresa(
+      supabase.from("pdv_locais").select("id, name").eq("active", true).ilike("name", consumedLocation),
+      req,
+      "pdv_locais"
+    ).maybeSingle();
     if (!pdvLocal) {
       return res.status(400).json({ error: "Selecione um local PDV válido cadastrado em Configurações." });
     }
@@ -1910,16 +4875,20 @@ export function createApp() {
     const parsedItems = normalizeComandaItems(items ?? []);
     if (!parsedItems.ok) return res.status(400).json({ error: parsedItems.error });
 
+    const protocol = await allocateLaunchProtocol(PROTOCOL_PREFIX.comanda, req);
+    if (!protocol) return res.status(500).json({ error: "Não foi possível gerar o protocolo da comanda." });
     const { data: comanda, error: comandaError } = await supabase
       .from("comandas")
-      .insert({
+      .insert(withEmpresaKey({
         consumer_name: name,
         consumed_at: consumedDate,
         location: String(pdvLocal.name),
+        provider_name: resolvedProviderName,
         user_id: req.user!.id,
-        status: "open",
-      })
-      .select("id")
+        status: initialLaunchStatus(req.user?.role),
+        protocol,
+      }, req))
+      .select("id, protocol")
       .single();
 
     if (comandaError || !comanda) {
@@ -1939,26 +4908,33 @@ export function createApp() {
       return res.status(500).json({ error: "Não foi possível salvar os itens da comanda." });
     }
 
-    res.json({ id: comanda.id });
+    res.json({ id: comanda.id, protocol: comanda.protocol });
   });
 
   app.patch("/api/comandas/:id/status", async (req, res) => {
     const { id } = req.params;
     const { status } = req.body;
-    if (!["open", "cancelled", "posted"].includes(status)) {
+    if (!["open", "approved", "cancelled", "posted"].includes(status)) {
       return res.status(400).json({ error: "Status inválido" });
     }
 
-    const { data: existing, error: fetchError } = await supabase
-      .from("comandas")
-      .select("id")
-      .eq("id", id)
-      .single();
+    const { data: existing, error: fetchError } = await scopeByEmpresa(
+      supabase.from("comandas").select("id, status").eq("id", id),
+      req
+    ).single();
     if (fetchError || !existing) {
       return res.status(404).json({ error: "Comanda não encontrada" });
     }
 
-    const { error } = await supabase.from("comandas").update({ status }).eq("id", id);
+    const role = String(req.user?.role || "");
+    const current = String((existing as any).status || "open");
+    const validation = validateLaunchFlowStatus(role, current, status);
+    if (validation.ok === false) return res.status(validation.status).json({ error: validation.error });
+
+    const { error } = await scopeByEmpresa(
+      supabase.from("comandas").update({ status }).eq("id", id),
+      req
+    );
     if (error) {
       console.error(error);
       return res.status(500).json({ error: "Erro interno ao processar a solicitação." });
@@ -1970,48 +4946,107 @@ export function createApp() {
   // INVOICES
   // ====================================================
   app.get("/api/invoices", async (req, res) => {
-    const { month, year, from, to } = req.query as {
+    const { month, year, from, to, q: searchQ, amount, crd, doc_type } = req.query as {
       month?: string;
       year?: string;
       from?: string;
       to?: string;
+      q?: string;
+      amount?: string;
+      crd?: string;
+      doc_type?: string;
     };
     const now = new Date();
+    const pag = parseListPagination(req.query as Record<string, unknown>);
+    const selectOpts = pag.enabled ? ({ count: "exact" } as const) : undefined;
 
-    let query = supabase
-      .from("invoices")
-      .select("*, sectors(name), users(name)")
-      .order("created_at", { ascending: false });
+    let query = filterByEmpresa(
+      supabase.from("invoices").select("*, sectors(name), users(name)", selectOpts),
+      req,
+      "invoices"
+    ).order("created_at", { ascending: false });
 
     if (from || to) {
       const dateFrom = from || to!;
       const dateTo = to || from!;
       query = applyProvisionDateRange(query, dateFrom, dateTo);
-    } else {
-      const selectedMonth = Number(month) || now.getMonth() + 1;
+    } else if (month && Number(month) >= 1 && Number(month) <= 12) {
+      const selectedMonth = Number(month);
       const selectedYear = Number(year) || now.getFullYear();
       const { dateFrom, dateTo } = getMonthDateRange(selectedYear, selectedMonth);
       query = applyProvisionDateRange(query, dateFrom, dateTo);
     }
+    // Sem month/from/to: retorna todas as notas (competência "Todos").
 
-    const { data, error } = await query;
+    // DANFE vs serviço: inferido pelo nº da nota (44 dígitos), filtrado no front/pós-query se necessário.
+    void doc_type;
+    if (amount) {
+      const amt = Number(String(amount).replace(",", "."));
+      if (Number.isFinite(amt)) query = query.eq("amount", amt);
+    }
+    const crdTerm = String(crd || "").replace(/[%_,]/g, " ").trim();
+    if (crdTerm) query = query.ilike("crd", `%${crdTerm}%`);
+    const term = String(searchQ || "").replace(/[%_,]/g, " ").trim();
+    if (term) {
+      const like = `%${term}%`;
+      query = query.or(
+        `protocol.ilike.${like},invoice_number.ilike.${like},provider_name.ilike.${like},description.ilike.${like}`
+      );
+    }
+
+    if (pag.enabled) query = query.range(pag.from, pag.to);
+
+    const { data, error, count } = await query;
 
     if (error) { console.error(error); return res.status(500).json({ error: "Erro interno ao processar a solicitação." }); }
 
-    res.json(
-      (data ?? []).map((i: any) => ({
-        ...i,
-        sector_name: i.sectors?.name ?? null,
-        user_name: i.users?.name ?? null,
-        sectors: undefined,
-        users: undefined,
-      }))
+    const mapped = (data ?? []).map((i: any) => ({
+      ...i,
+      sector_name: i.sectors?.name ?? null,
+      user_name: i.users?.name ?? null,
+      boleto_paths: collectBoletoPaths(i),
+      edit_count: Number(i.edit_count || 0),
+      sectors: undefined,
+      users: undefined,
+    }));
+
+    if (!pag.enabled) return res.json(mapped);
+
+    let totalAmount = sumAmounts(mapped, (r: any) => r.amount);
+    try {
+      let sumQuery = filterByEmpresa(supabase.from("invoices").select("amount"), req, "invoices");
+      if (from || to) {
+        sumQuery = applyProvisionDateRange(sumQuery, from || to!, to || from!);
+      } else if (month && Number(month) >= 1 && Number(month) <= 12) {
+        const { dateFrom, dateTo } = getMonthDateRange(Number(year) || now.getFullYear(), Number(month));
+        sumQuery = applyProvisionDateRange(sumQuery, dateFrom, dateTo);
+      }
+      if (amount) {
+        const amt = Number(String(amount).replace(",", "."));
+        if (Number.isFinite(amt)) sumQuery = sumQuery.eq("amount", amt);
+      }
+      if (crdTerm) sumQuery = sumQuery.ilike("crd", `%${crdTerm}%`);
+      if (term) {
+        const like = `%${term}%`;
+        sumQuery = sumQuery.or(
+          `protocol.ilike.${like},invoice_number.ilike.${like},provider_name.ilike.${like},description.ilike.${like}`
+        );
+      }
+      const { data: amountRows } = await sumQuery;
+      if (Array.isArray(amountRows)) totalAmount = sumAmounts(amountRows, (r: any) => r.amount);
+    } catch {
+      // mantém soma da página
+    }
+
+    return res.json(
+      paginatedPayload(mapped, count ?? mapped.length, pag.page, pag.pageSize, { totalAmount })
     );
   });
 
   // Relatório CSV / PDF
   const invoiceFlowStageLabel = (stage: string) => {
     const map: Record<string, string> = {
+      manager_pending: "Aguardando Gestor",
       control_pending: "Aguardando Controle",
       control_approved: "Aprovado Controle",
       paid: "Pago",
@@ -2026,14 +5061,19 @@ export function createApp() {
     return amount.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
   };
 
-  const fetchInvoiceReportRows = async (filters: {
-    from?: string;
-    to?: string;
-    payment_method?: string;
-  }) => {
-    let query = supabase
-      .from("invoices")
-      .select("*, sectors(name), users(name)")
+  const fetchInvoiceReportRows = async (
+    filters: {
+      from?: string;
+      to?: string;
+      payment_method?: string;
+    },
+    req: express.Request
+  ) => {
+    let query = filterByEmpresa(
+      supabase.from("invoices").select("*, sectors(name), users(name)"),
+      req,
+      "invoices"
+    )
       .neq("flow_stage", "cancelled")
       .order("due_date", { ascending: true });
 
@@ -2064,8 +5104,8 @@ export function createApp() {
   };
 
   const invoiceReportCsvHeader = [
-    "id", "invoice_number", "provider_name", "sector_name", "user_name", "amount",
-    "issue_date", "due_date", "payment_method", "pix_key", "flow_stage",
+    "id", "invoice_number", "provider_name", "description", "sector_name", "user_name", "amount",
+    "issue_date", "due_date", "payment_method", "currency", "pix_key", "flow_stage",
     "status", "natureza", "file_url", "boleto_file_url", "payment_receipt_url", "created_at",
   ];
 
@@ -2176,7 +5216,7 @@ export function createApp() {
     const exportFormat = String(format || "csv").toLowerCase();
 
     try {
-      const rows = await fetchInvoiceReportRows({ from, to, payment_method });
+      const rows = await fetchInvoiceReportRows({ from, to, payment_method }, req);
       const stamp = new Date().toISOString().slice(0, 10);
 
       if (exportFormat === "pdf") {
@@ -2222,7 +5262,11 @@ export function createApp() {
       try {
         const pdfParse = await loadPdfParse();
         const parsed = await pdfParse(fileBuffer);
-        const text = (parsed.text || "").replace(/\u00A0/g, " ");
+        let text = (parsed.text || "").replace(/\u00A0/g, " ");
+        if (isDanfseNacional(text)) {
+          const spaced = await pdfParse(fileBuffer, { pagerender: renderPdfPageWithSpaces });
+          text = (spaced.text || "").replace(/\u00A0/g, " ");
+        }
         const extracted = parseInvoicePdfText(text);
 
         const hasData = Boolean(
@@ -2347,9 +5391,11 @@ export function createApp() {
       return res.status(400).json({ error: "Campo inválido" });
     }
 
+    const selectFields =
+      field === "boleto_file_path" ? "boleto_file_path, boleto_file_paths" : field;
     const { data, error } = await supabase
       .from("invoices")
-      .select(field)
+      .select(selectFields)
       .eq("id", Number(req.params.id))
       .maybeSingle();
 
@@ -2359,7 +5405,13 @@ export function createApp() {
     }
     if (!data) return res.status(404).json({ error: "Nota não encontrada" });
 
-    const rawPath = String((data as Record<string, unknown>)[field] || "");
+    let rawPath = String((data as unknown as Record<string, unknown>)[field] || "");
+    if (field === "boleto_file_path") {
+      const paths = collectBoletoPaths(data as { boleto_file_path?: string; boleto_file_paths?: unknown });
+      const index = Number((req.query as { index?: string }).index);
+      const i = Number.isFinite(index) && index >= 0 ? index : 0;
+      rawPath = paths[i] || paths[0] || "";
+    }
     if (!rawPath) return res.status(404).json({ error: "Documento não anexado" });
 
     const result = await createSignedDocumentUrl(rawPath);
@@ -2370,43 +5422,327 @@ export function createApp() {
     res.json({ url: result.url });
   });
 
+  app.get("/api/invoices/:id/edits", async (req, res) => {
+    const invoiceId = Number(req.params.id);
+    if (!Number.isFinite(invoiceId)) {
+      return res.status(400).json({ error: "Nota inválida." });
+    }
+    const { data, error } = await supabase
+      .from("invoice_edit_history")
+      .select("id, editor_name, changes, created_at")
+      .eq("invoice_id", invoiceId)
+      .order("created_at", { ascending: false });
+    if (error) {
+      console.error(error);
+      return res.status(500).json({ error: "Não foi possível carregar o histórico de edições." });
+    }
+    res.json(data ?? []);
+  });
+
+  const findActiveInvoiceDuplicate = async (
+    req: express.Request,
+    invoiceNumber: string,
+    providerName: string,
+    ignoreId?: number
+  ) => {
+    const { data, error } = await scopeByEmpresa(
+      supabase
+        .from("invoices")
+        .select("id, invoice_number, protocol, provider_name, flow_stage")
+        .neq("flow_stage", "cancelled"),
+      req
+    );
+    if (error) throw error;
+    return findInvoiceDuplicate((data ?? []) as InvoiceDuplicateRow[], invoiceNumber, providerName, ignoreId);
+  };
+
+  const duplicateInvoiceResponse = (existing: InvoiceDuplicateRow) => ({
+    error: `Não é possível lançar duplicado. A nota nº ${existing.invoice_number || "—"} de ${existing.provider_name || "—"} já está no protocolo ${existing.protocol || "—"}.`,
+    code: "duplicate_invoice",
+    duplicate: {
+      id: existing.id,
+      invoice_number: existing.invoice_number ?? null,
+      protocol: existing.protocol ?? null,
+      provider_name: existing.provider_name ?? null,
+      flow_stage: existing.flow_stage ?? null,
+    },
+  });
+
   // Criar nota fiscal
   app.post("/api/invoices", async (req, res) => {
     const {
       invoice_number, provider_name, amount, issue_date, due_date,
-      sector_id, file_path, boleto_file_path, natureza,
-      crd, payment_method, pix_key,
+      sector_id, file_path, boleto_file_path, boleto_file_paths, natureza,
+      crd, payment_method, pix_key, currency, description,
     } = req.body;
+    const resolvedDescription = String(description || "").trim() || null;
+
+    const resolvedNumber = String(invoice_number || "").trim();
+    const resolvedProvider = String(provider_name || "").trim();
+    const resolvedAmount = Number(amount);
+    const resolvedIssue = String(issue_date || "").trim();
+    const resolvedDue = String(due_date || "").trim();
+    const resolvedSectorId = Number(sector_id);
+    const resolvedCrd = String(crd || "").trim();
+    const resolvedPayment = String(payment_method || "").trim();
+    const resolvedCurrency = String(currency || "BRL").trim().toUpperCase() || "BRL";
+
+    if (!resolvedNumber || !resolvedProvider || !Number.isFinite(resolvedAmount) || resolvedAmount < 0) {
+      return res.status(400).json({ error: "Número, fornecedor e valor são obrigatórios." });
+    }
+    if (!resolvedIssue || !resolvedDue) {
+      return res.status(400).json({ error: "Data de emissão e data de vencimento são obrigatórias." });
+    }
+    if (!Number.isFinite(resolvedSectorId) || resolvedSectorId <= 0) {
+      return res.status(400).json({ error: "Selecione o setor responsável." });
+    }
+    if (!resolvedCrd) {
+      return res.status(400).json({ error: "Selecione o CRD." });
+    }
+    if (!resolvedPayment) {
+      return res.status(400).json({ error: "Selecione a forma de pagamento." });
+    }
+
+    const access = await assertSectorAccessForUser(req, resolvedSectorId);
+    if (!access.ok) return res.status(access.status).json({ error: access.error });
+
+    try {
+      const duplicate = await findActiveInvoiceDuplicate(req, resolvedNumber, resolvedProvider);
+      if (duplicate) return res.status(409).json(duplicateInvoiceResponse(duplicate));
+    } catch (dupErr) {
+      console.error(dupErr);
+      return res.status(500).json({ error: "Não foi possível verificar se a nota já foi lançada." });
+    }
+
+    const boletoPaths = collectBoletoPaths({
+      boleto_file_path,
+      boleto_file_paths,
+    });
 
     const launchedByUserId = req.user?.id ?? null;
+    const protocolPrefix = invoiceProtocolPrefix(resolvedNumber);
+    const protocol = await allocateLaunchProtocol(protocolPrefix, req);
+    if (!protocol) return res.status(500).json({ error: "Não foi possível gerar o protocolo da nota." });
 
     const { data, error } = await supabase
       .from("invoices")
-      .insert({
-        invoice_number, provider_name, amount, issue_date, due_date,
-        sector_id,
+      .insert(withEmpresaKey({
+        invoice_number: resolvedNumber,
+        provider_name: resolvedProvider,
+        amount: resolvedAmount,
+        issue_date: resolvedIssue,
+        due_date: resolvedDue,
+        sector_id: resolvedSectorId,
         user_id: launchedByUserId,
-        file_path: file_path || null,
-        boleto_file_path: boleto_file_path || null,
+        file_path: String(file_path || "").trim() || null,
+        boleto_file_path: boletoPaths[0] || null,
+        boleto_file_paths: boletoPaths,
         natureza: natureza || "O",
-        crd: crd || null,
-        payment_method: payment_method || null,
-        pix_key: pix_key || null,
+        crd: resolvedCrd,
+        payment_method: resolvedPayment,
+        pix_key: resolvedPayment === "pix" ? String(pix_key || "").trim() || null : null,
+        currency: resolvedCurrency,
+        description: resolvedDescription,
         status: "received",
-        flow_stage: "control_pending",
-      })
-      .select("id")
+        flow_stage: initialInvoiceFlowStage(req.user?.role),
+        protocol,
+      }, req))
+      .select("id, invoice_number, protocol, provider_name, amount, issue_date, due_date, sector_id, flow_stage, status, crd, description, created_at")
       .single();
 
     if (error) { console.error(error); return res.status(500).json({ error: "Erro interno ao processar a solicitação." }); }
-    res.json({ id: data.id });
+    res.json(data);
+  });
+
+  app.patch("/api/invoices/:id", async (req, res) => {
+    const invoiceId = Number(req.params.id);
+    if (!Number.isFinite(invoiceId)) {
+      return res.status(400).json({ error: "Nota inválida." });
+    }
+
+    const { data: invoice, error: fetchErr } = await scopeByEmpresa(
+      supabase.from("invoices").select("*").eq("id", invoiceId),
+      req
+    ).single();
+    if (fetchErr || !invoice) {
+      return res.status(404).json({ error: "Nota não encontrada" });
+    }
+    const currentFlow = String(invoice.flow_stage || "");
+    if (currentFlow === "cancelled") {
+      return res.status(400).json({ error: "Não é possível editar uma nota cancelada." });
+    }
+    if (!isInvoiceFlowEditableBeforeControl(currentFlow)) {
+      return res.status(400).json({
+        error: "Não é possível editar após a aprovação do Controle (ou pagamento).",
+      });
+    }
+
+    const role = String(req.user?.role || "");
+    if (!canEditLaunchRole(role)) {
+      return res.status(403).json({ error: "Apenas administrador ou gestor pode editar lançamentos." });
+    }
+
+    const accessCurrent = await assertSectorAccessForUser(req, Number(invoice.sector_id));
+    if (!accessCurrent.ok) return res.status(accessCurrent.status).json({ error: accessCurrent.error });
+
+    const {
+      invoice_number, provider_name, amount, issue_date, due_date,
+      sector_id, file_path, boleto_file_path, boleto_file_paths, natureza,
+      crd, payment_method, pix_key, currency, description,
+    } = req.body;
+
+    const resolvedNumber = String(invoice_number || "").trim();
+    const resolvedProvider = String(provider_name || "").trim();
+    const resolvedAmount = Number(amount);
+    const resolvedIssue = String(issue_date || "").trim().slice(0, 10);
+    const resolvedDue = String(due_date || "").trim().slice(0, 10);
+    const resolvedSectorId = Number(sector_id);
+    const resolvedCrd = String(crd || "").trim();
+    const resolvedPayment = String(payment_method || "").trim();
+    const resolvedCurrency = String(currency || "BRL").trim().toUpperCase() || "BRL";
+    const resolvedNatureza = String(natureza || invoice.natureza || "O").trim() || "O";
+    const resolvedPix = resolvedPayment === "pix" ? String(pix_key || "").trim() || null : null;
+    const resolvedFile = String(file_path || "").trim() || null;
+    const resolvedDescription = String(description || "").trim() || null;
+    const boletoPaths = collectBoletoPaths({ boleto_file_path, boleto_file_paths });
+
+    if (!resolvedNumber || !resolvedProvider || !Number.isFinite(resolvedAmount) || resolvedAmount < 0) {
+      return res.status(400).json({ error: "Número, fornecedor e valor são obrigatórios." });
+    }
+    if (!resolvedIssue || !resolvedDue) {
+      return res.status(400).json({ error: "Data de emissão e data de vencimento são obrigatórias." });
+    }
+    if (!Number.isFinite(resolvedSectorId) || resolvedSectorId <= 0) {
+      return res.status(400).json({ error: "Selecione o setor responsável." });
+    }
+    if (!resolvedCrd) {
+      return res.status(400).json({ error: "Selecione o CRD." });
+    }
+    if (!resolvedPayment) {
+      return res.status(400).json({ error: "Selecione a forma de pagamento." });
+    }
+
+    const accessTarget = await assertSectorAccessForUser(req, resolvedSectorId);
+    if (!accessTarget.ok) return res.status(accessTarget.status).json({ error: accessTarget.error });
+
+    try {
+      const duplicate = await findActiveInvoiceDuplicate(req, resolvedNumber, resolvedProvider, invoiceId);
+      if (duplicate) return res.status(409).json(duplicateInvoiceResponse(duplicate));
+    } catch (dupErr) {
+      console.error(dupErr);
+      return res.status(500).json({ error: "Não foi possível verificar se a nota já foi lançada." });
+    }
+
+    const asDate = (v: unknown) => String(v || "").slice(0, 10);
+    const asText = (v: unknown) => String(v ?? "").trim();
+    const asAmount = (v: unknown) => {
+      const n = Number(v);
+      return Number.isFinite(n) ? n.toFixed(2) : "";
+    };
+    const currentBoletos = collectBoletoPaths(invoice);
+
+    let sectorFrom = asText(invoice.sector_id);
+    let sectorTo = String(resolvedSectorId);
+    if (String(invoice.sector_id) !== String(resolvedSectorId)) {
+      const { data: sectorRows } = await supabase
+        .from("sectors")
+        .select("id, name")
+        .in("id", [invoice.sector_id, resolvedSectorId].filter(Boolean));
+      const nameById = new Map((sectorRows || []).map((s: any) => [String(s.id), String(s.name || s.id)]));
+      sectorFrom = nameById.get(String(invoice.sector_id)) || sectorFrom;
+      sectorTo = nameById.get(String(resolvedSectorId)) || sectorTo;
+    }
+
+    const candidates: Array<{ field: string; label: string; from: string; to: string }> = [
+      { field: "invoice_number", label: "Número", from: asText(invoice.invoice_number), to: resolvedNumber },
+      { field: "provider_name", label: "Fornecedor", from: asText(invoice.provider_name), to: resolvedProvider },
+      { field: "description", label: "Descrição", from: asText(invoice.description), to: asText(resolvedDescription) },
+      { field: "amount", label: "Valor", from: asAmount(invoice.amount), to: asAmount(resolvedAmount) },
+      { field: "issue_date", label: "Emissão", from: asDate(invoice.issue_date), to: resolvedIssue },
+      { field: "due_date", label: "Vencimento", from: asDate(invoice.due_date), to: resolvedDue },
+      { field: "sector_id", label: "Setor", from: sectorFrom, to: sectorTo },
+      { field: "crd", label: "CRD", from: asText(invoice.crd), to: resolvedCrd },
+      { field: "natureza", label: "Natureza", from: asText(invoice.natureza), to: resolvedNatureza },
+      { field: "payment_method", label: "Forma de pagamento", from: asText(invoice.payment_method), to: resolvedPayment },
+      { field: "pix_key", label: "Chave Pix", from: asText(invoice.pix_key), to: asText(resolvedPix) },
+      { field: "currency", label: "Moeda", from: asText(invoice.currency || "BRL"), to: resolvedCurrency },
+      {
+        field: "file_path",
+        label: "PDF da nota",
+        from: asText(invoice.file_path) ? "anexado" : "sem anexo",
+        to: resolvedFile ? "anexado" : "sem anexo",
+      },
+      {
+        field: "boleto_file_paths",
+        label: "Boletos",
+        from: currentBoletos.length ? `${currentBoletos.length} arquivo(s)` : "sem boleto",
+        to: boletoPaths.length ? `${boletoPaths.length} arquivo(s)` : "sem boleto",
+      },
+    ];
+    const changes = candidates.filter((c) => c.from !== c.to);
+    if (changes.length === 0) {
+      return res.status(400).json({ error: "Nenhuma alteração para salvar." });
+    }
+
+    const nowIso = new Date().toISOString();
+    const { data, error } = await scopeByEmpresa(
+      supabase
+        .from("invoices")
+        .update({
+          invoice_number: resolvedNumber,
+          provider_name: resolvedProvider,
+          amount: resolvedAmount,
+          issue_date: resolvedIssue,
+          due_date: resolvedDue,
+          sector_id: resolvedSectorId,
+          file_path: resolvedFile,
+          boleto_file_path: boletoPaths[0] || null,
+          boleto_file_paths: boletoPaths,
+          natureza: resolvedNatureza,
+          crd: resolvedCrd,
+          payment_method: resolvedPayment,
+          pix_key: resolvedPix,
+          currency: resolvedCurrency,
+          description: resolvedDescription,
+          edit_count: Number(invoice.edit_count || 0) + 1,
+          last_edited_at: nowIso,
+        })
+        .eq("id", invoiceId),
+      req
+    )
+      .select("id, invoice_number, provider_name, amount, issue_date, due_date, sector_id, flow_stage, status, crd, description, file_path, edit_count, last_edited_at")
+      .single();
+
+    if (error) {
+      console.error(error);
+      return res.status(500).json({ error: "Não foi possível salvar a edição." });
+    }
+
+    const { error: histError } = await supabase.from("invoice_edit_history").insert({
+      invoice_id: invoiceId,
+      user_id: req.user?.id ?? null,
+      editor_name: req.user?.name || req.user?.email || "Usuário",
+      changes,
+    });
+    if (histError) {
+      console.error("invoice_edit_history insert:", histError);
+    }
+
+    res.json(data);
   });
 
   // Ações de fluxo (aprovar / reprovar / desaprovar / pagar / cancelar)
   app.patch("/api/invoices/:id/flow", async (req, res) => {
     const { id } = req.params;
     const { action, actorSector, payment_receipt_path, cancel_reason } = req.body as {
-      action?: "approve_control" | "reject_control" | "disapprove_control" | "mark_paid" | "cancel_request";
+      action?:
+        | "approve_manager"
+        | "reject_manager"
+        | "approve_control"
+        | "reject_control"
+        | "disapprove_control"
+        | "mark_paid"
+        | "cancel_request";
       actorSector?: string;
       payment_receipt_path?: string;
       cancel_reason?: string;
@@ -2416,7 +5752,11 @@ export function createApp() {
     const isAdmin = role === "admin";
     const isControle = role === "controle" || isAdmin;
     const isFinance = role === "finance" || isAdmin;
+    const isManager = role === "manager" || isAdmin;
 
+    if (["approve_manager", "reject_manager"].includes(String(action)) && !isManager) {
+      return res.status(403).json({ error: "Apenas o gestor do setor (ou admin) pode executar esta ação." });
+    }
     if (["approve_control", "reject_control", "disapprove_control"].includes(String(action)) && !isControle) {
       return res.status(403).json({ error: "Apenas Controle (ou admin) pode executar esta ação." });
     }
@@ -2424,22 +5764,57 @@ export function createApp() {
       return res.status(403).json({ error: "Apenas Financeiro (ou admin) pode marcar como pago." });
     }
 
-    const { data: invoice, error: fetchErr } = await supabase
-      .from("invoices")
-      .select("*")
-      .eq("id", id)
-      .single();
+    const { data: invoice, error: fetchErr } = await scopeByEmpresa(
+      supabase.from("invoices").select("*").eq("id", id),
+      req
+    ).single();
 
     if (fetchErr || !invoice) return res.status(404).json({ error: "Nota não encontrada" });
+
+    if (action === "approve_manager" || action === "reject_manager") {
+      const sectorId = Number(invoice.sector_id);
+      if (Number.isFinite(sectorId)) {
+        const access = await assertSectorAccessForUser(req, sectorId);
+        if (!access.ok) return res.status(access.status).json({ error: access.error });
+      }
+      if ((invoice.flow_stage || "") !== "manager_pending") {
+        return res.status(400).json({ error: "A nota não está aguardando aprovação do gestor." });
+      }
+      if (action === "approve_manager") {
+        const { error } = await scopeByEmpresa(
+          supabase.from("invoices").update({
+            flow_stage: "control_pending",
+            approved_by_sector: actorSector || "GESTOR",
+          }).eq("id", id),
+          req
+        );
+        if (error) { console.error(error); return res.status(500).json({ error: "Erro interno ao processar a solicitação." }); }
+        return res.json({ success: true });
+      }
+      const { error } = await scopeByEmpresa(
+        supabase.from("invoices").update({
+          flow_stage: "cancelled",
+          cancelled_at: new Date().toISOString(),
+          cancelled_by_sector: actorSector || "GESTOR",
+          cancel_reason: cancel_reason || "Reprovada pelo gestor do setor",
+        }).eq("id", id),
+        req
+      );
+      if (error) { console.error(error); return res.status(500).json({ error: "Erro interno ao processar a solicitação." }); }
+      return res.json({ success: true });
+    }
 
     if (action === "approve_control") {
       if ((invoice.flow_stage || "control_pending") !== "control_pending")
         return res.status(400).json({ error: "A nota não está aguardando aprovação do Controle" });
-      const { error } = await supabase.from("invoices").update({
-        flow_stage: "control_approved",
-        approved_at: new Date().toISOString(),
-        approved_by_sector: actorSector || "CONTROLE",
-      }).eq("id", id);
+      const { error } = await scopeByEmpresa(
+        supabase.from("invoices").update({
+          flow_stage: "control_approved",
+          approved_at: new Date().toISOString(),
+          approved_by_sector: actorSector || "CONTROLE",
+        }).eq("id", id),
+        req
+      );
       if (error) { console.error(error); return res.status(500).json({ error: "Erro interno ao processar a solicitação." }); }
       return res.json({ success: true });
     }
@@ -2447,12 +5822,15 @@ export function createApp() {
     if (action === "reject_control") {
       if ((invoice.flow_stage || "control_pending") !== "control_pending")
         return res.status(400).json({ error: "Só é possível reprovar notas aguardando o Controle" });
-      const { error } = await supabase.from("invoices").update({
-        flow_stage: "cancelled",
-        cancelled_at: new Date().toISOString(),
-        cancelled_by_sector: actorSector || "CONTROLE",
-        cancel_reason: cancel_reason || "Reprovada pelo Controle",
-      }).eq("id", id);
+      const { error } = await scopeByEmpresa(
+        supabase.from("invoices").update({
+          flow_stage: "cancelled",
+          cancelled_at: new Date().toISOString(),
+          cancelled_by_sector: actorSector || "CONTROLE",
+          cancel_reason: cancel_reason || "Reprovada pelo Controle",
+        }).eq("id", id),
+        req
+      );
       if (error) { console.error(error); return res.status(500).json({ error: "Erro interno ao processar a solicitação." }); }
       return res.json({ success: true });
     }
@@ -2460,11 +5838,14 @@ export function createApp() {
     if (action === "disapprove_control") {
       if ((invoice.flow_stage || "control_pending") !== "control_approved")
         return res.status(400).json({ error: "Só é possível desaprovar notas já aprovadas pelo Controle" });
-      const { error } = await supabase.from("invoices").update({
-        flow_stage: "control_pending",
-        approved_at: null,
-        approved_by_sector: null,
-      }).eq("id", id);
+      const { error } = await scopeByEmpresa(
+        supabase.from("invoices").update({
+          flow_stage: "control_pending",
+          approved_at: null,
+          approved_by_sector: null,
+        }).eq("id", id),
+        req
+      );
       if (error) { console.error(error); return res.status(500).json({ error: "Erro interno ao processar a solicitação." }); }
       return res.json({ success: true });
     }
@@ -2472,13 +5853,16 @@ export function createApp() {
     if (action === "mark_paid") {
       if ((invoice.flow_stage || "control_pending") !== "control_approved")
         return res.status(400).json({ error: "A nota precisa ser aprovada pelo Controle antes do pagamento" });
-      const { error } = await supabase.from("invoices").update({
-        status: "paid",
-        flow_stage: "paid",
-        paid_at: new Date().toISOString(),
-        paid_by_sector: actorSector || "FINANCEIRO",
-        payment_receipt_path: payment_receipt_path || null,
-      }).eq("id", id);
+      const { error } = await scopeByEmpresa(
+        supabase.from("invoices").update({
+          status: "paid",
+          flow_stage: "paid",
+          paid_at: new Date().toISOString(),
+          paid_by_sector: actorSector || "FINANCEIRO",
+          payment_receipt_path: payment_receipt_path || null,
+        }).eq("id", id),
+        req
+      );
       if (error) { console.error(error); return res.status(500).json({ error: "Erro interno ao processar a solicitação." }); }
       return res.json({ success: true });
     }
@@ -2488,12 +5872,15 @@ export function createApp() {
         return res.status(400).json({ error: "Não é possível cancelar uma nota já paga" });
       if (invoice.flow_stage === "cancelled")
         return res.status(400).json({ error: "Esta nota já está cancelada" });
-      const { error } = await supabase.from("invoices").update({
-        flow_stage: "cancelled",
-        cancelled_at: new Date().toISOString(),
-        cancelled_by_sector: actorSector || "SOLICITANTE",
-        cancel_reason: cancel_reason || null,
-      }).eq("id", id);
+      const { error } = await scopeByEmpresa(
+        supabase.from("invoices").update({
+          flow_stage: "cancelled",
+          cancelled_at: new Date().toISOString(),
+          cancelled_by_sector: actorSector || "SOLICITANTE",
+          cancel_reason: cancel_reason || null,
+        }).eq("id", id),
+        req
+      );
       if (error) { console.error(error); return res.status(500).json({ error: "Erro interno ao processar a solicitação." }); }
       return res.json({ success: true });
     }
@@ -2504,18 +5891,20 @@ export function createApp() {
   // Exclusão definitiva de nota (apenas admin)
   app.delete("/api/invoices/:id", requireRole("admin"), async (req, res) => {
     const { id } = req.params;
-    const { data: existing, error: fetchError } = await supabase
-      .from("invoices")
-      .select("id")
-      .eq("id", id)
-      .maybeSingle();
+    const { data: existing, error: fetchError } = await scopeByEmpresa(
+      supabase.from("invoices").select("id").eq("id", id),
+      req
+    ).maybeSingle();
     if (fetchError) {
       console.error(fetchError);
       return res.status(500).json({ error: "Erro interno ao processar a solicitação." });
     }
     if (!existing) return res.status(404).json({ error: "Nota não encontrada" });
 
-    const { error } = await supabase.from("invoices").delete().eq("id", id);
+    const { error } = await scopeByEmpresa(
+      supabase.from("invoices").delete().eq("id", id),
+      req
+    );
     if (error) {
       console.error(error);
       return res.status(500).json({ error: "Não foi possível excluir a nota." });
@@ -2526,8 +5915,12 @@ export function createApp() {
   // ====================================================
   // CATEGORIES
   // ====================================================
-  app.get("/api/categories", async (_req, res) => {
-    const { data, error } = await supabase.from("categories").select("*");
+  app.get("/api/categories", async (req, res) => {
+    const { data, error } = await filterByEmpresa(
+      supabase.from("categories").select("*"),
+      req,
+      "categories"
+    );
     if (error) { console.error(error); return res.status(500).json({ error: "Erro interno ao processar a solicitação." }); }
     res.json(data);
   });
@@ -2558,14 +5951,44 @@ export function createApp() {
   });
 
   // ====================================================
+  // CURRENCIES
+  // ====================================================
+  app.get("/api/currencies", async (_req, res) => {
+    const { data, error } = await supabase
+      .from("currencies")
+      .select("*")
+      .order("active", { ascending: false })
+      .order("key");
+    if (error) { console.error(error); return res.status(500).json({ error: "Erro interno ao processar a solicitação." }); }
+    res.json(data);
+  });
+
+  app.post("/api/currencies", async (req, res) => {
+    const { key, name, active } = req.body;
+    if (!key || !name) return res.status(400).json({ error: "código e nome são obrigatórios" });
+    const normalizedKey = String(key).trim().toUpperCase();
+    if (!/^[A-Z]{3,8}$/.test(normalizedKey)) {
+      return res.status(400).json({ error: "Use o código ISO da moeda (ex: BRL, USD)" });
+    }
+    const { data, error } = await supabase
+      .from("currencies")
+      .insert({ key: normalizedKey, name: String(name).trim(), active: active !== false })
+      .select("id")
+      .single();
+    if (error) return res.status(400).json({ error: "Não foi possível cadastrar (código duplicado?)" });
+    res.json({ id: data.id });
+  });
+
+  // ====================================================
   // CARGOS (vinculados a setores / centros de custo)
   // ====================================================
   app.get("/api/cargos", async (req, res) => {
     const activeOnly = String((req.query as any)?.active ?? "") === "1" || String((req.query as any)?.active ?? "") === "true";
-    let query = supabase
-      .from("cargos")
-      .select("id, name, sector_id, active, created_at, sectors(name)")
-      .order("name");
+    let query = filterByEmpresa(
+      supabase.from("cargos").select("id, name, sector_id, active, created_at, sectors(name)"),
+      req,
+      "cargos"
+    ).order("name");
     if (activeOnly) query = query.eq("active", true);
     const { data, error } = await query;
     if (error) {
@@ -2595,12 +6018,16 @@ export function createApp() {
     if (!name || !Number.isFinite(sectorId)) {
       return res.status(400).json({ error: "name e sector_id são obrigatórios." });
     }
-    const { data: sector } = await supabase.from("sectors").select("id").eq("id", sectorId).maybeSingle();
+    const { data: sector } = await filterByEmpresa(
+      supabase.from("sectors").select("id").eq("id", sectorId),
+      req,
+      "sectors"
+    ).maybeSingle();
     if (!sector) return res.status(400).json({ error: "Setor inválido." });
 
     const { data, error } = await supabase
       .from("cargos")
-      .insert({ name, sector_id: sectorId, active: true })
+      .insert(withEmpresaKey({ name, sector_id: sectorId, active: true }, req))
       .select("id")
       .single();
     if (error) {
@@ -2634,7 +6061,10 @@ export function createApp() {
     }
     if (req.body?.active != null) patch.active = Boolean(req.body.active);
 
-    const { error } = await supabase.from("cargos").update(patch).eq("id", id);
+    const { error } = await scopeByEmpresa(
+      supabase.from("cargos").update(patch).eq("id", id),
+      req
+    );
     if (error) {
       console.error("Erro ao atualizar cargo:", error);
       return res.status(500).json({ error: "Não foi possível atualizar o cargo." });
@@ -2645,7 +6075,10 @@ export function createApp() {
   app.delete("/api/cargos/:id", requireRole("admin", "controle"), async (req, res) => {
     const id = Number(req.params.id);
     if (!Number.isFinite(id)) return res.status(400).json({ error: "id inválido." });
-    const { error } = await supabase.from("cargos").delete().eq("id", id);
+    const { error } = await scopeByEmpresa(
+      supabase.from("cargos").delete().eq("id", id),
+      req
+    );
     if (error) {
       console.error("Erro ao excluir cargo:", error);
       return res.status(500).json({ error: "Não foi possível excluir o cargo." });
@@ -2688,6 +6121,116 @@ export function createApp() {
       sector_name: string | null;
       is_primary: boolean;
     }>;
+
+  const mapColaboradorRow = (row: any) => {
+    const funcoes = mapColaboradorFuncoes(row.colaborador_funcoes);
+    const primary = funcoes.find((f) => f.is_primary) || funcoes[0] || null;
+    const outros = parseOutrosAdicionais(row.outros_adicionais);
+    const remuneracao = calcularRemuneracaoTotal({
+      salario_base: row.salario_base,
+      adicionais_fixos: row.adicionais_fixos,
+      adicional_quebra_caixa: row.adicional_quebra_caixa,
+      adicional_idioma: row.adicional_idioma,
+      outros_adicionais: outros,
+    });
+    return {
+      id: row.id,
+      nome: row.nome,
+      nome_oficial: row.nome_oficial || row.nome,
+      empresa_key: row.empresa_key ?? null,
+      empresa_nome: row.empresa_nome || empresaNomeFromKey(row.empresa_key) || null,
+      codigo_funcionario: row.codigo_funcionario ?? null,
+      cargo_descricao: row.cargo_descricao ?? "",
+      ccusto_descricao: row.ccusto_descricao ?? "",
+      sector_id: row.sector_id != null ? Number(row.sector_id) : primary?.sector_id ?? null,
+      sector_name:
+        row.sectors?.name ||
+        row.ccusto_descricao ||
+        primary?.sector_name ||
+        null,
+      salario_base: Number(row.salario_base) || 0,
+      adicionais_fixos: Number(row.adicionais_fixos) || 0,
+      adicional_quebra_caixa: Number(row.adicional_quebra_caixa) || 0,
+      adicional_idioma: Number(row.adicional_idioma) || 0,
+      outros_adicionais: outros,
+      remuneracao_total: remuneracao,
+      observacao: row.observacao ?? null,
+      active: row.active !== false,
+      created_at: row.created_at,
+      funcoes,
+      funcao_id: primary?.id ?? null,
+    };
+  };
+
+  const applyColaboradorRemuneracaoBody = (body: any, patch: Record<string, any>) => {
+    if (body?.nome_oficial != null) {
+      const nomeOficial = String(body.nome_oficial).trim();
+      patch.nome_oficial = nomeOficial || null;
+    }
+    if (body?.codigo_funcionario !== undefined) {
+      patch.codigo_funcionario = String(body.codigo_funcionario ?? "").trim() || null;
+    }
+    if (body?.empresa_key !== undefined) {
+      const key = String(body.empresa_key ?? "").trim();
+      if (key && !["vivaz", "aqua"].includes(key)) {
+        return "empresa_key deve ser vivaz ou aqua.";
+      }
+      patch.empresa_key = key || null;
+      patch.empresa_nome = key ? empresaNomeFromKey(key) : null;
+    }
+    if (body?.salario_base != null) patch.salario_base = Number(body.salario_base) || 0;
+    if (body?.adicionais_fixos != null) patch.adicionais_fixos = Number(body.adicionais_fixos) || 0;
+    if (body?.adicional_quebra_caixa != null) {
+      patch.adicional_quebra_caixa = Number(body.adicional_quebra_caixa) || 0;
+    }
+    if (body?.adicional_idioma != null) patch.adicional_idioma = Number(body.adicional_idioma) || 0;
+    if (body?.outros_adicionais != null) {
+      patch.outros_adicionais = parseOutrosAdicionais(body.outros_adicionais);
+    }
+    if (body?.observacao !== undefined) {
+      patch.observacao = body.observacao ? String(body.observacao).slice(0, 500) : null;
+    }
+    return null;
+  };
+
+  const syncColaboradorParaFolha = async (colaboradorId: number) => {
+    const { data: row } = await supabase
+      .from("colaboradores")
+      .select(
+        `id, nome, nome_oficial, empresa_key, empresa_nome, codigo_funcionario,
+         cargo_descricao, ccusto_descricao, sector_id, salario_base, adicionais_fixos,
+         adicional_quebra_caixa, adicional_idioma, outros_adicionais, active,
+         sectors ( name, code )`
+      )
+      .eq("id", colaboradorId)
+      .maybeSingle();
+    if (!row) return;
+    const codigo = String((row as any).codigo_funcionario ?? "").trim();
+    if (!codigo) return;
+    const sector = (row as any).sectors;
+    await supabase.from("folha_funcionarios").upsert(
+      {
+        codigo_funcionario: codigo,
+        nome: String((row as any).nome_oficial || (row as any).nome).trim(),
+        cargo_nome: (row as any).cargo_descricao ?? null,
+        setor_nome: (row as any).ccusto_descricao || sector?.name || null,
+        setor_codigo: sector?.code ?? null,
+        sector_id: (row as any).sector_id ?? null,
+        empresa_key: (row as any).empresa_key ?? null,
+        empresa_nome:
+          (row as any).empresa_nome || empresaNomeFromKey((row as any).empresa_key) || null,
+        salario_base: Number((row as any).salario_base) || 0,
+        adicionais_fixos: Number((row as any).adicionais_fixos) || 0,
+        adicional_quebra_caixa: Number((row as any).adicional_quebra_caixa) || 0,
+        adicional_idioma: Number((row as any).adicional_idioma) || 0,
+        outros_adicionais: parseOutrosAdicionais((row as any).outros_adicionais),
+        colaborador_id: colaboradorId,
+        ativo: (row as any).active !== false,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "empresa_key,codigo_funcionario" }
+    );
+  };
 
   const fetchCargoWithSector = async (cargoId: number) => {
     const { data, error } = await supabase
@@ -2748,6 +6291,7 @@ export function createApp() {
       .update({
         cargo_descricao: cargo.name,
         ccusto_descricao: sectorName,
+        sector_id: cargo.sector_id ?? null,
         updated_at: new Date().toISOString(),
       })
       .eq("id", colaboradorId);
@@ -2767,26 +6311,41 @@ export function createApp() {
     const activeOnly =
       String((req.query as any)?.active ?? "") === "1" ||
       String((req.query as any)?.active ?? "") === "true";
-    let query = supabase
-      .from("colaboradores")
-      .select(
-        `id, nome, cargo_descricao, ccusto_descricao, active, created_at,
+    let query = filterByEmpresa(
+      supabase
+        .from("colaboradores")
+        .select(
+          `id, nome, nome_oficial, empresa_key, empresa_nome, codigo_funcionario,
+         cargo_descricao, ccusto_descricao, sector_id, salario_base, adicionais_fixos,
+         adicional_quebra_caixa, adicional_idioma, outros_adicionais, observacao,
+         active, created_at,
+         sectors ( name, code ),
          colaborador_funcoes (
            is_primary,
            cargo_id,
            cargos ( id, name, sector_id, sectors(name) )
          )`
-      )
-      .order("nome");
+        ),
+      req,
+      "colaboradores"
+    ).order("nome");
     if (activeOnly) query = query.eq("active", true);
     let { data, error } = await query;
 
     // Fallback se a junction ainda não existir no PostgREST cache
     if (error && colaboradorFuncoesMissing(error)) {
-      let fbQuery = supabase
-        .from("colaboradores")
-        .select("id, nome, cargo_descricao, ccusto_descricao, active, created_at")
-        .order("nome");
+      let fbQuery = filterByEmpresa(
+        supabase
+          .from("colaboradores")
+          .select(
+            `id, nome, nome_oficial, empresa_key, empresa_nome, codigo_funcionario,
+           cargo_descricao, ccusto_descricao, sector_id, salario_base, adicionais_fixos,
+           adicional_quebra_caixa, adicional_idioma, outros_adicionais, observacao,
+           active, created_at, sectors ( name, code )`
+          ),
+        req,
+        "colaboradores"
+      ).order("nome");
       if (activeOnly) fbQuery = fbQuery.eq("active", true);
       const fb = await fbQuery;
       data = (fb.data ?? []).map((row: any) => ({ ...row, colaborador_funcoes: [] }));
@@ -2803,30 +6362,16 @@ export function createApp() {
       return res.status(500).json({ error: "Erro interno ao processar a solicitação." });
     }
 
-    res.json(
-      (data ?? []).map((row: any) => {
-        const funcoes = mapColaboradorFuncoes(row.colaborador_funcoes);
-        const primary = funcoes.find((f) => f.is_primary) || funcoes[0] || null;
-        return {
-          id: row.id,
-          nome: row.nome,
-          cargo_descricao: row.cargo_descricao ?? "",
-          ccusto_descricao: row.ccusto_descricao ?? "",
-          active: row.active !== false,
-          created_at: row.created_at,
-          funcoes,
-          funcao_id: primary?.id ?? null,
-          sector_id: primary?.sector_id ?? null,
-          sector_name: primary?.sector_name ?? row.ccusto_descricao ?? null,
-        };
-      })
-    );
+    res.json((data ?? []).map((row: any) => mapColaboradorRow(row)));
   });
 
   app.post("/api/colaboradores", requireRole("admin", "controle"), async (req, res) => {
-    const nome = String(req.body?.nome ?? "").trim();
+    const nome = String(req.body?.nome ?? req.body?.nome_oficial ?? "").trim();
     const cargo = String(req.body?.cargo_descricao ?? "").trim();
     const ccusto = String(req.body?.ccusto_descricao ?? "").trim();
+    const sectorIdRaw = req.body?.sector_id;
+    const sectorId =
+      sectorIdRaw != null && sectorIdRaw !== "" ? Number(sectorIdRaw) : null;
     const funcaoIdRaw = req.body?.funcao_id ?? req.body?.cargo_id;
     const funcaoId = funcaoIdRaw != null && funcaoIdRaw !== "" ? Number(funcaoIdRaw) : null;
     if (!nome) {
@@ -2835,26 +6380,53 @@ export function createApp() {
 
     let cargoDescricao = cargo || null;
     let ccustoDescricao = ccusto || null;
+    if (sectorId != null && Number.isFinite(sectorId) && !ccustoDescricao) {
+      const { data: sectorRow } = await supabase
+        .from("sectors")
+        .select("name")
+        .eq("id", sectorId)
+        .maybeSingle();
+      ccustoDescricao = sectorRow?.name ? String(sectorRow.name) : null;
+    }
     if (funcaoId != null && Number.isFinite(funcaoId)) {
       try {
         const cargoRow = await fetchCargoWithSector(funcaoId);
         if (!cargoRow) return res.status(400).json({ error: "Função inválida." });
         cargoDescricao = cargoRow.name;
-        ccustoDescricao = cargoRow.sectors?.name ?? null;
+        // Função define o setor, salvo se o cliente enviou setor/ccusto explicitamente
+        if (!ccusto && !(sectorId != null && Number.isFinite(sectorId))) {
+          ccustoDescricao = cargoRow.sectors?.name ?? null;
+        }
       } catch (e) {
         console.error("Erro ao resolver função:", e);
         return res.status(500).json({ error: "Não foi possível validar a função." });
       }
     }
 
+    const empresaKeyRaw = String(req.body?.empresa_key ?? "").trim();
+    const empresaKey = empresaKeyRaw && ["vivaz", "aqua"].includes(empresaKeyRaw) ? empresaKeyRaw : null;
+
+    const insertRow: Record<string, any> = {
+      nome,
+      nome_oficial: String(req.body?.nome_oficial ?? nome).trim() || nome,
+      cargo_descricao: cargoDescricao,
+      ccusto_descricao: ccustoDescricao,
+      sector_id: sectorId != null && Number.isFinite(sectorId) ? sectorId : null,
+      empresa_key: empresaKey,
+      empresa_nome: empresaKey ? empresaNomeFromKey(empresaKey) : null,
+      codigo_funcionario: String(req.body?.codigo_funcionario ?? "").trim() || null,
+      salario_base: Number(req.body?.salario_base) || 0,
+      adicionais_fixos: Number(req.body?.adicionais_fixos) || 0,
+      adicional_quebra_caixa: Number(req.body?.adicional_quebra_caixa) || 0,
+      adicional_idioma: Number(req.body?.adicional_idioma) || 0,
+      outros_adicionais: parseOutrosAdicionais(req.body?.outros_adicionais),
+      observacao: req.body?.observacao ? String(req.body.observacao).slice(0, 500) : null,
+      active: true,
+    };
+
     const { data, error } = await supabase
       .from("colaboradores")
-      .insert({
-        nome,
-        cargo_descricao: cargoDescricao,
-        ccusto_descricao: ccustoDescricao,
-        active: true,
-      })
+      .insert(insertRow)
       .select("id")
       .single();
     if (error) {
@@ -2882,6 +6454,12 @@ export function createApp() {
       }
     }
 
+    try {
+      await syncColaboradorParaFolha(data.id);
+    } catch (e) {
+      console.error("sync folha_funcionarios após criar colaborador:", e);
+    }
+
     res.json({ id: data.id });
   });
 
@@ -2889,6 +6467,8 @@ export function createApp() {
     const id = Number(req.params.id);
     if (!Number.isFinite(id)) return res.status(400).json({ error: "id inválido." });
     const patch: Record<string, any> = { updated_at: new Date().toISOString() };
+    const remErr = applyColaboradorRemuneracaoBody(req.body, patch);
+    if (remErr) return res.status(400).json({ error: remErr });
     if (req.body?.nome != null) {
       const nome = String(req.body.nome).trim();
       if (!nome) return res.status(400).json({ error: "Nome inválido." });
@@ -2899,6 +6479,27 @@ export function createApp() {
     }
     if (req.body?.ccusto_descricao != null) {
       patch.ccusto_descricao = String(req.body.ccusto_descricao).trim() || null;
+    }
+    if (req.body?.sector_id !== undefined && req.body?.ccusto_descricao == null) {
+      const sectorId =
+        req.body.sector_id != null && req.body.sector_id !== ""
+          ? Number(req.body.sector_id)
+          : null;
+      if (sectorId == null) {
+        patch.ccusto_descricao = null;
+        patch.sector_id = null;
+      } else if (Number.isFinite(sectorId)) {
+        const { data: sectorRow } = await supabase
+          .from("sectors")
+          .select("name")
+          .eq("id", sectorId)
+          .maybeSingle();
+        if (!sectorRow) return res.status(400).json({ error: "Setor inválido." });
+        patch.ccusto_descricao = String(sectorRow.name);
+        patch.sector_id = sectorId;
+      } else {
+        return res.status(400).json({ error: "sector_id inválido." });
+      }
     }
     if (req.body?.active != null) patch.active = Boolean(req.body.active);
 
@@ -2988,6 +6589,11 @@ export function createApp() {
         console.error("Erro ao atualizar colaborador:", error);
         return res.status(500).json({ error: "Não foi possível atualizar o colaborador." });
       }
+    }
+    try {
+      await syncColaboradorParaFolha(id);
+    } catch (e) {
+      console.error("sync folha_funcionarios após atualizar colaborador:", e);
     }
     res.json({ success: true });
   });
@@ -3102,29 +6708,41 @@ export function createApp() {
   app.get("/api/crds", async (req, res) => {
     const { sector_id } = req.query as { sector_id?: string };
 
-    let query = supabase
-      .from("crds")
-      .select("*, sectors(name)")
+    let query = filterByEmpresa(
+      supabase.from("crds").select("*, sectors(name)"),
+      req,
+      "crds"
+    )
       .order("active", { ascending: false })
       .order("code");
 
-    // Filtro por setor: inclui também CRDs compartilhados (ex.: 326).
+    // Filtro por setor: inclui também CRDs compartilhados (ex.: 326)
+    // e CRDs extras liberados ao usuário (Cadastros › Usuários).
     if (sector_id && Number.isFinite(Number(sector_id))) {
-      const { data, error } = await supabase
-        .from("crds")
-        .select("*, sectors(name)")
+      const { data, error } = await filterByEmpresa(
+        supabase.from("crds").select("*, sectors(name)"),
+        req,
+        "crds"
+      )
         .order("active", { ascending: false })
         .order("code");
       if (error) { console.error(error); return res.status(500).json({ error: "Erro interno ao processar a solicitação." }); }
 
       const sectorIdNum = Number(sector_id);
+      const grantedIds = req.user?.id
+        ? await loadGrantedCrdIdsForUser(req.user.id)
+        : new Set<number>();
       const filtered = (data ?? []).filter(
-        (r: any) => Number(r.sector_id) === sectorIdNum || isSharedCrdCode(r.code)
+        (r: any) =>
+          Number(r.sector_id) === sectorIdNum ||
+          isSharedCrdCode(r.code) ||
+          grantedIds.has(Number(r.id))
       );
       return res.json(
         filtered.map((r: any) => ({
           ...r,
           sector_name: r.sectors?.name ?? null,
+          granted_extra: grantedIds.has(Number(r.id)) && Number(r.sector_id) !== sectorIdNum,
           sectors: undefined,
         }))
       );
@@ -3159,10 +6777,10 @@ export function createApp() {
       return res.status(400).json({ error: "natureza, code, name e sector_id são obrigatórios" });
     const { data, error } = await supabase
       .from("crds")
-      .insert({
+      .insert(withEmpresaKey({
         natureza: String(natureza).trim().toUpperCase(),
-        code,
-        name,
+        code: String(code).trim(),
+        name: String(name).trim(),
         sector_id: Number(sector_id),
         saldo_anterior: toNumberOrZero(saldo_anterior),
         previsto_mes: toNumberOrZero(previsto_mes),
@@ -3170,11 +6788,12 @@ export function createApp() {
         realizado_mes: toNumberOrZero(realizado_mes),
         saldo: toNumberOrZero(saldo),
         active: active !== false,
-      })
+      }, req))
       .select("id")
       .single();
     if (error)
       return res.status(400).json({ error: "Não foi possível cadastrar CRD (código já existe neste setor?)" });
+    await seedCrdMonthlyBudget(req, Number(data.id), toNumberOrZero(previsto_mes));
     res.json({ id: data.id });
   });
 
@@ -3185,16 +6804,13 @@ export function createApp() {
       code,
       name,
       sector_id,
-      saldo_anterior,
-      previsto_mes,
-      disponivel_mes,
-      realizado_mes,
-      saldo,
       active,
     } = req.body;
     if (!natureza || !code || !name || !sector_id)
       return res.status(400).json({ error: "natureza, code, name e sector_id são obrigatórios" });
 
+    // Cadastro em Cadastros › CRD só define a linha (identidade). Valores financeiros
+    // (previsto, realizado, saldo) vêm de lançamentos / Prev x Real / importações.
     const { error } = await supabase
       .from("crds")
       .update({
@@ -3202,11 +6818,6 @@ export function createApp() {
         code: String(code).trim(),
         name: String(name).trim(),
         sector_id: Number(sector_id),
-        saldo_anterior: toNumberOrZero(saldo_anterior),
-        previsto_mes: toNumberOrZero(previsto_mes),
-        disponivel_mes: toNumberOrZero(disponivel_mes),
-        realizado_mes: toNumberOrZero(realizado_mes),
-        saldo: toNumberOrZero(saldo),
         active: active !== false,
       })
       .eq("id", Number(id));
@@ -3257,32 +6868,24 @@ export function createApp() {
       }));
 
       const uniqueGroupNames = [...new Set(groupedCrdRows.map((r) => r.groupName.trim()).filter(Boolean))];
-      const { data: existingSectors, error: sectorsError } = await supabase.from("sectors").select("id, name");
-      if (sectorsError) throw sectorsError;
+      const empresaSectorCache = sectorCacheFor(empresaKeyOf(req));
+      await empresaSectorCache.reload(true);
 
       const sectorIdByGroup = new Map<string, number>();
-      for (const sector of existingSectors ?? []) {
-        sectorIdByGroup.set(String(sector.name).trim().toUpperCase(), Number(sector.id));
+      for (const groupName of uniqueGroupNames) {
+        const resolved = await resolveSector(supabase, { name: groupName, create: true }, empresaSectorCache);
+        if (resolved) sectorIdByGroup.set(groupName.toUpperCase(), resolved.id);
       }
 
       const createdGroups: string[] = [];
       for (const groupName of uniqueGroupNames) {
-        const key = groupName.toUpperCase();
-        if (sectorIdByGroup.has(key)) continue;
-
-        const { data: created, error: createSectorError } = await supabase
-          .from("sectors")
-          .insert({ name: groupName, budget_limit: 0 })
-          .select("id, name")
-          .single();
-        if (createSectorError) throw createSectorError;
-
-        sectorIdByGroup.set(String(created.name).trim().toUpperCase(), Number(created.id));
-        createdGroups.push(groupName);
+        if (!sectorIdByGroup.has(groupName.toUpperCase())) {
+          createdGroups.push(groupName);
+        }
       }
 
       const payload = groupedCrdRows
-        .map((row) => ({
+        .map((row) => withEmpresaKey({
           natureza: "O",
           code: row.code,
           name: row.name,
@@ -3293,7 +6896,7 @@ export function createApp() {
           realizado_mes: 0,
           saldo: 0,
           active: true,
-        }))
+        }, req))
         .filter((row) => Number.isFinite(Number(row.sector_id)));
 
       const { error: upsertError } = await supabase
@@ -3357,6 +6960,397 @@ export function createApp() {
       return res.status(500).json({ error: detail || "Erro ao carregar histórico de importações." });
     }
     res.json(data ?? []);
+  });
+
+  const importCorrectionsTableMissing = (error: any) =>
+    String(error?.message || "").toLowerCase().includes("import_row_correction") ||
+    error?.code === "42P01";
+
+  const IMPORT_CORRECTION_TABLE_MAP: Record<string, string> = {
+    requisicoes_rows: "requisicoes_rows",
+    rel_crd_rows: "rel_crd_rows",
+    consumo_interno_rows: "consumo_interno_rows",
+  };
+
+  app.get("/api/import/correcoes/historico", requireRole("admin", "finance", "controle", "manager"), async (req, res) => {
+    const q = req.query as {
+      source_table?: string;
+      row_id?: string;
+      field_name?: string;
+      year?: string;
+      month?: string;
+      limit?: string;
+    };
+    const limit = Math.min(Math.max(Number(q.limit) || 100, 1), 500);
+    let query = supabase
+      .from("import_row_correction_history")
+      .select("*")
+      .order("created_at", { ascending: false })
+      .limit(limit);
+    if (q.source_table?.trim()) query = query.eq("source_table", q.source_table.trim());
+    if (q.row_id && Number.isFinite(Number(q.row_id))) query = query.eq("row_id", Number(q.row_id));
+    if (q.field_name?.trim()) query = query.eq("field_name", q.field_name.trim());
+    if (q.year && Number.isFinite(Number(q.year))) query = query.eq("year", Number(q.year));
+    if (q.month && Number.isFinite(Number(q.month))) query = query.eq("month", Number(q.month));
+    const { data, error } = await query;
+    if (error) {
+      console.error(error);
+      if (importCorrectionsTableMissing(error)) {
+        return res.status(500).json({
+          error: "Tabela de correções ausente. Execute sql/44_import_row_corrections.sql no Supabase.",
+        });
+      }
+      return res.status(500).json({ error: "Não foi possível carregar o histórico de correções." });
+    }
+    res.json({ rows: data ?? [] });
+  });
+
+  app.get("/api/import/correcoes", requireRole("admin", "finance", "controle", "manager"), async (req, res) => {
+    const q = req.query as { source_table?: string; year?: string; month?: string };
+    const sourceTable = String(q.source_table ?? "").trim();
+    const year = Number(q.year);
+    const month = Number(q.month);
+    if (!isImportCorrectionSource(sourceTable)) {
+      return res.status(400).json({ error: "source_table inválida." });
+    }
+    if (!Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12) {
+      return res.status(400).json({ error: "Informe year e month válidos." });
+    }
+    const { data, error } = await supabase
+      .from("import_row_corrections")
+      .select("*")
+      .eq("source_table", sourceTable)
+      .eq("year", year)
+      .eq("month", month)
+      .order("updated_at", { ascending: false });
+    if (error) {
+      console.error(error);
+      if (importCorrectionsTableMissing(error)) {
+        return res.status(500).json({
+          error: "Tabela de correções ausente. Execute sql/44_import_row_corrections.sql no Supabase.",
+        });
+      }
+      return res.status(500).json({ error: "Não foi possível carregar correções." });
+    }
+    res.json({ rows: (data ?? []).map(mapCorrectionRow) });
+  });
+
+  app.patch("/api/import/correcoes", requireRole("admin", "finance", "controle"), async (req, res) => {
+    const body = req.body as Record<string, any>;
+    const sourceTable = String(body?.source_table ?? "").trim();
+    const fieldName = String(body?.field_name ?? "").trim();
+    const rowId = Number(body?.row_id);
+    const year = Number(body?.year);
+    const month = Number(body?.month);
+    const motivo = String(body?.motivo ?? "").trim();
+    const valorCorrigido = parseCorrectionNumber(body?.valor_corrigido);
+
+    if (!isImportCorrectionSource(sourceTable)) {
+      return res.status(400).json({ error: "source_table inválida." });
+    }
+    if (!isImportCorrectionField(sourceTable, fieldName)) {
+      return res.status(400).json({ error: "field_name não permitido para esta fonte." });
+    }
+    if (!Number.isFinite(rowId) || rowId <= 0) {
+      return res.status(400).json({ error: "row_id inválido." });
+    }
+    if (!Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12) {
+      return res.status(400).json({ error: "Informe year e month válidos." });
+    }
+    if (!motivo) return res.status(400).json({ error: "Informe o motivo da correção." });
+    if (valorCorrigido == null) return res.status(400).json({ error: "valor_corrigido inválido." });
+
+    const dbTable = IMPORT_CORRECTION_TABLE_MAP[sourceTable];
+    const { data: sourceRow, error: loadErr } = await supabase
+      .from(dbTable)
+      .select(`id, year, month, ${fieldName}`)
+      .eq("id", rowId)
+      .maybeSingle();
+    if (loadErr) {
+      console.error(loadErr);
+      return res.status(500).json({ error: "Não foi possível carregar o registro importado." });
+    }
+    if (!sourceRow) return res.status(404).json({ error: "Registro importado não encontrado." });
+
+    const importedValue = Number((sourceRow as any)[fieldName]) || 0;
+    const { data: existing } = await supabase
+      .from("import_row_corrections")
+      .select("*")
+      .eq("source_table", sourceTable)
+      .eq("row_id", rowId)
+      .eq("field_name", fieldName)
+      .maybeSingle();
+
+    const valorOriginal = existing
+      ? Number((existing as any).valor_original) || importedValue
+      : importedValue;
+    const valorAnterior = existing ? Number((existing as any).valor_corrigido) : importedValue;
+    const user = (req as any).user;
+    const nowIso = new Date().toISOString();
+    const record = {
+      source_table: sourceTable,
+      row_id: rowId,
+      field_name: fieldName,
+      year,
+      month,
+      valor_original: valorOriginal,
+      valor_corrigido: valorCorrigido,
+      row_label: body?.row_label ? String(body.row_label).slice(0, 300) : null,
+      motivo: motivo.slice(0, 2000),
+      user_id: user?.id != null ? String(user.id) : null,
+      user_name: user?.name ?? null,
+      user_email: user?.email ?? null,
+      updated_at: nowIso,
+    };
+
+    const { data: saved, error: saveErr } = await supabase
+      .from("import_row_corrections")
+      .upsert(record, { onConflict: "source_table,row_id,field_name" })
+      .select("*")
+      .single();
+    if (saveErr) {
+      console.error(saveErr);
+      if (importCorrectionsTableMissing(saveErr)) {
+        return res.status(500).json({
+          error: "Tabela de correções ausente. Execute sql/44_import_row_corrections.sql no Supabase.",
+        });
+      }
+      return res.status(500).json({ error: "Não foi possível salvar a correção." });
+    }
+
+    const { error: histErr } = await supabase.from("import_row_correction_history").insert({
+      correction_id: saved?.id ?? null,
+      source_table: sourceTable,
+      row_id: rowId,
+      field_name: fieldName,
+      year,
+      month,
+      valor_original: valorOriginal,
+      valor_anterior: valorAnterior,
+      valor_corrigido: valorCorrigido,
+      row_label: record.row_label,
+      motivo: record.motivo,
+      user_id: record.user_id,
+      user_name: record.user_name,
+      user_email: record.user_email,
+      created_at: nowIso,
+    });
+    if (histErr) console.error("import_row_correction_history insert:", histErr);
+
+    res.json({ ok: true, correction: mapCorrectionRow(saved) });
+  });
+
+  /** Desfaz uma importação do histórico: apaga os dados daquela competência e remove o registro. */
+  app.post("/api/import/history/:id/undo", requireRole("admin", "finance", "controle"), async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: "ID inválido." });
+
+    const confirm = String((req.body as { confirm?: string })?.confirm ?? "").trim();
+    if (confirm !== "DESFAZER") {
+      return res.status(400).json({
+        error: 'Confirmação inválida. Digite DESFAZER para confirmar.',
+      });
+    }
+
+    const { data: row, error: loadErr } = await supabase
+      .from("import_history")
+      .select("*")
+      .eq("id", id)
+      .maybeSingle();
+    if (loadErr) {
+      return res.status(500).json({ error: loadErr.message || "Não foi possível carregar a importação." });
+    }
+    if (!row) return res.status(404).json({ error: "Importação não encontrada no histórico." });
+
+    const sourceType = String((row as any).source_type || "");
+    const year = Number((row as any).year);
+    const month = Number((row as any).month);
+    const status = String((row as any).status || "");
+    const deleted: string[] = [];
+    const warnings: string[] = [];
+
+    const tryDelete = async (
+      table: string,
+      apply: (q: any) => any,
+      label?: string
+    ) => {
+      try {
+        const { error } = await apply(supabase.from(table).delete());
+        if (error) {
+          warnings.push(`${label || table}: ${error.message}`);
+          return;
+        }
+        deleted.push(label || table);
+      } catch (e: any) {
+        warnings.push(`${label || table}: ${e?.message || "falha"}`);
+      }
+    };
+
+    // Importações com erro não gravaram dados (ou falharam no meio) — só remove o histórico.
+    if (status === "error") {
+      const { error: delHistErr } = await supabase.from("import_history").delete().eq("id", id);
+      if (delHistErr) return res.status(500).json({ error: delHistErr.message });
+      return res.json({
+        success: true,
+        message: "Registro de erro removido do histórico.",
+        deleted: ["import_history"],
+        warnings: [],
+      });
+    }
+
+    if (sourceType === "crds") {
+      return res.status(400).json({
+        error:
+          "Não é possível desfazer a importação de CRDs automaticamente — isso alteraria o cadastro mestre. Remova ou inative os CRDs manualmente em Cadastros, se necessário.",
+      });
+    }
+
+    const needsMonth = ["consumo_interno", "extrato_mensal", "rel_crd", "rds", "requisicoes_sintetica"].includes(
+      sourceType
+    );
+    const needsYear = needsMonth || sourceType === "orcamento" || sourceType === "ajustes";
+
+    if (needsYear && (!Number.isFinite(year) || year < 2000)) {
+      return res.status(400).json({
+        error: "Esta importação não tem ano no histórico; não é seguro desfazer automaticamente.",
+      });
+    }
+    if (needsMonth && (!Number.isFinite(month) || month < 1 || month > 12)) {
+      return res.status(400).json({
+        error: "Esta importação não tem mês no histórico; não é seguro desfazer automaticamente.",
+      });
+    }
+
+    const importScope = String((row as any).import_scope || "");
+    const periodKey = String((row as any).period_key || "");
+    const importHistoryId = Number((row as any).id);
+
+    // Desfaz por importação específica quando há vínculo por import_history_id ou period_key.
+    const undoByImportHistoryId = async (table: string, label?: string) => {
+      await tryDelete(table, (q) => q.eq("import_history_id", importHistoryId), label || table);
+    };
+
+    if (sourceType === "consumo_interno") {
+      if (importHistoryId) {
+        await undoByImportHistoryId("consumo_interno_rows");
+        await undoByImportHistoryId("crd_realizado", "crd_realizado (consumo_interno)");
+      } else if (periodKey) {
+        await tryDelete("consumo_interno_rows", (q) =>
+          q.eq("year", year).eq("month", month).eq("period_key", periodKey)
+        );
+        await tryDelete("crd_realizado", (q) =>
+          q.eq("year", year).eq("month", month).eq("period_key", periodKey).eq("source", "consumo_interno"),
+          "crd_realizado (consumo_interno)"
+        );
+      } else {
+        await tryDelete("consumo_interno_rows", (q) => q.eq("year", year).eq("month", month));
+        await tryDelete(
+          "crd_realizado",
+          (q) => q.eq("year", year).eq("month", month).eq("source", "consumo_interno"),
+          "crd_realizado (consumo_interno)"
+        );
+      }
+    } else if (sourceType === "rel_crd") {
+      if (importHistoryId) {
+        await undoByImportHistoryId("rel_crd_rows");
+        await undoByImportHistoryId("crd_realizado", "crd_realizado (Rel. CRD)");
+      } else if (periodKey) {
+        await tryDelete("rel_crd_rows", (q) =>
+          q.eq("year", year).eq("month", month).eq("period_key", periodKey)
+        );
+        await tryDelete("crd_realizado", (q) =>
+          q.eq("year", year).eq("month", month).eq("period_key", periodKey),
+          "crd_realizado (Rel. CRD)"
+        );
+      } else {
+        await tryDelete("rel_crd_rows", (q) => q.eq("year", year).eq("month", month));
+        await tryDelete(
+          "crd_realizado",
+          (q) =>
+            q
+              .eq("year", year)
+              .eq("month", month)
+              .in("source", ["rel_crd", "rel_crd_diario", "rel_crd_mensal"]),
+          "crd_realizado (Rel. CRD)"
+        );
+      }
+    } else if (sourceType === "rds") {
+      await tryDelete("rds_snapshots", (q) => q.eq("year", year).eq("month", month));
+    } else if (sourceType === "requisicoes_sintetica") {
+      if (importHistoryId) {
+        await undoByImportHistoryId("requisicoes_rows");
+      } else if (periodKey) {
+        await tryDelete("requisicoes_rows", (q) =>
+          q.eq("year", year).eq("month", month).eq("period_key", periodKey)
+        );
+      } else {
+        await tryDelete("requisicoes_rows", (q) => q.eq("year", year).eq("month", month));
+      }
+    } else if (sourceType === "extrato_mensal") {
+      await tryDelete("folha_pagamento", (q) => q.eq("year", year).eq("month", month));
+      await tryDelete("folha_rubricas", (q) => q.eq("year", year).eq("month", month));
+      await tryDelete(
+        "folha_lancamentos_importados",
+        (q) => q.eq("competencia_ano", year).eq("competencia_mes", month)
+      );
+      await tryDelete(
+        "folha_situacoes_resumo",
+        (q) => q.eq("competencia_ano", year).eq("competencia_mes", month)
+      );
+      await tryDelete(
+        "folha_lancamentos",
+        (q) => q.eq("competencia_ano", year).eq("competencia_mes", month)
+      );
+      await tryDelete(
+        "folha_apuracoes_mensais",
+        (q) => q.eq("competencia_ano", year).eq("competencia_mes", month)
+      );
+      await tryDelete(
+        "folha_importacoes",
+        (q) => q.eq("competencia_ano", year).eq("competencia_mes", month)
+      );
+      await tryDelete(
+        "crd_realizado",
+        (q) => q.eq("year", year).eq("month", month).eq("source", "folha_pagamento"),
+        "crd_realizado (folha)"
+      );
+    } else if (sourceType === "orcamento") {
+      await tryDelete("crd_monthly_values", (q) => q.eq("year", year), "crd_monthly_values (orçamento do ano)");
+    } else if (sourceType === "ajustes") {
+      await tryDelete("orcamento_ajustes", (q) => q.eq("year", year), "orcamento_ajustes (ano)");
+    } else {
+      return res.status(400).json({
+        error: `Tipo de importação "${sourceType}" ainda não tem desfazer automático.`,
+      });
+    }
+
+    if (deleted.length === 0 && warnings.length) {
+      return res.status(500).json({
+        error: "Não foi possível apagar os dados desta importação.",
+        warnings,
+      });
+    }
+
+    const { error: delHistErr } = await supabase.from("import_history").delete().eq("id", id);
+    if (delHistErr) {
+      return res.status(500).json({
+        error:
+          "Os dados da importação foram apagados, mas o histórico não pôde ser removido. Atualize a página.",
+        deleted,
+        warnings: [...warnings, delHistErr.message],
+      });
+    }
+    deleted.push("import_history");
+
+    res.json({
+      success: true,
+      message: "Importação desfeita. Os dados daquela competência foram apagados.",
+      source_type: sourceType,
+      year: Number.isFinite(year) ? year : null,
+      month: Number.isFinite(month) ? month : null,
+      deleted,
+      warnings,
+    });
   });
 
   app.post("/api/import/desbravador/preview", upload.single("report_pdf"), async (req, res) => {
@@ -3461,7 +7455,8 @@ export function createApp() {
   // ====================================================
   // Conta/setor de destino do Consumo Interno na Prev x Real.
   const CONSUMO_INTERNO_CRD_NOME = "CONSUMO INTERNO (SEM CRD)";
-  const CONSUMO_INTERNO_SETOR = "Controle";
+  const CONSUMO_INTERNO_SETOR_CODE = "CONTROLE";
+  const CONSUMO_INTERNO_SETOR_NAME = "Controle";
 
   // Faz o parse do .xls de Consumo Interno: linhas + resumo + período detectado.
   const parseConsumoInternoFile = (filePath: string) => {
@@ -3544,30 +7539,22 @@ export function createApp() {
     };
   };
 
-  // Encontra (ou cria) o setor pelo nome.
-  const resolveSectorIdByName = async (sectorName: string): Promise<number | null> => {
-    const { data: sectors } = await supabase.from("sectors").select("id, name");
-    const found = (sectors ?? []).find((s: any) => normalizeName(s.name) === normalizeName(sectorName));
-    if (found) return Number((found as any).id);
-    const { data: created, error } = await supabase
-      .from("sectors")
-      .insert({ name: sectorName, budget_limit: 0 })
-      .select("id")
-      .single();
-    if (error || !created) {
-      console.error("Falha ao criar setor:", sectorName, error);
-      return null;
-    }
-    return Number(created.id);
-  };
-
-  // Encontra (ou cria) a CRD por nome dentro de um setor.
-  const resolveCrdByNameAndSector = async (name: string, sectorName: string, code: string): Promise<number | null> => {
-    const sectorId = await resolveSectorIdByName(sectorName);
+  // Encontra (ou cria) a CRD por nome dentro de um setor (prioriza código do setor).
+  const resolveCrdByNameAndSector = async (
+    name: string,
+    sector: { code?: string | number | null; name?: string | null },
+    code: string
+  ): Promise<number | null> => {
+    const resolved = await resolveSector(
+      supabase,
+      { code: sector.code, name: sector.name, create: true },
+      sectorCache
+    );
+    if (!resolved) return null;
+    const sectorId = resolved.id;
     const { data: crds } = await supabase.from("crds").select("id, name, sector_id");
-    const matches = (crds ?? []).filter((c: any) => normalizeName(c.name) === normalizeName(name));
-    const chosen =
-      matches.find((c: any) => sectorId != null && Number(c.sector_id) === sectorId) || matches[0];
+    const matches = (crds ?? []).filter((c: any) => normalizeSectorName(c.name) === normalizeSectorName(name));
+    const chosen = matches.find((c: any) => Number(c.sector_id) === sectorId) || matches[0];
     if (chosen) return Number((chosen as any).id);
     const { data: created, error } = await supabase
       .from("crds")
@@ -3602,7 +7589,7 @@ export function createApp() {
         period: parsed.period,
         summary: parsed.summary,
         lines: parsed.lines,
-        destino: { setor: CONSUMO_INTERNO_SETOR, conta: CONSUMO_INTERNO_CRD_NOME },
+        destino: { setor: CONSUMO_INTERNO_SETOR_NAME, setor_codigo: CONSUMO_INTERNO_SETOR_CODE, conta: CONSUMO_INTERNO_CRD_NOME },
       });
     } catch (error: any) {
       console.error("Erro ao processar Consumo Interno:", error);
@@ -3633,36 +7620,52 @@ export function createApp() {
         return res.status(400).json({ error: "Não foi possível determinar o mês do relatório. Informe mês e ano." });
       }
 
-      const crdId = await resolveCrdByNameAndSector(CONSUMO_INTERNO_CRD_NOME, CONSUMO_INTERNO_SETOR, "CONSUMO-INTERNO");
+      const periodParsed = parseImportPeriodInput(
+        year,
+        month,
+        (req.body as any)?.import_scope,
+        (req.body as any)?.week_index
+      );
+      if ("error" in periodParsed) return res.status(400).json({ error: periodParsed.error });
+      const { scope, weekIndex, periodKey } = periodParsed;
+
+      const historyId = await logImportHistory({
+        source_type: "consumo_interno",
+        file_name: req.file.originalname,
+        status: "success",
+        year,
+        month,
+        import_scope: scope,
+        period_key: periodKey,
+        week_index: weekIndex,
+        records_count: 0,
+        user: req.user,
+        summary: { import_scope: scope, period_key: periodKey },
+      });
+
+      const consumoSetor = await resolveSectorByCode(
+        supabase,
+        CONSUMO_INTERNO_SETOR_CODE,
+        CONSUMO_INTERNO_SETOR_NAME,
+        sectorCache
+      );
+      const crdId = await resolveCrdByNameAndSector(
+        CONSUMO_INTERNO_CRD_NOME,
+        { code: CONSUMO_INTERNO_SETOR_CODE, name: CONSUMO_INTERNO_SETOR_NAME },
+        "CONSUMO-INTERNO"
+      );
       if (!crdId) return res.status(500).json({ error: "Não foi possível resolver a conta de destino." });
 
       const total = parsed.summary.total_liquido;
-      const { error } = await supabase
-        .from("crd_realizado")
-        .upsert(
-          { crd_id: crdId, year, month, source: "consumo_interno", value: total },
-          { onConflict: "crd_id,year,month,source" }
-        );
-      if (error) {
-        console.error("Erro ao gravar realizado do Consumo Interno:", error);
-        await logImportHistory({
-          source_type: "consumo_interno",
-          file_name: req.file.originalname,
-          status: "error",
-          year,
-          month,
-          user: req.user,
-          error_message: String(error.message || "Não foi possível gravar o realizado.").slice(0, 500),
-        });
-        return res.status(500).json({ error: "Não foi possível gravar o realizado." });
-      }
 
-      // Persiste detalhe por linha na Apuração de Resultados › Consumo interno.
+      // Substitui apenas o período/escopo (semanal não interfere no fechamento).
       const { error: delRowsErr } = await supabase
         .from("consumo_interno_rows")
         .delete()
         .eq("year", year)
-        .eq("month", month);
+        .eq("month", month)
+        .eq("import_scope", scope)
+        .eq("period_key", periodKey);
       if (delRowsErr) {
         console.error("consumo_interno_rows delete (execute sql/17_consumo_interno_rows.sql):", delRowsErr);
         return res.status(500).json({
@@ -3673,6 +7676,11 @@ export function createApp() {
       const detailRows = (parsed.lines ?? []).map((l: any) => ({
         year,
         month,
+        import_scope: scope,
+        period_key: periodKey,
+        week_index: weekIndex,
+        import_history_id: historyId,
+        sector_id: consumoSetor?.id ?? null,
         cliente_id: l.cliente_id != null ? String(l.cliente_id) : null,
         cliente_nome: String(l.cliente_nome ?? "").trim() || null,
         produto_codigo: l.produto_codigo != null ? String(l.produto_codigo) : null,
@@ -3702,26 +7710,92 @@ export function createApp() {
         }
       }
 
-      await logImportHistory({
-        source_type: "consumo_interno",
-        file_name: req.file.originalname,
-        status: "success",
+      // Prev x Real: acompanhamento → diário; fechamento → mensal.
+      if (historyId) {
+        await supabase.from("crd_realizado").delete().eq("import_history_id", historyId);
+      }
+      await supabase
+        .from("crd_realizado")
+        .delete()
+        .eq("year", year)
+        .eq("month", month)
+        .eq("period_key", periodKey)
+        .eq("source", "consumo_interno");
+
+      const { error: realErr } = await supabase.from("crd_realizado").insert({
+        crd_id: crdId,
         year,
         month,
-        records_count: parsed.summary.lines_count,
-        total_amount: total,
-        user: req.user,
-        summary: {
-          destino: { setor: CONSUMO_INTERNO_SETOR, conta: CONSUMO_INTERNO_CRD_NOME },
-          destino_apuracao: "Apuração de Resultados › Consumo interno",
-          lines_count: parsed.summary.lines_count,
-          clientes_count: parsed.summary.clientes_count,
-        },
+        source: "consumo_interno",
+        value: total,
+        import_scope: scope,
+        period_key: periodKey,
+        import_history_id: historyId,
       });
+      if (realErr) {
+        console.error("Erro ao gravar realizado do Consumo Interno:", realErr);
+        await logImportHistory({
+          source_type: "consumo_interno",
+          file_name: req.file.originalname,
+          status: "error",
+          year,
+          month,
+          import_scope: scope,
+          period_key: periodKey,
+          week_index: weekIndex,
+          user: req.user,
+          error_message: String(realErr.message || "Não foi possível gravar o realizado.").slice(0, 500),
+        });
+        return res.status(500).json({ error: "Não foi possível gravar o realizado." });
+      }
+
+      if (historyId) {
+        await supabase
+          .from("import_history")
+          .update({
+            records_count: parsed.summary.lines_count,
+            total_amount: total,
+            summary: {
+              import_scope: scope,
+              period_key: periodKey,
+              week_index: weekIndex,
+              destino: { setor: CONSUMO_INTERNO_SETOR_NAME, setor_codigo: CONSUMO_INTERNO_SETOR_CODE, conta: CONSUMO_INTERNO_CRD_NOME },
+              destino_apuracao: "Apuração de Resultados › Consumo interno",
+              lines_count: parsed.summary.lines_count,
+              clientes_count: parsed.summary.clientes_count,
+            },
+          })
+          .eq("id", historyId);
+      } else {
+        await logImportHistory({
+          source_type: "consumo_interno",
+          file_name: req.file.originalname,
+          status: "success",
+          year,
+          month,
+          import_scope: scope,
+          period_key: periodKey,
+          week_index: weekIndex,
+          records_count: parsed.summary.lines_count,
+          total_amount: total,
+          user: req.user,
+          summary: {
+            destino: { setor: CONSUMO_INTERNO_SETOR_NAME, setor_codigo: CONSUMO_INTERNO_SETOR_CODE, conta: CONSUMO_INTERNO_CRD_NOME },
+            destino_apuracao: "Apuração de Resultados › Consumo interno",
+            lines_count: parsed.summary.lines_count,
+            clientes_count: parsed.summary.clientes_count,
+            import_scope: scope,
+            period_key: periodKey,
+          },
+        });
+      }
 
       res.json({
         success: true,
-        destino: { setor: CONSUMO_INTERNO_SETOR, conta: CONSUMO_INTERNO_CRD_NOME },
+        import_scope: scope,
+        period_key: periodKey,
+        week_index: weekIndex,
+        destino: { setor: CONSUMO_INTERNO_SETOR_NAME, setor_codigo: CONSUMO_INTERNO_SETOR_CODE, conta: CONSUMO_INTERNO_CRD_NOME },
         destino_apuracao: { secao: "Apuração de Resultados", sub: "Consumo interno", month, year },
         period: { month, year },
         total,
@@ -3743,14 +7817,315 @@ export function createApp() {
   });
 
   // ====================================================
+  // VENDAS POR AMBIENTE (Aquamania · PDVs — Desbravador MesAno)
+  // ====================================================
+  const parseVendasAmbienteFile = async (filePath: string, originalName = "") => {
+    const name = originalName || path.basename(filePath);
+    if (/\.pdf$/i.test(name) || /\.pdf$/i.test(filePath)) {
+      const buffer = fs.readFileSync(filePath);
+      const rows = await extractPdfRowsByPosition(buffer);
+      return parseVendasAmbientePdf(rows, name);
+    }
+    const workbook = xlsx.readFile(filePath);
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    const rows = xlsx.utils.sheet_to_json(sheet, { header: 1, defval: "", raw: true }) as any[][];
+    return parseVendasAmbienteGrid(rows, name);
+  };
+
+  const MONTH_SHORT_PT = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
+
+  app.post("/api/import/vendas-ambiente/preview", upload.single("vendas_file"), async (req, res) => {
+    if (!req.file) return res.status(400).json({ error: "Arquivo não enviado" });
+    if (!/\.(xlsx|xls|pdf)$/i.test(req.file.originalname || "")) {
+      if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+      return res.status(400).json({ error: "Envie o relatório em PDF ou Excel (.pdf, .xls ou .xlsx)." });
+    }
+    try {
+      const parsed = await parseVendasAmbienteFile(req.file.path, req.file.originalname);
+      if (!parsed.lines.length) {
+        return res.status(422).json({
+          success: false,
+          error:
+            "O arquivo foi lido, mas nenhum ambiente/PDV foi reconhecido. Confira se este é o relatório 'Vendas por Ambiente MesAno' do Desbravador.",
+        });
+      }
+      const bodyMonth = Number((req.body as any)?.month);
+      const bodyYear = Number((req.body as any)?.year);
+      const period =
+        parsed.period ||
+        (bodyMonth >= 1 && bodyMonth <= 12 && bodyYear >= 2000
+          ? { month: bodyMonth, year: bodyYear }
+          : null);
+      res.json({
+        success: true,
+        report_name: req.file.originalname || "vendas-ambiente.pdf",
+        period,
+        summary: parsed.summary,
+        total_geral_reported: parsed.total_geral_reported ?? null,
+        lines: parsed.lines,
+      });
+    } catch (error: any) {
+      console.error("Erro ao processar Vendas por Ambiente:", error);
+      res.status(500).json({
+        success: false,
+        error: "Falha ao processar o relatório de Vendas por Ambiente.",
+        detail: error?.message ? String(error.message).slice(0, 300) : undefined,
+      });
+    } finally {
+      if (req.file?.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+    }
+  });
+
+  app.post(
+    "/api/import/vendas-ambiente/commit",
+    requireRole("admin", "finance", "controle"),
+    upload.single("vendas_file"),
+    async (req, res) => {
+      if (!req.file) return res.status(400).json({ error: "Arquivo não enviado" });
+      if (!/\.(xlsx|xls|pdf)$/i.test(req.file.originalname || "")) {
+        if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+        return res.status(400).json({ error: "Envie o relatório em PDF ou Excel (.pdf, .xls ou .xlsx)." });
+      }
+      try {
+        const parsed = await parseVendasAmbienteFile(req.file.path, req.file.originalname);
+        if (!parsed.lines.length) {
+          return res.status(422).json({
+            error:
+              "Nenhum ambiente/PDV reconhecido no arquivo. Confira o layout do relatório 'Vendas por Ambiente MesAno'.",
+          });
+        }
+        const month = Number((req.body as any)?.month) || parsed.period?.month;
+        const year = Number((req.body as any)?.year) || parsed.period?.year;
+        if (!month || !year || month < 1 || month > 12) {
+          return res.status(400).json({
+            error: "Não foi possível determinar o mês do relatório. Informe mês e ano.",
+          });
+        }
+
+        const historyId = await logImportHistory({
+          source_type: "vendas_ambiente",
+          file_name: req.file.originalname,
+          status: "success",
+          year,
+          month,
+          records_count: parsed.lines.length,
+          total_amount: parsed.summary.total_liquido,
+          user: req.user,
+          summary: {
+            ambientes_count: parsed.summary.ambientes_count,
+            total_liquido: parsed.summary.total_liquido,
+            total_quantidade: parsed.summary.total_quantidade,
+          },
+        });
+
+        const { error: delErr } = await supabase
+          .from("vendas_ambiente_rows")
+          .delete()
+          .eq("year", year)
+          .eq("month", month);
+        if (delErr) {
+          console.error("vendas_ambiente_rows delete:", delErr);
+          return res.status(500).json({
+            error: "Tabela vendas_ambiente_rows indisponível. Execute sql/69_vendas_ambiente.sql no Supabase.",
+          });
+        }
+
+        const detailRows = parsed.lines.map((l) =>
+          withEmpresaKey(
+            {
+              year,
+              month,
+              ambiente: l.ambiente,
+              ambiente_codigo: l.ambiente_codigo,
+              quantidade: l.quantidade,
+              valor_bruto: l.valor_bruto,
+              valor_desconto: l.valor_desconto,
+              valor_liquido: l.valor_liquido,
+              ticket_medio: l.ticket_medio,
+              import_history_id: historyId,
+            },
+            req
+          )
+        );
+
+        const { error: insErr } = await supabase.from("vendas_ambiente_rows").insert(detailRows);
+        if (insErr) {
+          console.error("vendas_ambiente_rows insert:", insErr);
+          return res.status(500).json({ error: "Não foi possível gravar as linhas do relatório." });
+        }
+
+        res.json({
+          success: true,
+          period: { month, year },
+          summary: parsed.summary,
+        });
+      } catch (error: any) {
+        console.error("Erro no commit de Vendas por Ambiente:", error);
+        await logImportHistory({
+          source_type: "vendas_ambiente",
+          file_name: req.file?.originalname,
+          status: "error",
+          user: req.user,
+          error_message: String(error?.message || "Falha na importação.").slice(0, 500),
+        });
+        res.status(500).json({ error: "Não foi possível importar o relatório de Vendas por Ambiente." });
+      } finally {
+        if (req.file?.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+      }
+    }
+  );
+
+  app.get(
+    "/api/vendas-ambiente",
+    requireRole("admin", "finance", "controle", "manager", "diretoria"),
+    async (req, res) => {
+      const now = new Date();
+      const year = Number((req.query as { year?: string }).year) || now.getFullYear();
+      const month = Number((req.query as { month?: string }).month) || now.getMonth() + 1;
+      if (month < 1 || month > 12) {
+        return res.status(400).json({ error: "Mês inválido." });
+      }
+
+      const { data: monthRows, error } = await supabase
+        .from("vendas_ambiente_rows")
+        .select("ambiente, ambiente_codigo, quantidade, valor_bruto, valor_desconto, valor_liquido, ticket_medio")
+        .eq("year", year)
+        .eq("month", month)
+        .order("valor_liquido", { ascending: false });
+      if (error) {
+        console.error(error);
+        return res.status(500).json({
+          error: "Não foi possível carregar vendas. Execute sql/69_vendas_ambiente.sql se ainda não rodou.",
+        });
+      }
+
+      const rows = monthRows ?? [];
+      const total_liquido = rows.reduce((s, r) => s + (Number((r as any).valor_liquido) || 0), 0);
+      const total_bruto = rows.reduce((s, r) => s + (Number((r as any).valor_bruto) || 0), 0);
+      const total_desconto = rows.reduce((s, r) => s + (Number((r as any).valor_desconto) || 0), 0);
+      const total_quantidade = rows.reduce((s, r) => s + (Number((r as any).quantidade) || 0), 0);
+
+      const by_ambiente = rows.map((r: any) => {
+        const valor_liquido = Number(r.valor_liquido) || 0;
+        const quantidade = Number(r.quantidade) || 0;
+        return {
+          ambiente: String(r.ambiente || ""),
+          ambiente_codigo: r.ambiente_codigo != null ? String(r.ambiente_codigo) : null,
+          quantidade,
+          valor_bruto: Number(r.valor_bruto) || 0,
+          valor_desconto: Number(r.valor_desconto) || 0,
+          valor_liquido,
+          ticket_medio: quantidade > 0 ? valor_liquido / quantidade : Number(r.ticket_medio) || 0,
+          share: total_liquido > 0 ? (valor_liquido / total_liquido) * 100 : 0,
+        };
+      });
+
+      const { data: yearRows } = await supabase
+        .from("vendas_ambiente_rows")
+        .select("month, ambiente, valor_liquido, quantidade")
+        .eq("year", year);
+
+      const serieMap = new Map<number, { total: number; quantidade: number }>();
+      for (let m = 1; m <= 12; m++) serieMap.set(m, { total: 0, quantidade: 0 });
+
+      // Matriz ambiente × mês (líquido no ano)
+      const ambienteMonth = new Map<string, Map<number, number>>();
+      const ambienteTotais = new Map<string, number>();
+      for (const r of yearRows ?? []) {
+        const m = Number((r as any).month);
+        const valor = Number((r as any).valor_liquido) || 0;
+        const qtd = Number((r as any).quantidade) || 0;
+        const ambiente = String((r as any).ambiente || "").trim();
+        const agg = serieMap.get(m);
+        if (agg) {
+          agg.total += valor;
+          agg.quantidade += qtd;
+        }
+        if (!ambiente) continue;
+        if (!ambienteMonth.has(ambiente)) ambienteMonth.set(ambiente, new Map());
+        const monthMap = ambienteMonth.get(ambiente)!;
+        monthMap.set(m, (monthMap.get(m) || 0) + valor);
+        ambienteTotais.set(ambiente, (ambienteTotais.get(ambiente) || 0) + valor);
+      }
+
+      const ambientesOrdenados = Array.from(ambienteTotais.entries())
+        .sort((a, b) => b[1] - a[1])
+        .map(([nome]) => nome);
+
+      const comparativo_mensal = {
+        ambientes: ambientesOrdenados,
+        series: ambientesOrdenados.map((ambiente) => {
+          const monthMap = ambienteMonth.get(ambiente) || new Map();
+          const months = Array.from({ length: 12 }, (_, i) => monthMap.get(i + 1) || 0);
+          return {
+            ambiente,
+            months,
+            total: ambienteTotais.get(ambiente) || 0,
+          };
+        }),
+        chart: Array.from({ length: 12 }, (_, i) => {
+          const m = i + 1;
+          const point: Record<string, string | number> = {
+            month: m,
+            name: MONTH_SHORT_PT[i],
+            name_full: [
+              "Janeiro",
+              "Fevereiro",
+              "Março",
+              "Abril",
+              "Maio",
+              "Junho",
+              "Julho",
+              "Agosto",
+              "Setembro",
+              "Outubro",
+              "Novembro",
+              "Dezembro",
+            ][i],
+          };
+          for (const ambiente of ambientesOrdenados) {
+            point[ambiente] = ambienteMonth.get(ambiente)?.get(m) || 0;
+          }
+          return point;
+        }),
+      };
+
+      res.json({
+        year,
+        month,
+        summary: {
+          total_liquido,
+          total_bruto,
+          total_desconto,
+          total_quantidade,
+          ambientes_count: by_ambiente.length,
+          ticket_medio_geral: total_quantidade > 0 ? total_liquido / total_quantidade : 0,
+          has_data: by_ambiente.length > 0 || ambientesOrdenados.length > 0,
+        },
+        by_ambiente,
+        serie_anual: Array.from(serieMap.entries()).map(([m, agg]) => ({
+          month: m,
+          name: MONTH_SHORT_PT[m - 1],
+          total: agg.total,
+          quantidade: agg.quantidade,
+        })),
+        comparativo_mensal,
+      });
+    }
+  );
+
+  // ====================================================
   // CONSUMO INTERNO (Apuração de Resultados — consulta por competência)
   // ====================================================
   app.get("/api/consumo-interno/competencias", requireRole("admin", "finance", "controle", "manager"), async (req, res) => {
     const year = Number((req.query as { year?: string }).year) || new Date().getFullYear();
+    const scopeParam = String((req.query as { scope?: string }).scope || "fechamento");
+    const scope = scopeParam === "acompanhamento" ? "acompanhamento" : "fechamento";
     const { data, error } = await supabase
       .from("consumo_interno_rows")
-      .select("month, vl_liquido, quantidade, cliente_id")
-      .eq("year", year);
+      .select("month, vl_liquido, quantidade, cliente_id, import_scope, period_key, week_index")
+      .eq("year", year)
+      .eq("import_scope", scope);
     if (error) {
       console.error(error);
       return res.status(500).json({
@@ -3774,6 +8149,7 @@ export function createApp() {
 
     res.json({
       year,
+      import_scope: scope,
       months: Array.from(byMonth.entries()).map(([month, agg]) => ({
         month,
         importado: agg.linhas > 0,
@@ -3788,17 +8164,40 @@ export function createApp() {
   app.get("/api/consumo-interno", requireRole("admin", "finance", "controle", "manager"), async (req, res) => {
     const year = Number((req.query as { year?: string }).year) || new Date().getFullYear();
     const month = Number((req.query as { month?: string }).month);
+    const scopeParam = String((req.query as { scope?: string }).scope || "fechamento");
+    const scope = scopeParam === "acompanhamento" ? "acompanhamento" : "fechamento";
+    const weekIndex = Number((req.query as { week_index?: string }).week_index);
     if (!month || month < 1 || month > 12) {
       return res.status(400).json({ error: "Informe o mês (1-12)." });
     }
 
-    const { data, error } = await supabase
+    let query = supabase
       .from("consumo_interno_rows")
       .select("*")
       .eq("year", year)
       .eq("month", month)
+      .eq("import_scope", scope)
       .order("data_iso", { ascending: true })
       .order("cliente_nome", { ascending: true });
+
+    if (scope === "acompanhamento" && Number.isFinite(weekIndex) && weekIndex >= 1 && weekIndex <= 5) {
+      query = query.eq("week_index", weekIndex);
+    } else if (scope === "acompanhamento") {
+      const { data: weekRows } = await supabase
+        .from("consumo_interno_rows")
+        .select("week_index")
+        .eq("year", year)
+        .eq("month", month)
+        .eq("import_scope", "acompanhamento")
+        .order("week_index", { ascending: false })
+        .limit(1);
+      const latestWeek = Number((weekRows?.[0] as any)?.week_index);
+      if (Number.isFinite(latestWeek) && latestWeek >= 1) {
+        query = query.eq("week_index", latestWeek);
+      }
+    }
+
+    const { data, error } = await query;
 
     if (error) {
       console.error(error);
@@ -3808,21 +8207,46 @@ export function createApp() {
     }
 
     const lines = data ?? [];
+    const corrections = await fetchCorrectionsForCompetencia(
+      supabase,
+      "consumo_interno_rows",
+      year,
+      month
+    );
     const clientes = new Set(
       lines.map((l: any) => String(l.cliente_id ?? l.cliente_nome ?? "").trim()).filter(Boolean)
     );
     const n = (v: any) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+    const enrichedLines = lines.map((l: any) => {
+      const id = Number(l.id);
+      const quantidadeMeta = applyFieldCorrection(
+        n(l.quantidade),
+        getCorrectionFromMap(corrections, "consumo_interno_rows", id, "quantidade")
+      );
+      const liquidoMeta = applyFieldCorrection(
+        n(l.vl_liquido),
+        getCorrectionFromMap(corrections, "consumo_interno_rows", id, "vl_liquido")
+      );
+      return {
+        ...l,
+        quantidade: quantidadeMeta.value,
+        vl_liquido: liquidoMeta.value,
+        quantidade_meta: quantidadeMeta,
+        vl_liquido_meta: liquidoMeta,
+      };
+    });
     res.json({
       year,
       month,
-      lines,
+      import_scope: scope,
+      lines: enrichedLines,
       summary: {
-        lines_count: lines.length,
+        lines_count: enrichedLines.length,
         clientes_count: clientes.size,
-        total_quantidade: lines.reduce((s: number, l: any) => s + n(l.quantidade), 0),
-        total_liquido: lines.reduce((s: number, l: any) => s + n(l.vl_liquido), 0),
-        total_bruto: lines.reduce((s: number, l: any) => s + n(l.vl_total), 0),
-        total_desconto: lines.reduce((s: number, l: any) => s + n(l.vl_desconto), 0),
+        total_quantidade: enrichedLines.reduce((s: number, l: any) => s + n(l.quantidade), 0),
+        total_liquido: enrichedLines.reduce((s: number, l: any) => s + n(l.vl_liquido), 0),
+        total_bruto: enrichedLines.reduce((s: number, l: any) => s + n(l.vl_total), 0),
+        total_desconto: enrichedLines.reduce((s: number, l: any) => s + n(l.vl_desconto), 0),
       },
     });
   });
@@ -3917,7 +8341,7 @@ export function createApp() {
   // Também persiste as linhas em rel_crd_rows para o Relatorio de CRD.
   // ====================================================
   app.post("/api/import/rel-crd/commit", async (req, res) => {
-    const { rows, month, year } = req.body as {
+    const { rows, month, year, import_scope, week_index, file_name } = req.body as {
       rows: {
         codigo: string;
         nome?: string;
@@ -3933,21 +8357,72 @@ export function createApp() {
       }[];
       month: number;
       year: number;
+      import_scope?: ImportScope;
+      week_index?: number;
+      file_name?: string;
     };
     if (!Array.isArray(rows) || !rows.length)
       return res.status(400).json({ error: "Nenhuma linha enviada." });
     if (!month || !year || month < 1 || month > 12 || year < 2000)
       return res.status(400).json({ error: "Mês/ano inválido." });
 
-    const { data: crds, error: crdErr } = await supabase.from("crds").select("id, code");
+    const scope: ImportScope = import_scope === "acompanhamento" ? "acompanhamento" : "fechamento";
+    const weekIndex = Number(week_index);
+    if (scope === "acompanhamento" && (!Number.isFinite(weekIndex) || weekIndex < 1 || weekIndex > 5)) {
+      return res.status(400).json({ error: "Informe a semana (1 a 5) para importação de acompanhamento." });
+    }
+    const periodKey = buildPeriodKey(year, month, scope, scope === "acompanhamento" ? weekIndex : null);
+
+    const historyId = await logImportHistory({
+      source_type: "rel_crd",
+      file_name: file_name || `Rel. CRD ${month}/${year}`,
+      status: "success",
+      year: Number(year),
+      month: Number(month),
+      import_scope: scope,
+      period_key: periodKey,
+      week_index: scope === "acompanhamento" ? weekIndex : null,
+      records_count: 0,
+      user: (req as any).user,
+      summary: { import_scope: scope, period_key: periodKey },
+    });
+
+    const { data: crds, error: crdErr } = await supabase.from("crds").select("id, code, name");
     if (crdErr) return res.status(500).json({ error: crdErr.message });
 
+    // Match preferencial: código contábil entre parênteses no nome do CRD (ex.: "TELEFONE (366)").
+    // Fallback: campo crds.code.
     const codeToId = new Map<string, number>();
+    const parenToId = new Map<string, number>();
     for (const c of crds ?? []) {
-      if (c.code) codeToId.set(String(c.code).trim().toLowerCase(), Number(c.id));
+      const id = Number((c as any).id);
+      if (!Number.isFinite(id)) continue;
+      const code = String((c as any).code ?? "").trim().toLowerCase();
+      if (code) codeToId.set(code, id);
+      const paren = /\((\d+)\)\s*$/.exec(String((c as any).name ?? "").trim());
+      if (paren) parenToId.set(paren[1], id);
     }
+    const resolveCrdId = (codigoRaw: string): number | null => {
+      const codigo = String(codigoRaw ?? "").trim();
+      if (!codigo) return null;
+      if (parenToId.has(codigo)) return parenToId.get(codigo)!;
+      const byCode = codeToId.get(codigo.toLowerCase());
+      return byCode ?? null;
+    };
 
-    const upserts: { crd_id: number; year: number; month: number; source: string; value: number }[] = [];
+    // Só grava realizado nas contas folha (nível mais profundo) para não duplicar pais+filhos.
+    const maxNivel = rows.reduce((m, r) => Math.max(m, Number(r.nivel) || 1), 1);
+
+    const upserts: {
+      crd_id: number;
+      year: number;
+      month: number;
+      source: string;
+      value: number;
+      import_scope: ImportScope;
+      period_key: string;
+      import_history_id: number | null;
+    }[] = [];
     const reportRows: Record<string, any>[] = [];
     const notFound: string[] = [];
     let toDiario = 0;
@@ -3955,32 +8430,45 @@ export function createApp() {
 
     for (const row of rows) {
       const codigo = String(row.codigo ?? "").trim();
-      const crdId = codeToId.get(codigo.toLowerCase()) ?? null;
+      const nivel = Number(row.nivel) || 1;
+      const crdId = resolveCrdId(codigo);
       if (!crdId) notFound.push(codigo);
       const saldo = Number(row.saldo_lanc ?? row.lanc_liquido ?? 0);
-      const destinosRaw = Array.isArray(row.destinos) ? row.destinos : ["D", "M"];
+      const destinosRaw = Array.isArray(row.destinos) ? row.destinos : scope === "acompanhamento" ? ["D"] : ["M"];
       const wantD = destinosRaw.some((d) => String(d).toUpperCase() === "D");
       const wantM = destinosRaw.some((d) => String(d).toUpperCase() === "M");
       if (!wantD && !wantM) continue;
 
-      if (crdId) {
-        if (wantD) {
+      // Acompanhamento semanal: só alimenta Prev x Real Diário. Fechamento: só mensal.
+      const allowD = scope === "acompanhamento" ? wantD : false;
+      const allowM = scope === "fechamento" ? wantM : false;
+      if (!allowD && !allowM) continue;
+
+      // Realizado por CRD: apenas folhas (nível máximo do arquivo).
+      if (crdId && nivel >= maxNivel) {
+        if (allowD) {
           upserts.push({
             crd_id: crdId,
             year: Number(year),
             month: Number(month),
             source: "rel_crd_diario",
             value: saldo,
+            import_scope: scope,
+            period_key: periodKey,
+            import_history_id: historyId,
           });
           toDiario += 1;
         }
-        if (wantM) {
+        if (allowM) {
           upserts.push({
             crd_id: crdId,
             year: Number(year),
             month: Number(month),
             source: "rel_crd",
             value: saldo,
+            import_scope: scope,
+            period_key: periodKey,
+            import_history_id: historyId,
           });
           toMensal += 1;
         }
@@ -3989,7 +8477,11 @@ export function createApp() {
       reportRows.push({
         year: Number(year),
         month: Number(month),
-        nivel: Number(row.nivel) || 1,
+        import_scope: scope,
+        period_key: periodKey,
+        week_index: scope === "acompanhamento" ? weekIndex : null,
+        import_history_id: historyId,
+        nivel,
         codigo,
         nome: String(row.nome ?? "").trim() || null,
         lancamentos: Number(row.lancamentos) || 0,
@@ -4014,7 +8506,9 @@ export function createApp() {
       .from("rel_crd_rows")
       .delete()
       .eq("year", Number(year))
-      .eq("month", Number(month));
+      .eq("month", Number(month))
+      .eq("import_scope", scope)
+      .eq("period_key", periodKey);
     if (delErr) {
       console.error("rel_crd_rows delete (execute sql/13_rel_crd_rows.sql):", delErr);
       return res.status(500).json({
@@ -4029,50 +8523,66 @@ export function createApp() {
       return res.status(500).json({ error: insertErr.message });
     }
 
-    // Limpa realizado Rel. CRD do mês (diario + mensal) e reinsere conforme destinos.
-    const { data: existingReal } = await supabase
+    // Substitui apenas o realizado deste período/escopo (não mistura semanal com fechamento).
+    if (historyId) {
+      await supabase.from("crd_realizado").delete().eq("import_history_id", historyId);
+    }
+    const realizedSources =
+      scope === "acompanhamento" ? ["rel_crd_diario"] : ["rel_crd", "rel_crd_mensal"];
+    await supabase
       .from("crd_realizado")
-      .select("id, source")
+      .delete()
       .eq("year", Number(year))
       .eq("month", Number(month))
-      .in("source", ["rel_crd", "rel_crd_diario"]);
-    if (existingReal?.length) {
-      const ids = existingReal.map((r: any) => r.id).filter(Boolean);
-      if (ids.length) {
-        await supabase.from("crd_realizado").delete().in("id", ids);
-      } else {
-        await supabase
-          .from("crd_realizado")
-          .delete()
-          .eq("year", Number(year))
-          .eq("month", Number(month))
-          .in("source", ["rel_crd", "rel_crd_diario"]);
-      }
-    }
+      .eq("period_key", periodKey)
+      .in("source", realizedSources);
 
     if (upserts.length) {
-      const { error: upsertErr } = await supabase
-        .from("crd_realizado")
-        .upsert(upserts, { onConflict: "crd_id,year,month,source" });
+      const { error: upsertErr } = await supabase.from("crd_realizado").insert(upserts);
       if (upsertErr) return res.status(500).json({ error: upsertErr.message });
     }
 
+    if (historyId) {
+      await supabase
+        .from("import_history")
+        .update({
+          records_count: reportRows.length,
+          total_amount: reportRows.reduce((s, r) => s + Number(r.saldo_lanc || 0), 0),
+          summary: {
+            import_scope: scope,
+            period_key: periodKey,
+            week_index: scope === "acompanhamento" ? weekIndex : null,
+            to_diario: toDiario,
+            to_mensal: toMensal,
+            not_found: notFound,
+          },
+        })
+        .eq("id", historyId);
+    }
+
     try {
-      await logImportHistory({
-        source_type: "rel_crd",
-        file_name: `Rel. CRD ${month}/${year}`,
-        status: "success",
-        year: Number(year),
-        month: Number(month),
-        records_count: reportRows.length,
-        total_amount: reportRows.reduce((s, r) => s + Number(r.saldo_lanc || 0), 0),
-        summary: {
-          to_diario: toDiario,
-          to_mensal: toMensal,
-          not_found: notFound,
-        },
-        user: (req as any).user,
-      });
+      if (!historyId) {
+        await logImportHistory({
+          source_type: "rel_crd",
+          file_name: file_name || `Rel. CRD ${month}/${year}`,
+          status: "success",
+          year: Number(year),
+          month: Number(month),
+          import_scope: scope,
+          period_key: periodKey,
+          week_index: scope === "acompanhamento" ? weekIndex : null,
+          records_count: reportRows.length,
+          total_amount: reportRows.reduce((s, r) => s + Number(r.saldo_lanc || 0), 0),
+          summary: {
+            to_diario: toDiario,
+            to_mensal: toMensal,
+            not_found: notFound,
+            import_scope: scope,
+            period_key: periodKey,
+          },
+          user: (req as any).user,
+        });
+      }
     } catch (e) {
       console.error("Falha ao registrar histórico Rel. CRD:", e);
     }
@@ -4081,6 +8591,9 @@ export function createApp() {
       success: true,
       imported: reportRows.length,
       matched: upserts.length,
+      import_scope: scope,
+      period_key: periodKey,
+      week_index: scope === "acompanhamento" ? weekIndex : null,
       to_diario: toDiario,
       to_mensal: toMensal,
       not_found: notFound,
@@ -4092,16 +8605,26 @@ export function createApp() {
   // ====================================================
   app.get("/api/rel-crd/competencias", requireRole("admin", "finance", "controle", "manager"), async (req, res) => {
     const year = Number((req.query as { year?: string }).year) || new Date().getFullYear();
+    const scopeParam = String((req.query as { scope?: string }).scope || "fechamento");
+    const scope = scopeParam === "acompanhamento" ? "acompanhamento" : "fechamento";
     const { data, error } = await supabase
       .from("rel_crd_rows")
-      .select("month, saldo_lanc, codigo")
-      .eq("year", year);
+      .select("month, saldo_lanc, codigo, import_scope, period_key, week_index")
+      .eq("year", year)
+      .eq("import_scope", scope);
     if (error) {
       console.error(error);
       return res.status(500).json({
         error: "Não foi possível carregar competências. Execute sql/13_rel_crd_rows.sql se ainda não rodou.",
       });
     }
+
+    const { data: cadastroCrds } = await filterByEmpresa(
+      supabase.from("crds").select("id").eq("active", true),
+      req,
+      "crds"
+    );
+    const cadastroTotal = (cadastroCrds ?? []).length;
 
     const byMonth = new Map<number, { contas: number; saldo_lanc: number }>();
     for (let m = 1; m <= 12; m++) byMonth.set(m, { contas: 0, saldo_lanc: 0 });
@@ -4115,11 +8638,14 @@ export function createApp() {
 
     res.json({
       year,
+      import_scope: scope,
+      cadastro_crds: cadastroTotal,
       months: Array.from(byMonth.entries()).map(([month, agg]) => ({
         month,
         importado: agg.contas > 0,
-        contas: agg.contas,
+        contas: agg.contas > 0 ? agg.contas : cadastroTotal,
         saldo_lanc: agg.saldo_lanc,
+        tem_cadastro: cadastroTotal > 0,
       })),
     });
   });
@@ -4127,17 +8653,40 @@ export function createApp() {
   app.get("/api/rel-crd", requireRole("admin", "finance", "controle", "manager"), async (req, res) => {
     const year = Number((req.query as { year?: string }).year) || new Date().getFullYear();
     const month = Number((req.query as { month?: string }).month);
+    const scopeParam = String((req.query as { scope?: string }).scope || "fechamento");
+    const scope = scopeParam === "acompanhamento" ? "acompanhamento" : "fechamento";
+    const weekIndex = Number((req.query as { week_index?: string }).week_index);
     if (!month || month < 1 || month > 12) {
       return res.status(400).json({ error: "Informe month (1-12)." });
     }
 
-    const { data, error } = await supabase
+    let query = supabase
       .from("rel_crd_rows")
       .select("*")
       .eq("year", year)
       .eq("month", month)
+      .eq("import_scope", scope)
       .order("nivel", { ascending: true })
       .order("codigo", { ascending: true });
+
+    if (scope === "acompanhamento" && Number.isFinite(weekIndex) && weekIndex >= 1 && weekIndex <= 5) {
+      query = query.eq("week_index", weekIndex);
+    } else if (scope === "acompanhamento") {
+      const { data: weekRows } = await supabase
+        .from("rel_crd_rows")
+        .select("week_index")
+        .eq("year", year)
+        .eq("month", month)
+        .eq("import_scope", "acompanhamento")
+        .order("week_index", { ascending: false })
+        .limit(1);
+      const latestWeek = Number((weekRows?.[0] as any)?.week_index);
+      if (Number.isFinite(latestWeek) && latestWeek >= 1) {
+        query = query.eq("week_index", latestWeek);
+      }
+    }
+
+    const { data, error } = await query;
 
     if (error) {
       console.error(error);
@@ -4146,7 +8695,20 @@ export function createApp() {
       });
     }
 
-    const rows = data ?? [];
+    const rawRows = data ?? [];
+    const corrections = await fetchCorrectionsForCompetencia(supabase, "rel_crd_rows", year, month);
+    const rows = rawRows.map((r: any) => {
+      const id = Number(r.id);
+      const saldoMeta = applyFieldCorrection(
+        Number(r.saldo_lanc) || 0,
+        getCorrectionFromMap(corrections, "rel_crd_rows", id, "saldo_lanc")
+      );
+      return {
+        ...r,
+        saldo_lanc: saldoMeta.value,
+        saldo_lanc_meta: saldoMeta,
+      };
+    });
     const nivel1 = rows.filter((r: any) => Number(r.nivel) === 1);
     const summaryBase = nivel1.length ? nivel1 : rows;
 
@@ -4167,7 +8729,7 @@ export function createApp() {
       for (const c of crdMeta ?? []) {
         previstoByCrdId.set(Number((c as any).id), sanitizeMonthBudget((c as any).previsto_mes));
       }
-      const { rows: monthlyRows } = await fetchMonthlyValuesByYear(year);
+      const { rows: monthlyRows } = await fetchMonthlyValuesByYear(year, empresaKeyOf(req));
       for (const mv of monthlyRows ?? []) {
         if (Number(mv.month) !== month) continue;
         const crdId = Number(mv.crd_id);
@@ -4190,8 +8752,66 @@ export function createApp() {
         previsto,
         estourada,
         valor_estouro,
+        fonte: "importacao",
       };
     });
+
+    const { data: cadastroCrds } = await filterByEmpresa(
+      supabase.from("crds").select("id, code, name, previsto_mes, sectors(name)").eq("active", true),
+      req,
+      "crds"
+    ).order("code");
+    const existingCodes = new Set(
+      enrichedRows.map((r: any) => String(r.codigo || "").trim().toLowerCase()).filter(Boolean)
+    );
+    const existingCrdIds = new Set(
+      enrichedRows
+        .map((r: any) => Number(r.crd_id))
+        .filter((id: number) => Number.isFinite(id) && id > 0)
+    );
+    const cadastroMissing = (cadastroCrds ?? []).filter((c: any) => {
+      const id = Number(c.id);
+      const code = String(c.code || "").trim();
+      if (!code || !Number.isFinite(id)) return false;
+      if (existingCrdIds.has(id) || existingCodes.has(code.toLowerCase())) return false;
+      const paren = /\((\d+)\)\s*$/.exec(String(c.name || "").trim());
+      if (paren && existingCodes.has(paren[1])) return false;
+      return true;
+    });
+    const missingIds = cadastroMissing.map((c: any) => Number(c.id)).filter((id: number) => Number.isFinite(id));
+    if (missingIds.length) {
+      const { rows: monthlyRows } = await fetchMonthlyValuesByYear(year, empresaKeyOf(req));
+      for (const mv of monthlyRows ?? []) {
+        if (Number(mv.month) !== month) continue;
+        const crdId = Number(mv.crd_id);
+        if (!missingIds.includes(crdId)) continue;
+        previstoByCrdId.set(crdId, sanitizeMonthBudget(mv.value));
+      }
+    }
+    for (const c of cadastroMissing) {
+      const crdId = Number(c.id);
+      const previsto = previstoByCrdId.get(crdId) ?? sanitizeMonthBudget((c as any).previsto_mes);
+      enrichedRows.push({
+        id: null,
+        fonte: "cadastro",
+        nivel: 1,
+        codigo: String((c as any).code || "").trim(),
+        nome: (c as any).sectors?.name
+          ? `${(c as any).name} · ${(c as any).sectors.name}`
+          : String((c as any).name || ""),
+        lancamentos: 0,
+        cancelamentos: 0,
+        saldo_lanc: 0,
+        baixas: 0,
+        estorno: 0,
+        baixas_liquido: 0,
+        lanc_liquido: 0,
+        crd_id: crdId,
+        previsto,
+        estourada: false,
+        valor_estouro: 0,
+      });
+    }
 
     const linhasEstouradas = enrichedRows.filter((r: any) => r.estourada);
     const valorEstourado = linhasEstouradas.reduce(
@@ -4202,6 +8822,7 @@ export function createApp() {
     res.json({
       year,
       month,
+      import_scope: scope,
       rows: enrichedRows,
       summary: {
         contas: enrichedRows.length,
@@ -4358,6 +8979,88 @@ export function createApp() {
     }
   });
 
+  app.post("/api/import/provisao-ferias/commit", requireRole("admin", "finance", "controle"), async (req, res) => {
+    const body = req.body as { year?: number; month?: number; rows?: any[] };
+    const year = Number(body?.year);
+    const month = Number(body?.month);
+    if (!year || !month || month < 1 || month > 12) {
+      return res.status(400).json({ error: "Informe year e month válidos." });
+    }
+    const rows = Array.isArray(body?.rows) ? body.rows : [];
+    if (!rows.length) return res.status(400).json({ error: "Nenhuma linha para gravar." });
+
+    await supabase.from("folha_provisao_ferias").delete().eq("year", year).eq("month", month);
+    const payload = rows.map((r: any) => ({
+      year,
+      month,
+      codigo_funcionario: String(r.codigo ?? r.codigo_funcionario ?? "").trim(),
+      nome: String(r.nome ?? "").trim(),
+      faltas: Number(r.faltas) || 0,
+      fer_ven: Number(r.fer_ven) || 0,
+      fer_pro: Number(r.fer_pro) || 0,
+      salario: Number(r.salario) || 0,
+      valor_mes: Number(r.valor_mes) || 0,
+      inss: Number(r.inss) || 0,
+      fgts: Number(r.fgts) || 0,
+      pis: Number(r.pis) || 0,
+      media_vantagens: Number(r.media_vantagens) || 0,
+      terco_ferias: Number(r.terco_ferias) || 0,
+      valor_devido: Number(r.valor_devido) || 0,
+      updated_at: new Date().toISOString(),
+    })).filter((r) => r.codigo_funcionario);
+
+    const { error } = await supabase.from("folha_provisao_ferias").insert(payload);
+    if (error) {
+      console.error("folha_provisao_ferias insert:", error);
+      return res.status(500).json({
+        error: "Não foi possível gravar a provisão de férias. Execute sql/46_absenteismo.sql e sql/52_folha_fgts_guias.sql.",
+      });
+    }
+
+    const fgtsFeriasTotal = payload.reduce((s, r) => s + (Number((r as any).fgts) || 0), 0);
+    const { data: guiaExistente } = await supabase
+      .from("folha_fgts_guia_mensal")
+      .select("*")
+      .eq("year", year)
+      .eq("month", month)
+      .maybeSingle();
+    await supabase.from("folha_fgts_guia_mensal").upsert(
+      {
+        year,
+        month,
+        fgts_normal: Number((guiaExistente as any)?.fgts_normal) || 0,
+        fgts_ferias: fgtsFeriasTotal,
+        fgts_13: Number((guiaExistente as any)?.fgts_13) || 0,
+        fgts_outros: Number((guiaExistente as any)?.fgts_outros) || 0,
+        fonte_normal: (guiaExistente as any)?.fonte_normal ?? null,
+        fonte_ferias: "Guia Provisão de Férias (importação)",
+        fonte_13: (guiaExistente as any)?.fonte_13 ?? null,
+        fonte_outros: (guiaExistente as any)?.fonte_outros ?? null,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "year,month" }
+    );
+
+    const { data: importacao } = await supabase
+      .from("folha_importacoes")
+      .select("empresa_nome")
+      .eq("competencia_ano", year)
+      .eq("competencia_mes", month)
+      .maybeSingle();
+    try {
+      await syncAbsenteismoCompetencia(supabase, year, month, (importacao as any)?.empresa_nome ?? null);
+    } catch (e) {
+      console.error("sync absenteismo após provisão férias:", e);
+    }
+    try {
+      await syncTurnoverCompetencia(supabase, year, month, (importacao as any)?.empresa_nome ?? null);
+    } catch (e) {
+      console.error("sync turnover após provisão férias:", e);
+    }
+
+    res.json({ ok: true, rows: payload.length });
+  });
+
   // ====================================================
   // IMPORTAÇÃO: PROVISÃO DE 13º SALÁRIO (PDF do Desbravador)
   // Extrai todas as linhas (uma por funcionário) e os totais do relatório.
@@ -4492,6 +9195,71 @@ export function createApp() {
     } finally {
       if (req.file?.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
     }
+  });
+
+  app.post("/api/import/provisao-13/commit", requireRole("admin", "finance", "controle"), async (req, res) => {
+    const body = req.body as { year?: number; month?: number; rows?: any[] };
+    const year = Number(body?.year);
+    const month = Number(body?.month);
+    if (!year || !month || month < 1 || month > 12) {
+      return res.status(400).json({ error: "Informe year e month válidos." });
+    }
+    const rows = Array.isArray(body?.rows) ? body.rows : [];
+    if (!rows.length) return res.status(400).json({ error: "Nenhuma linha para gravar." });
+
+    await supabase.from("folha_provisao_13").delete().eq("year", year).eq("month", month);
+    const payload = rows
+      .map((r: any) => ({
+        year,
+        month,
+        codigo_funcionario: String(r.codigo ?? r.codigo_funcionario ?? "").trim(),
+        nome: String(r.nome ?? "").trim(),
+        salario_13: Number(r.salario_13) || 0,
+        media_vantagens: Number(r.media_vantagens) || 0,
+        adiantamento_13: Number(r.adiantamento_13) || 0,
+        valor_devido: Number(r.valor_devido) || 0,
+        valor_mes: Number(r.valor_mes) || 0,
+        inss: Number(r.inss) || 0,
+        fgts: Number(r.fgts) || 0,
+        pis: Number(r.pis) || 0,
+        avos: r.avos ? String(r.avos) : null,
+        updated_at: new Date().toISOString(),
+      }))
+      .filter((r) => r.codigo_funcionario);
+
+    const { error } = await supabase.from("folha_provisao_13").insert(payload);
+    if (error) {
+      console.error("folha_provisao_13 insert:", error);
+      return res.status(500).json({
+        error: "Não foi possível gravar a provisão de 13º. Execute sql/52_folha_fgts_guias.sql.",
+      });
+    }
+
+    const fgts13Total = payload.reduce((s, r) => s + (Number(r.fgts) || 0), 0);
+    const { data: guiaExistente13 } = await supabase
+      .from("folha_fgts_guia_mensal")
+      .select("*")
+      .eq("year", year)
+      .eq("month", month)
+      .maybeSingle();
+    await supabase.from("folha_fgts_guia_mensal").upsert(
+      {
+        year,
+        month,
+        fgts_normal: Number((guiaExistente13 as any)?.fgts_normal) || 0,
+        fgts_ferias: Number((guiaExistente13 as any)?.fgts_ferias) || 0,
+        fgts_13: fgts13Total,
+        fgts_outros: Number((guiaExistente13 as any)?.fgts_outros) || 0,
+        fonte_normal: (guiaExistente13 as any)?.fonte_normal ?? null,
+        fonte_ferias: (guiaExistente13 as any)?.fonte_ferias ?? null,
+        fonte_13: "Guia Provisão 13º (importação)",
+        fonte_outros: (guiaExistente13 as any)?.fonte_outros ?? null,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "year,month" }
+    );
+
+    res.json({ ok: true, rows: payload.length, fgts_13: fgts13Total });
   });
 
   // ====================================================
@@ -4981,41 +9749,69 @@ export function createApp() {
   // Grava as Requisições Sintética do mês em requisicoes_rows (substitui a competência).
   // Alimenta Apuração de Resultados › Requisição Sintética (Resumo + meses).
   app.post("/api/import/requisicoes-sintetica/commit", async (req, res) => {
-    const { setores, month, year, file_name } = req.body as {
+    const { setores, month, year, file_name, import_scope, week_index } = req.body as {
       setores: {
         codigo: number;
         nome: string;
-        grupos: { codigo: number; nome: string; valor: number; destino?: string | null }[];
+        grupos: { codigo: number; nome: string; valor: number; destino?: string | null; cmv_subtipo?: string | null }[];
       }[];
       month: number;
       year: number;
       file_name?: string;
+      import_scope?: ImportScope;
+      week_index?: number;
     };
     if (!Array.isArray(setores) || !setores.length)
       return res.status(400).json({ error: "Nenhum setor enviado." });
     if (!month || !year || month < 1 || month > 12 || year < 2000)
       return res.status(400).json({ error: "Mês/ano inválido." });
 
-    const DESTINOS_VALIDOS = new Set(["cmv", "uso_consumo", "investimento"]);
+    const periodParsed = parseImportPeriodInput(year, month, import_scope, week_index);
+    if ("error" in periodParsed) return res.status(400).json({ error: periodParsed.error });
+    const { scope, weekIndex, periodKey } = periodParsed;
+
+    const historyId = await logImportHistory({
+      source_type: "requisicoes_sintetica",
+      file_name: file_name || `Requisições Sintética ${month}/${year}`,
+      status: "success",
+      year: Number(year),
+      month: Number(month),
+      import_scope: scope,
+      period_key: periodKey,
+      week_index: weekIndex,
+      records_count: 0,
+      summary: { import_scope: scope, period_key: periodKey },
+      user: (req as any).user,
+    });
+
     const rows: Record<string, any>[] = [];
     for (const setor of setores) {
       const setorCodigo = Number(setor.codigo);
       const setorNome = String(setor.nome ?? "").trim();
       if (!Number.isFinite(setorCodigo) || !setorNome) continue;
+      const resolvedSector = await resolveSectorByCode(supabase, setorCodigo, setorNome, sectorCache);
       for (const grupo of setor.grupos ?? []) {
         const grupoCodigo = Number(grupo.codigo);
         const grupoNome = String(grupo.nome ?? "").trim();
         if (!Number.isFinite(grupoCodigo) || !grupoNome) continue;
         const destino = String(grupo.destino ?? "").trim();
+        const destinoNorm = isReqDestinoValid(destino) ? destino : null;
+        const cmvSubtipo = resolveReqCmvSubtipo(grupoCodigo, destinoNorm ?? '', grupo.cmv_subtipo);
         rows.push({
           year: Number(year),
           month: Number(month),
+          import_scope: scope,
+          period_key: periodKey,
+          week_index: weekIndex,
+          import_history_id: historyId,
           setor_codigo: setorCodigo,
           setor_nome: setorNome,
+          sector_id: resolvedSector?.id ?? null,
           grupo_codigo: grupoCodigo,
           grupo_nome: grupoNome,
           valor: Number(grupo.valor) || 0,
-          destino: DESTINOS_VALIDOS.has(destino) ? destino : null,
+          destino: destinoNorm,
+          cmv_subtipo: cmvSubtipo,
         });
       }
     }
@@ -5026,7 +9822,9 @@ export function createApp() {
       .from("requisicoes_rows")
       .delete()
       .eq("year", Number(year))
-      .eq("month", Number(month));
+      .eq("month", Number(month))
+      .eq("import_scope", scope)
+      .eq("period_key", periodKey);
     if (delErr) {
       console.error("requisicoes_rows delete (execute sql/14_requisicoes_rows.sql):", delErr);
       return res.status(500).json({
@@ -5042,27 +9840,57 @@ export function createApp() {
     }
 
     const totalGeral = rows.reduce((s, r) => s + Number(r.valor || 0), 0);
-    try {
-      await logImportHistory({
-        source_type: "requisicoes_sintetica",
-        file_name: file_name || `Requisições Sintética ${month}/${year}`,
-        status: "success",
-        year: Number(year),
-        month: Number(month),
-        records_count: rows.length,
-        total_amount: totalGeral,
-        summary: {
-          setores: setores.length,
-          grupos: rows.length,
-          nao_classificados: rows.filter((r) => !r.destino).length,
-        },
-        user: (req as any).user,
-      });
-    } catch (e) {
-      console.error("Falha ao registrar histórico Requisições Sintética:", e);
+    if (historyId) {
+      await supabase
+        .from("import_history")
+        .update({
+          records_count: rows.length,
+          total_amount: totalGeral,
+          summary: {
+            import_scope: scope,
+            period_key: periodKey,
+            week_index: weekIndex,
+            setores: setores.length,
+            grupos: rows.length,
+            nao_classificados: rows.filter((r) => !r.destino).length,
+          },
+        })
+        .eq("id", historyId);
+    } else {
+      try {
+        await logImportHistory({
+          source_type: "requisicoes_sintetica",
+          file_name: file_name || `Requisições Sintética ${month}/${year}`,
+          status: "success",
+          year: Number(year),
+          month: Number(month),
+          import_scope: scope,
+          period_key: periodKey,
+          week_index: weekIndex,
+          records_count: rows.length,
+          total_amount: totalGeral,
+          summary: {
+            setores: setores.length,
+            grupos: rows.length,
+            nao_classificados: rows.filter((r) => !r.destino).length,
+            import_scope: scope,
+            period_key: periodKey,
+          },
+          user: (req as any).user,
+        });
+      } catch (e) {
+        console.error("Falha ao registrar histórico Requisições Sintética:", e);
+      }
     }
 
-    res.json({ success: true, imported: rows.length, total_geral: totalGeral });
+    res.json({
+      success: true,
+      imported: rows.length,
+      total_geral: totalGeral,
+      import_scope: scope,
+      period_key: periodKey,
+      week_index: weekIndex,
+    });
   });
 
   // ====================================================
@@ -5070,10 +9898,13 @@ export function createApp() {
   // ====================================================
   app.get("/api/requisicoes-sintetica/competencias", requireRole("admin", "finance", "controle", "manager"), async (req, res) => {
     const year = Number((req.query as { year?: string }).year) || new Date().getFullYear();
+    const scopeParam = String((req.query as { scope?: string }).scope || "fechamento");
+    const scope = scopeParam === "acompanhamento" ? "acompanhamento" : "fechamento";
     const { data, error } = await supabase
       .from("requisicoes_rows")
-      .select("month, valor, setor_codigo")
-      .eq("year", year);
+      .select("month, valor, setor_codigo, import_scope, period_key, week_index")
+      .eq("year", year)
+      .eq("import_scope", scope);
     if (error) {
       console.error(error);
       return res.status(500).json({
@@ -5093,6 +9924,7 @@ export function createApp() {
 
     res.json({
       year,
+      import_scope: scope,
       months: Array.from(byMonth.entries()).map(([month, agg]) => ({
         month,
         importado: agg.grupos > 0,
@@ -5106,17 +9938,40 @@ export function createApp() {
   app.get("/api/requisicoes-sintetica", requireRole("admin", "finance", "controle", "manager"), async (req, res) => {
     const year = Number((req.query as { year?: string }).year) || new Date().getFullYear();
     const month = Number((req.query as { month?: string }).month);
+    const scopeParam = String((req.query as { scope?: string }).scope || "fechamento");
+    const scope = scopeParam === "acompanhamento" ? "acompanhamento" : "fechamento";
+    const weekIndex = Number((req.query as { week_index?: string }).week_index);
     if (!month || month < 1 || month > 12) {
       return res.status(400).json({ error: "Informe month (1-12)." });
     }
 
-    const { data, error } = await supabase
+    let query = supabase
       .from("requisicoes_rows")
       .select("*")
       .eq("year", year)
       .eq("month", month)
+      .eq("import_scope", scope)
       .order("setor_codigo", { ascending: true })
       .order("grupo_codigo", { ascending: true });
+
+    if (scope === "acompanhamento" && Number.isFinite(weekIndex) && weekIndex >= 1 && weekIndex <= 5) {
+      query = query.eq("week_index", weekIndex);
+    } else if (scope === "acompanhamento") {
+      const { data: weekRows } = await supabase
+        .from("requisicoes_rows")
+        .select("week_index")
+        .eq("year", year)
+        .eq("month", month)
+        .eq("import_scope", "acompanhamento")
+        .order("week_index", { ascending: false })
+        .limit(1);
+      const latestWeek = Number((weekRows?.[0] as any)?.week_index);
+      if (Number.isFinite(latestWeek) && latestWeek >= 1) {
+        query = query.eq("week_index", latestWeek);
+      }
+    }
+
+    const { data, error } = await query;
 
     if (error) {
       console.error(error);
@@ -5126,8 +9981,10 @@ export function createApp() {
     }
 
     const rows = data ?? [];
+    const corrections = await fetchCorrectionsForCompetencia(supabase, "requisicoes_rows", year, month);
     const setoresMap = new Map<number, { codigo: number; nome: string; total: number; grupos: any[] }>();
-    const porDestino: Record<string, number> = { cmv: 0, uso_consumo: 0, investimento: 0, "": 0 };
+    const porDestino = emptyReqDestinoTotals();
+    const porCmvSubtipo = emptyReqCmvSubtipoTotals();
     for (const r of rows as any[]) {
       const codigo = Number(r.setor_codigo);
       let setor = setoresMap.get(codigo);
@@ -5135,30 +9992,818 @@ export function createApp() {
         setor = { codigo, nome: String(r.setor_nome ?? ""), total: 0, grupos: [] };
         setoresMap.set(codigo, setor);
       }
-      const valor = Number(r.valor) || 0;
+      const rowId = Number(r.id);
+      const valorMeta = applyFieldCorrection(
+        Number(r.valor) || 0,
+        getCorrectionFromMap(corrections, "requisicoes_rows", rowId, "valor")
+      );
+      const valor = valorMeta.value;
       setor.total += valor;
       setor.grupos.push({
+        id: rowId,
         codigo: Number(r.grupo_codigo),
         nome: String(r.grupo_nome ?? ""),
         valor,
+        valor_meta: valorMeta,
         destino: r.destino ?? "",
+        cmv_subtipo: r.cmv_subtipo ?? "",
+        setor_codigo: codigo,
       });
-      const destino = String(r.destino ?? "");
-      porDestino[destino in porDestino ? destino : ""] += valor;
+      addReqDestinoTotal(porDestino, String(r.destino ?? ""), valor);
+      addReqCmvSubtipoTotal(porCmvSubtipo, String(r.destino ?? ""), String(r.cmv_subtipo ?? ""), valor);
     }
 
     res.json({
       year,
       month,
+      import_scope: scope,
       setores: Array.from(setoresMap.values()),
       summary: {
         setores: setoresMap.size,
         grupos: rows.length,
         total_geral: rows.reduce((s: number, r: any) => s + (Number(r.valor) || 0), 0),
         por_destino: porDestino,
+        por_cmv_subtipo: porCmvSubtipo,
         nao_classificados: (rows as any[]).filter((r) => !r.destino).length,
+        cmv_sem_subtipo: (rows as any[]).filter(
+          (r) => isReqDestinoCmv(r.destino) && !isReqCmvSubtipoValid(r.cmv_subtipo)
+        ).length,
       },
     });
+  });
+
+  // Atualiza a classificação (destino e subtipo CMV) de um grupo já importado.
+  app.patch("/api/requisicoes-sintetica/destino", requireRole("admin", "finance", "controle"), async (req, res) => {
+    const year = Number((req.body as any)?.year);
+    const month = Number((req.body as any)?.month);
+    const setorCodigo = Number((req.body as any)?.setor_codigo);
+    const grupoCodigo = Number((req.body as any)?.grupo_codigo);
+    const destinoRaw = (req.body as any)?.destino;
+    const cmvSubtipoRaw = (req.body as any)?.cmv_subtipo;
+
+    if (!year || !month || month < 1 || month > 12) {
+      return res.status(400).json({ error: "Informe ano e mês válidos." });
+    }
+    if (!Number.isFinite(setorCodigo) || !Number.isFinite(grupoCodigo)) {
+      return res.status(400).json({ error: "Informe setor_codigo e grupo_codigo." });
+    }
+
+    const patch: Record<string, string | null> = {};
+    if (destinoRaw !== undefined) {
+      const destinoStr = String(destinoRaw ?? "").trim();
+      patch.destino = isReqDestinoValid(destinoStr) ? destinoStr : null;
+      if (!isReqDestinoCmv(patch.destino)) {
+        patch.cmv_subtipo = null;
+      }
+    }
+    if (cmvSubtipoRaw !== undefined) {
+      const subStr = String(cmvSubtipoRaw ?? "").trim();
+      patch.cmv_subtipo = isReqCmvSubtipoValid(subStr) ? subStr : null;
+    }
+
+    if (!Object.keys(patch).length) {
+      return res.status(400).json({ error: "Informe destino e/ou cmv_subtipo." });
+    }
+
+    if (patch.cmv_subtipo && !patch.destino) {
+      const { data: current } = await supabase
+        .from("requisicoes_rows")
+        .select("destino")
+        .eq("year", year)
+        .eq("month", month)
+        .eq("setor_codigo", setorCodigo)
+        .eq("grupo_codigo", grupoCodigo)
+        .maybeSingle();
+      if (!isReqDestinoCmv((current as any)?.destino)) {
+        return res.status(400).json({ error: "Subtipo CMV só se aplica a destino CMV ou Crédito CMV." });
+      }
+    }
+
+    const { data, error } = await supabase
+      .from("requisicoes_rows")
+      .update(patch)
+      .eq("year", year)
+      .eq("month", month)
+      .eq("setor_codigo", setorCodigo)
+      .eq("grupo_codigo", grupoCodigo)
+      .select("id, destino, cmv_subtipo")
+      .maybeSingle();
+
+    if (error) {
+      console.error("requisicoes_rows destino update:", error);
+      return res.status(500).json({ error: "Não foi possível atualizar a classificação." });
+    }
+    if (!data) {
+      return res.status(404).json({ error: "Grupo não encontrado nesta competência." });
+    }
+
+    res.json({ success: true, destino: data.destino ?? null, cmv_subtipo: data.cmv_subtipo ?? null });
+  });
+
+  // ====================================================
+  // APURAÇÃO DE C.M.V. (Custo de Mercadoria Vendida) — Apuração de Resultados › CMV
+  // Réplica da planilha "Apuração do CMV": persiste apenas os valores digitados
+  // (receitas e requisições do fechamento do mês). Os indicadores derivados são
+  // calculados no front (src/lib/cmv.ts).
+  // ====================================================
+  const CMV_NUMERIC_FIELDS = [
+    "venda_direta_total",
+    "venda_direta_bebidas",
+    "cafe_manha_pensao",
+    "cafe_manha_chds",
+    "almoco_jantar_pensao",
+    "almoco_jantar_chds",
+    "almoco_jantar_antec",
+    "ci_total",
+    "ci_bebidas",
+    "requisicoes_total",
+    "requisicoes_bebidas",
+    "refeitorio",
+    "outros",
+    "aquamania",
+    "limite_pct",
+  ] as const;
+
+  const cmvTableMissing = (error: any) =>
+    String(error?.message || "").toLowerCase().includes("cmv_apuracao") ||
+    error?.code === "42P01";
+
+  const cmvHistoricoTableMissing = (error: any) =>
+    String(error?.message || "").toLowerCase().includes("cmv_apuracao_historico") ||
+    error?.code === "42P01";
+
+  const mapCmvHistoricoRow = (row: any) => ({
+    id: Number(row.id),
+    year: Number(row.year),
+    month: Number(row.month),
+    apuracao_scope: String(row.apuracao_scope ?? "acompanhamento"),
+    periodo_inicio: String(row.periodo_inicio).slice(0, 10),
+    periodo_fim: String(row.periodo_fim).slice(0, 10),
+    period_key: String(row.period_key ?? ""),
+    period_label: String(row.period_label ?? ""),
+    venda_direta_total: Number(row.venda_direta_total) || 0,
+    venda_direta_bebidas: Number(row.venda_direta_bebidas) || 0,
+    cafe_manha_pensao: Number(row.cafe_manha_pensao) || 0,
+    cafe_manha_chds: Number(row.cafe_manha_chds) || 0,
+    almoco_jantar_pensao: Number(row.almoco_jantar_pensao) || 0,
+    almoco_jantar_chds: Number(row.almoco_jantar_chds) || 0,
+    almoco_jantar_antec: Number(row.almoco_jantar_antec) || 0,
+    ci_total: Number(row.ci_total) || 0,
+    ci_bebidas: Number(row.ci_bebidas) || 0,
+    requisicoes_total: Number(row.requisicoes_total) || 0,
+    requisicoes_bebidas: Number(row.requisicoes_bebidas) || 0,
+    refeitorio: Number(row.refeitorio) || 0,
+    outros: Number(row.outros) || 0,
+    aquamania: Number(row.aquamania) || 0,
+    limite_pct: Number(row.limite_pct) || 0.29,
+    receita_considerada: Number(row.receita_considerada) || 0,
+    custo_ab: Number(row.custo_ab) || 0,
+    cmv_apurado: Number(row.cmv_apurado) || 0,
+    created_at: row.created_at ?? null,
+    created_by: row.created_by ?? null,
+  });
+
+  const buildCmvRecordFromBody = (body: Record<string, any>, year: number, month: number) => {
+    const num = (v: any) => {
+      if (v == null || v === "") return 0;
+      const n = Number(String(v).replace(",", "."));
+      return Number.isFinite(n) ? n : 0;
+    };
+    const record: Record<string, any> = { year, month };
+    for (const field of CMV_NUMERIC_FIELDS) record[field] = num(body?.[field]);
+    if (!Number.isFinite(record.limite_pct) || record.limite_pct <= 0) record.limite_pct = 0.29;
+    return record;
+  };
+
+  // Histórico de apurações de uma competência.
+  app.get("/api/cmv/historico", requireRole("admin", "finance", "controle", "manager"), async (req, res) => {
+    const year = Number((req.query as { year?: string }).year) || new Date().getFullYear();
+    const month = Number((req.query as { month?: string }).month);
+    if (!month || month < 1 || month > 12) {
+      return res.status(400).json({ error: "Informe o mês (1-12)." });
+    }
+    const { data, error } = await supabase
+      .from("cmv_apuracao_historico")
+      .select("*")
+      .eq("year", year)
+      .eq("month", month)
+      .order("periodo_fim", { ascending: true })
+      .order("created_at", { ascending: true });
+    if (error) {
+      console.error(error);
+      if (cmvHistoricoTableMissing(error)) {
+        return res.status(500).json({
+          error: "Tabela de histórico CMV ausente. Execute sql/43_cmv_apuracao_historico.sql no Supabase.",
+        });
+      }
+      return res.status(500).json({ error: "Não foi possível carregar o histórico do CMV." });
+    }
+    res.json({ year, month, rows: (data ?? []).map(mapCmvHistoricoRow) });
+  });
+
+  // Todas as competências do ano (usado no Resumo e no Sintético).
+  app.get("/api/cmv/ano", requireRole("admin", "finance", "controle", "manager"), async (req, res) => {
+    const year = Number((req.query as { year?: string }).year) || new Date().getFullYear();
+    const { data, error } = await supabase
+      .from("cmv_apuracao")
+      .select("*")
+      .eq("year", year);
+    if (error) {
+      console.error(error);
+      if (cmvTableMissing(error)) {
+        return res.status(500).json({
+          error: "Tabela de CMV ausente. Execute sql/36_cmv_apuracao.sql no Supabase.",
+        });
+      }
+      return res.status(500).json({ error: "Não foi possível carregar o CMV." });
+    }
+    const byMonth = new Map<number, any>();
+    for (const row of data ?? []) byMonth.set(Number((row as any).month), row);
+    const months = Array.from({ length: 12 }, (_, idx) => {
+      const month = idx + 1;
+      const row = byMonth.get(month) || null;
+      return { month, importado: Boolean(row), row };
+    });
+    res.json({ year, months });
+  });
+
+  // Uma competência (mês) específica.
+  app.get("/api/cmv", requireRole("admin", "finance", "controle", "manager"), async (req, res) => {
+    const year = Number((req.query as { year?: string }).year) || new Date().getFullYear();
+    const month = Number((req.query as { month?: string }).month);
+    if (!month || month < 1 || month > 12) {
+      return res.status(400).json({ error: "Informe o mês (1-12)." });
+    }
+    const { data, error } = await supabase
+      .from("cmv_apuracao")
+      .select("*")
+      .eq("year", year)
+      .eq("month", month)
+      .maybeSingle();
+    const { data: historicoRows, error: histErr } = await supabase
+      .from("cmv_apuracao_historico")
+      .select("*")
+      .eq("year", year)
+      .eq("month", month)
+      .order("periodo_fim", { ascending: true })
+      .order("created_at", { ascending: true });
+    if (error) {
+      console.error(error);
+      if (cmvTableMissing(error)) {
+        return res.status(500).json({
+          error: "Tabela de CMV ausente. Execute sql/36_cmv_apuracao.sql no Supabase.",
+        });
+      }
+      return res.status(500).json({ error: "Não foi possível carregar o CMV." });
+    }
+    if (histErr && !cmvHistoricoTableMissing(histErr)) {
+      console.error(histErr);
+      return res.status(500).json({ error: "Não foi possível carregar o histórico do CMV." });
+    }
+    const historico = (historicoRows ?? []).map(mapCmvHistoricoRow);
+    const latest = historico.length ? historico[historico.length - 1] : null;
+    res.json({
+      year,
+      month,
+      importado: Boolean(data) || historico.length > 0,
+      row: data ?? null,
+      historico,
+      latest,
+    });
+  });
+
+  // Registra nova apuração (histórico — não sobrescreve anteriores).
+  app.post("/api/cmv", requireRole("admin", "finance", "controle"), async (req, res) => {
+    const body = req.body as Record<string, any>;
+    const year = Number(body?.year);
+    const month = Number(body?.month);
+    if (!Number.isFinite(year) || year < 2000)
+      return res.status(400).json({ error: "year inválido" });
+    if (!Number.isFinite(month) || month < 1 || month > 12)
+      return res.status(400).json({ error: "month deve estar entre 1 e 12" });
+
+    const period = parseCmvApuracaoPeriod(
+      year,
+      month,
+      body?.apuracao_scope,
+      body?.periodo_fim_dia
+    );
+    if ("error" in period) return res.status(400).json({ error: period.error });
+
+    const record = buildCmvRecordFromBody(body, year, month);
+    const inputs = toCmvInputs(record);
+    const derived = computeCmv(inputs);
+    const user = (req as any).user;
+    const created_by = user?.name ?? user?.email ?? null;
+
+    const historicoInsert = {
+      year,
+      month,
+      apuracao_scope: period.scope,
+      periodo_inicio: period.periodo_inicio,
+      periodo_fim: period.periodo_fim,
+      period_key: period.period_key,
+      period_label: period.period_label,
+      ...Object.fromEntries(CMV_NUMERIC_FIELDS.map((f) => [f, record[f]])),
+      receita_considerada: derived.receita_considerada,
+      custo_ab: derived.custo_ab,
+      cmv_apurado: derived.cmv_apurado,
+      created_by,
+    };
+
+    const { data: historico, error: histError } = await supabase
+      .from("cmv_apuracao_historico")
+      .insert(historicoInsert)
+      .select("*")
+      .single();
+    if (histError) {
+      console.error(histError);
+      if (cmvHistoricoTableMissing(histError)) {
+        return res.status(500).json({
+          error: "Tabela de histórico CMV ausente. Execute sql/43_cmv_apuracao_historico.sql no Supabase.",
+        });
+      }
+      if (histError.code === "23505") {
+        return res.status(409).json({
+          error: `Já existe apuração para o período "${period.period_label}". Escolha outro dia final ou altere o período.`,
+        });
+      }
+      return res.status(500).json({ error: "Não foi possível registrar a apuração." });
+    }
+
+    let fechamentoRow = null;
+    if (period.scope === "fechamento") {
+      const upsertRecord = {
+        ...record,
+        updated_at: new Date().toISOString(),
+        updated_by: created_by,
+      };
+      const { data, error } = await supabase
+        .from("cmv_apuracao")
+        .upsert(upsertRecord, { onConflict: "year,month" })
+        .select("*")
+        .single();
+      if (error) {
+        console.error(error);
+        if (cmvTableMissing(error)) {
+          return res.status(500).json({
+            error: "Tabela de CMV ausente. Execute sql/36_cmv_apuracao.sql no Supabase.",
+          });
+        }
+        return res.status(500).json({
+          error: "Apuração registrada no histórico, mas falhou ao atualizar o fechamento mensal.",
+        });
+      }
+      fechamentoRow = data;
+    }
+
+    res.json({
+      ok: true,
+      historico: mapCmvHistoricoRow(historico),
+      row: fechamentoRow,
+      period_label: period.period_label,
+    });
+  });
+
+  const cmvTarifasTableMissing = (error: any) =>
+    String(error?.message || "").toLowerCase().includes("cmv_tarifas_config") ||
+    error?.code === "42P01";
+
+  const CMV_TARIFA_MOTIVOS = new Set([
+    "padrao",
+    "carnaval",
+    "reveillon",
+    "pacote",
+    "promocao",
+    "outro",
+  ]);
+
+  const CMV_TARIFA_MOTIVO_PRIORIDADE: Record<string, number> = {
+    padrao: 0,
+    promocao: 5,
+    pacote: 8,
+    carnaval: 10,
+    reveillon: 10,
+    outro: 5,
+  };
+
+  const parseIsoDateOnly = (value: unknown): string | null => {
+    const s = String(value ?? "").trim().slice(0, 10);
+    return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null;
+  };
+
+  const minusOneDayIso = (iso: string): string => {
+    const [y, m, d] = iso.split("-").map(Number);
+    const dt = new Date(Date.UTC(y, m - 1, d));
+    dt.setUTCDate(dt.getUTCDate() - 1);
+    return dt.toISOString().slice(0, 10);
+  };
+
+  const mapCmvTarifaRow = (row: any) => ({
+    id: Number(row.id),
+    nome: String(row.nome ?? ""),
+    motivo: String(row.motivo ?? "padrao"),
+    prioridade: Number(row.prioridade) || 0,
+    vigencia_inicio: String(row.vigencia_inicio).slice(0, 10),
+    vigencia_fim: row.vigencia_fim ? String(row.vigencia_fim).slice(0, 10) : null,
+    cafe_manha_adulto: Number(row.cafe_manha_adulto) || 0,
+    cafe_manha_crianca: Number(row.cafe_manha_crianca) || 0,
+    pensao_adulto: Number(row.pensao_adulto) || 0,
+    pensao_crianca: Number(row.pensao_crianca) || 0,
+    observacoes: row.observacoes ?? null,
+    created_at: row.created_at ?? null,
+    created_by_name: row.created_by_name ?? null,
+    encerrado_em: row.encerrado_em ?? null,
+  });
+
+  // Lista histórico de tarifas internas do CMV.
+  app.get("/api/cmv/tarifas", requireRole("admin", "finance", "controle", "manager"), async (_req, res) => {
+    const { data, error } = await supabase
+      .from("cmv_tarifas_config")
+      .select("*")
+      .order("vigencia_inicio", { ascending: false })
+      .order("prioridade", { ascending: false })
+      .order("id", { ascending: false });
+    if (error) {
+      console.error(error);
+      if (cmvTarifasTableMissing(error)) {
+        return res.status(500).json({
+          error: "Tabela de tarifas CMV ausente. Execute sql/41_cmv_tarifas_config.sql no Supabase.",
+        });
+      }
+      return res.status(500).json({ error: "Não foi possível carregar as tarifas do CMV." });
+    }
+    res.json({ rows: (data ?? []).map(mapCmvTarifaRow) });
+  });
+
+  // Tarifas vigentes em uma data (prioridade + período mais específico).
+  app.get("/api/cmv/tarifas/vigente", requireRole("admin", "finance", "controle", "manager"), async (req, res) => {
+    const date =
+      parseIsoDateOnly((req.query as { date?: string }).date) ||
+      new Date().toISOString().slice(0, 10);
+    const { data, error } = await supabase.from("cmv_tarifas_config").select("*");
+    if (error) {
+      console.error(error);
+      if (cmvTarifasTableMissing(error)) {
+        return res.status(500).json({
+          error: "Tabela de tarifas CMV ausente. Execute sql/41_cmv_tarifas_config.sql no Supabase.",
+        });
+      }
+      return res.status(500).json({ error: "Não foi possível resolver as tarifas vigentes." });
+    }
+    const rows = (data ?? []).map(mapCmvTarifaRow);
+    const matching = rows.filter((row) => {
+      if (row.vigencia_inicio > date) return false;
+      if (row.vigencia_fim && row.vigencia_fim < date) return false;
+      return true;
+    });
+    matching.sort((a, b) => {
+      if (b.prioridade !== a.prioridade) return b.prioridade - a.prioridade;
+      const range = (r: typeof a) => {
+        const end = r.vigencia_fim || r.vigencia_inicio;
+        const [y1, m1, d1] = r.vigencia_inicio.split("-").map(Number);
+        const [y2, m2, d2] = end.split("-").map(Number);
+        const t1 = Date.UTC(y1, m1 - 1, d1);
+        const t2 = Date.UTC(y2, m2 - 1, d2);
+        return Math.max(1, Math.round((t2 - t1) / 86400000) + 1);
+      };
+      const ra = range(a);
+      const rb = range(b);
+      if (ra !== rb) return ra - rb;
+      return b.vigencia_inicio.localeCompare(a.vigencia_inicio);
+    });
+    const config = matching[0] ?? null;
+    const rates = config
+      ? {
+          cafe_manha_adulto: config.cafe_manha_adulto,
+          cafe_manha_crianca: config.cafe_manha_crianca,
+          pensao_adulto: config.pensao_adulto,
+          pensao_crianca: config.pensao_crianca,
+        }
+      : {
+          cafe_manha_adulto: 70,
+          cafe_manha_crianca: 35,
+          pensao_adulto: 130,
+          pensao_crianca: 65,
+        };
+    res.json({ date, config, rates, fallback: !config });
+  });
+
+  // Nova vigência de tarifas (histórico preservado — insert only).
+  app.post("/api/cmv/tarifas", requireRole("admin", "finance", "controle"), async (req, res) => {
+    const body = req.body as Record<string, any>;
+    const nome = String(body?.nome ?? "").trim();
+    const motivo = String(body?.motivo ?? "padrao").trim().toLowerCase();
+    const vigencia_inicio = parseIsoDateOnly(body?.vigencia_inicio);
+    const vigencia_fim = body?.vigencia_fim ? parseIsoDateOnly(body.vigencia_fim) : null;
+    const fecharPadraoAnterior = body?.fechar_padrao_anterior !== false;
+
+    if (!nome) return res.status(400).json({ error: "Informe o nome da configuração." });
+    if (!CMV_TARIFA_MOTIVOS.has(motivo)) {
+      return res.status(400).json({ error: "Motivo inválido." });
+    }
+    if (!vigencia_inicio) {
+      return res.status(400).json({ error: "Informe a vigência inicial (AAAA-MM-DD)." });
+    }
+    if (vigencia_fim && vigencia_fim < vigencia_inicio) {
+      return res.status(400).json({ error: "A vigência final deve ser igual ou posterior à inicial." });
+    }
+
+    const num = (v: any) => {
+      if (v == null || v === "") return 0;
+      const n = Number(String(v).replace(",", "."));
+      return Number.isFinite(n) && n >= 0 ? n : NaN;
+    };
+    const cafe_manha_adulto = num(body?.cafe_manha_adulto);
+    const cafe_manha_crianca = num(body?.cafe_manha_crianca);
+    const pensao_adulto = num(body?.pensao_adulto);
+    const pensao_crianca = num(body?.pensao_crianca);
+    if ([cafe_manha_adulto, cafe_manha_crianca, pensao_adulto, pensao_crianca].some((n) => Number.isNaN(n))) {
+      return res.status(400).json({ error: "Informe valores numéricos válidos (≥ 0) para todas as tarifas." });
+    }
+
+    const prioridade =
+      Number.isFinite(Number(body?.prioridade)) && Number(body?.prioridade) >= 0
+        ? Number(body.prioridade)
+        : CMV_TARIFA_MOTIVO_PRIORIDADE[motivo] ?? 0;
+
+    const user = (req as any).user;
+    const created_by_name = user?.name ?? user?.email ?? null;
+    const created_by_id = user?.id != null ? Number(user.id) : null;
+
+    if (motivo === "padrao" && fecharPadraoAnterior) {
+      const fimAnterior = minusOneDayIso(vigencia_inicio);
+      const { error: closeErr } = await supabase
+        .from("cmv_tarifas_config")
+        .update({
+          vigencia_fim: fimAnterior,
+          encerrado_em: new Date().toISOString(),
+        })
+        .eq("motivo", "padrao")
+        .is("vigencia_fim", null)
+        .lt("vigencia_inicio", vigencia_inicio);
+      if (closeErr) {
+        console.error(closeErr);
+        if (cmvTarifasTableMissing(closeErr)) {
+          return res.status(500).json({
+            error: "Tabela de tarifas CMV ausente. Execute sql/41_cmv_tarifas_config.sql no Supabase.",
+          });
+        }
+        return res.status(500).json({ error: "Não foi possível encerrar a tarifa padrão anterior." });
+      }
+    }
+
+    const { data, error } = await supabase
+      .from("cmv_tarifas_config")
+      .insert({
+        nome,
+        motivo,
+        prioridade,
+        vigencia_inicio,
+        vigencia_fim,
+        cafe_manha_adulto,
+        cafe_manha_crianca,
+        pensao_adulto,
+        pensao_crianca,
+        observacoes: body?.observacoes ? String(body.observacoes).trim() : null,
+        created_by_id: Number.isFinite(created_by_id) ? created_by_id : null,
+        created_by_name,
+      })
+      .select("*")
+      .single();
+
+    if (error) {
+      console.error(error);
+      if (cmvTarifasTableMissing(error)) {
+        return res.status(500).json({
+          error: "Tabela de tarifas CMV ausente. Execute sql/41_cmv_tarifas_config.sql no Supabase.",
+        });
+      }
+      return res.status(500).json({ error: "Não foi possível salvar a nova vigência de tarifas." });
+    }
+    res.json({ ok: true, row: mapCmvTarifaRow(data) });
+  });
+
+  // Encerra antecipadamente uma vigência (mantém histórico).
+  app.patch("/api/cmv/tarifas/:id/encerrar", requireRole("admin", "finance", "controle"), async (req, res) => {
+    const id = Number((req.params as { id?: string }).id);
+    if (!Number.isFinite(id) || id <= 0) {
+      return res.status(400).json({ error: "ID inválido." });
+    }
+    const vigencia_fim =
+      parseIsoDateOnly((req.body as { vigencia_fim?: string })?.vigencia_fim) ||
+      new Date().toISOString().slice(0, 10);
+
+    const { data: existing, error: loadErr } = await supabase
+      .from("cmv_tarifas_config")
+      .select("*")
+      .eq("id", id)
+      .maybeSingle();
+    if (loadErr) {
+      console.error(loadErr);
+      return res.status(500).json({ error: "Não foi possível carregar a vigência." });
+    }
+    if (!existing) return res.status(404).json({ error: "Configuração não encontrada." });
+    const ini = String(existing.vigencia_inicio).slice(0, 10);
+    if (vigencia_fim < ini) {
+      return res.status(400).json({ error: "A data de encerramento deve ser igual ou posterior ao início da vigência." });
+    }
+
+    const { data, error } = await supabase
+      .from("cmv_tarifas_config")
+      .update({
+        vigencia_fim,
+        encerrado_em: new Date().toISOString(),
+      })
+      .eq("id", id)
+      .select("*")
+      .single();
+    if (error) {
+      console.error(error);
+      return res.status(500).json({ error: "Não foi possível encerrar a vigência." });
+    }
+    res.json({ ok: true, row: mapCmvTarifaRow(data) });
+  });
+
+  const cmvMetaTableMissing = (error: any) =>
+    String(error?.message || "").toLowerCase().includes("cmv_meta_config") ||
+    error?.code === "42P01";
+
+  const mapCmvMetaRow = (row: any) => ({
+    id: Number(row.id),
+    nome: String(row.nome ?? ""),
+    meta_pct: Number(row.meta_pct) || 0.29,
+    vigencia_inicio: String(row.vigencia_inicio).slice(0, 10),
+    vigencia_fim: row.vigencia_fim ? String(row.vigencia_fim).slice(0, 10) : null,
+    observacoes: row.observacoes ?? null,
+    created_at: row.created_at ?? null,
+    created_by_name: row.created_by_name ?? null,
+    encerrado_em: row.encerrado_em ?? null,
+  });
+
+  app.get("/api/cmv/meta", requireRole("admin", "finance", "controle", "manager"), async (_req, res) => {
+    const { data, error } = await supabase
+      .from("cmv_meta_config")
+      .select("*")
+      .order("vigencia_inicio", { ascending: false })
+      .order("id", { ascending: false });
+    if (error) {
+      console.error(error);
+      if (cmvMetaTableMissing(error)) {
+        return res.status(500).json({
+          error: "Tabela de meta CMV ausente. Execute sql/42_cmv_meta_config.sql no Supabase.",
+        });
+      }
+      return res.status(500).json({ error: "Não foi possível carregar a meta de CMV." });
+    }
+    res.json({ rows: (data ?? []).map(mapCmvMetaRow) });
+  });
+
+  app.get("/api/cmv/meta/vigente", requireRole("admin", "finance", "controle", "manager"), async (req, res) => {
+    const date =
+      parseIsoDateOnly((req.query as { date?: string }).date) ||
+      new Date().toISOString().slice(0, 10);
+    const { data, error } = await supabase.from("cmv_meta_config").select("*");
+    if (error) {
+      console.error(error);
+      if (cmvMetaTableMissing(error)) {
+        return res.status(500).json({
+          error: "Tabela de meta CMV ausente. Execute sql/42_cmv_meta_config.sql no Supabase.",
+        });
+      }
+      return res.status(500).json({ error: "Não foi possível resolver a meta vigente." });
+    }
+    const rows = (data ?? []).map(mapCmvMetaRow);
+    const matching = rows.filter((row) => {
+      if (row.vigencia_inicio > date) return false;
+      if (row.vigencia_fim && row.vigencia_fim < date) return false;
+      return true;
+    });
+    matching.sort((a, b) => {
+      const range = (r: typeof a) => {
+        const end = r.vigencia_fim || r.vigencia_inicio;
+        const [y1, m1, d1] = r.vigencia_inicio.split("-").map(Number);
+        const [y2, m2, d2] = end.split("-").map(Number);
+        const t1 = Date.UTC(y1, m1 - 1, d1);
+        const t2 = Date.UTC(y2, m2 - 1, d2);
+        return Math.max(1, Math.round((t2 - t1) / 86400000) + 1);
+      };
+      return range(a) - range(b);
+    });
+    const config = matching[0] ?? null;
+    const meta_pct = config?.meta_pct && config.meta_pct > 0 ? config.meta_pct : 0.29;
+    res.json({ date, config, meta_pct, fallback: !config });
+  });
+
+  app.post("/api/cmv/meta", requireRole("admin", "finance", "controle"), async (req, res) => {
+    const body = req.body as Record<string, any>;
+    const nome = String(body?.nome ?? "").trim();
+    const vigencia_inicio = parseIsoDateOnly(body?.vigencia_inicio);
+    const vigencia_fim = body?.vigencia_fim ? parseIsoDateOnly(body.vigencia_fim) : null;
+    const fecharAnterior = body?.fechar_anterior !== false;
+
+    if (!nome) return res.status(400).json({ error: "Informe o nome da configuração." });
+    if (!vigencia_inicio) {
+      return res.status(400).json({ error: "Informe a vigência inicial (AAAA-MM-DD)." });
+    }
+    if (vigencia_fim && vigencia_fim < vigencia_inicio) {
+      return res.status(400).json({ error: "A vigência final deve ser igual ou posterior à inicial." });
+    }
+
+    let meta_pct = Number(String(body?.meta_pct ?? "").replace(",", "."));
+    if (meta_pct > 1 && meta_pct <= 100) meta_pct = meta_pct / 100;
+    if (!Number.isFinite(meta_pct) || meta_pct <= 0 || meta_pct > 1) {
+      return res.status(400).json({ error: "Informe a meta entre 0 e 100% (ex.: 29 ou 0,29)." });
+    }
+
+    const user = (req as any).user;
+    const created_by_name = user?.name ?? user?.email ?? null;
+    const created_by_id = user?.id != null ? Number(user.id) : null;
+
+    if (fecharAnterior) {
+      const fimAnterior = minusOneDayIso(vigencia_inicio);
+      const { error: closeErr } = await supabase
+        .from("cmv_meta_config")
+        .update({
+          vigencia_fim: fimAnterior,
+          encerrado_em: new Date().toISOString(),
+        })
+        .is("vigencia_fim", null)
+        .lt("vigencia_inicio", vigencia_inicio);
+      if (closeErr) {
+        console.error(closeErr);
+        if (cmvMetaTableMissing(closeErr)) {
+          return res.status(500).json({
+            error: "Tabela de meta CMV ausente. Execute sql/42_cmv_meta_config.sql no Supabase.",
+          });
+        }
+        return res.status(500).json({ error: "Não foi possível encerrar a meta anterior." });
+      }
+    }
+
+    const { data, error } = await supabase
+      .from("cmv_meta_config")
+      .insert({
+        nome,
+        meta_pct,
+        vigencia_inicio,
+        vigencia_fim,
+        observacoes: body?.observacoes ? String(body.observacoes).trim() : null,
+        created_by_id: Number.isFinite(created_by_id) ? created_by_id : null,
+        created_by_name,
+      })
+      .select("*")
+      .single();
+    if (error) {
+      console.error(error);
+      if (cmvMetaTableMissing(error)) {
+        return res.status(500).json({
+          error: "Tabela de meta CMV ausente. Execute sql/42_cmv_meta_config.sql no Supabase.",
+        });
+      }
+      return res.status(500).json({ error: "Não foi possível salvar a nova meta." });
+    }
+    res.json({ ok: true, row: mapCmvMetaRow(data) });
+  });
+
+  app.patch("/api/cmv/meta/:id/encerrar", requireRole("admin", "finance", "controle"), async (req, res) => {
+    const id = Number((req.params as { id?: string }).id);
+    if (!Number.isFinite(id) || id <= 0) {
+      return res.status(400).json({ error: "ID inválido." });
+    }
+    const vigencia_fim =
+      parseIsoDateOnly((req.body as { vigencia_fim?: string })?.vigencia_fim) ||
+      new Date().toISOString().slice(0, 10);
+
+    const { data: existing, error: loadErr } = await supabase
+      .from("cmv_meta_config")
+      .select("*")
+      .eq("id", id)
+      .maybeSingle();
+    if (loadErr) {
+      console.error(loadErr);
+      return res.status(500).json({ error: "Não foi possível carregar a vigência." });
+    }
+    if (!existing) return res.status(404).json({ error: "Configuração não encontrada." });
+    const ini = String(existing.vigencia_inicio).slice(0, 10);
+    if (vigencia_fim < ini) {
+      return res.status(400).json({ error: "A data de encerramento deve ser igual ou posterior ao início da vigência." });
+    }
+
+    const { data, error } = await supabase
+      .from("cmv_meta_config")
+      .update({
+        vigencia_fim,
+        encerrado_em: new Date().toISOString(),
+      })
+      .eq("id", id)
+      .select("*")
+      .single();
+    if (error) {
+      console.error(error);
+      return res.status(500).json({ error: "Não foi possível encerrar a vigência." });
+    }
+    res.json({ ok: true, row: mapCmvMetaRow(data) });
   });
 
   // ====================================================
@@ -5217,6 +10862,24 @@ export function createApp() {
       }
     }
     return grid;
+  };
+
+  // Extrai o nome da empresa no cabeçalho do Extrato Mensal (quando disponível).
+  const parseExtratoEmpresa = (grid: any[][]): string | null => {
+    for (let r = 0; r < Math.min(grid.length, 30); r++) {
+      const row = grid[r] || [];
+      for (let c = 0; c < row.length; c++) {
+        const cell = String(row[c] ?? "").trim();
+        if (!/^(empresa|raz[aã]o social|razao social)\s*:/i.test(cell)) continue;
+        const inline = cell.split(":").slice(1).join(":").trim();
+        if (inline) return inline.slice(0, 200);
+        for (let k = c + 1; k < Math.min(c + 4, row.length); k++) {
+          const next = String(row[k] ?? "").trim();
+          if (next) return next.slice(0, 200);
+        }
+      }
+    }
+    return null;
   };
 
   // Extrai a folha por funcionário a partir da grade do Extrato Mensal.
@@ -5288,7 +10951,6 @@ export function createApp() {
   };
 
   // Extrai a seção "Resumo por Rubrica" do Extrato Mensal (totais por rubrica do mês).
-  // Cada linha tem dois lados: esquerda (cols 1/8/19/24/31) e direita (cols 34/38/53/65/73).
   const parseExtratoRubricas = (grid: any[][]): any[] => {
     const toNum = (v: any) => {
       if (typeof v === "number") return Number.isFinite(v) ? v : 0;
@@ -5298,7 +10960,6 @@ export function createApp() {
       const n = Number(s);
       return Number.isFinite(n) ? n : 0;
     };
-    // Localiza o início do "Resumo por Rubrica".
     let start = -1;
     for (let r = 0; r < grid.length; r++) {
       if ((grid[r] || []).some((c) => String(c).trim() === "Resumo por Rubrica")) {
@@ -5308,26 +10969,63 @@ export function createApp() {
     }
     if (start < 0) return [];
 
+    const detectSide = (row: any[], startCol: number) => {
+      const defaults = { code: startCol, name: startCol + 7, horas: startCol + 18, val: startCol + 23, tipo: startCol + 30 };
+      const slice = row.slice(startCol, startCol + 40);
+      const horasIdx = slice.findIndex((c) => String(c ?? "").trim().toLowerCase() === "horas");
+      const valorIdx = slice.findIndex((c) => String(c ?? "").trim().toLowerCase() === "valor");
+      const tipoIdx = slice.findIndex((c) => String(c ?? "").trim().toLowerCase() === "tipo");
+      const codeIdx = slice.findIndex((c) => /c[oó]digo/i.test(String(c ?? "").trim()));
+      const nameIdx = slice.findIndex((c) => /rubrica|descri/i.test(String(c ?? "").trim()));
+      return {
+        code: codeIdx >= 0 ? startCol + codeIdx : defaults.code,
+        name: nameIdx >= 0 ? startCol + nameIdx : defaults.name,
+        horas: horasIdx >= 0 ? startCol + horasIdx : defaults.horas,
+        val: valorIdx >= 0 ? startCol + valorIdx : defaults.val,
+        tipo: tipoIdx >= 0 ? startCol + tipoIdx : defaults.tipo,
+      };
+    };
+
+    let leftCols = { code: 1, name: 8, horas: 19, val: 24, tipo: 31 };
+    let rightCols = { code: 34, name: 38, horas: 53, val: 65, tipo: 73 };
+    for (let r = start; r < Math.min(start + 6, grid.length); r++) {
+      const row = grid[r] || [];
+      if (row.some((c) => String(c ?? "").trim().toLowerCase() === "horas")) {
+        leftCols = detectSide(row, 0);
+        rightCols = detectSide(row, 33);
+        break;
+      }
+    }
+
     const out: any[] = [];
-    const addSide = (row: any[], codeCol: number, nameCol: number, horasCol: number, valCol: number, tipoCol: number) => {
-      const codigo = row[codeCol];
-      const nome = String(row[nameCol] ?? "").trim();
-      const tipo = String(row[tipoCol] ?? "").trim().toUpperCase();
+    const addSide = (row: any[], cols: typeof leftCols) => {
+      const codigo = row[cols.code];
+      const nome = String(row[cols.name] ?? "").trim();
+      const tipo = String(row[cols.tipo] ?? "").trim().toUpperCase();
       if ((typeof codigo !== "number" && !String(codigo ?? "").trim()) || !nome) return;
       if (tipo !== "P" && tipo !== "D") return;
+      const horasRaw = row[cols.horas];
+      const horas =
+        formatHorasCell(horasRaw) ||
+        (() => {
+          const val = toNum(row[cols.val]);
+          const h = toNum(horasRaw);
+          if (h > 0 && h < 500 && (val === 0 || h < val * 0.5)) return formatHorasCell(h);
+          return "";
+        })();
       out.push({
         codigo: String(codigo).trim(),
         nome,
-        horas: String(row[horasCol] ?? "").trim(),
-        valor: toNum(row[valCol]),
+        horas,
+        valor: toNum(row[cols.val]),
         tipo,
-        operacao: tipo === "D" ? "subtracao" : "soma", // padrão: P soma, D subtrai
+        operacao: tipo === "D" ? "subtracao" : "soma",
       });
     };
     for (let r = start + 1; r < grid.length; r++) {
       const row = grid[r] || [];
-      addSide(row, 1, 8, 19, 24, 31); // lado esquerdo
-      addSide(row, 34, 38, 53, 65, 73); // lado direito
+      addSide(row, leftCols);
+      addSide(row, rightCols);
     }
     return out;
   };
@@ -5392,18 +11090,29 @@ export function createApp() {
       let valor = 0;
       let horas = "";
       let descricao = "";
+      const numericCells: { c: number; v: unknown }[] = [];
       for (const cell of cells.slice(1)) {
         const s = String(cell.v).trim();
         const upper = s.toUpperCase();
-        if (upper === "P" || upper === "D") tipo = upper;
-        else if (typeof cell.v === "number" && Math.abs(cell.v) >= 0.001 && cell.v !== codigoRaw) {
-          if (Math.abs(cell.v) >= Math.abs(valor)) valor = toNum(cell.v);
-        } else if (s.length > 2 && !/^\d+([.,]\d+)?$/.test(s)) {
+        if (upper === "P" || upper === "D") {
+          tipo = upper;
+          continue;
+        }
+        if (typeof cell.v === "number" && Number.isFinite(cell.v)) {
+          numericCells.push(cell);
+          continue;
+        }
+        if (/^\d+([.,]\d+)?$/.test(s)) {
+          numericCells.push(cell);
+          continue;
+        }
+        if (s.length > 2) {
           if (!descricao || s.length > descricao.length) descricao = s;
-        } else if (/^\d+([.,]\d+)?$/.test(s) && !horas) {
-          horas = s;
         }
       }
+      const extracted = extractHorasValorFromCells(numericCells, codigoRaw);
+      valor = extracted.valor;
+      horas = extracted.horas;
       if (!tipo || !valor) continue;
       out.push({
         matricula: emp.matricula,
@@ -5451,19 +11160,47 @@ export function createApp() {
 
   app.post("/api/import/extrato-mensal/preview", upload.single("extrato_file"), async (req, res) => {
     if (!req.file) return res.status(400).json({ error: "Arquivo não enviado" });
-    if (!/\.(xls|xlsx)$/i.test(req.file.originalname || "")) {
+    const originalName = String(req.file.originalname || "");
+    const isPdf = /\.pdf$/i.test(originalName);
+    const isXls = /\.(xls|xlsx)$/i.test(originalName);
+    if (!isPdf && !isXls) {
       if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
-      return res.status(400).json({ error: "Envie o relatório em Excel (.xls ou .xlsx)." });
+      return res.status(400).json({ error: "Envie o relatório em Excel (.xls ou .xlsx) ou PDF." });
     }
     try {
-      const grid = readDesbravadorXlsGrid(req.file.path);
-      if (!grid.length) {
-        return res.status(422).json({
-          success: false,
-          error: "Não consegui ler o conteúdo do Excel. O arquivo pode estar corrompido ou em um formato não suportado.",
-        });
+      let employees: any[] = [];
+      let period: { month: number; year: number } | null = null;
+      if (isPdf) {
+        const pdfRows = await extractPdfRowsByPosition(fs.readFileSync(req.file.path));
+        const parsed = parseExtratoFolhaPdf(pdfRows);
+        employees = parsed.funcionarios.map((f) => ({
+          matricula: f.matricula,
+          nome: f.nome,
+          situacao: f.situacao,
+          cpf: f.cpf,
+          cargo_cod: f.cargo_cod,
+          cargo: f.cargo,
+          setor: f.setor,
+          salario: f.salario,
+          proventos: f.proventos,
+          descontos: f.descontos,
+          liquido: f.liquido,
+          base_inss: f.base_inss,
+          base_fgts: f.base_fgts,
+          base_irrf: f.base_irrf,
+        }));
+        period = detectExtratoPeriod([], originalName);
+      } else {
+        const grid = readDesbravadorXlsGrid(req.file.path);
+        if (!grid.length) {
+          return res.status(422).json({
+            success: false,
+            error: "Não consegui ler o conteúdo do Excel. O arquivo pode estar corrompido ou em um formato não suportado.",
+          });
+        }
+        employees = parseExtratoEmployees(grid);
+        period = detectExtratoPeriod(grid, originalName);
       }
-      const employees = parseExtratoEmployees(grid);
       if (!employees.length) {
         return res.status(422).json({
           success: false,
@@ -5471,8 +11208,6 @@ export function createApp() {
             "O arquivo foi lido, mas nenhum funcionário foi reconhecido. Confira se este é o relatório 'Extrato Mensal' (folha de pagamento) do Desbravador — o layout parece diferente do esperado.",
         });
       }
-      const period = detectExtratoPeriod(grid, req.file.originalname || "");
-
       const totalProventos = employees.reduce((s, e) => s + e.proventos, 0);
       const totalDescontos = employees.reduce((s, e) => s + e.descontos, 0);
       const totalLiquido = employees.reduce((s, e) => s + e.liquido, 0);
@@ -5513,12 +11248,16 @@ export function createApp() {
     const filtroSetor = String((req.query as any)?.setor ?? "").trim().toLowerCase();
     const filtroFuncionario = String((req.query as any)?.funcionario ?? "").trim().toLowerCase();
 
-    const { data, error } = await supabase
-      .from("folha_pagamento")
-      .select("matricula, nome, cargo, situacao, cpf, salario, proventos, descontos, liquido, base_inss, base_fgts, base_irrf")
-      .eq("year", year)
-      .eq("month", month)
-      .order("nome");
+    const { data, error } = await filterByEmpresa(
+      supabase
+        .from("folha_pagamento")
+        .select("matricula, nome, cargo, situacao, cpf, salario, proventos, descontos, liquido, base_inss, base_fgts, base_irrf")
+        .eq("year", year)
+        .eq("month", month)
+        .order("nome"),
+      req,
+      "folha_pagamento"
+    );
     if (error) {
       console.error("Erro ao carregar folha:", error);
       return res.status(500).json({ error: "Erro interno ao processar a solicitação." });
@@ -5530,13 +11269,21 @@ export function createApp() {
     const setorByMatricula = new Map<string, string>();
     if (mats.length) {
       const [{ data: funcs }, { data: lancSetores }] = await Promise.all([
-        supabase.from("folha_funcionarios").select("codigo_funcionario, setor_nome").in("codigo_funcionario", mats),
-        supabase
-          .from("folha_lancamentos")
-          .select("codigo_funcionario, setor_nome")
-          .eq("competencia_ano", year)
-          .eq("competencia_mes", month)
-          .not("setor_nome", "is", null),
+        filterByEmpresa(
+          supabase.from("folha_funcionarios").select("codigo_funcionario, setor_nome").in("codigo_funcionario", mats),
+          req,
+          "folha_funcionarios"
+        ),
+        filterByEmpresa(
+          supabase
+            .from("folha_lancamentos")
+            .select("codigo_funcionario, setor_nome")
+            .eq("competencia_ano", year)
+            .eq("competencia_mes", month)
+            .not("setor_nome", "is", null),
+          req,
+          "folha_lancamentos"
+        ),
       ]);
       for (const l of lancSetores ?? []) {
         const mat = String((l as any).codigo_funcionario ?? "").trim();
@@ -5580,12 +11327,15 @@ export function createApp() {
     });
   });
 
-  // Importa o Extrato Mensal (.xls) e grava a folha do mês (substitui o que existir).
+  // Importa o Extrato Mensal (.xls ou PDF) e grava a folha do mês da empresa ativa.
   app.post("/api/folha/import", requireRole("admin", "finance", "controle"), upload.single("extrato_file"), async (req, res) => {
     if (!req.file) return res.status(400).json({ error: "Arquivo não enviado" });
-    if (!/\.(xls|xlsx)$/i.test(req.file.originalname || "")) {
+    const originalName = String(req.file.originalname || "");
+    const isPdf = /\.pdf$/i.test(originalName);
+    const isXls = /\.(xls|xlsx)$/i.test(originalName);
+    if (!isPdf && !isXls) {
       if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
-      return res.status(400).json({ error: "Envie o relatório em Excel (.xls ou .xlsx)." });
+      return res.status(400).json({ error: "Envie o relatório em Excel (.xls ou .xlsx) ou PDF." });
     }
     const year = Number((req.body as any)?.year) || new Date().getFullYear();
     const month = Number((req.body as any)?.month);
@@ -5594,13 +11344,76 @@ export function createApp() {
       return res.status(400).json({ error: "Informe o mês (1 a 12) para gravar a folha." });
     }
     try {
-      const grid = readDesbravadorXlsGrid(req.file.path);
-      if (!grid.length) {
-        return res.status(422).json({
-          error: "Não consegui ler o conteúdo do Excel. O arquivo pode estar corrompido ou em formato não suportado.",
-        });
+      const empresaFolhaCache = sectorCacheFor(empresaKeyOf(req));
+      let grid: any[][] = [];
+      let empresaNome = "";
+      let employees: any[] = [];
+      let fromPdf = false;
+      let rubricasParsed: any[] = [];
+      let detalheRubricas: any[] = [];
+
+      if (isPdf) {
+        const pdfRows = await extractPdfRowsByPosition(fs.readFileSync(req.file.path));
+        const parsed = parseExtratoFolhaPdf(pdfRows);
+        empresaNome = parsed.empresaNome;
+        fromPdf = true;
+        employees = parsed.funcionarios.map((f) => ({
+          matricula: f.matricula,
+          nome: f.nome,
+          cargo: f.cargo,
+          situacao: f.situacao,
+          cpf: f.cpf,
+          salario: f.salario,
+          proventos: f.proventos,
+          descontos: f.descontos,
+          liquido: f.liquido,
+          base_inss: f.base_inss,
+          base_fgts: f.base_fgts,
+          base_irrf: f.base_irrf,
+          setor: f.setor,
+        }));
+        detalheRubricas = parsed.rubricas.map((r) => ({
+          matricula: r.matricula,
+          nome: r.nome,
+          cpf: r.cpf,
+          cargo: r.cargo,
+          situacao: r.situacao,
+          setor: r.setor,
+          codigo: r.codigo,
+          nome_rubrica: r.nome_rubrica,
+          tipo: r.tipo,
+          horas: r.horas,
+          valor: r.valor,
+        }));
+        const resumo = new Map<string, { codigo: string; nome: string; horas: string; valor: number; tipo: string; operacao: string }>();
+        for (const r of parsed.rubricas) {
+          const codigo = String(r.codigo || "").trim();
+          const tipo = String(r.tipo || "").trim().toUpperCase();
+          if (!codigo || (tipo !== "P" && tipo !== "D")) continue;
+          const key = `${codigo}|${tipo}`;
+          const current = resumo.get(key) || {
+            codigo,
+            nome: String(r.nome_rubrica || "").trim(),
+            horas: "",
+            valor: 0,
+            tipo,
+            operacao: tipo === "D" ? "subtracao" : "soma",
+          };
+          current.valor += Number(r.valor) || 0;
+          if (!current.nome && r.nome_rubrica) current.nome = String(r.nome_rubrica).trim();
+          resumo.set(key, current);
+        }
+        rubricasParsed = Array.from(resumo.values());
+      } else {
+        grid = readDesbravadorXlsGrid(req.file.path);
+        if (!grid.length) {
+          return res.status(422).json({
+            error: "Não consegui ler o conteúdo do Excel. O arquivo pode estar corrompido ou em formato não suportado.",
+          });
+        }
+        empresaNome = parseExtratoEmpresa(grid);
+        employees = parseExtratoEmployees(grid);
       }
-      const employees = parseExtratoEmployees(grid);
       if (!employees.length) {
         return res.status(422).json({
           error:
@@ -5609,7 +11422,7 @@ export function createApp() {
       }
 
       // Mapa opcional de cargos definidos na pré-visualização: [{ matricula, cargo_id }]
-      let cargoByMatricula = new Map<string, { cargo_id: number; cargo_name: string; sector_id: number; sector_name: string }>();
+      let cargoByMatricula = new Map<string, { cargo_id: number; cargo_name: string; sector_id: number; sector_name: string; sector_code: string }>();
       try {
         const rawMap = (req.body as any)?.cargo_map;
         const parsed = typeof rawMap === "string" ? JSON.parse(rawMap || "[]") : Array.isArray(rawMap) ? rawMap : [];
@@ -5623,7 +11436,7 @@ export function createApp() {
         if (cargoIds.length) {
           const { data: cargoRows } = await supabase
             .from("cargos")
-            .select("id, name, sector_id, sectors(name)")
+            .select("id, name, sector_id, sectors(name, code)")
             .in("id", cargoIds)
             .eq("active", true);
           const byId = new Map<number, any>((cargoRows ?? []).map((c: any) => [Number(c.id), c]));
@@ -5637,6 +11450,7 @@ export function createApp() {
               cargo_name: String(cargo.name ?? "").trim(),
               sector_id: Number(cargo.sector_id),
               sector_name: String(cargo.sectors?.name ?? "").trim(),
+              sector_code: String(cargo.sectors?.code ?? "").trim(),
             });
           }
         }
@@ -5652,6 +11466,33 @@ export function createApp() {
           e.setor = assigned.sector_name;
           e.cargo_id = assigned.cargo_id;
           e.sector_id = assigned.sector_id;
+          e.setor_codigo = assigned.sector_code;
+          if (!e.setor_codigo && assigned.sector_name) {
+            const resolvedFromCargo = await resolveSector(
+              supabase,
+              { name: assigned.sector_name, create: false },
+              empresaFolhaCache
+            );
+            if (resolvedFromCargo) {
+              e.setor_codigo = resolvedFromCargo.code;
+              e.sector_id = resolvedFromCargo.id;
+              e.setor = resolvedFromCargo.name;
+            }
+          }
+        } else if (e.setor) {
+          const parsedSetor = parseSectorText(String(e.setor));
+          const resolved = await resolveSector(
+            supabase,
+            fromPdf
+              ? { name: parsedSetor.name || e.setor, create: false, nameMatch: "prefix" as const }
+              : { code: parsedSetor.code, name: parsedSetor.name || e.setor, create: true },
+            empresaFolhaCache
+          );
+          if (resolved) {
+            e.sector_id = resolved.id;
+            e.setor_codigo = resolved.code;
+            e.setor = resolved.name;
+          }
         }
       }
 
@@ -5671,16 +11512,25 @@ export function createApp() {
         base_fgts: e.base_fgts || 0,
         base_irrf: e.base_irrf || 0,
       }));
-      const setorByMatriculaImport = new Map<string, string>();
+      const setorByMatriculaImport = new Map<string, { nome: string; codigo: string | null; sector_id: number | null }>();
       for (const e of employees) {
         const mat = String(e.matricula ?? "").trim() || "SEM-MATRICULA";
         const setor = String(e.setor ?? "").trim();
-        if (setor) setorByMatriculaImport.set(mat, setor);
+        if (setor) {
+          setorByMatriculaImport.set(mat, {
+            nome: setor,
+            codigo: e.setor_codigo ? String(e.setor_codigo) : null,
+            sector_id: e.sector_id ?? null,
+          });
+        }
       }
 
-      // Substitui a folha do mês.
-      await supabase.from("folha_pagamento").delete().eq("year", year).eq("month", month);
-      const { error } = await supabase.from("folha_pagamento").insert(rows);
+      // Substitui a folha do mês da empresa ativa.
+      await scopeByEmpresa(
+        supabase.from("folha_pagamento").delete().eq("year", year).eq("month", month),
+        req
+      );
+      const { error } = await supabase.from("folha_pagamento").insert(rows.map((r) => withEmpresaKey(r, req)));
       if (error) {
         console.error("Erro ao gravar folha:", error);
         await logImportHistory({
@@ -5699,9 +11549,15 @@ export function createApp() {
       }
 
       // Grava o "Resumo por Rubrica" do mês (substitui o que existir).
-      const rubricasParsed = parseExtratoRubricas(grid);
+      if (!fromPdf) {
+        rubricasParsed = parseExtratoRubricas(grid);
+        detalheRubricas = parseExtratoEmployeeRubricas(grid);
+      }
       if (rubricasParsed.length) {
-        await supabase.from("folha_rubricas").delete().eq("year", year).eq("month", month);
+        await scopeByEmpresa(
+          supabase.from("folha_rubricas").delete().eq("year", year).eq("month", month),
+          req
+        );
         const seen = new Set<string>();
         const rubricaRows = rubricasParsed
           .filter((rb) => {
@@ -5720,17 +11576,39 @@ export function createApp() {
             tipo: rb.tipo,
             operacao: rb.operacao,
           }));
-        const { error: rubErr } = await supabase.from("folha_rubricas").insert(rubricaRows);
+        const { error: rubErr } = await supabase
+          .from("folha_rubricas")
+          .insert(rubricaRows.map((rb) => withEmpresaKey(rb, req)));
         if (rubErr) console.error("Erro ao gravar rubricas da folha:", rubErr);
       }
 
-      // Parser de detalhe (reutilizado no cadastro e no v2)
-      const detalheRubricas = parseExtratoEmployeeRubricas(grid);
       for (const d of detalheRubricas) {
         const mat = String(d.matricula ?? "").trim();
         const setor = String(d.setor ?? "").trim();
         if (mat && setor && !setorByMatriculaImport.has(mat)) {
-          setorByMatriculaImport.set(mat, setor);
+          const parsedSetor = parseSectorText(setor);
+          const resolved = await resolveSector(
+            supabase,
+            fromPdf
+              ? { name: parsedSetor.name || setor, create: false, nameMatch: "prefix" as const }
+              : { code: parsedSetor.code, name: parsedSetor.name || setor, create: true },
+            empresaFolhaCache
+          );
+          setorByMatriculaImport.set(mat, {
+            nome: resolved?.name ?? setor,
+            codigo: resolved?.code ?? parsedSetor.code,
+            sector_id: resolved?.id ?? null,
+          });
+          if (resolved) {
+            d.setor = resolved.name;
+            d.setor_codigo = resolved.code;
+            d.sector_id = resolved.id;
+          }
+        } else if (mat && setorByMatriculaImport.has(mat)) {
+          const info = setorByMatriculaImport.get(mat)!;
+          d.setor = info.nome;
+          d.setor_codigo = info.codigo;
+          d.sector_id = info.sector_id;
         }
       }
 
@@ -5768,18 +11646,22 @@ export function createApp() {
       // Metadados da importação para o módulo de apuração (v1 — sempre grava)
       let detalheRubricasCount = detalheRubricas.length;
       const { error: impMetaErr } = await supabase.from("folha_importacoes").upsert(
-        {
-          nome_arquivo: req.file.originalname,
-          competencia_mes: month,
-          competencia_ano: year,
-          data_importacao: new Date().toISOString(),
-          usuario_id: req.user?.id ?? null,
-          status: "importado",
-          total_funcionarios: rows.length,
-          total_rubricas: rubricasParsed.length,
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: "competencia_ano,competencia_mes" }
+        withEmpresaKey(
+          {
+            nome_arquivo: req.file.originalname,
+            competencia_mes: month,
+            competencia_ano: year,
+            data_importacao: new Date().toISOString(),
+            usuario_id: req.user?.id ?? null,
+            status: "importado",
+            total_funcionarios: rows.length,
+            total_rubricas: rubricasParsed.length,
+            empresa_nome: empresaNome,
+            updated_at: new Date().toISOString(),
+          },
+          req
+        ),
+        { onConflict: "empresa_key,competencia_ano,competencia_mes" }
       );
       if (impMetaErr) {
         console.error("Erro ao registrar folha_importacoes:", impMetaErr);
@@ -5787,7 +11669,10 @@ export function createApp() {
 
       // Complementos v2 (funcionários, lançamentos detalhados, situações)
       try {
-        await supabase.from("folha_lancamentos_importados").delete().eq("competencia_ano", year).eq("competencia_mes", month);
+        await scopeByEmpresa(
+          supabase.from("folha_lancamentos_importados").delete().eq("competencia_ano", year).eq("competencia_mes", month),
+          req
+        );
         if (detalheRubricas.length) {
           const detRows = detalheRubricas.map((d) => ({
             competencia_ano: year,
@@ -5797,6 +11682,8 @@ export function createApp() {
             cpf_funcionario: d.cpf,
             cargo_nome: d.cargo,
             setor_nome: d.setor || null,
+            setor_codigo: d.setor_codigo ?? null,
+            sector_id: d.sector_id ?? null,
             situacao: d.situacao,
             codigo_rubrica: d.codigo,
             descricao_rubrica: d.nome_rubrica,
@@ -5804,12 +11691,12 @@ export function createApp() {
             quantidade: d.horas,
             valor_original: d.valor,
           }));
-          await supabase.from("folha_lancamentos_importados").insert(detRows);
+          await supabase.from("folha_lancamentos_importados").insert(detRows.map((d) => withEmpresaKey(d, req)));
         }
 
         for (const r of rows) {
           const mat = String(r.matricula || "SEM-MATRICULA");
-          const setorNome = setorByMatriculaImport.get(mat);
+          const setorInfo = setorByMatriculaImport.get(mat);
           const payload: Record<string, any> = {
             codigo_funcionario: mat,
             nome: r.nome,
@@ -5820,24 +11707,50 @@ export function createApp() {
             ativo: true,
             updated_at: new Date().toISOString(),
           };
-          if (setorNome) payload.setor_nome = setorNome;
-          await supabase.from("folha_funcionarios").upsert(payload, { onConflict: "codigo_funcionario" });
+          if (setorInfo) {
+            payload.setor_nome = setorInfo.nome;
+            payload.setor_codigo = setorInfo.codigo;
+            payload.sector_id = setorInfo.sector_id;
+          }
+          await supabase
+            .from("folha_funcionarios")
+            .upsert(withEmpresaKey(payload, req), { onConflict: "empresa_key,codigo_funcionario" });
         }
         const situacoes = new Map<string, number>();
         for (const r of rows) {
           const sit = String(r.situacao || "Outros").trim() || "Outros";
           situacoes.set(sit, (situacoes.get(sit) || 0) + 1);
         }
-        await supabase.from("folha_situacoes_resumo").delete().eq("competencia_ano", year).eq("competencia_mes", month);
-        const sitRows = Array.from(situacoes.entries()).map(([situacao, quantidade]) => ({
-          competencia_ano: year,
-          competencia_mes: month,
-          situacao,
-          quantidade,
-        }));
+        await scopeByEmpresa(
+          supabase.from("folha_situacoes_resumo").delete().eq("competencia_ano", year).eq("competencia_mes", month),
+          req
+        );
+        const sitRows = Array.from(situacoes.entries()).map(([situacao, quantidade]) =>
+          withEmpresaKey(
+            {
+              competencia_ano: year,
+              competencia_mes: month,
+              situacao,
+              quantidade,
+            },
+            req
+          )
+        );
         if (sitRows.length) await supabase.from("folha_situacoes_resumo").insert(sitRows);
       } catch (e) {
         console.error("Falha ao registrar dados de apuração v2 (execute sql/folha_apuracao_module_v2.sql):", e);
+      }
+
+      try {
+        await syncAbsenteismoCompetencia(supabase, year, month, empresaNome);
+      } catch (e) {
+        console.error("Falha ao sincronizar absenteísmo (execute sql/46_absenteismo.sql):", e);
+      }
+
+      try {
+        await syncTurnoverCompetencia(supabase, year, month, empresaNome);
+      } catch (e) {
+        console.error("Falha ao sincronizar turnover (execute sql/47_turnover.sql):", e);
       }
 
       const totalLiquido = rows.reduce((s, r) => s + r.liquido, 0);
@@ -5846,7 +11759,11 @@ export function createApp() {
       // (aparece em Prev x Real > RH > Folha de pagamento > Real do mês).
       let realizadoCrdId: number | null = null;
       try {
-        realizadoCrdId = await resolveCrdByNameAndSector("Folha de pagamento", "RH", "RH-FOLHA-PAGAMENTO");
+        realizadoCrdId = await resolveCrdByNameAndSector(
+          "Folha de pagamento",
+          { code: "RH", name: "RH" },
+          "RH-FOLHA-PAGAMENTO"
+        );
         if (realizadoCrdId) {
           const { error: realErr } = await supabase
             .from("crd_realizado")
@@ -5923,13 +11840,17 @@ export function createApp() {
     const year = Number((req.query as any)?.year) || new Date().getFullYear();
     const month = Number((req.query as any)?.month);
     if (!month || month < 1 || month > 12) return res.status(400).json({ error: "month deve estar entre 1 e 12" });
-    const { data, error } = await supabase
-      .from("folha_rubricas")
-      .select("codigo, nome, horas, valor, tipo, operacao")
-      .eq("year", year)
-      .eq("month", month)
-      .order("tipo")
-      .order("codigo");
+    const { data, error } = await filterByEmpresa(
+      supabase
+        .from("folha_rubricas")
+        .select("codigo, nome, horas, valor, tipo, operacao")
+        .eq("year", year)
+        .eq("month", month)
+        .order("tipo")
+        .order("codigo"),
+      req,
+      "folha_rubricas"
+    );
     if (error) {
       console.error("Erro ao carregar rubricas:", error);
       return res.status(500).json({ error: "Erro interno ao processar a solicitação." });
@@ -5955,13 +11876,16 @@ export function createApp() {
     if (operacao !== "soma" && operacao !== "subtracao") {
       return res.status(400).json({ error: "operacao deve ser 'soma' ou 'subtracao'" });
     }
-    const { error } = await supabase
-      .from("folha_rubricas")
-      .update({ operacao })
-      .eq("year", Number(year))
-      .eq("month", Number(month))
-      .eq("codigo", String(codigo))
-      .eq("tipo", String(tipo ?? "P"));
+    const { error } = await scopeByEmpresa(
+      supabase
+        .from("folha_rubricas")
+        .update({ operacao })
+        .eq("year", Number(year))
+        .eq("month", Number(month))
+        .eq("codigo", String(codigo))
+        .eq("tipo", String(tipo ?? "P")),
+      req
+    );
     if (error) {
       console.error("Erro ao atualizar operação da rubrica:", error);
       return res.status(500).json({ error: "Não foi possível salvar a alteração." });
@@ -5976,11 +11900,15 @@ export function createApp() {
     if (!year || !month || month < 1 || month > 12) {
       return res.status(400).json({ error: "Informe ano e mês (1 a 12)." });
     }
-    const { data: rubricas, error } = await supabase
-      .from("folha_rubricas")
-      .select("valor, operacao")
-      .eq("year", year)
-      .eq("month", month);
+    const { data: rubricas, error } = await filterByEmpresa(
+      supabase
+        .from("folha_rubricas")
+        .select("valor, operacao")
+        .eq("year", year)
+        .eq("month", month),
+      req,
+      "folha_rubricas"
+    );
     if (error) {
       console.error("Erro ao carregar rubricas para envio:", error);
       return res.status(500).json({ error: "Erro ao carregar as rubricas." });
@@ -5990,7 +11918,11 @@ export function createApp() {
     }
     const total = computeRubricasTotal(rubricas);
 
-    const crdId = await resolveCrdByNameAndSector("Folha de pagamento", "RH", "RH-FOLHA-PAGAMENTO");
+    const crdId = await resolveCrdByNameAndSector(
+      "Folha de pagamento",
+      { code: "RH", name: "RH" },
+      "RH-FOLHA-PAGAMENTO"
+    );
     if (!crdId) return res.status(500).json({ error: "Não foi possível resolver a conta RH > Folha de pagamento." });
 
     // Previsto (crd_monthly_values) e Realizado (crd_realizado) do mês.
@@ -6039,22 +11971,30 @@ export function createApp() {
     const month = Number((req.query as any)?.month);
     if (!month || month < 1 || month > 12) return res.status(400).json({ error: "month deve estar entre 1 e 12" });
 
-    const { data: rubricas, error } = await supabase
-      .from("folha_rubricas")
-      .select("codigo, nome, valor, tipo")
-      .eq("year", year)
-      .eq("month", month);
+    const { data: rubricas, error } = await filterByEmpresa(
+      supabase
+        .from("folha_rubricas")
+        .select("codigo, nome, valor, tipo")
+        .eq("year", year)
+        .eq("month", month),
+      req,
+      "folha_rubricas"
+    );
     if (error) {
       console.error("Erro ao carregar rubricas (custo):", error);
       return res.status(500).json({ error: "Erro interno ao processar a solicitação." });
     }
 
-    const { data: manualRows } = await supabase
-      .from("folha_custo_manual")
-      .select("fgts, fgts_prov_ferias, fgts_prov_13")
-      .eq("year", year)
-      .eq("month", month)
-      .limit(1);
+    const { data: manualRows } = await filterByEmpresa(
+      supabase
+        .from("folha_custo_manual")
+        .select("fgts, fgts_prov_ferias, fgts_prov_13")
+        .eq("year", year)
+        .eq("month", month)
+        .limit(1),
+      req,
+      "folha_custo_manual"
+    );
     const manual = (manualRows && manualRows[0]) || { fgts: 0, fgts_prov_ferias: 0, fgts_prov_13: 0 };
 
     const groups: Record<string, { valor: number; codigos: any[] }> = {};
@@ -6134,12 +12074,2050 @@ export function createApp() {
     if ((req.body as any)?.fgts_prov_ferias !== undefined) row.fgts_prov_ferias = num((req.body as any).fgts_prov_ferias);
     if ((req.body as any)?.fgts_prov_13 !== undefined) row.fgts_prov_13 = num((req.body as any).fgts_prov_13);
 
-    const { error } = await supabase.from("folha_custo_manual").upsert(row, { onConflict: "year,month" });
+    const { error } = await supabase
+      .from("folha_custo_manual")
+      .upsert(withEmpresaKey(row, req), { onConflict: "empresa_key,year,month" });
     if (error) {
       console.error("Erro ao salvar FGTS manual:", error);
       return res.status(500).json({ error: "Não foi possível salvar." });
     }
+
+    const { data: guiaExistenteManual } = await supabase
+      .from("folha_fgts_guia_mensal")
+      .select("*")
+      .eq("year", year)
+      .eq("month", month)
+      .maybeSingle();
+    const patchGuia: Record<string, unknown> = {
+      year,
+      month,
+      fgts_normal:
+        row.fgts !== undefined ? row.fgts : Number((guiaExistenteManual as any)?.fgts_normal) || 0,
+      fgts_ferias:
+        row.fgts_prov_ferias !== undefined
+          ? row.fgts_prov_ferias
+          : Number((guiaExistenteManual as any)?.fgts_ferias) || 0,
+      fgts_13:
+        row.fgts_prov_13 !== undefined
+          ? row.fgts_prov_13
+          : Number((guiaExistenteManual as any)?.fgts_13) || 0,
+      fgts_outros: Number((guiaExistenteManual as any)?.fgts_outros) || 0,
+      fonte_normal:
+        row.fgts !== undefined
+          ? "Cadastro manual (folha_custo_manual)"
+          : (guiaExistenteManual as any)?.fonte_normal ?? null,
+      fonte_ferias:
+        row.fgts_prov_ferias !== undefined
+          ? "Cadastro manual (folha_custo_manual)"
+          : (guiaExistenteManual as any)?.fonte_ferias ?? null,
+      fonte_13:
+        row.fgts_prov_13 !== undefined
+          ? "Cadastro manual (folha_custo_manual)"
+          : (guiaExistenteManual as any)?.fonte_13 ?? null,
+      fonte_outros: (guiaExistenteManual as any)?.fonte_outros ?? null,
+      updated_at: new Date().toISOString(),
+    };
+    await supabase.from("folha_fgts_guia_mensal").upsert(patchGuia, { onConflict: "year,month" });
+
     res.json({ success: true });
+  });
+
+  // Painel consolidado de custos e indicadores de RH
+  app.patch("/api/folha/funcionarios/setor", requireRole("admin", "finance", "controle"), async (req, res) => {
+    const body = req.body as any;
+    const codigo = String(body?.codigo_funcionario ?? "").trim();
+    const setor_nome = String(body?.setor_nome ?? "").trim();
+    if (!codigo || !setor_nome) {
+      return res.status(400).json({ error: "Informe codigo_funcionario e setor_nome." });
+    }
+    let setor_codigo = body?.setor_codigo ? String(body.setor_codigo).trim() : null;
+    let sector_id: number | null = body?.sector_id != null ? Number(body.sector_id) : null;
+
+    if (!setor_codigo || !sector_id) {
+      const { data: sector } = await supabase
+        .from("sectors")
+        .select("id, code, name")
+        .ilike("name", setor_nome)
+        .eq("active", true)
+        .limit(1)
+        .maybeSingle();
+      if (sector) {
+        sector_id = Number((sector as any).id) || sector_id;
+        setor_codigo = setor_codigo || ((sector as any).code ? String((sector as any).code) : null);
+      }
+    }
+
+    const { data, error } = await supabase
+      .from("folha_funcionarios")
+      .upsert(
+        withEmpresaKey(
+          {
+            codigo_funcionario: codigo,
+            nome: body?.nome ? String(body.nome).trim() : codigo,
+            setor_nome,
+            setor_codigo,
+            sector_id,
+            ativo: true,
+            updated_at: new Date().toISOString(),
+          },
+          req
+        ),
+        { onConflict: "empresa_key,codigo_funcionario" }
+      )
+      .select()
+      .single();
+    if (error) return res.status(500).json({ error: "Não foi possível atualizar o setor do funcionário." });
+    res.json(data);
+  });
+
+  app.get("/api/folha/painel", requireRole("admin", "finance", "controle", "manager", "diretoria"), async (req, res) => {
+    const year = Number((req.query as any)?.year) || new Date().getFullYear();
+    const month = Number((req.query as any)?.month);
+    if (!month || month < 1 || month > 12) return res.status(400).json({ error: "Informe o mês (1-12)." });
+    const filtroSetor = String((req.query as any)?.setor ?? "").trim();
+    const filtroEmpresa = String((req.query as any)?.empresa ?? "").trim();
+
+    const [
+      { data: apuracao },
+      { data: lancamentos },
+      { data: importacao },
+      { data: funcRows },
+      { data: funcCadastro },
+      { data: sectors },
+      { data: empresasRows },
+      { data: folhaCrd },
+      { data: rdsSnapshot },
+      { data: encargosRows },
+      { data: taxaMensalRow },
+      { data: fgtsGuiaRow },
+      { data: provFeriasFgtsRows },
+      { data: prov13FgtsRows },
+    ] = await Promise.all([
+      filterByEmpresa(
+        supabase.from("folha_apuracoes_mensais").select("*").eq("competencia_ano", year).eq("competencia_mes", month),
+        req,
+        "folha_apuracoes_mensais"
+      ).maybeSingle(),
+      filterByEmpresa(
+        supabase
+          .from("folha_lancamentos")
+          .select("codigo_funcionario, setor_nome, valor_provento, valor_retorno, valor_comissao, valor_produtividade")
+          .eq("competencia_ano", year)
+          .eq("competencia_mes", month),
+        req,
+        "folha_lancamentos"
+      ),
+      filterByEmpresa(
+        supabase.from("folha_importacoes").select("*").eq("competencia_ano", year).eq("competencia_mes", month),
+        req,
+        "folha_importacoes"
+      ).maybeSingle(),
+      filterByEmpresa(
+        supabase.from("folha_pagamento").select("matricula, nome, situacao, proventos, salario, liquido").eq("year", year).eq("month", month),
+        req,
+        "folha_pagamento"
+      ),
+      filterByEmpresa(
+        supabase
+          .from("folha_funcionarios")
+          .select("codigo_funcionario, nome, setor_nome, setor_codigo, sector_id")
+          .eq("ativo", true),
+        req,
+        "folha_funcionarios"
+      ),
+      supabase.from("sectors").select("id, name, code, budget_limit, active").eq("active", true),
+      filterByEmpresa(
+        supabase.from("folha_importacoes").select("empresa_nome").not("empresa_nome", "is", null),
+        req,
+        "folha_importacoes"
+      ),
+      supabase.from("crds").select("id, previsto_mes").eq("code", "RH-FOLHA-PAGAMENTO").maybeSingle(),
+      supabase.from("rds_snapshots").select("sections").eq("year", year).eq("month", month).maybeSingle(),
+      supabase
+        .from("folha_parametros_encargos")
+        .select("*")
+        .eq("ano", year)
+        .eq("ativo", true)
+        .maybeSingle(),
+      supabase
+        .from("folha_taxa_servico_mensal")
+        .select("orcado_bruto, credito_rds, observacao")
+        .eq("year", year)
+        .eq("month", month)
+        .maybeSingle(),
+      supabase
+        .from("folha_fgts_guia_mensal")
+        .select("*")
+        .eq("year", year)
+        .eq("month", month)
+        .maybeSingle(),
+      supabase.from("folha_provisao_ferias").select("fgts").eq("year", year).eq("month", month),
+      supabase.from("folha_provisao_13").select("fgts").eq("year", year).eq("month", month),
+    ]);
+
+    const empresaCompetencia = String((importacao as any)?.empresa_nome ?? "").trim() || null;
+    const empresaBloqueia =
+      Boolean(filtroEmpresa) &&
+      Boolean(empresaCompetencia) &&
+      !normalizeFolhaFilterText(empresaCompetencia!).includes(normalizeFolhaFilterText(filtroEmpresa)) &&
+      !normalizeFolhaFilterText(filtroEmpresa).includes(normalizeFolhaFilterText(empresaCompetencia!));
+
+    let orcadoGlobal = sanitizeMonthBudget((folhaCrd as any)?.previsto_mes);
+    if (folhaCrd?.id) {
+      const { data: mv } = await supabase
+        .from("crd_monthly_values")
+        .select("value")
+        .eq("crd_id", folhaCrd.id)
+        .eq("year", year)
+        .eq("month", month)
+        .maybeSingle();
+      if (mv) orcadoGlobal = sanitizeMonthBudget((mv as any).value);
+    }
+
+    let totalCusto = Number((apuracao as any)?.total_custo) || 0;
+    let realizadoFonte = "Apuração mensal (total de custo)";
+
+    const sectorBudgetByName = new Map<string, { budget: number; code: string | null }>();
+    for (const s of sectors ?? []) {
+      const name = String((s as any).name ?? "").trim();
+      if (!name) continue;
+      sectorBudgetByName.set(normalizeSetorKey(name), {
+        budget: resolveSectorMonthlyBudget(Number((s as any).budget_limit) || 0),
+        code: (s as any).code ? String((s as any).code) : null,
+      });
+    }
+
+    const cadastroMap = buildCadastroSetorMap(funcCadastro ?? []);
+    const weights = buildEmployeeCostWeights(lancamentos ?? [], funcRows ?? [], cadastroMap);
+
+    let setorStats = aggregateLancamentosPorSetor(lancamentos ?? []);
+    let totalSalarioGlobal = Array.from(setorStats.values()).reduce((s, g) => s + g.total_salario, 0);
+    if (!totalCusto && totalSalarioGlobal > 0) {
+      totalCusto = totalSalarioGlobal;
+      realizadoFonte = "Salários classificados (apuração pendente)";
+    }
+
+    let custoPorSetor = allocateValorPorSetor(setorStats, totalCusto, totalSalarioGlobal);
+    let setoresResumoCalc: ReturnType<typeof calcularCustoPorSetor>["resumos"] = [];
+
+    if (weights.length) {
+      const calculado = calcularCustoPorSetor({
+        weights,
+        totalCusto,
+        sectorBudgetByName,
+        setoresCatalogo: (sectors ?? []).map((s: any) => ({
+          nome: String(s.name ?? "").trim(),
+          codigo: s.code ? String(s.code) : null,
+        })),
+      });
+      setorStats = calculado.setorStats;
+      totalSalarioGlobal = calculado.totalSalarioGlobal;
+      custoPorSetor = calculado.custoPorSetor;
+      setoresResumoCalc = calculado.resumos;
+      if (!totalCusto && totalSalarioGlobal > 0) {
+        totalCusto = totalSalarioGlobal;
+        realizadoFonte = "Salários por setor (cadastro do funcionário)";
+      }
+    }
+
+    const setoresList = Array.from(
+      new Map(
+        [
+          ...(sectors ?? []).map((s: any) => {
+            const nome = String(s.name ?? "").trim();
+            return [normalizeSetorKey(nome), { nome, codigo: s.code ? String(s.code) : null }];
+          }),
+          ...Array.from(setorStats.keys()).map((nome) => {
+            const meta = sectorBudgetByName.get(normalizeSetorKey(nome));
+            return [normalizeSetorKey(nome), { nome, codigo: meta?.code ?? null }];
+          }),
+        ] as Array<[string, { nome: string; codigo: string | null }]>
+      ).values()
+    ).sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
+
+    const empresasSet = new Set<string>();
+    for (const r of empresasRows ?? []) {
+      const e = String((r as any).empresa_nome ?? "").trim();
+      if (e) empresasSet.add(e);
+    }
+    if (empresaCompetencia) empresasSet.add(empresaCompetencia);
+
+    const buildSetorResumo = () =>
+      setoresResumoCalc.length
+        ? setoresResumoCalc.map((r) => ({
+            setor: r.setor,
+            setor_codigo: r.setor_codigo,
+            orcado: r.orcado,
+            realizado: r.realizado,
+            diferenca: r.diferenca,
+            pct_diferenca: r.pct_diferenca,
+            acima_orcamento: r.acima_orcamento,
+            status_label: r.status_label,
+            funcionarios: r.funcionarios,
+          }))
+        : Array.from(setorStats.entries())
+            .map(([setor, stats]) => {
+              const meta = sectorBudgetByName.get(normalizeSetorKey(setor));
+              const orcadoSetor = meta?.budget ?? 0;
+              const realizadoSetor = custoPorSetor.get(setor) ?? 0;
+              const diferencaSetor = realizadoSetor - orcadoSetor;
+              return {
+                setor,
+                setor_codigo: meta?.code ?? null,
+                orcado: orcadoSetor,
+                realizado: realizadoSetor,
+                diferenca: diferencaSetor,
+                pct_diferenca: calcPctDesvio(orcadoSetor, diferencaSetor),
+                acima_orcamento: diferencaSetor > 0.009,
+                status_label: buildStatusLabel(diferencaSetor),
+                funcionarios: stats.funcionarios.size,
+              };
+            })
+            .sort((a, b) => b.realizado - a.realizado);
+
+    let orcado = orcadoGlobal;
+    let realizado = totalCusto;
+    let scale = 1;
+    let orcadoFonte = "CRD RH-FOLHA-PAGAMENTO (orçamento mensal)";
+    let setorSelecionado: string | null = null;
+
+    if (filtroSetor) {
+      const entry = Array.from(setorStats.entries()).find(([nome]) => matchFolhaSetor(nome, filtroSetor));
+      const resumoEntry = setoresResumoCalc.find((r) => matchFolhaSetor(r.setor, filtroSetor));
+      if (entry || resumoEntry) {
+        setorSelecionado = entry?.[0] ?? resumoEntry!.setor;
+        const meta = sectorBudgetByName.get(normalizeSetorKey(setorSelecionado));
+        orcado = meta?.budget ?? resumoEntry?.orcado ?? 0;
+        orcadoFonte = "Limite orçamentário do setor (cadastro de centros de custo)";
+        realizado = custoPorSetor.get(setorSelecionado) ?? resumoEntry?.realizado ?? 0;
+        scale = totalCusto > 0 ? realizado / totalCusto : 0;
+      } else {
+        setorSelecionado = filtroSetor;
+        const meta = sectorBudgetByName.get(normalizeSetorKey(filtroSetor));
+        orcado = meta?.budget ?? 0;
+        realizado = 0;
+        scale = 0;
+      }
+    }
+
+    if (empresaBloqueia) {
+      orcado = 0;
+      realizado = 0;
+      scale = 0;
+    }
+
+    const diferenca = realizado - orcado;
+    const funcionarios = (funcRows ?? []).length;
+    const trabalhando = (funcRows ?? []).filter((f: any) => /trabalh/i.test(String(f.situacao ?? ""))).length;
+
+    let componentes = apuracao && scale > 0 ? componentesFromApuracao(apuracao as any, scale) : [];
+
+    const { data: rubricasPainel } = await filterByEmpresa(
+      supabase
+        .from("folha_rubricas")
+        .select("codigo, nome, valor, tipo")
+        .eq("year", year)
+        .eq("month", month),
+      req,
+      "folha_rubricas"
+    );
+
+    const { data: manualRowsPainel } = await filterByEmpresa(
+      supabase
+        .from("folha_custo_manual")
+        .select("fgts, fgts_prov_ferias, fgts_prov_13")
+        .eq("year", year)
+        .eq("month", month)
+        .limit(1),
+      req,
+      "folha_custo_manual"
+    );
+    const manualPainel = (manualRowsPainel && manualRowsPainel[0]) || {
+      fgts: 0,
+      fgts_prov_ferias: 0,
+      fgts_prov_13: 0,
+    };
+
+    let composicao =
+      scale > 0 && (apuracao || (rubricasPainel?.length ?? 0) > 0)
+        ? buildComposicaoCusto({
+            apuracao: apuracao as any,
+            rubricas: (rubricasPainel ?? []).map((rb: any) => ({
+              codigo: rb.codigo,
+              nome: rb.nome,
+              valor: rb.valor,
+              tipo: rb.tipo,
+            })),
+            manualFgts: manualPainel as any,
+            scale,
+            fonte: apuracao
+              ? realizadoFonte
+              : rubricasPainel?.length
+                ? "Rubricas importadas (apuração pendente)"
+                : realizadoFonte,
+          })
+        : null;
+
+    if (!componentes.length && realizado > 0 && filtroSetor && setorSelecionado) {
+      const stats = setorStats.get(setorSelecionado);
+      if (stats) {
+        componentes = [
+          {
+            key: "total_salario",
+            label: "Salários e rubricas do setor",
+            valor: stats.total_salario,
+            pct: 100,
+          },
+        ];
+      }
+    }
+
+    if (!componentes.length && realizado > 0) {
+      if (rubricasPainel?.length) {
+        const groups: Record<string, { valor: number; codigos: any[] }> = {};
+        for (const rb of rubricasPainel) {
+          const cat = classifyRubrica((rb as any).nome, (rb as any).tipo);
+          if (!groups[cat]) groups[cat] = { valor: 0, codigos: [] };
+          const v = Number((rb as any).valor) || 0;
+          groups[cat].valor += v;
+          groups[cat].codigos.push({ codigo: (rb as any).codigo, nome: (rb as any).nome, valor: v });
+        }
+        const g = (k: string) => groups[k] || { valor: 0, codigos: [] };
+        const proventos = g("proventos").valor;
+        const comissao = g("comissao").valor;
+        const produtividade = g("produtividade").valor;
+        const total_salario = proventos + comissao + produtividade;
+        const retornos = g("retornos").valor;
+        const decimo = g("decimo_terceiro").valor;
+        const ferias = g("ferias").valor;
+        const umTerco = g("um_terco_ferias").valor;
+        const inss = g("inss").valor;
+        const inss13 = g("inss_13").valor;
+        const inssProvFerias = g("inss_prov_ferias").valor;
+        const linhas = [
+          { key: "proventos", label: "Proventos", valor: proventos },
+          { key: "comissao", label: "Comissão", valor: comissao },
+          { key: "produtividade", label: "Produtividade", valor: produtividade },
+          { key: "total_salario", label: "Total Salário", valor: total_salario },
+          { key: "retornos", label: "Retornos", valor: -Math.abs(retornos) },
+          { key: "decimo_terceiro", label: "13º", valor: decimo },
+          { key: "ferias", label: "Férias", valor: ferias },
+          { key: "um_terco_ferias", label: "1/3 Férias", valor: umTerco },
+          { key: "fgts", label: "FGTS", valor: Number(manualPainel.fgts) || 0 },
+          { key: "fgts_prov_ferias", label: "FGTS Prov. Férias", valor: Number(manualPainel.fgts_prov_ferias) || 0 },
+          { key: "fgts_prov_13", label: "FGTS Prov. 13º", valor: Number(manualPainel.fgts_prov_13) || 0 },
+          { key: "inss", label: "INSS", valor: inss },
+          { key: "inss_13", label: "INSS 13º", valor: inss13 },
+          { key: "inss_prov_ferias", label: "INSS Prov. Férias", valor: inssProvFerias },
+        ];
+        componentes = componentesFromCustoLinhas(linhas, scale || 1);
+        if (!apuracao) realizadoFonte = "Rubricas importadas (apuração pendente)";
+      }
+    }
+
+    if (!componentes.length && realizado > 0) {
+      componentes = [{ key: "total_custo", label: "Custo total", valor: realizado, pct: 100 }];
+    }
+
+    const pct_diferenca = calcPctDesvio(orcado, diferenca);
+    const drilldown =
+      setorSelecionado && weights.length
+        ? {
+            setor: setorSelecionado,
+            funcionarios: buildFuncionariosDrilldown({
+              setor: setorSelecionado,
+              weights,
+              orcadoSetor: orcado,
+              realizadoSetor: realizado,
+              cadastro: cadastroMap,
+              folhaPagamento: funcRows ?? [],
+            }),
+          }
+        : null;
+
+    const creditoRdsTaxa = extractCreditoTaxaRds((rdsSnapshot as any)?.sections);
+    const taxa_servico = buildTaxaServicoAnalise({
+      rubricas: (rubricasPainel ?? []).map((rb: any) => ({
+        codigo: rb.codigo,
+        nome: rb.nome,
+        valor: rb.valor,
+        tipo: rb.tipo,
+      })),
+      apuracao: apuracao as any,
+      encargos: (encargosRows as any) ?? null,
+      orcadoFolha: orcado,
+      realizadoFolha: realizado,
+      diferencaFolha: diferenca,
+      orcadoTaxaBruto: (taxaMensalRow as any)?.orcado_bruto ?? null,
+      creditoRds: creditoRdsTaxa,
+      creditoRdsOverride: (taxaMensalRow as any)?.credito_rds ?? null,
+      scale,
+    });
+
+    const provisaoFeriasFgtsSum = (provFeriasFgtsRows ?? []).reduce(
+      (s: number, r: any) => s + (Number(r.fgts) || 0),
+      0
+    );
+    const provisao13FgtsSum = (prov13FgtsRows ?? []).reduce((s: number, r: any) => s + (Number(r.fgts) || 0), 0);
+    const fgtsRaw = buildFgtsAnalise({
+      scale,
+      apuracao: apuracao as any,
+      manual: manualPainel as any,
+      guiaMensal: (fgtsGuiaRow as any) ?? null,
+      provisaoFeriasFgtsSum,
+      provisao13FgtsSum,
+      rubricas: (rubricasPainel ?? []).map((rb: any) => ({
+        codigo: rb.codigo,
+        nome: rb.nome,
+        valor: rb.valor,
+        tipo: rb.tipo,
+      })),
+    });
+    const fgts = sanitizeFgtsEmprestimosDetalhe(
+      fgtsRaw,
+      await canUserViewEmprestimos(req.user)
+    );
+
+    res.json({
+      year,
+      month,
+      empresa: filtroEmpresa || null,
+      setor: setorSelecionado,
+      filtros: {
+        empresas: Array.from(empresasSet).sort((a, b) => a.localeCompare(b, "pt-BR")),
+        setores: setoresList,
+      },
+      orcado,
+      realizado,
+      diferenca,
+      pct_diferenca,
+      acima_orcamento: diferenca > 0.009,
+      status_label: buildStatusLabel(diferenca),
+      drilldown,
+      componentes: componentes.sort((a, b) => b.valor - a.valor),
+      composicao,
+      taxa_servico,
+      fgts,
+      setores_resumo: buildSetorResumo(),
+      indicadores: {
+        funcionarios,
+        trabalhando,
+        custo_medio: funcionarios > 0 ? realizado / funcionarios : 0,
+        apuracao_calculada: Boolean(apuracao?.total_custo),
+        importado: Boolean(importacao) || funcionarios > 0,
+      },
+      fontes: {
+        orcado: orcadoFonte,
+        realizado: realizadoFonte,
+        setor: "Cadastro do funcionário (folha_funcionarios) — não exige reclassificação mensal",
+      },
+      sem_setor: weights.filter((w) => w.setor_nome === "Sem setor").length,
+    });
+  });
+
+  app.patch("/api/folha/taxa-servico", requireRole("admin", "finance", "controle"), async (req, res) => {
+    const year = Number((req.body as any)?.year);
+    const month = Number((req.body as any)?.month);
+    if (!year || !month || month < 1 || month > 12) {
+      return res.status(400).json({ error: "Informe ano e mês (1 a 12)." });
+    }
+    const patch: Record<string, unknown> = {
+      year,
+      month,
+      updated_at: new Date().toISOString(),
+    };
+    if ((req.body as any)?.orcado_bruto != null) {
+      patch.orcado_bruto = Number((req.body as any).orcado_bruto) || 0;
+    }
+    if ((req.body as any)?.credito_rds != null) {
+      const v = Number((req.body as any).credito_rds);
+      patch.credito_rds = Number.isFinite(v) ? v : null;
+    }
+    if ((req.body as any)?.observacao != null) {
+      patch.observacao = String((req.body as any).observacao ?? "").trim() || null;
+    }
+    const { data, error } = await supabase
+      .from("folha_taxa_servico_mensal")
+      .upsert(patch, { onConflict: "year,month" })
+      .select()
+      .single();
+    if (error) {
+      console.error("folha_taxa_servico_mensal:", error);
+      return res.status(500).json({
+        error: "Tabela folha_taxa_servico_mensal indisponível. Execute sql/51_folha_taxa_servico.sql.",
+      });
+    }
+    res.json(data);
+  });
+
+  const absenteismoRoles = requireRole("admin", "finance", "controle", "manager", "diretoria");
+
+  app.get("/api/folha/absenteismo", absenteismoRoles, async (req, res) => {
+    const q = req.query as any;
+    const year = Number(q?.year) || new Date().getFullYear();
+    const monthFrom = Number(q?.month_from || q?.month) || 1;
+    const monthTo = Number(q?.month_to || q?.month) || monthFrom;
+    const filtroSetor = String(q?.setor ?? "").trim().toLowerCase();
+    const filtroEmpresa = String(q?.empresa ?? "").trim().toLowerCase();
+
+    if (monthFrom < 1 || monthTo > 12 || monthFrom > monthTo) {
+      return res.status(400).json({ error: "Período inválido (month_from / month_to)." });
+    }
+
+    let query = supabase
+      .from("folha_absenteismo_mensal")
+      .select("*")
+      .eq("year", year)
+      .gte("month", monthFrom)
+      .lte("month", monthTo)
+      .order("month")
+      .order("setor_nome")
+      .order("nome_funcionario");
+
+    const { data, error } = await query;
+    if (error) {
+      console.error("folha_absenteismo_mensal:", error);
+      return res.status(500).json({
+        error: "Tabela de absenteísmo ausente. Execute sql/46_absenteismo.sql e processe a competência.",
+      });
+    }
+
+    let rows = (data ?? []).map((r: any) => ({
+      ...r,
+      absenteismo_pct:
+        r.absenteismo_pct != null
+          ? Number(r.absenteismo_pct)
+          : r.horas_previstas > 0
+            ? (Number(r.horas_ausencia) / Number(r.horas_previstas)) * 100
+            : null,
+    }));
+
+    if (filtroSetor) {
+      rows = rows.filter((r: any) =>
+        String(r.setor_nome ?? "")
+          .toLowerCase()
+          .includes(filtroSetor)
+      );
+    }
+    if (filtroEmpresa) {
+      rows = rows.filter((r: any) =>
+        String(r.empresa_nome ?? "")
+          .toLowerCase()
+          .includes(filtroEmpresa)
+      );
+    }
+
+    const config = await loadAbsenteismoConfig(supabase);
+    const funcionarios = summarizeAbsenteismo(
+      rows.map((r: any) => ({
+        codigo_funcionario: r.codigo_funcionario,
+        nome_funcionario: r.nome_funcionario,
+        setor_nome: r.setor_nome,
+        setor_codigo: r.setor_codigo,
+        horas_previstas: Number(r.horas_previstas) || 0,
+        horas_trabalhadas: Number(r.horas_trabalhadas) || 0,
+        horas_ausencia: Number(r.horas_ausencia) || 0,
+        dias_faltas: Number(r.dias_faltas) || 0,
+        fonte_previstas: r.fonte_previstas,
+        fonte_trabalhadas: r.fonte_trabalhadas,
+        fonte_ausencias: r.fonte_ausencias,
+      }))
+    );
+
+    const empresas = Array.from(
+      new Set((data ?? []).map((r: any) => String(r.empresa_nome ?? "").trim()).filter(Boolean))
+    ).sort((a, b) => a.localeCompare(b, "pt-BR"));
+    const setores = Array.from(
+      new Map(
+        (data ?? []).map((r: any) => [
+          String(r.setor_nome ?? ""),
+          { nome: String(r.setor_nome ?? ""), codigo: r.setor_codigo ?? null },
+        ])
+      ).values()
+    ).filter((s) => s.nome);
+
+    const porMes = new Map<number, typeof rows>();
+    for (const r of rows) {
+      const m = Number((r as any).month);
+      if (!porMes.has(m)) porMes.set(m, []);
+      porMes.get(m)!.push(r);
+    }
+    const evolucao = Array.from({ length: monthTo - monthFrom + 1 }, (_, i) => {
+      const m = monthFrom + i;
+      const mesRows = porMes.get(m) ?? [];
+      const resumo = summarizeAbsenteismo(
+        mesRows.map((r: any) => ({
+          codigo_funcionario: r.codigo_funcionario,
+          nome_funcionario: r.nome_funcionario,
+          setor_nome: r.setor_nome,
+          setor_codigo: r.setor_codigo,
+          horas_previstas: Number(r.horas_previstas) || 0,
+          horas_trabalhadas: Number(r.horas_trabalhadas) || 0,
+          horas_ausencia: Number(r.horas_ausencia) || 0,
+          dias_faltas: Number(r.dias_faltas) || 0,
+          fonte_previstas: r.fonte_previstas,
+          fonte_trabalhadas: r.fonte_trabalhadas,
+          fonte_ausencias: r.fonte_ausencias,
+        }))
+      );
+      return { month: m, ...resumo };
+    });
+
+    res.json({
+      year,
+      month_from: monthFrom,
+      month_to: monthTo,
+      config,
+      filtros: { empresas, setores },
+      resumo: funcionarios,
+      evolucao,
+      rows,
+    });
+  });
+
+  app.post("/api/folha/absenteismo/processar", requireRole("admin", "finance", "controle"), async (req, res) => {
+    const year = Number((req.body as any)?.year);
+    const month = Number((req.body as any)?.month);
+    if (!year || !month || month < 1 || month > 12) {
+      return res.status(400).json({ error: "Informe year e month válidos." });
+    }
+    const { data: importacao } = await supabase
+      .from("folha_importacoes")
+      .select("empresa_nome")
+      .eq("competencia_ano", year)
+      .eq("competencia_mes", month)
+      .maybeSingle();
+    try {
+      const result = await syncAbsenteismoCompetencia(
+        supabase,
+        year,
+        month,
+        (importacao as any)?.empresa_nome ?? null
+      );
+      res.json({ ok: true, ...result });
+    } catch (e: any) {
+      console.error(e);
+      return res.status(500).json({
+        error: "Falha ao processar absenteísmo. Execute sql/46_absenteismo.sql.",
+      });
+    }
+  });
+
+  app.patch("/api/folha/absenteismo/config", requireRole("admin", "finance", "controle"), async (req, res) => {
+    const body = req.body as any;
+    const num = (v: unknown, fallback: number) => {
+      const n = Number(v);
+      return Number.isFinite(n) ? n : fallback;
+    };
+    const { data, error } = await supabase
+      .from("folha_absenteismo_config")
+      .upsert(
+        {
+          id: 1,
+          horas_previstas_padrao: num(body?.horas_previstas_padrao, 220),
+          horas_dia_padrao: num(body?.horas_dia_padrao, 8),
+          dias_uteis_padrao: num(body?.dias_uteis_padrao, 22),
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "id" }
+      )
+      .select()
+      .single();
+    if (error) {
+      return res.status(500).json({ error: "Execute sql/46_absenteismo.sql." });
+    }
+    res.json(data);
+  });
+
+  app.get("/api/folha/absenteismo/config", absenteismoRoles, async (_req, res) => {
+    res.json(await loadAbsenteismoConfig(supabase));
+  });
+
+  app.patch("/api/folha/absenteismo/funcionario", requireRole("admin", "finance", "controle"), async (req, res) => {
+    const body = req.body as any;
+    const year = Number(body?.year);
+    const month = Number(body?.month);
+    const codigo = String(body?.codigo_funcionario ?? "").trim();
+    if (!year || !month || !codigo) {
+      return res.status(400).json({ error: "Informe year, month e codigo_funcionario." });
+    }
+    const n = (v: unknown) => (Number.isFinite(Number(v)) ? Number(v) : undefined);
+    const row: Record<string, unknown> = {
+      year,
+      month,
+      codigo_funcionario: codigo,
+      nome_funcionario: body?.nome_funcionario ? String(body.nome_funcionario) : undefined,
+      setor_nome: body?.setor_nome ? String(body.setor_nome) : undefined,
+      updated_at: new Date().toISOString(),
+    };
+    if (body?.horas_previstas != null) {
+      row.horas_previstas = n(body.horas_previstas) ?? 0;
+      row.fonte_previstas = "Importação manual";
+    }
+    if (body?.horas_trabalhadas != null) {
+      row.horas_trabalhadas = n(body.horas_trabalhadas) ?? 0;
+      row.fonte_trabalhadas = "Importação manual";
+    }
+    if (body?.horas_ausencia != null) {
+      row.horas_ausencia = n(body.horas_ausencia) ?? 0;
+      row.fonte_ausencias = "Importação manual";
+    }
+    if (body?.dias_faltas != null) row.dias_faltas = n(body.dias_faltas) ?? 0;
+    const hp = n(row.horas_previstas);
+    const ha = n(row.horas_ausencia);
+    if (hp != null && ha != null) row.absenteismo_pct = hp > 0 ? (ha / hp) * 100 : null;
+
+    const { data, error } = await supabase
+      .from("folha_absenteismo_mensal")
+      .upsert(row, { onConflict: "year,month,codigo_funcionario" })
+      .select()
+      .single();
+    if (error) {
+      return res.status(500).json({ error: "Não foi possível salvar os dados do funcionário." });
+    }
+    res.json(data);
+  });
+
+  const turnoverRoles = requireRole("admin", "finance", "controle", "manager", "diretoria");
+
+  app.get("/api/folha/turnover", turnoverRoles, async (req, res) => {
+    const q = req.query as any;
+    const year = Number(q?.year) || new Date().getFullYear();
+    const monthFrom = Number(q?.month_from || q?.month) || 1;
+    const monthTo = Number(q?.month_to || q?.month) || monthFrom;
+    const filtroSetor = String(q?.setor ?? "").trim();
+    const filtroEmpresa = String(q?.empresa ?? "").trim().toLowerCase();
+
+    if (monthFrom < 1 || monthTo > 12 || monthFrom > monthTo) {
+      return res.status(400).json({ error: "Período inválido (month_from / month_to)." });
+    }
+
+    const config = await loadTurnoverConfig(supabase);
+
+    const [{ data: resumos, error: resErr }, { data: movimentos, error: movErr }] = await Promise.all([
+      supabase
+        .from("folha_turnover_mensal")
+        .select("*")
+        .eq("year", year)
+        .gte("month", monthFrom)
+        .lte("month", monthTo)
+        .order("month")
+        .order("setor_nome"),
+      supabase
+        .from("folha_turnover_movimentos")
+        .select("*")
+        .eq("year", year)
+        .gte("month", monthFrom)
+        .lte("month", monthTo)
+        .order("month")
+        .order("tipo")
+        .order("nome_funcionario"),
+    ]);
+
+    if (resErr || movErr) {
+      console.error(resErr || movErr);
+      return res.status(500).json({
+        error: "Tabela de turnover ausente. Execute sql/47_turnover.sql e importe a folha do mês.",
+      });
+    }
+
+    let resumoRows = (resumos ?? []).filter((r: any) => {
+      if (filtroSetor) return String(r.setor_nome ?? "") === filtroSetor;
+      return String(r.setor_nome ?? "") === "";
+    });
+    if (filtroEmpresa) {
+      resumoRows = resumoRows.filter((r: any) =>
+        String(r.empresa_nome ?? "")
+          .toLowerCase()
+          .includes(filtroEmpresa)
+      );
+    }
+
+    let movRows = movimentos ?? [];
+    if (filtroSetor) {
+      movRows = movRows.filter((m: any) => String(m.setor_nome ?? "") === filtroSetor);
+    }
+    if (filtroEmpresa) {
+      movRows = movRows.filter((m: any) =>
+        String(m.empresa_nome ?? "")
+          .toLowerCase()
+          .includes(filtroEmpresa)
+      );
+    }
+
+    const periodoAgg = summarizeTurnoverPeriodo(
+      resumoRows.map((r: any) => ({
+        year: Number(r.year),
+        month: Number(r.month),
+        setor_nome: String(r.setor_nome ?? ""),
+        setor_codigo: r.setor_codigo,
+        headcount_inicio: Number(r.headcount_inicio) || 0,
+        headcount_fim: Number(r.headcount_fim) || 0,
+        admissoes: Number(r.admissoes) || 0,
+        desligamentos: Number(r.desligamentos) || 0,
+        turnover_pct: r.turnover_pct != null ? Number(r.turnover_pct) : null,
+      }))
+    );
+
+    const turnover_periodo_pct = calcularTurnoverPct(
+      periodoAgg.admissoes,
+      periodoAgg.desligamentos,
+      periodoAgg.headcount_inicio,
+      periodoAgg.headcount_fim,
+      config.formula as TurnoverFormula
+    );
+
+    const empresas = Array.from(
+      new Set((resumos ?? []).map((r: any) => String(r.empresa_nome ?? "").trim()).filter(Boolean))
+    ).sort((a, b) => a.localeCompare(b, "pt-BR"));
+
+    const setores = Array.from(
+      new Map(
+        (resumos ?? [])
+          .filter((r: any) => String(r.setor_nome ?? "").trim())
+          .map((r: any) => [
+            String(r.setor_nome),
+            { nome: String(r.setor_nome), codigo: r.setor_codigo ?? null },
+          ])
+      ).values()
+    );
+
+    res.json({
+      year,
+      month_from: monthFrom,
+      month_to: monthTo,
+      config: {
+        ...config,
+        formulas_disponiveis: FORMULA_OPTIONS,
+      },
+      filtros: { empresas, setores },
+      resumo: {
+        ...periodoAgg,
+        turnover_pct: turnover_periodo_pct,
+      },
+      evolucao: resumoRows.map((r: any) => ({
+        month: Number(r.month),
+        setor_nome: r.setor_nome,
+        headcount_inicio: Number(r.headcount_inicio) || 0,
+        headcount_fim: Number(r.headcount_fim) || 0,
+        admissoes: Number(r.admissoes) || 0,
+        desligamentos: Number(r.desligamentos) || 0,
+        turnover_pct: r.turnover_pct != null ? Number(r.turnover_pct) : null,
+      })),
+      movimentos: movRows,
+      setores_resumo: (resumos ?? [])
+        .filter((r: any) => String(r.setor_nome ?? "").trim() && Number(r.month) === monthTo)
+        .map((r: any) => ({
+          setor_nome: r.setor_nome,
+          setor_codigo: r.setor_codigo,
+          headcount_fim: Number(r.headcount_fim) || 0,
+          admissoes: Number(r.admissoes) || 0,
+          desligamentos: Number(r.desligamentos) || 0,
+          turnover_pct: r.turnover_pct != null ? Number(r.turnover_pct) : null,
+        }))
+        .sort((a: any, b: any) => (b.turnover_pct ?? 0) - (a.turnover_pct ?? 0)),
+    });
+  });
+
+  app.post("/api/folha/turnover/processar", requireRole("admin", "finance", "controle"), async (req, res) => {
+    const year = Number((req.body as any)?.year);
+    const month = Number((req.body as any)?.month);
+    if (!year || !month || month < 1 || month > 12) {
+      return res.status(400).json({ error: "Informe year e month válidos." });
+    }
+    const { data: importacao } = await supabase
+      .from("folha_importacoes")
+      .select("empresa_nome")
+      .eq("competencia_ano", year)
+      .eq("competencia_mes", month)
+      .maybeSingle();
+    try {
+      const result = await syncTurnoverCompetencia(
+        supabase,
+        year,
+        month,
+        (importacao as any)?.empresa_nome ?? null
+      );
+      res.json({ ok: true, ...result });
+    } catch (e) {
+      console.error(e);
+      return res.status(500).json({ error: "Falha ao processar turnover. Execute sql/47_turnover.sql." });
+    }
+  });
+
+  app.get("/api/folha/turnover/config", turnoverRoles, async (_req, res) => {
+    const config = await loadTurnoverConfig(supabase);
+    res.json({ ...config, formulas_disponiveis: FORMULA_OPTIONS });
+  });
+
+  app.patch("/api/folha/turnover/config", requireRole("admin", "finance", "controle"), async (req, res) => {
+    const body = req.body as any;
+    const formula = String(body?.formula ?? "").trim() as TurnoverFormula;
+    const valid = FORMULA_OPTIONS.some((f) => f.id === formula);
+    if (!valid) return res.status(400).json({ error: "Fórmula inválida." });
+    const label = FORMULA_OPTIONS.find((f) => f.id === formula)?.label ?? formula;
+    const { data, error } = await supabase
+      .from("folha_turnover_config")
+      .upsert(
+        {
+          id: 1,
+          formula,
+          formula_label: label,
+          observacao: body?.observacao != null ? String(body.observacao).slice(0, 500) : undefined,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "id" }
+      )
+      .select()
+      .single();
+    if (error) return res.status(500).json({ error: "Execute sql/47_turnover.sql." });
+    res.json(data);
+  });
+
+  const emprestimosRoles = requireEmprestimosConfidencial;
+
+  const canUserViewEmprestimos = async (user?: SessionUser) => {
+    if (!user?.role) return false;
+    const perms = await loadRolePermissions(String(user.role));
+    return canViewEmprestimosConfidenciais(user.role, perms);
+  };
+
+  async function requireEmprestimosConfidencial(req: express.Request, res: express.Response, next: express.NextFunction) {
+    if (!req.user) return res.status(401).json({ error: "Não autenticado" });
+    if (await canUserViewEmprestimos(req.user)) return next();
+    return res.status(403).json({ error: EMPRESTIMOS_ACESSO_NEGADO_MSG });
+  }
+
+  const resolveEmprestimoColaboradorMeta = async (body: Record<string, unknown>) => {
+    const colaboradorId =
+      body.colaborador_id != null && body.colaborador_id !== ""
+        ? Number(body.colaborador_id)
+        : null;
+    const codigo = String(body.codigo_funcionario ?? "").trim();
+    let nome = String(body.nome_colaborador ?? "").trim();
+    let setor_nome = body.setor_nome ? String(body.setor_nome).trim() : null;
+    let empresa_nome = body.empresa_nome ? String(body.empresa_nome).trim() : null;
+    let resolvedColaboradorId: number | null =
+      colaboradorId != null && Number.isFinite(colaboradorId) ? colaboradorId : null;
+
+    if (resolvedColaboradorId) {
+      const { data: col } = await supabase
+        .from("colaboradores")
+        .select("id, nome, nome_oficial, codigo_funcionario, empresa_nome, sectors(name)")
+        .eq("id", resolvedColaboradorId)
+        .maybeSingle();
+      if (col) {
+        nome = String((col as any).nome_oficial ?? (col as any).nome ?? nome).trim() || nome;
+        if (!codigo && (col as any).codigo_funcionario) {
+          (body as any).codigo_funcionario = String((col as any).codigo_funcionario);
+        }
+        if (!setor_nome && (col as any).sectors?.name) setor_nome = String((col as any).sectors.name);
+        if (!empresa_nome && (col as any).empresa_nome) empresa_nome = String((col as any).empresa_nome);
+      }
+    } else if (codigo) {
+      const { data: col } = await supabase
+        .from("colaboradores")
+        .select("id, nome, nome_oficial, empresa_nome, sectors(name)")
+        .eq("codigo_funcionario", codigo)
+        .maybeSingle();
+      if (col) {
+        resolvedColaboradorId = Number((col as any).id) || null;
+        nome = String((col as any).nome_oficial ?? (col as any).nome ?? nome).trim() || nome;
+        if (!setor_nome && (col as any).sectors?.name) setor_nome = String((col as any).sectors.name);
+        if (!empresa_nome && (col as any).empresa_nome) empresa_nome = String((col as any).empresa_nome);
+      } else {
+        const { data: ff } = await supabase
+          .from("folha_funcionarios")
+          .select("nome, setor_nome, empresa_nome")
+          .eq("codigo_funcionario", codigo)
+          .maybeSingle();
+        if (ff) {
+          nome = String((ff as any).nome ?? nome).trim() || nome;
+          if (!setor_nome && (ff as any).setor_nome) setor_nome = String((ff as any).setor_nome);
+          if (!empresa_nome && (ff as any).empresa_nome) empresa_nome = String((ff as any).empresa_nome);
+        }
+      }
+    }
+
+    return {
+      colaborador_id: resolvedColaboradorId,
+      codigo_funcionario: codigo || (body.codigo_funcionario ? String(body.codigo_funcionario) : null),
+      nome_colaborador: nome || codigo || "Colaborador",
+      setor_nome,
+      empresa_nome,
+    };
+  };
+
+  const buildEmprestimoPayload = async (body: Record<string, unknown>, existing?: Record<string, unknown>) => {
+    const meta = await resolveEmprestimoColaboradorMeta(body);
+    const instituicao = String(body.instituicao_financeira ?? existing?.instituicao_financeira ?? "").trim();
+    if (!instituicao) throw new Error("INSTITUICAO_OBRIGATORIA");
+
+    const quantidade_parcelas = Math.max(1, Math.round(Number(body.quantidade_parcelas ?? existing?.quantidade_parcelas) || 1));
+    const parcelas_pagas = Math.max(0, Math.round(Number(body.parcelas_pagas ?? existing?.parcelas_pagas) || 0));
+    const statusRaw = String(body.status ?? existing?.status ?? "ativo").trim() as EmprestimoStatus;
+    const status = inferStatusFromParcelas(statusRaw, quantidade_parcelas, parcelas_pagas);
+    const data_inicio =
+      body.data_inicio != null && String(body.data_inicio).trim()
+        ? String(body.data_inicio).slice(0, 10)
+        : existing?.data_inicio
+          ? String(existing.data_inicio).slice(0, 10)
+          : null;
+
+    const numOrNull = (v: unknown) => {
+      if (v === null || v === undefined || v === "") return null;
+      const n = Number(v);
+      return Number.isFinite(n) ? n : null;
+    };
+
+    const responsabilidadeRaw = String(
+      body.responsabilidade ?? existing?.responsabilidade ?? "empresa"
+    ).trim() as EmprestimoResponsabilidade;
+    const responsabilidade: EmprestimoResponsabilidade = [
+      "empresa",
+      "colaborador",
+      "instituicao",
+      "encerrado",
+    ].includes(responsabilidadeRaw)
+      ? responsabilidadeRaw
+      : "empresa";
+
+    const data_desligamento =
+      body.data_desligamento !== undefined
+        ? body.data_desligamento != null && String(body.data_desligamento).trim()
+          ? String(body.data_desligamento).slice(0, 10)
+          : null
+        : existing?.data_desligamento
+          ? String(existing.data_desligamento).slice(0, 10)
+          : null;
+
+    const projeta_parcelas =
+      body.projeta_parcelas !== undefined
+        ? Boolean(body.projeta_parcelas)
+        : existing?.projeta_parcelas !== undefined
+          ? Boolean(existing.projeta_parcelas)
+          : !data_desligamento;
+
+    const motivo_encerramento =
+      body.motivo_encerramento !== undefined
+        ? body.motivo_encerramento != null
+          ? String(body.motivo_encerramento).slice(0, 500) || null
+          : null
+        : existing?.motivo_encerramento
+          ? String(existing.motivo_encerramento).slice(0, 500)
+          : null;
+
+    const projeta = shouldProjectEmprestimoParcelas({
+      projeta_parcelas,
+      responsabilidade,
+      data_desligamento,
+      status,
+    });
+
+    const previsaoFinal = projeta
+      ? body.previsao_termino != null && String(body.previsao_termino).trim()
+        ? String(body.previsao_termino).slice(0, 10)
+        : computePrevisaoTermino(data_inicio, quantidade_parcelas, parcelas_pagas)
+      : null;
+
+    return {
+      colaborador_id: meta.colaborador_id,
+      codigo_funcionario: meta.codigo_funcionario,
+      nome_colaborador: meta.nome_colaborador,
+      setor_nome: meta.setor_nome,
+      empresa_nome: meta.empresa_nome,
+      instituicao_financeira: instituicao,
+      valor_contratado: numOrNull(body.valor_contratado ?? existing?.valor_contratado),
+      valor_recebido: numOrNull(body.valor_recebido ?? existing?.valor_recebido),
+      valor_parcela: Number(body.valor_parcela ?? existing?.valor_parcela) || 0,
+      quantidade_parcelas,
+      parcelas_pagas,
+      data_inicio,
+      previsao_termino: previsaoFinal,
+      status,
+      rubrica_codigo:
+        body.rubrica_codigo != null
+          ? String(body.rubrica_codigo).trim() || null
+          : existing?.rubrica_codigo
+            ? String(existing.rubrica_codigo)
+            : null,
+      rubrica_nome:
+        body.rubrica_nome != null
+          ? String(body.rubrica_nome).trim() || null
+          : existing?.rubrica_nome
+            ? String(existing.rubrica_nome)
+            : null,
+      observacao:
+        body.observacao != null
+          ? String(body.observacao).slice(0, 500) || null
+          : existing?.observacao
+            ? String(existing.observacao).slice(0, 500)
+            : null,
+      responsabilidade,
+      data_desligamento,
+      projeta_parcelas: projeta,
+      motivo_encerramento,
+      updated_at: new Date().toISOString(),
+    };
+  };
+
+  const mapLancamentoEmprestimo = (l: any) => ({
+    codigo_funcionario: l.codigo_funcionario,
+    nome_funcionario: l.nome_funcionario,
+    setor_nome: l.setor_nome,
+    situacao: l.situacao,
+    codigo_rubrica: l.codigo_rubrica,
+    descricao_rubrica: l.descricao_rubrica,
+    tipo_original: l.tipo_original,
+    valor_original: l.valor_original,
+  });
+
+  app.get("/api/folha/emprestimos", emprestimosRoles, async (req, res) => {
+    const q = req.query as any;
+    const status = String(q?.status ?? "").trim();
+    const empresa = String(q?.empresa ?? "").trim().toLowerCase();
+    const setor = String(q?.setor ?? "").trim().toLowerCase();
+    const busca = String(q?.q ?? "").trim().toLowerCase();
+
+    const { data, error } = await supabase
+      .from("folha_emprestimos_consignados")
+      .select("*")
+      .order("nome_colaborador")
+      .order("instituicao_financeira");
+
+    if (error) {
+      console.error("folha_emprestimos_consignados list:", error);
+      return res.status(500).json({
+        error: "Tabela de empréstimos indisponível. Execute sql/53_folha_emprestimos_consignados.sql.",
+      });
+    }
+
+    let rows = (data ?? []).map((r: any) => mapEmprestimoRow(r));
+    if (status) rows = rows.filter((r) => r.status === status);
+    if (empresa) rows = rows.filter((r) => String(r.empresa_nome ?? "").toLowerCase().includes(empresa));
+    if (setor) rows = rows.filter((r) => String(r.setor_nome ?? "").toLowerCase().includes(setor));
+    if (busca) {
+      rows = rows.filter((r) =>
+        [r.nome_colaborador, r.codigo_funcionario, r.instituicao_financeira, r.rubrica_nome, r.setor_nome]
+          .filter(Boolean)
+          .some((v) => String(v).toLowerCase().includes(busca))
+      );
+    }
+
+    res.json(buildEmprestimosListResponse(rows));
+  });
+
+  app.post("/api/folha/emprestimos", requireRole("admin", "finance", "controle"), async (req, res) => {
+    try {
+      const payload = await buildEmprestimoPayload(req.body as Record<string, unknown>);
+      const { data, error } = await supabase
+        .from("folha_emprestimos_consignados")
+        .insert(payload)
+        .select()
+        .single();
+      if (error) {
+        console.error("folha_emprestimos insert:", error);
+        return res.status(500).json({ error: "Não foi possível cadastrar o empréstimo." });
+      }
+      res.status(201).json(mapEmprestimoRow(data as any));
+    } catch (e: any) {
+      if (e?.message === "INSTITUICAO_OBRIGATORIA") {
+        return res.status(400).json({ error: "Informe a instituição financeira." });
+      }
+      console.error(e);
+      return res.status(500).json({ error: "Erro ao processar cadastro." });
+    }
+  });
+
+  app.patch("/api/folha/emprestimos/:id", requireRole("admin", "finance", "controle"), async (req, res) => {
+    const id = Number((req.params as any).id);
+    if (!id) return res.status(400).json({ error: "ID inválido." });
+    const { data: existing, error: fetchErr } = await supabase
+      .from("folha_emprestimos_consignados")
+      .select("*")
+      .eq("id", id)
+      .maybeSingle();
+    if (fetchErr || !existing) return res.status(404).json({ error: "Empréstimo não encontrado." });
+
+    try {
+      const payload = await buildEmprestimoPayload(req.body as Record<string, unknown>, existing as any);
+      const { data, error } = await supabase
+        .from("folha_emprestimos_consignados")
+        .update(payload)
+        .eq("id", id)
+        .select()
+        .single();
+      if (error) return res.status(500).json({ error: "Não foi possível atualizar." });
+      res.json(mapEmprestimoRow(data as any));
+    } catch (e: any) {
+      if (e?.message === "INSTITUICAO_OBRIGATORIA") {
+        return res.status(400).json({ error: "Informe a instituição financeira." });
+      }
+      return res.status(500).json({ error: "Erro ao atualizar." });
+    }
+  });
+
+  app.delete("/api/folha/emprestimos/:id", requireRole("admin", "finance", "controle"), async (req, res) => {
+    const id = Number((req.params as any).id);
+    if (!id) return res.status(400).json({ error: "ID inválido." });
+    const { error } = await supabase.from("folha_emprestimos_consignados").delete().eq("id", id);
+    if (error) return res.status(500).json({ error: "Não foi possível excluir." });
+    res.json({ ok: true });
+  });
+
+  app.post("/api/folha/emprestimos/sync-folha", requireRole("admin", "finance", "controle"), async (req, res) => {
+    const year = Number((req.body as any)?.year);
+    const month = Number((req.body as any)?.month);
+    if (!year || !month || month < 1 || month > 12) {
+      return res.status(400).json({ error: "Informe year e month válidos." });
+    }
+
+    const { data: lancamentos, error: lancErr } = await supabase
+      .from("folha_lancamentos_importados")
+      .select("*")
+      .eq("competencia_ano", year)
+      .eq("competencia_mes", month);
+
+    if (lancErr) {
+      return res.status(500).json({ error: "Lançamentos da folha indisponíveis para sincronização." });
+    }
+
+    const candidatos = (lancamentos ?? []).filter((l: any) =>
+      classifyEmprestimoLancamento(
+        String(l.descricao_rubrica ?? ""),
+        String(l.tipo_original ?? ""),
+        Number(l.valor_original) || 0
+      )
+    );
+
+    const agregados = aggregateEmprestimoLancamentos(
+      candidatos.map((l: any) => mapLancamentoEmprestimo(l))
+    );
+
+    const { data: existentes } = await supabase.from("folha_emprestimos_consignados").select("*");
+    const byRubricaKey = new Map<string, any>();
+    const byConciliacaoKey = new Map<string, any>();
+    for (const e of existentes ?? []) {
+      const codigo = String((e as any).codigo_funcionario ?? "").trim();
+      const rubrica = String((e as any).rubrica_codigo ?? "").trim();
+      if (codigo && rubrica) byRubricaKey.set(`${codigo}|${rubrica}`, e);
+      const instKey = emprestimoConciliacaoKey(
+        codigo,
+        String((e as any).rubrica_nome ?? (e as any).instituicao_financeira ?? "")
+      );
+      if (codigo && instKey) byConciliacaoKey.set(instKey, e);
+    }
+
+    const findExistente = (linha: (typeof agregados)[0]) => {
+      const rubrica = String(linha.rubrica_codigo ?? "").trim();
+      const byRub = rubrica ? byRubricaKey.get(`${linha.codigo_funcionario}|${rubrica}`) : null;
+      if (byRub) return byRub;
+      return byConciliacaoKey.get(linha.key) ?? null;
+    };
+
+    let criados = 0;
+    let atualizados = 0;
+    const conciliacaoRows: any[] = [];
+
+    for (const linha of agregados) {
+      const existente = findExistente(linha);
+      const valor_cadastro = existente ? Number((existente as any).valor_parcela) || 0 : null;
+      const diferenca =
+        valor_cadastro != null ? linha.desconto_liquido_folha - valor_cadastro : null;
+      let emprestimoId: number | null = existente ? Number((existente as any).id) : null;
+
+      if (existente) {
+        const updatePayload: Record<string, unknown> = {
+          rubrica_nome: linha.rubrica_nome || (existente as any).rubrica_nome,
+          rubrica_codigo: linha.rubrica_codigo || (existente as any).rubrica_codigo,
+          nome_colaborador: linha.nome_funcionario || (existente as any).nome_colaborador,
+          setor_nome: linha.setor_nome || (existente as any).setor_nome,
+          instituicao_financeira: linha.instituicao_financeira || (existente as any).instituicao_financeira,
+          updated_at: new Date().toISOString(),
+        };
+        if (linha.desconto_liquido_folha > 0.009) {
+          updatePayload.valor_parcela = linha.desconto_liquido_folha;
+        }
+        const { error } = await supabase
+          .from("folha_emprestimos_consignados")
+          .update(updatePayload)
+          .eq("id", (existente as any).id);
+        if (!error) atualizados += 1;
+      } else if (linha.desconto_liquido_folha > 0.009) {
+        const meta = await resolveEmprestimoColaboradorMeta({
+          codigo_funcionario: linha.codigo_funcionario,
+          nome_colaborador: linha.nome_funcionario,
+          setor_nome: linha.setor_nome ?? "",
+        });
+
+        const { data: inserted, error } = await supabase
+          .from("folha_emprestimos_consignados")
+          .insert({
+            ...meta,
+            instituicao_financeira: linha.instituicao_financeira,
+            valor_parcela: linha.desconto_liquido_folha,
+            quantidade_parcelas: 1,
+            parcelas_pagas: 0,
+            status: "ativo",
+            rubrica_codigo: linha.rubrica_codigo,
+            rubrica_nome: linha.rubrica_nome,
+            observacao: `Sincronizado da folha ${String(month).padStart(2, "0")}/${year} (folha normal, desconto líquido)`,
+            updated_at: new Date().toISOString(),
+          })
+          .select("id")
+          .single();
+        if (!error && inserted) {
+          criados += 1;
+          emprestimoId = Number((inserted as any).id) || null;
+        }
+      }
+
+      conciliacaoRows.push({
+        year,
+        month,
+        codigo_funcionario: linha.codigo_funcionario,
+        conciliacao_key: linha.key,
+        emprestimo_id: emprestimoId,
+        nome_colaborador: linha.nome_funcionario,
+        setor_nome: linha.setor_nome,
+        instituicao_financeira: linha.instituicao_financeira,
+        rubrica_codigo: linha.rubrica_codigo,
+        rubrica_nome: linha.rubrica_nome,
+        descontos: linha.descontos,
+        estornos: linha.estornos,
+        desconto_liquido: linha.desconto_liquido,
+        valor_cadastro,
+        diferenca,
+        lancamentos: linha.lancamentos,
+        updated_at: new Date().toISOString(),
+      });
+    }
+
+    if (conciliacaoRows.length) {
+      await supabase.from("folha_emprestimos_conciliacao_mensal").delete().eq("year", year).eq("month", month);
+      const { error: concErr } = await supabase.from("folha_emprestimos_conciliacao_mensal").insert(conciliacaoRows);
+      if (concErr) {
+        console.error("folha_emprestimos_conciliacao_mensal:", concErr);
+      }
+    }
+
+    const totais = sumConciliacao(agregados);
+
+    res.json({
+      ok: true,
+      year,
+      month,
+      lancamentos_emprestimo: candidatos.length,
+      linhas_conciliacao: agregados.length,
+      criados,
+      atualizados,
+      descontos: totais.descontos,
+      descontos_folha_normal: totais.descontos_folha_normal,
+      descontos_rescisao: totais.descontos_rescisao,
+      estornos: totais.estornos,
+      desconto_liquido: totais.desconto_liquido,
+      desconto_liquido_folha: totais.desconto_liquido_folha,
+    });
+  });
+
+  app.get("/api/folha/emprestimos/alertas-desligamento", emprestimosRoles, async (_req, res) => {
+    const [{ data: emprestimos, error }, { data: pagamentos, error: pagErr }] = await Promise.all([
+      supabase.from("folha_emprestimos_consignados").select("*").eq("status", "ativo"),
+      supabase
+        .from("folha_pagamento")
+        .select("matricula, nome, situacao, year, month")
+        .order("year", { ascending: false })
+        .order("month", { ascending: false }),
+    ]);
+
+    if (error) {
+      return res.status(500).json({ error: "Não foi possível carregar empréstimos." });
+    }
+    if (pagErr) {
+      console.warn("folha_pagamento alertas-desligamento:", pagErr.message);
+    }
+
+    const situacaoPorMatricula = new Map<
+      string,
+      { situacao: string; nome: string; year: number; month: number }
+    >();
+    for (const p of pagamentos ?? []) {
+      const mat = String((p as any).matricula ?? "").trim();
+      if (!mat || situacaoPorMatricula.has(mat)) continue;
+      situacaoPorMatricula.set(mat, {
+        situacao: String((p as any).situacao ?? ""),
+        nome: String((p as any).nome ?? ""),
+        year: Number((p as any).year) || 0,
+        month: Number((p as any).month) || 0,
+      });
+    }
+
+    const alertas: Array<Record<string, unknown>> = [];
+    for (const raw of emprestimos ?? []) {
+      const row = mapEmprestimoRow(raw as any);
+      if (!row.projeta_parcelas || row.data_desligamento) continue;
+      const codigo = String(row.codigo_funcionario ?? "").trim();
+      if (!codigo) continue;
+      const sit = situacaoPorMatricula.get(codigo);
+      if (!sit || !isSituacaoDesligamento(sit.situacao)) continue;
+      alertas.push({
+        emprestimo_id: row.id,
+        colaborador_id: row.colaborador_id,
+        codigo_funcionario: codigo,
+        nome_colaborador: row.nome_colaborador,
+        instituicao_financeira: row.instituicao_financeira,
+        valor_parcela: row.valor_parcela,
+        parcelas_restantes_exibicao: row.parcelas_restantes_exibicao,
+        situacao_folha: sit.situacao,
+        competencia_folha: { year: sit.year, month: sit.month },
+        sugestao:
+          "Colaborador com situação de desligamento na folha. Registre o desligamento e defina a responsabilidade do contrato.",
+      });
+    }
+
+    alertas.sort((a, b) =>
+      String(a.nome_colaborador).localeCompare(String(b.nome_colaborador), "pt-BR")
+    );
+
+    res.json({
+      regras_rescisao_pendentes: REGRAS_RESCISAO_PENDENTES,
+      alertas,
+    });
+  });
+
+  app.patch("/api/folha/emprestimos/:id/desligamento", requireRole("admin", "finance", "controle"), async (req, res) => {
+    const id = Number((req.params as any).id);
+    if (!id) return res.status(400).json({ error: "ID inválido." });
+
+    const body = req.body as Record<string, unknown>;
+    const data_desligamento = body.data_desligamento ? String(body.data_desligamento).slice(0, 10) : "";
+    if (!data_desligamento) {
+      return res.status(400).json({ error: "Informe a data de desligamento." });
+    }
+
+    const responsabilidadeRaw = String(body.responsabilidade ?? "").trim() as EmprestimoResponsabilidade;
+    if (!["empresa", "colaborador", "instituicao", "encerrado"].includes(responsabilidadeRaw)) {
+      return res.status(400).json({ error: "Responsabilidade inválida." });
+    }
+
+    const aplicarTodos = Boolean(body.aplicar_todos_colaborador);
+    const projeta_parcelas =
+      body.projeta_parcelas !== undefined ? Boolean(body.projeta_parcelas) : false;
+    const motivo_encerramento =
+      body.motivo_encerramento != null ? String(body.motivo_encerramento).slice(0, 500) || null : null;
+
+    const { data: existente, error: fetchErr } = await supabase
+      .from("folha_emprestimos_consignados")
+      .select("*")
+      .eq("id", id)
+      .maybeSingle();
+    if (fetchErr || !existente) return res.status(404).json({ error: "Empréstimo não encontrado." });
+
+    const updatePayload = {
+      data_desligamento,
+      responsabilidade: responsabilidadeRaw,
+      projeta_parcelas,
+      motivo_encerramento,
+      previsao_termino: null,
+      updated_at: new Date().toISOString(),
+      ...(responsabilidadeRaw === "encerrado" ? { status: "quitado" as const } : {}),
+    };
+
+    let idsAtualizados = [id];
+    if (aplicarTodos) {
+      const codigo = String((existente as any).codigo_funcionario ?? "").trim();
+      const colaboradorId = (existente as any).colaborador_id;
+      let q = supabase.from("folha_emprestimos_consignados").select("id").eq("status", "ativo");
+      if (colaboradorId != null) q = q.eq("colaborador_id", colaboradorId);
+      else if (codigo) q = q.eq("codigo_funcionario", codigo);
+      else return res.status(400).json({ error: "Empréstimo sem vínculo de colaborador." });
+      const { data: irmãos } = await q;
+      idsAtualizados = (irmãos ?? []).map((r: any) => Number(r.id)).filter(Boolean);
+    }
+
+    const { data, error } = await supabase
+      .from("folha_emprestimos_consignados")
+      .update(updatePayload)
+      .in("id", idsAtualizados)
+      .select();
+
+    if (error) {
+      console.error("folha_emprestimos desligamento:", error);
+      return res.status(500).json({ error: "Não foi possível registrar o desligamento." });
+    }
+
+    res.json({
+      ok: true,
+      atualizados: (data ?? []).length,
+      emprestimos: (data ?? []).map((r: any) => mapEmprestimoRow(r)),
+      regras_rescisao_pendentes: REGRAS_RESCISAO_PENDENTES,
+    });
+  });
+
+  app.get("/api/folha/emprestimos/conciliacao", emprestimosRoles, async (req, res) => {
+    const year = Number((req.query as any)?.year);
+    const month = Number((req.query as any)?.month);
+    if (!year || !month || month < 1 || month > 12) {
+      return res.status(400).json({ error: "Informe year e month válidos." });
+    }
+
+    const { data: lancamentos, error: lancErr } = await supabase
+      .from("folha_lancamentos_importados")
+      .select("*")
+      .eq("competencia_ano", year)
+      .eq("competencia_mes", month);
+
+    if (lancErr) {
+      return res.status(500).json({ error: "Lançamentos da folha indisponíveis." });
+    }
+
+    const candidatos = (lancamentos ?? []).filter((l: any) =>
+      classifyEmprestimoLancamento(
+        String(l.descricao_rubrica ?? ""),
+        String(l.tipo_original ?? ""),
+        Number(l.valor_original) || 0
+      )
+    );
+
+    const linhasCalc = aggregateEmprestimoLancamentos(
+      candidatos.map((l: any) => mapLancamentoEmprestimo(l))
+    );
+
+    const { data: cadastroRows } = await supabase.from("folha_emprestimos_consignados").select("*");
+    const byRubricaKey = new Map<string, any>();
+    const byConciliacaoKey = new Map<string, any>();
+    for (const e of cadastroRows ?? []) {
+      const codigo = String((e as any).codigo_funcionario ?? "").trim();
+      const rubrica = String((e as any).rubrica_codigo ?? "").trim();
+      if (codigo && rubrica) byRubricaKey.set(`${codigo}|${rubrica}`, e);
+      const instKey = emprestimoConciliacaoKey(
+        codigo,
+        String((e as any).rubrica_nome ?? (e as any).instituicao_financeira ?? "")
+      );
+      if (codigo && instKey) byConciliacaoKey.set(instKey, e);
+    }
+
+    const linhas = linhasCalc.map((linha) => {
+      const rubrica = String(linha.rubrica_codigo ?? "").trim();
+      const existente =
+        (rubrica ? byRubricaKey.get(`${linha.codigo_funcionario}|${rubrica}`) : null) ??
+        byConciliacaoKey.get(linha.key) ??
+        null;
+      const valor_cadastro = existente ? Number((existente as any).valor_parcela) || 0 : null;
+      return {
+        ...linha,
+        valor_cadastro,
+        emprestimo_id: existente ? Number((existente as any).id) : null,
+        diferenca:
+          valor_cadastro != null ? linha.desconto_liquido_folha - valor_cadastro : null,
+      };
+    });
+
+    const cadastroMapped = (cadastroRows ?? []).map((r: any) => mapEmprestimoRow(r));
+
+    const { data: justRows, error: justErr } = await supabase
+      .from("folha_emprestimos_divergencias")
+      .select("*")
+      .eq("year", year)
+      .eq("month", month);
+
+    if (justErr) {
+      console.warn("folha_emprestimos_divergencias:", justErr.message);
+    }
+
+    const divergencias_lista = buildEmprestimoDivergencias(
+      linhas,
+      cadastroMapped,
+      (justRows ?? []).map((j: any) => ({
+        conciliacao_key: String(j.conciliacao_key),
+        motivo: j.motivo,
+        justificativa: j.justificativa,
+      }))
+    );
+
+    const totais = sumConciliacao(linhas);
+    const divergencias = divergencias_lista.length;
+    const divergencias_justificadas = divergencias_lista.filter((d) => d.justificado).length;
+
+    res.json({
+      year,
+      month,
+      resumo: {
+        ...totais,
+        linhas: linhas.length,
+        divergencias,
+        divergencias_justificadas,
+        divergencias_pendentes: divergencias - divergencias_justificadas,
+      },
+      linhas,
+      divergencias_lista,
+    });
+  });
+
+  app.put("/api/folha/emprestimos/divergencias/justificativa", requireRole("admin", "finance", "controle"), async (req, res) => {
+    const body = req.body as Record<string, unknown>;
+    const year = Number(body.year);
+    const month = Number(body.month);
+    const conciliacao_key = String(body.conciliacao_key ?? "").trim();
+    const motivoRaw = String(body.motivo ?? "").trim() as EmprestimoDivergenciaMotivo;
+    const justificativa = body.justificativa != null ? String(body.justificativa).trim() : "";
+
+    if (!year || !month || month < 1 || month > 12) {
+      return res.status(400).json({ error: "Informe year e month válidos." });
+    }
+    if (!conciliacao_key) {
+      return res.status(400).json({ error: "Informe conciliacao_key." });
+    }
+    const motivosValidos: EmprestimoDivergenciaMotivo[] = [
+      "rescisao",
+      "estorno",
+      "parcela_nao_descontada",
+      "reembolso",
+      "diferenca_competencia",
+      "erro_inconsistencia",
+      "outro",
+    ];
+    if (!motivosValidos.includes(motivoRaw)) {
+      return res.status(400).json({ error: "Motivo inválido." });
+    }
+    if (!justificativa) {
+      return res.status(400).json({ error: "Informe a justificativa." });
+    }
+
+    const payload = {
+      year,
+      month,
+      conciliacao_key,
+      emprestimo_id: body.emprestimo_id != null ? Number(body.emprestimo_id) || null : null,
+      codigo_funcionario: String(body.codigo_funcionario ?? "").trim() || "—",
+      nome_colaborador: body.nome_colaborador != null ? String(body.nome_colaborador) : null,
+      instituicao_financeira: body.instituicao_financeira != null ? String(body.instituicao_financeira) : null,
+      valor_esperado: body.valor_esperado != null ? Number(body.valor_esperado) : null,
+      valor_descontado: Number(body.valor_descontado) || 0,
+      valor_repassado: Number(body.valor_repassado) || 0,
+      diferenca: Number(body.diferenca) || 0,
+      motivo: motivoRaw,
+      justificativa,
+      updated_at: new Date().toISOString(),
+    };
+
+    const { data, error } = await supabase
+      .from("folha_emprestimos_divergencias")
+      .upsert(payload, { onConflict: "year,month,conciliacao_key" })
+      .select()
+      .single();
+
+    if (error) {
+      console.error("folha_emprestimos_divergencias upsert:", error);
+      return res.status(500).json({
+        error: "Não foi possível salvar a justificativa. Execute sql/56_folha_emprestimos_divergencias.sql.",
+      });
+    }
+
+    res.json({ ok: true, registro: data });
+  });
+
+  app.get("/api/folha/emprestimos/historico", emprestimosRoles, async (req, res) => {
+    const q = req.query as any;
+    const desdeInicio =
+      String(q?.desde_inicio ?? "") === "1" || String(q?.desde_inicio ?? "").toLowerCase() === "true";
+
+    const { data: lancamentos, error: lancErr } = await supabase
+      .from("folha_lancamentos_importados")
+      .select("*")
+      .order("competencia_ano")
+      .order("competencia_mes");
+
+    if (lancErr) {
+      return res.status(500).json({ error: "Lançamentos da folha indisponíveis." });
+    }
+
+    const candidatos = (lancamentos ?? [])
+      .filter((l: any) =>
+        classifyEmprestimoLancamento(
+          String(l.descricao_rubrica ?? ""),
+          String(l.tipo_original ?? ""),
+          Number(l.valor_original) || 0
+        )
+      )
+      .map((l: any) => ({
+        ...mapLancamentoEmprestimo(l),
+        competencia_ano: l.competencia_ano,
+        competencia_mes: l.competencia_mes,
+      }));
+
+    const periodo = resolveEmprestimoHistoricoPeriodo(candidatos, {
+      desde_inicio: desdeInicio,
+      year_from: Number(q?.year_from),
+      month_from: Number(q?.month_from),
+      year_to: Number(q?.year_to),
+      month_to: Number(q?.month_to),
+    });
+
+    if (!periodo) {
+      return res.json({
+        periodo: null,
+        resumo: {
+          pago_repassado: 0,
+          descontado: 0,
+          estornos: 0,
+          diferenca_acumulada: 0,
+        },
+        evolucao_mensal: [],
+        por_colaborador: [],
+        sem_dados: true,
+      });
+    }
+
+    const filtroCodigo = String(q?.codigo_funcionario ?? "").trim();
+    const filtroBusca = String(q?.q ?? "").trim().toLowerCase();
+
+    let rowsFiltrados = candidatos;
+    if (filtroCodigo) {
+      rowsFiltrados = rowsFiltrados.filter(
+        (l) => String(l.codigo_funcionario ?? "").trim() === filtroCodigo
+      );
+    }
+    if (filtroBusca) {
+      rowsFiltrados = rowsFiltrados.filter((l) => {
+        const desc = String(l.descricao_rubrica ?? "");
+        const inst = extractInstituicaoFromRubrica(desc);
+        return [l.nome_funcionario, l.codigo_funcionario, inst, desc]
+          .filter(Boolean)
+          .some((v) => String(v).toLowerCase().includes(filtroBusca));
+      });
+    }
+
+    const resultado = buildEmprestimoHistorico(rowsFiltrados, periodo);
+
+    res.json(resultado);
+  });
+
+  const tangerinoRoles = requireRole("admin", "finance", "controle", "manager", "diretoria");
+
+  app.get("/api/folha/tangerino", tangerinoRoles, async (req, res) => {
+    const q = req.query as any;
+    const year = Number(q?.year) || new Date().getFullYear();
+    const monthFrom = Number(q?.month_from || q?.month) || 1;
+    const monthTo = Number(q?.month_to || q?.month) || monthFrom;
+    const empresaKey = String(q?.empresa_key ?? "").trim() as TangerinoEmpresaKey | "";
+    const filtroSetor = String(q?.setor ?? "").trim().toLowerCase();
+
+    if (monthFrom < 1 || monthTo > 12 || monthFrom > monthTo) {
+      return res.status(400).json({ error: "Período inválido." });
+    }
+
+    let query = supabase
+      .from("tangerino_ponto_mensal")
+      .select("*")
+      .eq("year", year)
+      .gte("month", monthFrom)
+      .lte("month", monthTo)
+      .order("month")
+      .order("setor_nome")
+      .order("nome_colaborador");
+
+    if (empresaKey) query = query.eq("empresa_key", empresaKey);
+
+    const [{ data: rows, error }, { data: importacoes }, { data: vinculos }] = await Promise.all([
+      query,
+      supabase
+        .from("tangerino_importacoes")
+        .select("*")
+        .eq("year", year)
+        .gte("month", monthFrom)
+        .lte("month", monthTo)
+        .order("created_at", { ascending: false }),
+      supabase.from("tangerino_colaborador_vinculo").select("*").eq("ativo", true).order("nome_tangerino"),
+    ]);
+
+    if (error) {
+      console.error(error);
+      return res.status(500).json({
+        error: "Tabelas Tangerino ausentes. Execute sql/48_tangerino.sql.",
+      });
+    }
+
+    let filtered = rows ?? [];
+    if (filtroSetor) {
+      filtered = filtered.filter((r: any) =>
+        String(r.setor_nome ?? "")
+          .toLowerCase()
+          .includes(filtroSetor)
+      );
+    }
+
+    const resumo = summarizeTangerino(filtered);
+    const setores = Array.from(
+      new Map(
+        filtered
+          .filter((r: any) => String(r.setor_nome ?? "").trim())
+          .map((r: any) => [
+            String(r.setor_nome),
+            { nome: String(r.setor_nome), codigo: r.setor_codigo ?? null },
+          ])
+      ).values()
+    );
+
+    const evolucao = Array.from({ length: monthTo - monthFrom + 1 }, (_, i) => monthFrom + i).map((m) => {
+      const mesRows = filtered.filter((r: any) => Number(r.month) === m);
+      const s = summarizeTangerino(mesRows);
+      return { month: m, ...s };
+    });
+
+    res.json({
+      year,
+      month_from: monthFrom,
+      month_to: monthTo,
+      empresas: TANGERINO_EMPRESAS,
+      filtros: { setores },
+      resumo,
+      evolucao,
+      rows: filtered.map((r: any) => ({
+        ...r,
+        empresa_nome: empresaNomeFromKey(String(r.empresa_key ?? "")),
+        horas_previstas: Number(r.horas_previstas) || 0,
+        horas_trabalhadas: Number(r.horas_trabalhadas) || 0,
+        horas_ausencia: Number(r.horas_ausencia) || 0,
+        dias_faltas: Number(r.dias_faltas) || 0,
+      })),
+      importacoes: importacoes ?? [],
+      vinculos: vinculos ?? [],
+    });
+  });
+
+  app.post("/api/folha/tangerino/import/preview", requireRole("admin", "finance", "controle"), upload.single("tangerino_file"), async (req, res) => {
+    if (!req.file) return res.status(400).json({ error: "Arquivo não enviado." });
+    const empresaKey = (String((req.body as any)?.empresa_key ?? "vivaz").trim() || "vivaz") as TangerinoEmpresaKey;
+    if (!["vivaz", "aqua"].includes(empresaKey)) {
+      return res.status(400).json({ error: "empresa_key deve ser vivaz ou aqua." });
+    }
+
+    const isPdf = req.file.mimetype === "application/pdf" || /\.pdf$/i.test(req.file.originalname || "");
+    if (isPdf) {
+      if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+      return res.status(422).json({
+        success: false,
+        error:
+          "Importação por PDF do Tangerino será mapeada em breve. Por enquanto, exporte o relatório em CSV e envie nesta tela.",
+        pdf_pendente: true,
+      });
+    }
+
+    try {
+      const content = fs.readFileSync(req.file.path, "utf8");
+      const parsed = parseTangerinoCsv(content, empresaKey);
+      if (!parsed.rows.length) {
+        return res.status(422).json({
+          success: false,
+          error: parsed.errors[0] || "Nenhuma linha reconhecida no CSV.",
+          parse_errors: parsed.errors,
+          headers: parsed.headers,
+        });
+      }
+      res.json({
+        success: true,
+        arquivo_nome: req.file.originalname || "tangerino.csv",
+        empresa_key: empresaKey,
+        empresa_nome: empresaNomeFromKey(empresaKey),
+        rows: parsed.rows,
+        resumo: summarizeTangerino(parsed.rows),
+        parse_warnings: parsed.errors,
+        headers: parsed.headers,
+      });
+    } catch (e: any) {
+      console.error(e);
+      res.status(500).json({ error: "Falha ao ler o arquivo CSV." });
+    } finally {
+      if (req.file?.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+    }
+  });
+
+  app.post("/api/folha/tangerino/import/commit", requireRole("admin", "finance", "controle"), async (req, res) => {
+    const body = req.body as any;
+    const year = Number(body?.year);
+    const month = Number(body?.month);
+    const empresaKey = String(body?.empresa_key ?? "vivaz").trim() as TangerinoEmpresaKey;
+    const rows = Array.isArray(body?.rows) ? body.rows : [];
+    const aplicarAbsenteismo = body?.aplicar_absenteismo !== false;
+
+    if (!year || !month || month < 1 || month > 12) {
+      return res.status(400).json({ error: "Informe year e month válidos." });
+    }
+    if (!["vivaz", "aqua"].includes(empresaKey)) {
+      return res.status(400).json({ error: "empresa_key deve ser vivaz ou aqua." });
+    }
+    if (!rows.length) return res.status(400).json({ error: "Nenhuma linha para gravar." });
+
+    try {
+      const result = await commitTangerinoImport(supabase, year, month, empresaKey, rows, {
+        arquivo_nome: body?.arquivo_nome,
+        origem: body?.origem ?? "csv",
+        usuario: (req as any).user?.email ?? null,
+      });
+
+      let absenteismo = { rows: 0 };
+      if (aplicarAbsenteismo) {
+        absenteismo = await applyTangerinoToAbsenteismo(supabase, year, month, empresaKey);
+      }
+
+      res.json({ ok: true, ...result, absenteismo });
+    } catch (e) {
+      console.error(e);
+      return res.status(500).json({ error: "Falha ao gravar importação Tangerino. Execute sql/48_tangerino.sql." });
+    }
+  });
+
+  app.post("/api/folha/tangerino/aplicar-absenteismo", requireRole("admin", "finance", "controle"), async (req, res) => {
+    const year = Number((req.body as any)?.year);
+    const month = Number((req.body as any)?.month);
+    const empresaKey = String((req.body as any)?.empresa_key ?? "").trim() as TangerinoEmpresaKey | "";
+    if (!year || !month) return res.status(400).json({ error: "Informe year e month." });
+    try {
+      const result = await applyTangerinoToAbsenteismo(
+        supabase,
+        year,
+        month,
+        empresaKey && ["vivaz", "aqua"].includes(empresaKey) ? empresaKey : null
+      );
+      res.json({ ok: true, ...result });
+    } catch (e) {
+      console.error(e);
+      return res.status(500).json({ error: "Falha ao aplicar Tangerino no absenteísmo." });
+    }
+  });
+
+  app.get("/api/folha/tangerino/vinculos", tangerinoRoles, async (req, res) => {
+    const empresaKey = String((req.query as any)?.empresa_key ?? "").trim();
+    let q = supabase.from("tangerino_colaborador_vinculo").select("*").order("nome_tangerino");
+    if (empresaKey) q = q.eq("empresa_key", empresaKey);
+    const { data, error } = await q;
+    if (error) return res.status(500).json({ error: "Execute sql/48_tangerino.sql." });
+    res.json(data ?? []);
+  });
+
+  app.patch("/api/folha/tangerino/vinculos", requireRole("admin", "finance", "controle"), async (req, res) => {
+    const body = req.body as any;
+    const empresa_key = String(body?.empresa_key ?? "").trim();
+    const nome_tangerino = String(body?.nome_tangerino ?? "").trim();
+    if (!empresa_key || !nome_tangerino) {
+      return res.status(400).json({ error: "Informe empresa_key e nome_tangerino." });
+    }
+    try {
+      const data = await upsertVinculo(supabase, {
+        empresa_key,
+        nome_tangerino,
+        tangerino_id: body?.tangerino_id,
+        codigo_funcionario: body?.codigo_funcionario,
+        setor_nome: body?.setor_nome,
+        setor_codigo: body?.setor_codigo,
+        ativo: body?.ativo !== false,
+      });
+      res.json(data);
+    } catch (e) {
+      console.error(e);
+      return res.status(500).json({ error: "Não foi possível salvar o vínculo." });
+    }
   });
 
   // ====================================================
@@ -6187,15 +14165,23 @@ export function createApp() {
   };
 
   /** Cria parâmetros de rubricas a partir dos dados já importados (folha_rubricas + detalhe). */
-  const sincronizarCadastroRubricasCompetencia = async (year: number, month: number): Promise<number> => {
+  const sincronizarCadastroRubricasCompetencia = async (year: number, month: number, req: express.Request): Promise<number> => {
     const [{ data: rubricas }, { data: paramsExistentes }, { data: detalhe }] = await Promise.all([
-      supabase.from("folha_rubricas").select("codigo, nome, tipo").eq("year", year).eq("month", month),
+      filterByEmpresa(
+        supabase.from("folha_rubricas").select("codigo, nome, tipo").eq("year", year).eq("month", month),
+        req,
+        "folha_rubricas"
+      ),
       supabase.from("folha_rubricas_parametros").select("codigo_rubrica"),
-      supabase
-        .from("folha_lancamentos_importados")
-        .select("codigo_rubrica, descricao_rubrica, tipo_original")
-        .eq("competencia_ano", year)
-        .eq("competencia_mes", month),
+      filterByEmpresa(
+        supabase
+          .from("folha_lancamentos_importados")
+          .select("codigo_rubrica, descricao_rubrica, tipo_original")
+          .eq("competencia_ano", year)
+          .eq("competencia_mes", month),
+        req,
+        "folha_lancamentos_importados"
+      ),
     ]);
     const codigosCadastrados = new Set((paramsExistentes ?? []).map((p: any) => String(p.codigo_rubrica).trim()));
     const rubricasUnicas: { codigo: string; nome: string; tipo: string }[] = [];
@@ -6333,10 +14319,14 @@ export function createApp() {
     const year = Number((req.query as any)?.year) || new Date().getFullYear();
     const month = Number((req.query as any)?.month);
 
-    const { data: rubricas, error } = await supabase
-      .from("folha_rubricas")
-      .select("codigo, nome, valor, tipo, year, month")
-      .eq("year", year);
+    const { data: rubricas, error } = await filterByEmpresa(
+      supabase
+        .from("folha_rubricas")
+        .select("codigo, nome, valor, tipo, year, month")
+        .eq("year", year),
+      req,
+      "folha_rubricas"
+    );
     if (error) return res.status(500).json({ error: "Erro ao carregar rubricas importadas." });
 
     const paramsMap = await loadRubricaParamsMap();
@@ -6454,11 +14444,31 @@ export function createApp() {
     if (!month || month < 1 || month > 12) return res.status(400).json({ error: "Informe o mês (1-12)." });
 
     const [{ data: funcionarios }, { data: rubricas }, { data: importacao }, { data: apuracao }, { data: detalhe }] = await Promise.all([
-      supabase.from("folha_pagamento").select("matricula, nome, situacao, proventos, descontos, liquido").eq("year", year).eq("month", month),
-      supabase.from("folha_rubricas").select("codigo, nome, valor, tipo").eq("year", year).eq("month", month),
-      supabase.from("folha_importacoes").select("*").eq("competencia_ano", year).eq("competencia_mes", month).maybeSingle(),
-      supabase.from("folha_apuracoes_mensais").select("*").eq("competencia_ano", year).eq("competencia_mes", month).maybeSingle(),
-      supabase.from("folha_lancamentos_importados").select("id").eq("competencia_ano", year).eq("competencia_mes", month),
+      filterByEmpresa(
+        supabase.from("folha_pagamento").select("matricula, nome, situacao, proventos, descontos, liquido").eq("year", year).eq("month", month),
+        req,
+        "folha_pagamento"
+      ),
+      filterByEmpresa(
+        supabase.from("folha_rubricas").select("codigo, nome, valor, tipo").eq("year", year).eq("month", month),
+        req,
+        "folha_rubricas"
+      ),
+      filterByEmpresa(
+        supabase.from("folha_importacoes").select("*").eq("competencia_ano", year).eq("competencia_mes", month),
+        req,
+        "folha_importacoes"
+      ).maybeSingle(),
+      filterByEmpresa(
+        supabase.from("folha_apuracoes_mensais").select("*").eq("competencia_ano", year).eq("competencia_mes", month),
+        req,
+        "folha_apuracoes_mensais"
+      ).maybeSingle(),
+      filterByEmpresa(
+        supabase.from("folha_lancamentos_importados").select("id").eq("competencia_ano", year).eq("competencia_mes", month),
+        req,
+        "folha_lancamentos_importados"
+      ),
     ]);
 
     const paramsMap = await loadRubricaParamsMap();
@@ -6494,12 +14504,15 @@ export function createApp() {
       return res.status(400).json({ error: "Informe ano e mês válidos." });
     }
 
-    const { data: apExistente } = await supabase
-      .from("folha_apuracoes_mensais")
-      .select("bloqueado")
-      .eq("competencia_ano", year)
-      .eq("competencia_mes", month)
-      .maybeSingle();
+    const { data: apExistente } = await filterByEmpresa(
+      supabase
+        .from("folha_apuracoes_mensais")
+        .select("bloqueado")
+        .eq("competencia_ano", year)
+        .eq("competencia_mes", month),
+      req,
+      "folha_apuracoes_mensais"
+    ).maybeSingle();
     if (apExistente?.bloqueado) {
       if (!force) {
         return res.status(403).json({ error: "Competência bloqueada. Apenas administradores podem reprocessar com confirmação." });
@@ -6509,12 +14522,15 @@ export function createApp() {
       }
     }
 
-    const { data: importacao } = await supabase
-      .from("folha_importacoes")
-      .select("id, status")
-      .eq("competencia_ano", year)
-      .eq("competencia_mes", month)
-      .maybeSingle();
+    const { data: importacao } = await filterByEmpresa(
+      supabase
+        .from("folha_importacoes")
+        .select("id, status")
+        .eq("competencia_ano", year)
+        .eq("competencia_mes", month),
+      req,
+      "folha_importacoes"
+    ).maybeSingle();
 
     const encargos = await loadEncargosAno(year);
     if (!encargos) {
@@ -6525,21 +14541,29 @@ export function createApp() {
     const ignored = await loadIgnoredRubricas();
 
     // Garante cadastro de rubricas a partir da importação (equivalente à tabela de classificação da planilha)
-    await sincronizarCadastroRubricasCompetencia(year, month);
+    await sincronizarCadastroRubricasCompetencia(year, month, req);
 
     const paramsMap = await loadRubricaParamsMap();
 
-    const { data: detalheImportado } = await supabase
-      .from("folha_lancamentos_importados")
-      .select("*")
-      .eq("competencia_ano", year)
-      .eq("competencia_mes", month);
+    const { data: detalheImportado } = await filterByEmpresa(
+      supabase
+        .from("folha_lancamentos_importados")
+        .select("*")
+        .eq("competencia_ano", year)
+        .eq("competencia_mes", month),
+      req,
+      "folha_lancamentos_importados"
+    );
 
-    const { data: rubricasResumo, error: rubErr } = await supabase
-      .from("folha_rubricas")
-      .select("codigo, nome, horas, valor, tipo")
-      .eq("year", year)
-      .eq("month", month);
+    const { data: rubricasResumo, error: rubErr } = await filterByEmpresa(
+      supabase
+        .from("folha_rubricas")
+        .select("codigo, nome, horas, valor, tipo")
+        .eq("year", year)
+        .eq("month", month),
+      req,
+      "folha_rubricas"
+    );
     if (rubErr) return res.status(500).json({ error: "Erro ao carregar rubricas do mês." });
 
     const rawInputs = lancamentosDaImportacao(detalheImportado ?? [], rubricasResumo ?? []);
@@ -6547,17 +14571,32 @@ export function createApp() {
       return res.status(400).json({ error: "Não há dados importados para esta competência. Importe o extrato mensal primeiro." });
     }
 
-    const rawLancamentos = rawInputs.filter(
+    const { data: funcCadastroRows } = await filterByEmpresa(
+      supabase
+        .from("folha_funcionarios")
+        .select("codigo_funcionario, setor_nome, setor_codigo, sector_id")
+        .eq("ativo", true),
+      req,
+      "folha_funcionarios"
+    );
+    const cadastroSetorMap = buildCadastroSetorMap(funcCadastroRows ?? []);
+    const rawInputsComSetor = enrichLancamentosComCadastroSetor(rawInputs, cadastroSetorMap);
+
+    const rawLancamentos = rawInputsComSetor.filter(
       (l) => !ignored.has(String(l.codigo_rubrica).trim())
     );
 
     const lancamentos = classificarLancamentosImportacao(rawLancamentos, paramsMap);
 
-    const { data: funcionarios } = await supabase
-      .from("folha_pagamento")
-      .select("matricula, nome, cargo, situacao, cpf")
-      .eq("year", year)
-      .eq("month", month);
+    const { data: funcionarios } = await filterByEmpresa(
+      supabase
+        .from("folha_pagamento")
+        .select("matricula, nome, cargo, situacao, cpf")
+        .eq("year", year)
+        .eq("month", month),
+      req,
+      "folha_pagamento"
+    );
 
     const qtdFuncionarios = (funcionarios ?? []).length;
     const qtdTrabalhando = (funcionarios ?? []).filter((f: any) =>
@@ -6573,7 +14612,10 @@ export function createApp() {
       });
     }
 
-    await supabase.from("folha_lancamentos").delete().eq("competencia_ano", year).eq("competencia_mes", month);
+    await scopeByEmpresa(
+      supabase.from("folha_lancamentos").delete().eq("competencia_ano", year).eq("competencia_mes", month),
+      req
+    );
 
     const lancRows = lancamentos.map((l) => ({
       importacao_id: importacao?.id ?? null,
@@ -6597,22 +14639,27 @@ export function createApp() {
       status_mapeamento: l.status_mapeamento,
       updated_at: new Date().toISOString(),
     }));
-    const { error: insErr } = await supabase.from("folha_lancamentos").insert(lancRows);
+    const { error: insErr } = await supabase
+      .from("folha_lancamentos")
+      .insert(lancRows.map((row) => withEmpresaKey(row, req)));
     if (insErr) {
       console.error("Erro ao gravar lançamentos:", insErr);
       return res.status(500).json({ error: "Não foi possível gravar lançamentos." });
     }
 
-    const apRow = {
-      ...apuracao,
-      status: "calculado",
-      calculado_por: req.user?.id ?? null,
-      calculado_em: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    };
+    const apRow = withEmpresaKey(
+      {
+        ...apuracao,
+        status: "calculado",
+        calculado_por: req.user?.id ?? null,
+        calculado_em: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      },
+      req
+    );
     const { data: saved, error: apErr } = await supabase
       .from("folha_apuracoes_mensais")
-      .upsert(apRow, { onConflict: "competencia_ano,competencia_mes" })
+      .upsert(apRow, { onConflict: "empresa_key,competencia_ano,competencia_mes" })
       .select()
       .single();
     if (apErr) {
@@ -6649,16 +14696,24 @@ export function createApp() {
   app.get("/api/folha/apuracao/competencias", folhaApuracaoRoles, async (req, res) => {
     const year = Number((req.query as any)?.year) || new Date().getFullYear();
     const [{ data: importacoes }, { data: apuracoes }] = await Promise.all([
-      supabase
-        .from("folha_importacoes")
-        .select("competencia_mes, competencia_ano, nome_arquivo, data_importacao, total_funcionarios, total_rubricas, status")
-        .eq("competencia_ano", year)
-        .order("competencia_mes"),
-      supabase
-        .from("folha_apuracoes_mensais")
-        .select("competencia_mes, status, calculado_em, total_custo")
-        .eq("competencia_ano", year)
-        .order("competencia_mes"),
+      filterByEmpresa(
+        supabase
+          .from("folha_importacoes")
+          .select("competencia_mes, competencia_ano, nome_arquivo, data_importacao, total_funcionarios, total_rubricas, status")
+          .eq("competencia_ano", year)
+          .order("competencia_mes"),
+        req,
+        "folha_importacoes"
+      ),
+      filterByEmpresa(
+        supabase
+          .from("folha_apuracoes_mensais")
+          .select("competencia_mes, status, calculado_em, total_custo")
+          .eq("competencia_ano", year)
+          .order("competencia_mes"),
+        req,
+        "folha_apuracoes_mensais"
+      ),
     ]);
 
     const apMap = new Map((apuracoes ?? []).map((a: any) => [Number(a.competencia_mes), a]));
@@ -6695,27 +14750,67 @@ export function createApp() {
       { data: detalheRows },
       { data: rubricasRows },
     ] = await Promise.all([
-      supabase.from("folha_apuracoes_mensais").select("*").eq("competencia_ano", year).eq("competencia_mes", month).maybeSingle(),
-      supabase.from("folha_lancamentos").select("*").eq("competencia_ano", year).eq("competencia_mes", month).order("codigo_rubrica"),
-      supabase.from("folha_situacoes_resumo").select("*").eq("competencia_ano", year).eq("competencia_mes", month),
-      supabase.from("folha_pagamento").select("*", { count: "exact", head: true }).eq("year", year).eq("month", month),
-      supabase.from("folha_rubricas").select("*", { count: "exact", head: true }).eq("year", year).eq("month", month),
-      supabase.from("folha_importacoes").select("*").eq("competencia_ano", year).eq("competencia_mes", month).maybeSingle(),
-      supabase.from("folha_lancamentos_importados").select("*", { count: "exact", head: true }).eq("competencia_ano", year).eq("competencia_mes", month),
-      supabase.from("folha_lancamentos_importados").select("*").eq("competencia_ano", year).eq("competencia_mes", month),
-      supabase.from("folha_rubricas").select("codigo, nome, horas, valor, tipo").eq("year", year).eq("month", month),
+      filterByEmpresa(
+        supabase.from("folha_apuracoes_mensais").select("*").eq("competencia_ano", year).eq("competencia_mes", month),
+        req,
+        "folha_apuracoes_mensais"
+      ).maybeSingle(),
+      filterByEmpresa(
+        supabase.from("folha_lancamentos").select("*").eq("competencia_ano", year).eq("competencia_mes", month).order("codigo_rubrica"),
+        req,
+        "folha_lancamentos"
+      ),
+      filterByEmpresa(
+        supabase.from("folha_situacoes_resumo").select("*").eq("competencia_ano", year).eq("competencia_mes", month),
+        req,
+        "folha_situacoes_resumo"
+      ),
+      filterByEmpresa(
+        supabase.from("folha_pagamento").select("*", { count: "exact", head: true }).eq("year", year).eq("month", month),
+        req,
+        "folha_pagamento"
+      ),
+      filterByEmpresa(
+        supabase.from("folha_rubricas").select("*", { count: "exact", head: true }).eq("year", year).eq("month", month),
+        req,
+        "folha_rubricas"
+      ),
+      filterByEmpresa(
+        supabase.from("folha_importacoes").select("*").eq("competencia_ano", year).eq("competencia_mes", month),
+        req,
+        "folha_importacoes"
+      ).maybeSingle(),
+      filterByEmpresa(
+        supabase.from("folha_lancamentos_importados").select("*", { count: "exact", head: true }).eq("competencia_ano", year).eq("competencia_mes", month),
+        req,
+        "folha_lancamentos_importados"
+      ),
+      filterByEmpresa(
+        supabase.from("folha_lancamentos_importados").select("*").eq("competencia_ano", year).eq("competencia_mes", month),
+        req,
+        "folha_lancamentos_importados"
+      ),
+      filterByEmpresa(
+        supabase.from("folha_rubricas").select("codigo, nome, horas, valor, tipo").eq("year", year).eq("month", month),
+        req,
+        "folha_rubricas"
+      ),
     ]);
 
     if (sitErr) console.warn("folha_situacoes_resumo indisponível:", sitErr.message);
     if (detErr) console.warn("folha_lancamentos_importados indisponível:", detErr.message);
 
-    const dadosImportados = (funcCount ?? 0) > 0 || (rubCount ?? 0) > 0;
+    const temResumoRubricas = (rubCount ?? 0) > 0;
+    const temDetalheImportado = (detCount ?? 0) > 0;
+    const temFuncionarios = (funcCount ?? 0) > 0;
+    const dadosImportados =
+      Boolean(importacao) || temResumoRubricas || temDetalheImportado || temFuncionarios;
 
     let proventosImportacao = 0;
     let rubricasPendentesProvento = 0;
     if (dadosImportados) {
       try {
-        await sincronizarCadastroRubricasCompetencia(year, month);
+        await sincronizarCadastroRubricasCompetencia(year, month, req);
         const paramsMap = await loadRubricaParamsMap();
         const ignored = await loadIgnoredRubricas();
         const rawImport = lancamentosDaImportacao(detalheRows ?? [], rubricasRows ?? []).filter(
@@ -6782,7 +14877,7 @@ export function createApp() {
         lancamentos_detalhe: detCount ?? 0,
         proventos_calculados: proventosImportacao,
         rubricas_pendentes: rubricasPendentesProvento,
-        pronto_para_processar: dadosImportados && (rubCount ?? 0) > 0,
+        pronto_para_processar: dadosImportados && (temResumoRubricas || temDetalheImportado),
         aguardando_processamento: dadosImportados && !apuracao,
       },
     });
@@ -6791,11 +14886,15 @@ export function createApp() {
   // Síntese anual com variação mês a mês
   app.get("/api/folha/apuracao/sintese", folhaApuracaoRoles, async (req, res) => {
     const year = Number((req.query as any)?.year) || new Date().getFullYear();
-    const { data, error } = await supabase
-      .from("folha_apuracoes_mensais")
-      .select("*")
-      .eq("competencia_ano", year)
-      .order("competencia_mes");
+    const { data, error } = await filterByEmpresa(
+      supabase
+        .from("folha_apuracoes_mensais")
+        .select("*")
+        .eq("competencia_ano", year)
+        .order("competencia_mes"),
+      req,
+      "folha_apuracoes_mensais"
+    );
     if (error) return res.status(500).json({ error: "Erro ao carregar síntese." });
 
     const meses = Array.from({ length: 12 }, (_, i) => {
@@ -6836,11 +14935,15 @@ export function createApp() {
     const year = Number((req.query as any)?.year) || new Date().getFullYear();
     const month = Number((req.query as any)?.month);
     if (!month) return res.status(400).json({ error: "Informe o mês." });
-    const { data: lancamentos } = await supabase
-      .from("folha_lancamentos")
-      .select("*")
-      .eq("competencia_ano", year)
-      .eq("competencia_mes", month);
+    const { data: lancamentos } = await filterByEmpresa(
+      supabase
+        .from("folha_lancamentos")
+        .select("*")
+        .eq("competencia_ano", year)
+        .eq("competencia_mes", month),
+      req,
+      "folha_lancamentos"
+    );
     const paramsMap = await loadRubricaParamsMap();
     const grouped = new Map<string, any>();
     for (const l of lancamentos ?? []) {
@@ -6872,11 +14975,15 @@ export function createApp() {
     const year = Number((req.query as any)?.year) || new Date().getFullYear();
     const month = Number((req.query as any)?.month);
     if (!month) return res.status(400).json({ error: "Informe o mês." });
-    const { data: lancamentos } = await supabase
-      .from("folha_lancamentos")
-      .select("*")
-      .eq("competencia_ano", year)
-      .eq("competencia_mes", month);
+    const { data: lancamentos } = await filterByEmpresa(
+      supabase
+        .from("folha_lancamentos")
+        .select("*")
+        .eq("competencia_ano", year)
+        .eq("competencia_mes", month),
+      req,
+      "folha_lancamentos"
+    );
     const grouped = new Map<string, any>();
     for (const l of lancamentos ?? []) {
       const setor = String((l as any).setor_nome || "Sem setor");
@@ -6951,11 +15058,18 @@ export function createApp() {
 
   // Sincronizar setores a partir de sectors existente
   app.post("/api/folha/apuracao/setores/sync", folhaApuracaoRoles, async (_req, res) => {
-    const { data: sectors } = await supabase.from("sectors").select("id, name, code").eq("active", true);
+    const { data: sectors } = await supabase.from("sectors").select("id, name, code, active").eq("active", true);
     let count = 0;
     for (const s of sectors ?? []) {
+      const code = (s as any).code ?? slugSectorCodeFromName(String((s as any).name ?? ""));
       await supabase.from("folha_setores").upsert(
-        { nome: (s as any).name, codigo: (s as any).code, sector_id: (s as any).id, ativo: true, updated_at: new Date().toISOString() },
+        {
+          nome: (s as any).name,
+          codigo: code,
+          sector_id: (s as any).id,
+          ativo: true,
+          updated_at: new Date().toISOString(),
+        },
         { onConflict: "nome" }
       );
       count += 1;
@@ -6969,11 +15083,14 @@ export function createApp() {
     const month = Number((req.body as any)?.month);
     const bloqueado = Boolean((req.body as any)?.bloqueado);
     if (!year || !month) return res.status(400).json({ error: "Informe ano e mês." });
-    const { error } = await supabase
-      .from("folha_apuracoes_mensais")
-      .update({ bloqueado, updated_at: new Date().toISOString() })
-      .eq("competencia_ano", year)
-      .eq("competencia_mes", month);
+    const { error } = await scopeByEmpresa(
+      supabase
+        .from("folha_apuracoes_mensais")
+        .update({ bloqueado, updated_at: new Date().toISOString() })
+        .eq("competencia_ano", year)
+        .eq("competencia_mes", month),
+      req
+    );
     if (error) return res.status(500).json({ error: "Não foi possível atualizar bloqueio." });
     await logFolhaAuditoria(year, month, bloqueado ? "bloquear" : "desbloquear", req.user?.id, { bloqueado });
     res.json({ success: true, bloqueado });
@@ -6988,27 +15105,29 @@ export function createApp() {
     const crdFilter = normalizeCrdFilterText(crd || "");
 
     let occupancyPercent = 100;
-    const { data: occupancyRows, error: occupancyError } = await supabase
-      .from("sintase_occupancy")
-      .select("occupancy_percent")
-      .eq("year", selectedYear)
-      .limit(1);
+    const { data: occupancyRows, error: occupancyError } = await filterByEmpresa(
+      supabase.from("sintase_occupancy").select("occupancy_percent").eq("year", selectedYear),
+      req,
+      "sintase_occupancy"
+    ).limit(1);
     if (!occupancyError && occupancyRows?.length) {
       occupancyPercent = getNormalizedOccupancyPercent((occupancyRows[0] as any).occupancy_percent);
     }
     const occupancyFactor = occupancyPercent / 100;
 
-    const { data: crdData, error } = await supabase
-      .from("crds")
-      .select("id, code, name, sector_id, previsto_mes, sectors(name)")
-      .eq("active", true)
-      .order("code");
+    const { data: crdData, error } = await filterByEmpresa(
+      supabase.from("crds").select("id, code, name, sector_id, previsto_mes, sectors(name)").eq("active", true),
+      req,
+      "crds"
+    ).order("code");
 
     if (error) { console.error(error); return res.status(500).json({ error: "Erro interno ao processar a solicitação." }); }
 
-    const { data: allCrds } = await supabase
-      .from("crds")
-      .select("id, code, sector_id");
+    const { data: allCrds } = await filterByEmpresa(
+      supabase.from("crds").select("id, code, sector_id"),
+      req,
+      "crds"
+    );
 
     const crdIds = (crdData ?? []).map((item: any) => Number(item.id)).filter((id) => Number.isFinite(id));
     const monthValueByKey = new Map<string, number>();
@@ -7024,7 +15143,10 @@ export function createApp() {
 
     if (crdIds.length) {
       const allowedCrdIds = new Set(crdIds);
-      const { rows: monthlyRows, error: monthlyError } = await fetchMonthlyValuesByYear(selectedYear);
+      const { rows: monthlyRows, error: monthlyError } = await fetchMonthlyValuesByYear(
+        selectedYear,
+        empresaKeyOf(req)
+      );
 
       if (!monthlyError) {
         for (const row of (monthlyRows ?? []) as CrdMonthlyValueRow[]) {
@@ -7174,6 +15296,47 @@ export function createApp() {
       source:
         "Apuração de Receita › Relatório Diário de Situação › Alimentos & Bebidas › EVENTOS/BANQUETES › Acumulado (R$)",
     },
+    {
+      rowId: "l66-estacionamento",
+      rowLabel: "Estacionamento",
+      sectionKey: "diversos",
+      labels: ["ESTACIONAMENTO"],
+      source:
+        "Apuração de Receita › Relatório Diário de Situação › Diversos › ESTACIONAMENTO › Acumulado (R$)",
+    },
+    {
+      rowId: "l67-outras",
+      rowLabel: "Outras",
+      sectionKey: "diversos",
+      labels: [
+        "TAXA DE TURISMO",
+        "LAVANDERIA",
+        "DAY PASS",
+        "RECREACAO",
+        "RECEPCAO DIVERSOS",
+        "RECEPCAO SERVICOS",
+        "TARIFADOR",
+        "TAXA DE ISS",
+      ],
+      source:
+        "Apuração de Receita › Relatório Diário de Situação › Diversos › Acumulado (R$) — TAXA DE TURISMO + LAVANDERIA + DAY PASS + RECREACAO + RECEPCAO DIVERSOS + RECEPCAO SERVICOS + TARIFADOR + TAXA DE ISS",
+    },
+    {
+      rowId: "l68-aluguel-eventos",
+      rowLabel: "Aluguel Eventos",
+      sectionKey: "eventos",
+      labels: ["EVENTOS - SERVICOS"],
+      source:
+        "Apuração de Receita › Relatório Diário de Situação › Eventos › EVENTOS - SERVICOS › Acumulado (R$)",
+    },
+    {
+      rowId: "l69-spa",
+      rowLabel: "SPA",
+      sectionKey: "diversos",
+      labels: ["SPA"],
+      source:
+        "Apuração de Receita › Relatório Diário de Situação › Diversos › SPA › Acumulado (R$)",
+    },
   ] as const;
 
   const normalizeRdsLabel = (value: unknown) =>
@@ -7200,14 +15363,14 @@ export function createApp() {
     return matched > 0 ? sum : null;
   };
 
-  app.get("/api/dre/realizado-rds", requireRole("admin", "controle"), async (req, res) => {
+  app.get("/api/dre/realizado-rds", requireRole("admin", "controle", "diretoria"), async (req, res) => {
     const year = Number((req.query as { year?: string }).year) || new Date().getFullYear();
 
-    const { data, error } = await supabase
-      .from("rds_snapshots")
-      .select("month, sections, report_date")
-      .eq("year", year)
-      .order("month", { ascending: true });
+    const { data, error } = await filterByEmpresa(
+      supabase.from("rds_snapshots").select("month, sections, report_date").eq("year", year),
+      req,
+      "rds_snapshots"
+    ).order("month", { ascending: true });
 
     if (error) {
       console.error("dre realizado-rds:", error);
@@ -7253,29 +15416,112 @@ export function createApp() {
     });
   });
 
-  app.get("/api/dre/edits", requireRole("admin", "controle"), async (req, res) => {
+  // Realizado do DRE a partir do Rel. CRD (SALDO LANÇ), chaveado pelo código contábil
+  // que aparece no label das linhas (ex.: "ENERGIA (367)").
+  app.get("/api/dre/realizado-crd", requireRole("admin", "controle", "diretoria"), async (req, res) => {
     const year = Number((req.query as { year?: string }).year) || new Date().getFullYear();
-    const { data, error } = await supabase
-      .from("dre_cell_edits")
-      .select("row_key, month, field, value, user_name, updated_at")
-      .eq("year", year);
+
+    const { data, error } = await filterByEmpresa(
+      supabase.from("rel_crd_rows").select("id, month, nivel, codigo, nome, saldo_lanc").eq("year", year),
+      req,
+      "rel_crd_rows"
+    );
+
     if (error) {
-      console.error("dre_cell_edits select (execute sql/15_dre_cell_edits.sql):", error);
+      console.error("dre realizado-crd:", error);
       return res.status(500).json({
-        error: "Não foi possível carregar as edições do DRE. Execute sql/15_dre_cell_edits.sql no Supabase.",
+        error: "Não foi possível carregar o realizado do Rel. CRD. Execute sql/13_rel_crd_rows.sql se ainda não rodou.",
+      });
+    }
+
+    const rowIds = (data ?? []).map((r: any) => Number(r.id)).filter((id) => Number.isFinite(id) && id > 0);
+    const corrections = await fetchCorrectionsForRows(supabase, "rel_crd_rows", rowIds);
+
+    const maxNivelByMonth = new Map<number, number>();
+    for (const row of data ?? []) {
+      const month = Number((row as any).month);
+      if (!Number.isFinite(month) || month < 1 || month > 12) continue;
+      const nivel = Number((row as any).nivel) || 1;
+      maxNivelByMonth.set(month, Math.max(maxNivelByMonth.get(month) ?? 1, nivel));
+    }
+
+    const byCodigo: Record<string, Array<number | null>> = {};
+    const nomes: Record<string, string> = {};
+    for (const row of data ?? []) {
+      const month = Number((row as any).month);
+      if (!Number.isFinite(month) || month < 1 || month > 12) continue;
+      const nivel = Number((row as any).nivel) || 1;
+      if (nivel < (maxNivelByMonth.get(month) ?? 1)) continue; // só folhas — evita dupla contagem
+      const codigo = String((row as any).codigo ?? "").trim();
+      if (!codigo) continue;
+      if (!byCodigo[codigo]) byCodigo[codigo] = Array.from({ length: 12 }, () => null);
+      const saldoMeta = applyFieldCorrection(
+        Number((row as any).saldo_lanc) || 0,
+        getCorrectionFromMap(corrections, "rel_crd_rows", Number((row as any).id), "saldo_lanc")
+      );
+      byCodigo[codigo][month - 1] = saldoMeta.value;
+      const nome = String((row as any).nome ?? "").trim();
+      if (nome && !nomes[codigo]) nomes[codigo] = nome;
+    }
+
+    res.json({
+      year,
+      byCodigo,
+      nomes,
+      source: "Importação › Rel. CRD › coluna SALDO LANÇ (contas folha)",
+    });
+  });
+
+  app.get("/api/dre/edits", requireRole("admin", "controle", "diretoria"), async (req, res) => {
+    const year = Number((req.query as { year?: string }).year) || new Date().getFullYear();
+    const { data, error } = await filterByEmpresa(
+      supabase
+        .from("dre_cell_edits")
+        .select("row_key, month, field, value, previous_value, motivo, user_name, user_email, updated_at")
+        .eq("year", year),
+      req,
+      "dre_cell_edits"
+    );
+    if (error) {
+      console.error("dre_cell_edits select (execute sql/15_dre_cell_edits.sql + sql/26_dre_ajustes.sql):", error);
+      return res.status(500).json({
+        error: "Não foi possível carregar as edições do DRE. Execute sql/15_dre_cell_edits.sql e sql/26_dre_ajustes.sql no Supabase.",
       });
     }
     res.json({ year, edits: data ?? [] });
   });
 
+  app.get("/api/dre/ajustes", requireRole("admin", "controle", "diretoria"), async (req, res) => {
+    const year = Number((req.query as { year?: string }).year) || new Date().getFullYear();
+    const { data, error } = await filterByEmpresa(
+      supabase
+        .from("dre_cell_edit_history")
+        .select("id, year, row_key, row_label, month, field, previous_value, new_value, motivo, user_name, user_email, created_at")
+        .eq("year", year),
+      req,
+      "dre_cell_edit_history"
+    )
+      .order("created_at", { ascending: false })
+      .limit(500);
+    if (error) {
+      console.error("dre_cell_edit_history select (execute sql/26_dre_ajustes.sql):", error);
+      return res.status(500).json({
+        error: "Não foi possível carregar o histórico de ajustes. Execute sql/26_dre_ajustes.sql no Supabase.",
+      });
+    }
+    res.json({ year, ajustes: data ?? [] });
+  });
+
   app.patch("/api/dre/cell", requireRole("admin", "controle"), async (req, res) => {
-    const { year, row_key, row_label, month, field, value } = req.body as {
+    const { year, row_key, row_label, month, field, value, motivo, previous_value } = req.body as {
       year?: number;
       row_key?: number;
       row_label?: string;
       month?: number;
       field?: string;
       value?: number | string;
+      motivo?: string;
+      previous_value?: number | string | null;
     };
     if (!Number.isFinite(Number(year)) || Number(year) < 2000)
       return res.status(400).json({ error: "year inválido" });
@@ -7285,37 +15531,78 @@ export function createApp() {
       return res.status(400).json({ error: "month deve estar entre 1 e 12" });
     if (field !== "prev" && field !== "real")
       return res.status(400).json({ error: "field deve ser 'prev' ou 'real'" });
+    const motivoText = String(motivo ?? "").trim();
+    if (!motivoText)
+      return res.status(400).json({ error: "Informe o motivo do ajuste." });
     const numValue = Number(String(value).replace(",", "."));
     if (!Number.isFinite(numValue))
       return res.status(400).json({ error: "value inválido" });
+    const prevRaw = previous_value;
+    const numPrevious =
+      prevRaw == null || prevRaw === ""
+        ? null
+        : Number(String(prevRaw).replace(",", "."));
+    if (numPrevious != null && !Number.isFinite(numPrevious))
+      return res.status(400).json({ error: "previous_value inválido" });
 
     const user = (req as any).user;
-    const record = {
-      year: Number(year),
-      row_key: Number(row_key),
-      row_label: String(row_label ?? "").slice(0, 200) || null,
-      month: Number(month),
-      field,
-      value: numValue,
-      user_name: user?.name ?? null,
-      user_email: user?.email ?? null,
-      updated_at: new Date().toISOString(),
-    };
+    const nowIso = new Date().toISOString();
+    const record = withEmpresaKey(
+      {
+        year: Number(year),
+        row_key: Number(row_key),
+        row_label: String(row_label ?? "").slice(0, 200) || null,
+        month: Number(month),
+        field,
+        value: numValue,
+        previous_value: numPrevious,
+        motivo: motivoText.slice(0, 2000),
+        user_name: user?.name ?? null,
+        user_email: user?.email ?? null,
+        updated_at: nowIso,
+      },
+      req
+    );
+
     const { data, error } = await supabase
       .from("dre_cell_edits")
       .upsert(record, { onConflict: "year,row_key,month,field" })
-      .select("row_key, month, field, value, user_name, updated_at")
+      .select("row_key, month, field, value, previous_value, motivo, user_name, user_email, updated_at")
       .single();
     if (error) {
-      console.error("dre_cell_edits upsert (execute sql/15_dre_cell_edits.sql):", error);
+      console.error("dre_cell_edits upsert (execute sql/15 + sql/26):", error);
       return res.status(500).json({
-        error: "Não foi possível salvar. Execute sql/15_dre_cell_edits.sql no Supabase se ainda não rodou.",
+        error: "Não foi possível salvar. Execute sql/15_dre_cell_edits.sql e sql/26_dre_ajustes.sql no Supabase se ainda não rodou.",
       });
     }
+
+    const { error: histError } = await supabase.from("dre_cell_edit_history").insert(
+      withEmpresaKey(
+        {
+          year: record.year,
+          row_key: record.row_key,
+          row_label: record.row_label,
+          month: record.month,
+          field: record.field,
+          previous_value: record.previous_value,
+          new_value: record.value,
+          motivo: record.motivo,
+          user_name: record.user_name,
+          user_email: record.user_email,
+          created_at: nowIso,
+        },
+        req
+      )
+    );
+    if (histError) {
+      console.error("dre_cell_edit_history insert:", histError);
+      // Célula já foi salva; histórico é complementar.
+    }
+
     res.json({ success: true, edit: data });
   });
 
-  app.patch("/api/sintase/cell", async (req, res) => {
+  app.patch("/api/sintase/cell", requireRole("admin"), async (req, res) => {
     const { crd_id, month, year, value, occupancy_percent } = req.body as {
       crd_id?: number;
       month?: number;
@@ -7341,12 +15628,15 @@ export function createApp() {
     const { error } = await supabase
       .from("crd_monthly_values")
       .upsert(
-        {
-          crd_id: Number(crd_id),
-          year: Number(year),
-          month: Number(month),
-          value: sanitizedValue,
-        },
+        withEmpresaKey(
+          {
+            crd_id: Number(crd_id),
+            year: Number(year),
+            month: Number(month),
+            value: sanitizedValue,
+          },
+          req
+        ),
         { onConflict: "crd_id,year,month" }
       );
 
@@ -7375,11 +15665,11 @@ export function createApp() {
   app.get("/api/sintase/occupancy", async (req, res) => {
     const { year } = req.query as { year?: string };
     const selectedYear = Number(year) || new Date().getFullYear();
-    const { data, error } = await supabase
-      .from("sintase_occupancy")
-      .select("year, occupancy_percent")
-      .eq("year", selectedYear)
-      .limit(1);
+    const { data, error } = await filterByEmpresa(
+      supabase.from("sintase_occupancy").select("year, occupancy_percent").eq("year", selectedYear),
+      req,
+      "sintase_occupancy"
+    ).limit(1);
     if (error) { console.error(error); return res.status(500).json({ error: "Erro interno ao processar a solicitação." }); }
     const occupancyPercent = data?.length
       ? getNormalizedOccupancyPercent((data[0] as any).occupancy_percent)
@@ -7387,7 +15677,7 @@ export function createApp() {
     res.json({ year: selectedYear, occupancy_percent: occupancyPercent });
   });
 
-  app.patch("/api/sintase/occupancy", async (req, res) => {
+  app.patch("/api/sintase/occupancy", requireRole("admin"), async (req, res) => {
     const { year, occupancy_percent } = req.body as { year?: number | string; occupancy_percent?: number | string };
     if (!Number.isFinite(Number(year))) {
       return res.status(400).json({ error: "year inválido" });
@@ -7396,10 +15686,13 @@ export function createApp() {
     const { error } = await supabase
       .from("sintase_occupancy")
       .upsert(
-        {
-          year: Number(year),
-          occupancy_percent: occupancyPercent,
-        },
+        withEmpresaKey(
+          {
+            year: Number(year),
+            occupancy_percent: occupancyPercent,
+          },
+          req
+        ),
         { onConflict: "year" }
       );
     if (error) { console.error(error); return res.status(500).json({ error: "Erro interno ao processar a solicitação." }); }
@@ -7407,10 +15700,191 @@ export function createApp() {
   });
 
   // ====================================================
+  // CNPJ — consulta pública (BrasilAPI / dados Receita Federal)
+  // ====================================================
+  app.get("/api/cnpj/:cnpj", async (req, res) => {
+    const digits = String(req.params.cnpj || "").replace(/\D/g, "");
+    if (digits.length !== 14) {
+      return res.status(400).json({ error: "Informe um CNPJ com 14 dígitos." });
+    }
+    try {
+      const upstream = await fetch(`https://brasilapi.com.br/api/cnpj/v1/${digits}`, {
+        headers: { Accept: "application/json" },
+      });
+      if (upstream.status === 404) {
+        return res.status(404).json({ error: "CNPJ não encontrado na Receita Federal." });
+      }
+      if (!upstream.ok) {
+        return res.status(502).json({
+          error: "Não foi possível consultar o CNPJ no momento. Tente novamente.",
+        });
+      }
+      const data = (await upstream.json()) as Record<string, any>;
+      const razao = String(data.razao_social || "").trim();
+      const fantasia = String(data.nome_fantasia || "").trim();
+      const dddTel = String(data.ddd_telefone_1 || "").replace(/\D/g, "");
+      let telefone = "";
+      if (dddTel.length >= 10) {
+        const ddd = dddTel.slice(0, 2);
+        const rest = dddTel.slice(2);
+        telefone =
+          rest.length === 9
+            ? `(${ddd}) ${rest.slice(0, 5)}-${rest.slice(5)}`
+            : `(${ddd}) ${rest.slice(0, 4)}-${rest.slice(4)}`;
+      } else if (dddTel) {
+        telefone = dddTel;
+      }
+      res.json({
+        cnpj: digits,
+        razao_social: razao,
+        nome_fantasia: fantasia,
+        prestador: fantasia || razao,
+        telefone,
+        email: String(data.email || "").trim() || null,
+        municipio: String(data.municipio || "").trim() || null,
+        uf: String(data.uf || "").trim() || null,
+      });
+    } catch (err: any) {
+      console.error("Erro ao consultar CNPJ:", err?.message || err);
+      res.status(502).json({ error: "Falha na consulta do CNPJ." });
+    }
+  });
+
+  // ====================================================
+  // COMPRAS: ORDENS DE COMPRA
+  // ====================================================
+  app.get("/api/ordens-compra", async (req, res) => {
+    const { data, error } = await filterByEmpresa(
+      supabase.from("ordens_compra").select("*, users(id, name)"),
+      req,
+      "ordens_compra"
+    ).order("created_at", { ascending: false });
+    if (error) {
+      console.error(error);
+      return res.status(500).json({ error: "Erro ao listar ordens de compra." });
+    }
+    res.json(data ?? []);
+  });
+
+  app.patch("/api/ordens-compra/:id/status", async (req, res) => {
+    const { id } = req.params;
+    const { status } = req.body;
+    if (!["open", "approved", "cancelled", "posted"].includes(status)) {
+      return res.status(400).json({ error: "Status inválido" });
+    }
+
+    const { data: existing, error: fetchError } = await scopeByEmpresa(
+      supabase
+        .from("ordens_compra")
+        .select("id, servico_sector_id, materiais_sector_id, status")
+        .eq("id", id),
+      req
+    ).maybeSingle();
+    if (fetchError) {
+      console.error(fetchError);
+      return res.status(500).json({ error: "Erro interno ao processar a solicitação." });
+    }
+    if (!existing) return res.status(404).json({ error: "Ordem de compra não encontrada" });
+
+    const sectorId = (existing as { servico_sector_id?: number | null; materiais_sector_id?: number | null }).servico_sector_id
+      ?? (existing as { materiais_sector_id?: number | null }).materiais_sector_id;
+    if (sectorId != null) {
+      const access = await assertSectorAccessForUser(req, Number(sectorId));
+      if (!access.ok) return res.status(access.status).json({ error: access.error });
+    }
+
+    const role = String(req.user?.role || "");
+    const current = String((existing as { status?: string }).status || "open");
+    const validation = validateLaunchFlowStatus(role, current, status);
+    if (validation.ok === false) return res.status(validation.status).json({ error: validation.error });
+
+    const { error } = await scopeByEmpresa(
+      supabase.from("ordens_compra").update({ status }).eq("id", id),
+      req
+    );
+    if (error) {
+      console.error(error);
+      return res.status(500).json({ error: "Erro interno ao processar a solicitação." });
+    }
+    res.json({ success: true });
+  });
+
+  app.get("/api/ordens-compra/:id/document-url", async (req, res) => {
+    const kind = String(req.query.kind || "nota");
+    const columns: Record<string, string> = {
+      nota: "nota_file_path",
+      recibo: "recibo_file_path",
+      boleto: "boleto_file_path",
+    };
+    const column = columns[kind];
+    if (!column) {
+      return res.status(400).json({ error: "Informe kind=nota, kind=recibo ou kind=boleto." });
+    }
+    const { data, error } = await scopeByEmpresa(
+      supabase.from("ordens_compra").select(`id, ${column}`).eq("id", req.params.id),
+      req
+    ).maybeSingle();
+    if (error) {
+      console.error(error);
+      return res.status(500).json({ error: "Erro ao buscar o documento." });
+    }
+    if (!data) return res.status(404).json({ error: "Ordem de compra não encontrada" });
+    const rawPath = String((data as Record<string, unknown>)[column] || "");
+    if (!rawPath) return res.status(404).json({ error: "Documento não anexado" });
+    const result = await createSignedDocumentUrl(rawPath);
+    if (!("url" in result)) {
+      const status = result.error === "Caminho inválido" ? 400 : 404;
+      return res.status(status).json({ error: result.error });
+    }
+    res.json({ url: result.url });
+  });
+
+  // ====================================================
   // COMPRAS: ORDEM DE COMPRA — geração de PDF (pdfkit)
   // ====================================================
-  app.post("/api/ordem-compra/pdf", async (req, res) => {
+  app.post(
+    "/api/ordem-compra/pdf",
+    (req, res, next) => {
+      uploadOrdemAnexos.fields([
+        { name: "anexos", maxCount: ORDEM_ANEXO_MAX_FILES },
+        { name: "nota_file", maxCount: 1 },
+        { name: "recibo_file", maxCount: 1 },
+        { name: "boleto_file", maxCount: 1 },
+      ])(req, res, (err: any) => {
+        if (err instanceof multer.MulterError) {
+          if (err.code === "LIMIT_FILE_SIZE") {
+            return res.status(400).json({ error: "Cada anexo deve ter no máximo 10 MB." });
+          }
+          if (err.code === "LIMIT_FILE_COUNT" || err.code === "LIMIT_UNEXPECTED_FILE") {
+            return res.status(400).json({ error: `Máximo de ${ORDEM_ANEXO_MAX_FILES} anexos.` });
+          }
+          return res.status(400).json({ error: err.message || "Falha no upload dos anexos." });
+        }
+        if (err) return next(err);
+        return next();
+      });
+    },
+    async (req, res) => {
     const b = req.body as Record<string, string>;
+    const uploaded = (req.files && !Array.isArray(req.files) ? req.files : {}) as {
+      anexos?: Express.Multer.File[];
+      nota_file?: Express.Multer.File[];
+      recibo_file?: Express.Multer.File[];
+      boleto_file?: Express.Multer.File[];
+    };
+    const anexosFiles = uploaded.anexos ?? [];
+    const notaFile = uploaded.nota_file?.[0];
+    const reciboFile = uploaded.recibo_file?.[0];
+    const boletoFile = uploaded.boleto_file?.[0];
+    const cleanupAnexos = () => {
+      for (const f of [...anexosFiles, notaFile, reciboFile, boletoFile]) {
+        try {
+          if (f?.path && fs.existsSync(f.path)) fs.unlinkSync(f.path);
+        } catch {
+          // ignore
+        }
+      }
+    };
 
     const fmtDate = (iso: string) => {
       if (!iso) return "___/___/______";
@@ -7422,92 +15896,163 @@ export function createApp() {
       if (!Number.isFinite(n)) return "R$ —";
       return `R$ ${n.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     };
-
-    const FATURAMENTO_LABEL: Record<string, string> = {
-      nf_recibo: "Emissão de Nota Fiscal + Recibo",
-      recibo: "Emissão de Recibo (sem nota fiscal)",
+    const fmtBytes = (n: number) => {
+      if (n < 1024) return `${n} B`;
+      if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+      return `${(n / (1024 * 1024)).toFixed(1)} MB`;
     };
-    const PAGAMENTO_LABEL: Record<string, string> = {
-      cartao: "Cartão de Crédito",
-      avista: "À Vista — Efetivo",
-      boleto: "Boleto Bancário — máximo de prazo possível considerando o vencimento",
-      pix: "PIX",
-    };
+    const isImageFile = (f: Express.Multer.File) =>
+      /^image\/(png|jpe?g|webp)$/i.test(f.mimetype || "") ||
+      /\.(png|jpe?g|webp)$/i.test(f.originalname || "");
+    const isPdfFile = (f: Express.Multer.File) =>
+      /pdf/i.test(f.mimetype || "") || /\.pdf$/i.test(f.originalname || "");
 
     try {
-      const doc = new PDFDocument({ margin: 45, size: "A4" });
+      if (anexosFiles.length > ORDEM_ANEXO_MAX_FILES) {
+        cleanupAnexos();
+        return res.status(400).json({ error: `Máximo de ${ORDEM_ANEXO_MAX_FILES} anexos.` });
+      }
+      for (const f of anexosFiles) {
+        if (f.size > ORDEM_ANEXO_MAX_BYTES) {
+          cleanupAnexos();
+          return res.status(400).json({
+            error: `Arquivo "${f.originalname}" excede 10 MB.`,
+          });
+        }
+      }
+
+      const faturamentoPermitido = (file?: Express.Multer.File) => {
+        if (!file) return true;
+        const mime = String(file.mimetype || "");
+        const ext = path.extname(file.originalname || "").toLowerCase();
+        const allowedExt = [".pdf", ".jpg", ".jpeg", ".png", ".webp"];
+        const allowedMime = ["application/pdf", "image/jpeg", "image/png", "image/webp"];
+        return allowedMime.includes(mime) || allowedExt.includes(ext);
+      };
+      if (!faturamentoPermitido(notaFile) || !faturamentoPermitido(reciboFile) || !faturamentoPermitido(boletoFile)) {
+        cleanupAnexos();
+        return res.status(400).json({ error: "Nota, recibo e boleto devem ser PDF ou imagem (PNG, JPG, WEBP)." });
+      }
+
+      const prestadorNome = String(b.prestador || "").trim();
+      const rawValor = String(b.valor ?? "").trim().replace(/\s/g, "");
+      const valorOrdem = rawValor.includes(",")
+        ? Number(rawValor.replace(/\./g, "").replace(",", "."))
+        : Number(rawValor);
+      if (!prestadorNome) {
+        cleanupAnexos();
+        return res.status(400).json({ error: "Prestador é obrigatório para lançar a ordem." });
+      }
+      if (!Number.isFinite(valorOrdem) || valorOrdem < 0) {
+        cleanupAnexos();
+        return res.status(400).json({ error: "Informe um valor válido para lançar a ordem." });
+      }
+
+      const protocol = await allocateLaunchProtocol(PROTOCOL_PREFIX.ordem, req);
+      if (!protocol) {
+        cleanupAnexos();
+        return res.status(500).json({ error: "Não foi possível gerar o protocolo da ordem de compra." });
+      }
+
+      let solicitadoPor = String(req.user?.name || "").trim();
+      if (req.user?.id) {
+        const { data: userRow } = await supabase
+          .from("users")
+          .select("name")
+          .eq("id", req.user.id)
+          .maybeSingle();
+        const dbName = String(userRow?.name || "").trim();
+        if (dbName) solicitadoPor = dbName;
+      }
+      if (!solicitadoPor) solicitadoPor = String(req.user?.email || "").trim();
+      if (!solicitadoPor) {
+        cleanupAnexos();
+        return res.status(400).json({ error: "Não foi possível identificar o usuário logado." });
+      }
+
+      const ordemBuffer: Buffer = await new Promise((resolve, reject) => {
+      const doc = new PDFDocument({ margin: 40, size: "A4" });
       const chunks: Buffer[] = [];
       doc.on("data", (c: Buffer) => chunks.push(c));
-      doc.on("end", () => {
-        const pdf = Buffer.concat(chunks);
-        res.setHeader("Content-Type", "application/pdf");
-        res.setHeader("Content-Disposition", `attachment; filename="ordem_compra.pdf"`);
-        res.send(pdf);
-      });
+      doc.on("end", () => resolve(Buffer.concat(chunks)));
+      doc.on("error", reject);
 
-      const W = doc.page.width - 90; // largura útil
-      const X = 45;
+      const W = doc.page.width - 80; // largura útil
+      const X = 40;
       const TEAL = "#004D40";
       const GRAY = "#64748B";
       const LINE = "#E2E8F0";
+      const pageBottom = () => doc.page.height - doc.page.margins.bottom;
+      /** Garante espaço; só cria página nova se ainda houver conteúdo a desenhar. */
+      const ensureSpace = (needed: number) => {
+        if (doc.y + needed <= pageBottom()) return;
+        doc.addPage();
+      };
 
       // ── CABEÇALHO ──────────────────────────────────────────────────────
-      doc.rect(X, 40, W, 50).fill(TEAL);
-      doc.fillColor("white").fontSize(16).font("Helvetica-Bold")
-         .text("ORDEM DE COMPRA", X + 12, 52, { width: W - 12 });
-      doc.fontSize(9).font("Helvetica")
-         .text("VIVAZ CATARATAS RESORT", X + 12, 72, { width: W - 12 });
-
-      // Data — canto direito do header
+      doc.rect(X, 36, W, 44).fill(TEAL);
+      doc.fillColor("white").fontSize(15).font("Helvetica-Bold")
+         .text("ORDEM DE COMPRA", X + 12, 46, { width: W - 170 });
+      doc.fontSize(8).font("Helvetica-Bold")
+         .text(protocol, X, 48, { width: W - 12, align: "right" });
+      doc.fontSize(8).font("Helvetica")
+         .text("VIVAZ CATARATAS RESORT", X + 12, 64, { width: W * 0.55 });
       doc.fillColor("white").fontSize(8).font("Helvetica")
-         .text(`Data: ${fmtDate(b.data_execucao)}`, X, 56, { width: W - 12, align: "right" });
-
-      doc.y = 105;
+         .text(`Data: ${fmtDate(b.data_execucao)}`, X, 62, { width: W - 12, align: "right" });
+      doc.y = 92;
 
       // ── helper de seção ─────────────────────────────────────────────────
       const sectionTitle = (title: string) => {
-        doc.moveDown(0.4);
-        doc.rect(X, doc.y, W, 16).fill("#F1F5F9");
-        doc.fillColor(TEAL).fontSize(7.5).font("Helvetica-Bold")
-           .text(title.toUpperCase(), X + 6, doc.y + 4, { width: W - 12 });
-        doc.y += 20;
+        ensureSpace(22);
+        doc.rect(X, doc.y, W, 14).fill("#F1F5F9");
+        doc.fillColor(TEAL).fontSize(7).font("Helvetica-Bold")
+           .text(title.toUpperCase(), X + 6, doc.y + 3.5, { width: W - 12 });
+        doc.y += 18;
       };
 
       const row = (label: string, value: string, opts?: { bold?: boolean }) => {
+        ensureSpace(18);
         const yStart = doc.y;
         doc.fillColor(GRAY).fontSize(7).font("Helvetica")
            .text(label + ":", X, yStart, { continued: false });
-        doc.fillColor("#0F172A").fontSize(8.5)
+        doc.fillColor("#0F172A").fontSize(8)
            .font(opts?.bold ? "Helvetica-Bold" : "Helvetica")
            .text(value || "—", X + 90, yStart, { width: W - 90 });
-        const yEnd = doc.y;
-        doc.y = Math.max(yStart + 16, yEnd + 2);
+        doc.y = Math.max(yStart + 14, doc.y + 1);
       };
 
       const twoCol = (items: [string, string][]) => {
+        ensureSpace(26);
         const colW = (W - 12) / items.length;
         const yStart = doc.y;
         let xOff = X;
         for (const [label, value] of items) {
           doc.fillColor(GRAY).fontSize(7).font("Helvetica").text(label + ":", xOff, yStart);
-          doc.fillColor("#0F172A").fontSize(8.5).font("Helvetica").text(value || "—", xOff, yStart + 11, { width: colW - 6 });
+          doc.fillColor("#0F172A").fontSize(8).font("Helvetica").text(value || "—", xOff, yStart + 10, {
+            width: colW - 6,
+            height: 12,
+            ellipsis: true,
+          });
           xOff += colW + 6;
         }
-        doc.y = yStart + 28;
+        doc.y = yStart + 24;
       };
 
       const checkRow = (label: string, checked: boolean, note?: string) => {
-        const mark = checked ? "☑" : "☐";
-        doc.fillColor(checked ? TEAL : GRAY).fontSize(9).font("Helvetica-Bold")
-           .text(mark, X, doc.y, { continued: true });
-        doc.fillColor(checked ? "#0F172A" : GRAY).font(checked ? "Helvetica-Bold" : "Helvetica")
-           .fontSize(8.5).text(`  ${label}${note ? "  " + note : ""}`, { lineBreak: true });
+        ensureSpace(14);
+        const mark = checked ? "[X]" : "[ ]";
+        const line = `${mark}  ${label}${note ? `  ${note}` : ""}`;
+        doc.fillColor(checked ? "#0F172A" : GRAY)
+           .font(checked ? "Helvetica-Bold" : "Helvetica")
+           .fontSize(8)
+           .text(line, X, doc.y, { width: W, height: 12, ellipsis: true });
         doc.y += 2;
       };
 
       const divider = () => {
+        ensureSpace(10);
         doc.moveTo(X, doc.y).lineTo(X + W, doc.y).strokeColor(LINE).lineWidth(0.5).stroke();
-        doc.y += 6;
+        doc.y += 5;
       };
 
       // ── PRESTADOR ────────────────────────────────────────────────────────
@@ -7537,35 +16082,62 @@ export function createApp() {
 
       // ── VALOR ───────────────────────────────────────────────────────────
       sectionTitle("Valor");
-      doc.rect(X, doc.y, W, 22).fill("#F0FDF4");
-      doc.fillColor(TEAL).fontSize(12).font("Helvetica-Bold")
-         .text(`VALOR A SER PAGO: ${fmtCurrency(b.valor)}`, X + 8, doc.y + 5, { width: W - 16 });
-      doc.y += 28;
+      ensureSpace(24);
+      doc.rect(X, doc.y, W, 20).fill("#F0FDF4");
+      doc.fillColor(TEAL).fontSize(11).font("Helvetica-Bold")
+         .text(`VALOR A SER PAGO: ${fmtCurrency(b.valor)}`, X + 8, doc.y + 4, { width: W - 16 });
+      doc.y += 24;
 
       // ── FATURAMENTO ─────────────────────────────────────────────────────
       sectionTitle("Faturamento");
-      checkRow("Emissão de Nota Fiscal + Recibo", b.faturamento === "nf_recibo");
-      checkRow("Emissão de Recibo (sem nota fiscal)", b.faturamento === "recibo");
+      checkRow("Emissão de Nota Fiscal + Recibo", b.faturamento === "nf_recibo", notaFile?.originalname || "");
+      checkRow("Emissão de Recibo (sem nota fiscal)", b.faturamento === "recibo", reciboFile?.originalname || "");
+      if (notaFile && b.faturamento !== "nf_recibo") checkRow("Nota fiscal anexada", true, notaFile.originalname);
+      if (reciboFile && b.faturamento !== "recibo") checkRow("Recibo anexado", true, reciboFile.originalname);
 
       // ── PAGAMENTO ───────────────────────────────────────────────────────
       sectionTitle("Condições de Pagamento");
       checkRow("Cartão de Crédito", b.pagamento === "cartao");
       checkRow("À Vista — Efetivo", b.pagamento === "avista");
-      checkRow("Boleto Bancário — máximo de prazo possível considerando o vencimento", b.pagamento === "boleto");
-      checkRow("PIX", b.pagamento === "pix", b.pagamento === "pix" && b.pix_chave ? `  Chave: ${b.pix_chave}` : "");
-      doc.moveDown(0.3);
-      twoCol([
-        ["Banco", b.banco],
-        ["Agência", b.agencia],
-        ["C/C", b.conta_corrente],
-      ]);
+      checkRow("Boleto Bancário — máximo de prazo possível considerando o vencimento", b.pagamento === "boleto", boletoFile?.originalname || "");
+      checkRow(
+        "PIX",
+        b.pagamento === "pix",
+        b.pagamento === "pix" && b.pix_chave ? `Chave: ${b.pix_chave}` : ""
+      );
+      checkRow("Transferência bancária", b.pagamento === "transferencia");
+      if (b.pagamento === "transferencia") {
+        twoCol([
+          ["Banco", b.banco],
+          ["Agência", b.agencia],
+          ["C/C", b.conta_corrente],
+        ]);
+      }
 
       // ── OBS ─────────────────────────────────────────────────────────────
       if (b.observacao) {
         sectionTitle("Observações");
-        doc.fillColor("#0F172A").fontSize(8.5).font("Helvetica")
-           .text(b.observacao, X, doc.y, { width: W });
-        doc.y += 8;
+        ensureSpace(28);
+        const obsStart = doc.y;
+        doc.fillColor("#0F172A").fontSize(8).font("Helvetica")
+           .text(b.observacao, X, obsStart, { width: W, height: 48, ellipsis: true });
+        doc.y = Math.min(obsStart + 52, Math.max(doc.y + 4, obsStart + 16));
+      }
+
+      // ── ANEXOS (lista) ──────────────────────────────────────────────────
+      if (anexosFiles.length) {
+        sectionTitle(`Anexos (${anexosFiles.length})`);
+        for (const f of anexosFiles) {
+          ensureSpace(12);
+          const kind = isPdfFile(f) ? "PDF" : isImageFile(f) ? "Imagem" : "Arquivo";
+          doc.fillColor("#0F172A").fontSize(8).font("Helvetica")
+             .text(`• [${kind}] ${f.originalname || "arquivo"} (${fmtBytes(f.size)})`, X, doc.y, {
+               width: W,
+               height: 11,
+               ellipsis: true,
+             });
+          doc.y += 1;
+        }
       }
 
       // ── AVISOS ──────────────────────────────────────────────────────────
@@ -7579,48 +16151,189 @@ export function createApp() {
         "Solicitar aos prestadores inserir a chave PIX no corpo da nota Fiscal.",
       ];
       for (const a of avisos) {
-        doc.fillColor(GRAY).fontSize(7.5).font("Helvetica")
-           .text(`• ${a}`, X, doc.y, { width: W });
-        doc.y += 2;
+        ensureSpace(12);
+        doc.fillColor(GRAY).fontSize(7).font("Helvetica")
+           .text(`• ${a}`, X, doc.y, { width: W, height: 11, ellipsis: true });
+        doc.y += 1;
       }
 
-      // ── ASSINATURAS ─────────────────────────────────────────────────────
-      doc.moveDown(1.2);
+      // ── ASSINATURAS (fluxo relativo — evita páginas vazias por Y absoluto) ─
+      const sigBlockHeight = 110;
+      ensureSpace(sigBlockHeight);
+      doc.moveDown(0.5);
       divider();
-      const sigY = doc.y + 30;
-      const sigW = (W - 20) / 3;
-      const sigs = [
-        b.solicitado_por || "Solicitado por",
+
+      const drawSigRow = (labels: string[], gap = 10) => {
+        const rowH = 42;
+        ensureSpace(rowH);
+        const yLine = doc.y + 22;
+        const sigW = (W - gap * (labels.length - 1)) / labels.length;
+        labels.forEach((label, i) => {
+          const sx = X + i * (sigW + gap);
+          doc.moveTo(sx, yLine).lineTo(sx + sigW, yLine).strokeColor("#94A3B8").lineWidth(0.8).stroke();
+          doc.fillColor(GRAY).fontSize(6.5).font("Helvetica")
+             .text(label, sx, yLine + 4, { width: sigW, align: "center", height: 16, ellipsis: true });
+        });
+        doc.y = yLine + 22;
+      };
+
+      drawSigRow([
+        solicitadoPor,
         "Autorizado — Gerência",
-        "Autorizado — Diretoria\nLuiza Mello",
-      ];
-      sigs.forEach((label, i) => {
-        const sx = X + i * (sigW + 10);
-        doc.moveTo(sx, sigY).lineTo(sx + sigW, sigY).strokeColor("#94A3B8").lineWidth(0.8).stroke();
-        doc.fillColor(GRAY).fontSize(7).font("Helvetica")
-           .text(label, sx, sigY + 4, { width: sigW, align: "center" });
-      });
-
-      doc.y = sigY + 36;
+        "Autorizado — Diretoria\nEdilson Andrade",
+      ]);
       divider();
+      drawSigRow(["Supervisora ADM — Cristiane Queiroz", "Controller — Elton Roque"], 20);
 
-      const sig2Y = doc.y + 28;
-      const sigs2 = ["Supervisora ADM — Cristiane Queiroz", "Controller — Elton Roque"];
-      const sig2W = (W - 20) / 2;
-      sigs2.forEach((label, i) => {
-        const sx = X + i * (sig2W + 20);
-        doc.moveTo(sx, sig2Y).lineTo(sx + sig2W, sig2Y).strokeColor("#94A3B8").lineWidth(0.8).stroke();
-        doc.fillColor(GRAY).fontSize(7).font("Helvetica")
-           .text(label, sx, sig2Y + 4, { width: sig2W, align: "center" });
-      });
-
-      // ── RODAPÉ ──────────────────────────────────────────────────────────
-      doc.y = sig2Y + 40;
-      doc.fillColor(GRAY).fontSize(7.5).font("Helvetica")
+      ensureSpace(16);
+      doc.fillColor(GRAY).fontSize(7).font("Helvetica")
          .text(`Foz do Iguaçu, ${fmtDate(b.data_execucao)}`, X, doc.y, { width: W, align: "right" });
 
+      // ── PÁGINAS DE IMAGENS ANEXADAS ─────────────────────────────────────
+      for (const f of anexosFiles.filter(isImageFile)) {
+        try {
+          doc.addPage();
+          doc.fillColor(TEAL).fontSize(9).font("Helvetica-Bold")
+             .text(`Anexo: ${f.originalname || "imagem"}`, X, 40, { width: W });
+          const maxW = W;
+          const maxH = doc.page.height - 100;
+          doc.image(f.path, X, 58, { fit: [maxW, maxH], align: "center", valign: "center" });
+        } catch (imgErr) {
+          console.error("Falha ao embutir imagem no PDF da ordem:", f.originalname, imgErr);
+          doc.addPage();
+          doc.fillColor("#B91C1C").fontSize(10).font("Helvetica")
+             .text(`Não foi possível embutir a imagem: ${f.originalname}`, X, 60, { width: W });
+        }
+      }
+
+      const faturamentoImagens: Array<{ file: Express.Multer.File; label: string }> = [];
+      if (notaFile && isImageFile(notaFile)) faturamentoImagens.push({ file: notaFile, label: "Nota fiscal" });
+      if (reciboFile && isImageFile(reciboFile)) faturamentoImagens.push({ file: reciboFile, label: "Recibo" });
+      if (boletoFile && isImageFile(boletoFile)) faturamentoImagens.push({ file: boletoFile, label: "Boleto" });
+      for (const item of faturamentoImagens) {
+        const f = item.file;
+        try {
+          doc.addPage();
+          doc.fillColor(TEAL).fontSize(9).font("Helvetica-Bold")
+             .text(`${item.label}: ${f.originalname || "imagem"}`, X, 40, { width: W });
+          doc.image(f.path, X, 58, { fit: [W, doc.page.height - 100], align: "center", valign: "center" });
+        } catch (imgErr) {
+          console.error("Falha ao embutir nota/recibo no PDF da ordem:", f.originalname, imgErr);
+        }
+      }
+
       doc.end();
+      });
+
+      // Mescla PDFs anexados ao final do documento
+      let finalBuffer = ordemBuffer;
+      const pdfAnexos = [
+        ...anexosFiles.filter(isPdfFile),
+        ...(notaFile && isPdfFile(notaFile) ? [notaFile] : []),
+        ...(reciboFile && isPdfFile(reciboFile) ? [reciboFile] : []),
+        ...(boletoFile && isPdfFile(boletoFile) ? [boletoFile] : []),
+      ];
+      if (pdfAnexos.length) {
+        const { PDFDocument: PDFLibDocument } = await import("pdf-lib");
+        const merged = await PDFLibDocument.create();
+        const mainDoc = await PDFLibDocument.load(ordemBuffer);
+        const mainPages = await merged.copyPages(mainDoc, mainDoc.getPageIndices());
+        mainPages.forEach((p) => merged.addPage(p));
+        for (const f of pdfAnexos) {
+          try {
+            const src = await PDFLibDocument.load(fs.readFileSync(f.path), { ignoreEncryption: true });
+            const pages = await merged.copyPages(src, src.getPageIndices());
+            pages.forEach((p) => merged.addPage(p));
+          } catch (pdfErr) {
+            console.error("Falha ao mesclar PDF anexo:", f.originalname, pdfErr);
+          }
+        }
+        finalBuffer = Buffer.from(await merged.save());
+      }
+
+      const textOrNull = (value: unknown) => {
+        const text = String(value ?? "").trim();
+        return text || null;
+      };
+      const idOrNull = (value: unknown) => {
+        const n = Number(value);
+        return Number.isFinite(n) && n > 0 ? Math.trunc(n) : null;
+      };
+      const dataExec = /^\d{4}-\d{2}-\d{2}$/.test(String(b.data_execucao || ""))
+        ? String(b.data_execucao).slice(0, 10)
+        : null;
+      const faturamento = textOrNull(b.faturamento);
+      const pagamento = textOrNull(b.pagamento);
+
+      const storeFaturamentoFile = async (file?: Express.Multer.File) => {
+        if (!file) return { path: null as string | null, name: null as string | null };
+        const mime = String(file.mimetype || "application/octet-stream");
+        const ext = path.extname(file.originalname || "").replace(".", "").toLowerCase() || "pdf";
+        const storagePath = await uploadDocument(fs.readFileSync(file.path), "ordens-compra", ext, mime);
+        return {
+          path: storagePath,
+          name: String(file.originalname || "").slice(0, 255) || null,
+        };
+      };
+      let notaStored = { path: null as string | null, name: null as string | null };
+      let reciboStored = { path: null as string | null, name: null as string | null };
+      let boletoStored = { path: null as string | null, name: null as string | null };
+      try {
+        notaStored = await storeFaturamentoFile(notaFile);
+        reciboStored = await storeFaturamentoFile(reciboFile);
+        boletoStored = await storeFaturamentoFile(boletoFile);
+      } catch (uploadErr) {
+        cleanupAnexos();
+        console.error("Falha ao salvar nota/recibo/boleto da ordem:", uploadErr);
+        return res.status(500).json({ error: "Não foi possível salvar a nota, o recibo ou o boleto." });
+      }
+
+      const { error: insertError } = await supabase.from("ordens_compra").insert(withEmpresaKey({
+        protocol,
+        user_id: req.user?.id ?? null,
+        data_execucao: dataExec,
+        prestador: prestadorNome,
+        telefone: textOrNull(b.telefone),
+        servico_executado: textOrNull(b.servico_executado),
+        servico_sector_id: idOrNull(b.servico_sector_id),
+        servico_crd_id: idOrNull(b.servico_crd_id),
+        materiais_descricao: textOrNull(b.materiais_descricao),
+        materiais_sector_id: idOrNull(b.materiais_sector_id),
+        materiais_crd_id: idOrNull(b.materiais_crd_id),
+        valor: valorOrdem,
+        faturamento: faturamento === "nf_recibo" || faturamento === "recibo" ? faturamento : null,
+        pagamento: pagamento === "cartao" || pagamento === "avista" || pagamento === "boleto" || pagamento === "pix" || pagamento === "transferencia"
+          ? pagamento
+          : null,
+        pix_chave: pagamento === "pix" ? textOrNull(b.pix_chave) : null,
+        banco: pagamento === "transferencia" ? textOrNull(b.banco) : null,
+        agencia: pagamento === "transferencia" ? textOrNull(b.agencia) : null,
+        conta_corrente: pagamento === "transferencia" ? textOrNull(b.conta_corrente) : null,
+        cnpj_cpf: textOrNull(b.cnpj_cpf),
+        nome_titular: textOrNull(b.nome_titular),
+        observacao: textOrNull(b.observacao),
+        solicitado_por: solicitadoPor,
+        nota_file_path: notaStored.path,
+        nota_file_name: notaStored.name,
+        recibo_file_path: reciboStored.path,
+        recibo_file_name: reciboStored.name,
+        boleto_file_path: boletoStored.path,
+        boleto_file_name: boletoStored.name,
+        status: initialLaunchStatus(req.user?.role),
+      }, req));
+
+      cleanupAnexos();
+      if (insertError) {
+        console.error(insertError);
+        return res.status(500).json({ error: "Não foi possível gravar a ordem de compra. O PDF não foi emitido." });
+      }
+
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", `attachment; filename="ordem_compra_${protocol}.pdf"`);
+      res.setHeader("X-Ordem-Protocol", protocol);
+      res.send(finalBuffer);
     } catch (err: any) {
+      cleanupAnexos();
       console.error("Erro ao gerar PDF da Ordem de Compra:", err);
       res.status(500).json({ error: "Falha ao gerar o PDF.", detail: err?.message });
     }
@@ -7634,6 +16347,512 @@ export function createApp() {
       .order("id", { ascending: true });
     if (error) return res.status(500).json({ error: error.message });
     res.json(data ?? []);
+  });
+
+  // ====================================================
+  // CONTRATOS / MENSALIDADES (Fase 4.8)
+  // ====================================================
+  const CONTRATO_STATUSES = new Set(["ativo", "vencido", "pendente_assinatura", "encerrado"]);
+  const CONTRATO_PERIODS = new Set(["unica", "mensal", "trimestral", "semestral", "anual"]);
+  const CONTRATO_ALERT_DAYS = 30;
+
+  const mapContratoRow = (row: any) => {
+    const vencimento = row.vencimento ? String(row.vencimento).slice(0, 10) : null;
+    let dias_para_vencer: number | null = null;
+    if (vencimento) {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const due = new Date(`${vencimento}T00:00:00`);
+      dias_para_vencer = Math.round((due.getTime() - today.getTime()) / 86400000);
+    }
+    const alerta_vencimento =
+      dias_para_vencer != null &&
+      dias_para_vencer <= CONTRATO_ALERT_DAYS &&
+      row.status !== "encerrado";
+    const crd = row.crds;
+    const crd_label = crd
+      ? [crd.code, crd.name].filter(Boolean).join(" — ") || null
+      : null;
+    return {
+      id: row.id,
+      fornecedor: row.fornecedor,
+      valor: Number(row.valor) || 0,
+      status: row.status,
+      ativo: row.ativo !== false,
+      assinado: Boolean(row.assinado),
+      sector_id: row.sector_id != null ? Number(row.sector_id) : null,
+      sector_name: row.sectors?.name ?? null,
+      crd_id: row.crd_id != null ? Number(row.crd_id) : null,
+      crd_label,
+      vencimento,
+      periodicidade: row.periodicidade || "mensal",
+      responsavel: row.responsavel ?? null,
+      observacoes: row.observacoes ?? null,
+      dias_para_vencer,
+      alerta_vencimento,
+      created_at: row.created_at,
+      updated_at: row.updated_at,
+    };
+  };
+
+  const deriveContratoStatus = (status: string, vencimento: string | null, assinado: boolean) => {
+    if (status === "encerrado") return "encerrado";
+    if (status === "pendente_assinatura" || (!assinado && status !== "vencido")) {
+      // Mantém pendente se explicitamente pedido ou não assinado (exceto se já marcado vencido)
+      if (status === "pendente_assinatura" || !assinado) {
+        if (vencimento) {
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
+          const due = new Date(`${vencimento}T00:00:00`);
+          if (due < today && status !== "pendente_assinatura") return "vencido";
+        }
+        if (!assinado && status !== "vencido") return status === "ativo" ? "ativo" : status;
+      }
+    }
+    if (vencimento) {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const due = new Date(`${vencimento}T00:00:00`);
+      if (due < today && status === "ativo") return "vencido";
+    }
+    return status;
+  };
+
+  app.get("/api/contratos", requireRole("admin", "controle", "manager", "finance", "diretoria", "estagiario"), async (req, res) => {
+    const status = String((req.query as any)?.status || "");
+    const sectorId = (req.query as any)?.sector_id;
+    let query = filterByEmpresa(
+      supabase.from("contratos").select("*, sectors(name), crds(id, code, name)"),
+      req,
+      "contratos"
+    ).order("vencimento", { ascending: true, nullsFirst: false });
+    if (status && CONTRATO_STATUSES.has(status)) query = query.eq("status", status);
+    if (sectorId != null && sectorId !== "" && Number.isFinite(Number(sectorId))) {
+      query = query.eq("sector_id", Number(sectorId));
+    }
+    const { data, error } = await query;
+    if (error) {
+      console.error("Erro ao listar contratos:", error);
+      if (String(error.message || "").includes("contratos") || error.code === "42P01" || error.code === "PGRST205") {
+        return res.status(500).json({
+          error: "Tabela contratos não encontrada. Execute sql/23_contratos.sql no Supabase.",
+        });
+      }
+      return res.status(500).json({ error: "Erro ao listar contratos." });
+    }
+    res.json((data ?? []).map(mapContratoRow));
+  });
+
+  app.post("/api/contratos", requireRole("admin", "controle", "finance"), async (req, res) => {
+    const fornecedor = String(req.body?.fornecedor ?? "").trim();
+    if (!fornecedor) return res.status(400).json({ error: "fornecedor é obrigatório." });
+    const periodicidade = String(req.body?.periodicidade ?? "mensal");
+    if (!CONTRATO_PERIODS.has(periodicidade)) {
+      return res.status(400).json({ error: "periodicidade inválida." });
+    }
+    const assinado = Boolean(req.body?.assinado);
+    const vencimento = req.body?.vencimento ? String(req.body.vencimento).slice(0, 10) : null;
+    let status = String(req.body?.status ?? "ativo");
+    if (!CONTRATO_STATUSES.has(status)) status = "ativo";
+    status = deriveContratoStatus(status, vencimento, assinado);
+
+    const { data, error } = await supabase
+      .from("contratos")
+      .insert(
+        withEmpresaKey(
+          {
+            fornecedor,
+            valor: Number(req.body?.valor) || 0,
+            status,
+            ativo: req.body?.ativo != null ? Boolean(req.body.ativo) : true,
+            assinado,
+            sector_id: req.body?.sector_id != null && req.body.sector_id !== "" ? Number(req.body.sector_id) : null,
+            crd_id: req.body?.crd_id != null && req.body.crd_id !== "" ? Number(req.body.crd_id) : null,
+            vencimento,
+            periodicidade,
+            responsavel: String(req.body?.responsavel ?? "").trim() || null,
+            observacoes: String(req.body?.observacoes ?? "").trim() || null,
+          },
+          req
+        )
+      )
+      .select("id")
+      .single();
+    if (error) {
+      console.error("Erro ao criar contrato:", error);
+      return res.status(500).json({ error: "Não foi possível criar o contrato." });
+    }
+    res.json({ id: data.id });
+  });
+
+  app.patch("/api/contratos/:id", requireRole("admin", "controle", "finance"), async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: "id inválido." });
+    const patch: Record<string, any> = { updated_at: new Date().toISOString() };
+    if (req.body?.fornecedor != null) {
+      const fornecedor = String(req.body.fornecedor).trim();
+      if (!fornecedor) return res.status(400).json({ error: "fornecedor inválido." });
+      patch.fornecedor = fornecedor;
+    }
+    if (req.body?.valor != null) patch.valor = Number(req.body.valor) || 0;
+    if (req.body?.ativo != null) patch.ativo = Boolean(req.body.ativo);
+    if (req.body?.assinado != null) patch.assinado = Boolean(req.body.assinado);
+    if (req.body?.sector_id !== undefined) {
+      patch.sector_id = req.body.sector_id != null && req.body.sector_id !== "" ? Number(req.body.sector_id) : null;
+    }
+    if (req.body?.crd_id !== undefined) {
+      patch.crd_id = req.body.crd_id != null && req.body.crd_id !== "" ? Number(req.body.crd_id) : null;
+    }
+    if (req.body?.vencimento !== undefined) {
+      patch.vencimento = req.body.vencimento ? String(req.body.vencimento).slice(0, 10) : null;
+    }
+    if (req.body?.periodicidade != null) {
+      const p = String(req.body.periodicidade);
+      if (!CONTRATO_PERIODS.has(p)) return res.status(400).json({ error: "periodicidade inválida." });
+      patch.periodicidade = p;
+    }
+    if (req.body?.responsavel !== undefined) {
+      patch.responsavel = String(req.body.responsavel ?? "").trim() || null;
+    }
+    if (req.body?.observacoes !== undefined) {
+      patch.observacoes = String(req.body.observacoes ?? "").trim() || null;
+    }
+    if (req.body?.status != null) {
+      let status = String(req.body.status);
+      if (!CONTRATO_STATUSES.has(status)) return res.status(400).json({ error: "status inválido." });
+      const assinado = patch.assinado != null ? patch.assinado : Boolean(req.body.assinado);
+      const venc = patch.vencimento !== undefined ? patch.vencimento : req.body.vencimento;
+      status = deriveContratoStatus(status, venc ? String(venc).slice(0, 10) : null, assinado);
+      patch.status = status;
+    }
+
+    const { error } = await scopeByEmpresa(
+      supabase.from("contratos").update(patch).eq("id", id),
+      req
+    );
+    if (error) {
+      console.error("Erro ao atualizar contrato:", error);
+      return res.status(500).json({ error: "Não foi possível atualizar o contrato." });
+    }
+    res.json({ success: true });
+  });
+
+  app.delete("/api/contratos/:id", requireRole("admin", "controle"), async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: "id inválido." });
+    const { error } = await scopeByEmpresa(
+      supabase.from("contratos").delete().eq("id", id),
+      req
+    );
+    if (error) {
+      console.error("Erro ao excluir contrato:", error);
+      return res.status(500).json({ error: "Não foi possível excluir o contrato." });
+    }
+    res.json({ success: true });
+  });
+
+  app.get("/api/contrato-lancamentos", requireRole("admin", "controle", "manager", "finance", "diretoria", "estagiario"), async (req, res) => {
+    const { data, error } = await filterByEmpresa(
+      supabase
+        .from("contrato_lancamentos")
+        .select("*, contratos(fornecedor, sector_id, vencimento, periodicidade, sectors(name), crds(id, code, name)), users(id, name)"),
+      req,
+      "contrato_lancamentos"
+    ).order("competencia", { ascending: false });
+    if (error) {
+      console.error("Erro ao listar lançamentos de contrato:", error);
+      if (String(error.message || "").includes("contrato_lancamentos") || error.code === "42P01" || error.code === "PGRST205") {
+        return res.status(500).json({
+          error: "Tabela contrato_lancamentos não encontrada. Execute sql/35_contrato_lancamentos.sql no Supabase.",
+        });
+      }
+      return res.status(500).json({ error: "Erro ao listar lançamentos de mensalidade." });
+    }
+    res.json(
+      (data ?? []).map((row: any) => {
+        const contrato = row.contratos;
+        const crd = contrato?.crds;
+        return {
+          id: row.id,
+          contrato_id: Number(row.contrato_id),
+          competencia: String(row.competencia || "").slice(0, 10),
+          valor: Number(row.valor) || 0,
+          observacao: row.observacao ?? null,
+          status: String(row.status || "open"),
+          protocol: row.protocol ?? null,
+          user_name: row.users?.name ?? null,
+          fornecedor: contrato?.fornecedor ?? null,
+          sector_id: contrato?.sector_id != null ? Number(contrato.sector_id) : null,
+          sector_name: contrato?.sectors?.name ?? null,
+          crd_code: crd?.code ?? null,
+          crd_name: crd?.name ?? null,
+          vencimento: contrato?.vencimento ? String(contrato.vencimento).slice(0, 10) : null,
+          created_at: row.created_at,
+        };
+      })
+    );
+  });
+
+  app.post("/api/contratos/:id/lancamentos", requireRole("admin", "controle", "manager", "finance", "estagiario"), async (req, res) => {
+    const contratoId = Number(req.params.id);
+    if (!Number.isFinite(contratoId)) return res.status(400).json({ error: "id inválido." });
+
+    const { data: contrato, error: contratoError } = await scopeByEmpresa(
+      supabase.from("contratos").select("id, sector_id, valor, status, ativo").eq("id", contratoId),
+      req
+    ).single();
+    if (contratoError || !contrato) return res.status(404).json({ error: "Contrato não encontrado." });
+    if (contrato.ativo === false || contrato.status === "encerrado") {
+      return res.status(400).json({ error: "Contrato inativo ou encerrado." });
+    }
+
+    const sectorId = Number(contrato.sector_id);
+    if (Number.isFinite(sectorId)) {
+      const access = await assertSectorAccessForUser(req, sectorId);
+      if (!access.ok) return res.status(access.status).json({ error: access.error });
+    }
+
+    const { data: pending } = await filterByEmpresa(
+      supabase
+        .from("contrato_lancamentos")
+        .select("id")
+        .eq("contrato_id", contratoId)
+        .in("status", ["pending_manager", "open", "approved"])
+        .limit(1),
+      req,
+      "contrato_lancamentos"
+    );
+    if ((pending ?? []).length > 0) {
+      return res.status(400).json({ error: "Já existe um lançamento pendente para este contrato." });
+    }
+
+    const competencia = req.body?.competencia ? String(req.body.competencia).slice(0, 10) : new Date().toISOString().slice(0, 10);
+    const valor = req.body?.valor != null ? Number(req.body.valor) : Number(contrato.valor) || 0;
+    if (!Number.isFinite(valor) || valor <= 0) {
+      return res.status(400).json({ error: "valor inválido." });
+    }
+
+    const protocol = await allocateLaunchProtocol(PROTOCOL_PREFIX.mensalidade, req);
+    if (!protocol) return res.status(500).json({ error: "Não foi possível gerar o protocolo da mensalidade." });
+    const { data, error } = await supabase
+      .from("contrato_lancamentos")
+      .insert(withEmpresaKey({
+        contrato_id: contratoId,
+        user_id: req.user!.id,
+        competencia,
+        valor,
+        observacao: req.body?.observacao ? String(req.body.observacao).trim() : null,
+        status: initialLaunchStatus(req.user?.role),
+        protocol,
+      }, req))
+      .select("id, protocol")
+      .single();
+    if (error) {
+      console.error("Erro ao criar lançamento de contrato:", error);
+      return res.status(500).json({ error: "Não foi possível solicitar o pagamento." });
+    }
+    res.json({ id: data.id, protocol: data.protocol });
+  });
+
+  app.patch("/api/contrato-lancamentos/:id/status", requireRole("admin", "controle", "manager", "finance", "estagiario"), async (req, res) => {
+    const id = Number(req.params.id);
+    const { status } = req.body;
+    if (!Number.isFinite(id)) return res.status(400).json({ error: "id inválido." });
+    if (!["open", "approved", "cancelled", "posted"].includes(status)) {
+      return res.status(400).json({ error: "Status inválido" });
+    }
+
+    const { data: existing, error: fetchError } = await scopeByEmpresa(
+      supabase
+        .from("contrato_lancamentos")
+        .select("id, status, contrato_id, contratos(sector_id)")
+        .eq("id", id),
+      req
+    ).single();
+    if (fetchError || !existing) {
+      return res.status(404).json({ error: "Lançamento não encontrado" });
+    }
+
+    const sectorId = Number((existing as any).contratos?.sector_id);
+    if (Number.isFinite(sectorId)) {
+      const access = await assertSectorAccessForUser(req, sectorId);
+      if (!access.ok) return res.status(access.status).json({ error: access.error });
+    }
+
+    const role = String(req.user?.role || "");
+    const current = String((existing as any).status || "open");
+    const validation = validateLaunchFlowStatus(role, current, status);
+    if (validation.ok === false) return res.status(validation.status).json({ error: validation.error });
+
+    const { error } = await scopeByEmpresa(
+      supabase.from("contrato_lancamentos").update({ status }).eq("id", id),
+      req
+    );
+    if (error) {
+      console.error(error);
+      return res.status(500).json({ error: "Erro interno ao processar a solicitação." });
+    }
+    res.json({ success: true });
+  });
+
+  // ====================================================
+  // INVESTIMENTOS (Fase 4.7)
+  // ====================================================
+  const INVESTIMENTO_STATUSES = new Set(["planejado", "em_andamento", "concluido", "cancelado"]);
+
+  const mapInvestimentoRow = (row: any) => {
+    const valor_previsto = Number(row.valor_previsto) || 0;
+    const valor_lancado = Number(row.valor_lancado) || 0;
+    const valor_realizado = Number(row.valor_realizado) || 0;
+    const saldo_a_realizar = valor_previsto - valor_realizado;
+    const pct_executado = valor_previsto > 0 ? valor_realizado / valor_previsto : 0;
+    const estouro_orcamento =
+      (valor_previsto > 0 && valor_realizado > valor_previsto + 0.009) ||
+      (valor_previsto > 0 && valor_lancado > valor_previsto + 0.009);
+    const crd = row.crds;
+    const crd_label = crd
+      ? [crd.code, crd.name].filter(Boolean).join(" — ") || null
+      : null;
+    return {
+      id: row.id,
+      nome: row.nome,
+      valor_previsto,
+      valor_lancado,
+      valor_realizado,
+      saldo_a_realizar,
+      pct_executado,
+      estouro_orcamento,
+      status: row.status || "planejado",
+      sector_id: row.sector_id != null ? Number(row.sector_id) : null,
+      sector_name: row.sectors?.name ?? null,
+      crd_id: row.crd_id != null ? Number(row.crd_id) : null,
+      crd_label,
+      responsavel: row.responsavel ?? null,
+      observacoes: row.observacoes ?? null,
+      created_at: row.created_at,
+      updated_at: row.updated_at,
+    };
+  };
+
+  app.get(
+    "/api/investimentos",
+    requireRole("admin", "controle", "manager", "finance", "diretoria"),
+    async (req, res) => {
+      const status = String((req.query as any)?.status || "");
+      const sectorId = (req.query as any)?.sector_id;
+      let query = filterByEmpresa(
+        supabase.from("investimentos").select("*, sectors(name), crds(id, code, name)"),
+        req,
+        "investimentos"
+      ).order("updated_at", { ascending: false });
+      if (status && INVESTIMENTO_STATUSES.has(status)) query = query.eq("status", status);
+      if (sectorId != null && sectorId !== "" && Number.isFinite(Number(sectorId))) {
+        query = query.eq("sector_id", Number(sectorId));
+      }
+      const { data, error } = await query;
+      if (error) {
+        console.error("Erro ao listar investimentos:", error);
+        if (
+          String(error.message || "").includes("investimentos") ||
+          error.code === "42P01" ||
+          error.code === "PGRST205"
+        ) {
+          return res.status(500).json({
+            error: "Tabela investimentos não encontrada. Execute sql/25_investimentos.sql no Supabase.",
+          });
+        }
+        return res.status(500).json({ error: "Erro ao listar investimentos." });
+      }
+      res.json((data ?? []).map(mapInvestimentoRow));
+    }
+  );
+
+  app.post("/api/investimentos", requireRole("admin", "controle", "finance"), async (req, res) => {
+    const nome = String(req.body?.nome ?? "").trim();
+    if (!nome) return res.status(400).json({ error: "nome é obrigatório." });
+    let status = String(req.body?.status ?? "planejado");
+    if (!INVESTIMENTO_STATUSES.has(status)) status = "planejado";
+
+    const { data, error } = await supabase
+      .from("investimentos")
+      .insert(withEmpresaKey({
+        nome,
+        valor_previsto: Number(req.body?.valor_previsto) || 0,
+        valor_lancado: Number(req.body?.valor_lancado) || 0,
+        valor_realizado: Number(req.body?.valor_realizado) || 0,
+        status,
+        sector_id:
+          req.body?.sector_id != null && req.body.sector_id !== ""
+            ? Number(req.body.sector_id)
+            : null,
+        crd_id:
+          req.body?.crd_id != null && req.body.crd_id !== "" ? Number(req.body.crd_id) : null,
+        responsavel: String(req.body?.responsavel ?? "").trim() || null,
+        observacoes: String(req.body?.observacoes ?? "").trim() || null,
+      }, req))
+      .select("id")
+      .single();
+    if (error) {
+      console.error("Erro ao criar investimento:", error);
+      return res.status(500).json({ error: "Não foi possível criar o investimento." });
+    }
+    res.json({ id: data.id });
+  });
+
+  app.patch("/api/investimentos/:id", requireRole("admin", "controle", "finance"), async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: "id inválido." });
+    const patch: Record<string, any> = { updated_at: new Date().toISOString() };
+    if (req.body?.nome != null) {
+      const nome = String(req.body.nome).trim();
+      if (!nome) return res.status(400).json({ error: "nome inválido." });
+      patch.nome = nome;
+    }
+    if (req.body?.valor_previsto != null) patch.valor_previsto = Number(req.body.valor_previsto) || 0;
+    if (req.body?.valor_lancado != null) patch.valor_lancado = Number(req.body.valor_lancado) || 0;
+    if (req.body?.valor_realizado != null) patch.valor_realizado = Number(req.body.valor_realizado) || 0;
+    if (req.body?.status != null) {
+      const status = String(req.body.status);
+      if (!INVESTIMENTO_STATUSES.has(status)) return res.status(400).json({ error: "status inválido." });
+      patch.status = status;
+    }
+    if (req.body?.sector_id !== undefined) {
+      patch.sector_id =
+        req.body.sector_id != null && req.body.sector_id !== "" ? Number(req.body.sector_id) : null;
+    }
+    if (req.body?.crd_id !== undefined) {
+      patch.crd_id =
+        req.body.crd_id != null && req.body.crd_id !== "" ? Number(req.body.crd_id) : null;
+    }
+    if (req.body?.responsavel !== undefined) {
+      patch.responsavel = String(req.body.responsavel ?? "").trim() || null;
+    }
+    if (req.body?.observacoes !== undefined) {
+      patch.observacoes = String(req.body.observacoes ?? "").trim() || null;
+    }
+    const { error } = await scopeByEmpresa(
+      supabase.from("investimentos").update(patch).eq("id", id),
+      req
+    );
+    if (error) {
+      console.error("Erro ao atualizar investimento:", error);
+      return res.status(500).json({ error: "Não foi possível atualizar o investimento." });
+    }
+    res.json({ success: true });
+  });
+
+  app.delete("/api/investimentos/:id", requireRole("admin", "controle"), async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: "id inválido." });
+    const { error } = await scopeByEmpresa(
+      supabase.from("investimentos").delete().eq("id", id),
+      req
+    );
+    if (error) {
+      console.error("Erro ao excluir investimento:", error);
+      return res.status(500).json({ error: "Não foi possível excluir o investimento." });
+    }
+    res.json({ success: true });
   });
 
   // ====================================================
@@ -7800,7 +17019,7 @@ export function createApp() {
       }
 
       const crdIds = crds.map((c) => Number(c.id)).filter((id) => Number.isFinite(id));
-      const { rows: monthlyRows } = await fetchMonthlyValuesByYear(year);
+      const { rows: monthlyRows } = await fetchMonthlyValuesByYear(year, empresaKeyOf(req));
 
       const previstoByCrdMonth = new Map<string, number>();
       for (const row of monthlyRows ?? []) {
@@ -8152,26 +17371,28 @@ export function createApp() {
     const dateTo = `${selectedYear}-12-31`;
 
     let occupancyPercent = 100;
-    const { data: occupancyRows, error: occupancyError } = await supabase
-      .from("sintase_occupancy")
-      .select("occupancy_percent")
-      .eq("year", selectedYear)
-      .limit(1);
+    const { data: occupancyRows, error: occupancyError } = await filterByEmpresa(
+      supabase.from("sintase_occupancy").select("occupancy_percent").eq("year", selectedYear),
+      req,
+      "sintase_occupancy"
+    ).limit(1);
     if (!occupancyError && occupancyRows?.length) {
       occupancyPercent = getNormalizedOccupancyPercent((occupancyRows[0] as any).occupancy_percent);
     }
     const occupancyFactor = occupancyPercent / 100;
 
-    const { data: crdData, error: crdError } = await supabase
-      .from("crds")
-      .select("id, code, name, previsto_mes, sector_id, sectors(name)")
-      .eq("active", true)
-      .order("code");
+    const { data: crdData, error: crdError } = await filterByEmpresa(
+      supabase.from("crds").select("id, code, name, previsto_mes, sector_id, sectors(name)").eq("active", true),
+      req,
+      "crds"
+    ).order("code");
     if (crdError) return res.status(500).json({ error: crdError.message });
 
-    const { data: allCrds } = await supabase
-      .from("crds")
-      .select("id, code, sector_id");
+    const { data: allCrds } = await filterByEmpresa(
+      supabase.from("crds").select("id, code, sector_id"),
+      req,
+      "crds"
+    );
 
     const crdIds = (crdData ?? []).map((item: any) => Number(item.id)).filter((id) => Number.isFinite(id));
     const monthValueByKey = new Map<string, number>();
@@ -8187,7 +17408,10 @@ export function createApp() {
 
     if (crdIds.length) {
       const allowedCrdIds = new Set(crdIds);
-      const { rows: monthlyRows, error: monthlyError } = await fetchMonthlyValuesByYear(selectedYear);
+      const { rows: monthlyRows, error: monthlyError } = await fetchMonthlyValuesByYear(
+        selectedYear,
+        empresaKeyOf(req)
+      );
 
       if (!monthlyError) {
         for (const row of (monthlyRows ?? []) as CrdMonthlyValueRow[]) {
@@ -8202,12 +17426,21 @@ export function createApp() {
 
     const crdById = new Map<number, any>();
     const crdBySectorAndCode = new Map<string, number>();
+    const codeCount = new Map<string, number>();
+    const crdByCodeUnique = new Map<string, number>();
     for (const c of crdData ?? []) {
       const id = Number((c as any).id);
       const sectorId = Number((c as any).sector_id);
       const code = String((c as any).code || "").trim();
       crdById.set(id, c);
       crdBySectorAndCode.set(`${sectorId}:${code}`, id);
+      const key = code.toLowerCase();
+      if (key) codeCount.set(key, (codeCount.get(key) || 0) + 1);
+    }
+    for (const c of crdData ?? []) {
+      const id = Number((c as any).id);
+      const key = String((c as any).code || "").trim().toLowerCase();
+      if (key && codeCount.get(key) === 1) crdByCodeUnique.set(key, id);
     }
 
     const realizedByKey = new Map<string, number>();
@@ -8217,12 +17450,16 @@ export function createApp() {
       realizedByKey.set(key, (realizedByKey.get(key) || 0) + sanitizeMonthBudget(amount));
     };
 
-    const { data: invoiceData, error: invoiceError } = await supabase
-      .from("invoices")
-      .select("amount, due_date, sector_id, crd, status, flow_stage")
-      .gte("due_date", dateFrom)
-      .lte("due_date", dateTo)
-      .neq("flow_stage", "cancelled");
+    const { data: invoiceData, error: invoiceError } = await filterByEmpresa(
+      supabase
+        .from("invoices")
+        .select("amount, due_date, sector_id, crd, status, flow_stage")
+        .gte("due_date", dateFrom)
+        .lte("due_date", dateTo)
+        .neq("flow_stage", "cancelled"),
+      req,
+      "invoices"
+    );
     if (invoiceError) return res.status(500).json({ error: invoiceError.message });
 
     for (const invoice of invoiceData ?? []) {
@@ -8232,17 +17469,23 @@ export function createApp() {
       const sectorId = Number((invoice as any).sector_id);
       const code = String((invoice as any).crd || "").trim();
       if (!code || !Number.isFinite(sectorId)) continue;
-      const crdId = crdBySectorAndCode.get(`${sectorId}:${code}`);
+      const crdId =
+        crdBySectorAndCode.get(`${sectorId}:${code}`) ??
+        (crdByCodeUnique.get(code.toLowerCase()) ?? undefined);
       if (!crdId) continue;
       addRealized(crdId, month, (invoice as any).amount);
     }
 
-    const { data: reqData, error: reqError } = await supabase
-      .from("requisitions")
-      .select("amount, date, status, crd_id")
-      .neq("status", "cancelled")
-      .gte("date", dateFrom)
-      .lte("date", dateTo);
+    const { data: reqData, error: reqError } = await filterByEmpresa(
+      supabase
+        .from("requisitions")
+        .select("amount, date, status, crd_id")
+        .neq("status", "cancelled")
+        .gte("date", dateFrom)
+        .lte("date", dateTo),
+      req,
+      "requisitions"
+    );
     if (reqError) return res.status(500).json({ error: reqError.message });
 
     for (const reqRow of reqData ?? []) {
@@ -8253,17 +17496,169 @@ export function createApp() {
       addRealized(crdId, month, (reqRow as any).amount);
     }
 
+    // Lançamentos Manuais (+) e Estornos (−) entram SÓ no Prev x Real Diário.
+    // O mensal é alimentado pelas importações (Rel. CRD fechamento etc.).
+    // Qualquer status exceto "cancelled" conta — independe de aprovação.
+    if (viewMode === "diario") {
+      const { data: manualData, error: manualError } = await filterByEmpresa(
+        supabase
+          .from("manual_entries")
+          .select("amount, date, status, crd_id")
+          .neq("status", "cancelled")
+          .gte("date", dateFrom)
+          .lte("date", dateTo),
+        req,
+        "manual_entries"
+      );
+      if (manualError) return res.status(500).json({ error: manualError.message });
+      for (const row of manualData ?? []) {
+        const date = new Date(String((row as any).date || ""));
+        if (Number.isNaN(date.getTime())) continue;
+        const crdId = Number((row as any).crd_id);
+        if (!Number.isFinite(crdId)) continue; // sem CRD: usuário é avisado para vincular
+        addRealized(crdId, date.getMonth() + 1, (row as any).amount);
+      }
+
+      const { data: estornoData, error: estornoError } = await filterByEmpresa(
+        supabase
+          .from("estornos")
+          .select("amount, date, status, crd_id")
+          .neq("status", "cancelled")
+          .gte("date", dateFrom)
+          .lte("date", dateTo),
+        req,
+        "estornos"
+      );
+      if (estornoError) return res.status(500).json({ error: estornoError.message });
+      for (const row of estornoData ?? []) {
+        const date = new Date(String((row as any).date || ""));
+        if (Number.isNaN(date.getTime())) continue;
+        const crdId = Number((row as any).crd_id);
+        if (!Number.isFinite(crdId)) continue;
+        // Estorno reverte o lançamento: subtrai do Realizado.
+        addRealized(crdId, date.getMonth() + 1, -Math.abs(Number((row as any).amount) || 0));
+      }
+    }
+
     // Realizado importado (ex.: Consumo Interno, Rel. CRD).
-    // Rel. CRD: source rel_crd = Mensal (M); rel_crd_diario = Diario (D).
-    const { data: realizadoImport } = await supabase
-      .from("crd_realizado")
-      .select("crd_id, month, value, source")
-      .eq("year", selectedYear);
+    // Rel. CRD: rematch a partir de rel_crd_rows (código entre parênteses no nome do CRD)
+    // para o SALDO LANÇ alimentar o setor competente mesmo em imports antigos.
+    const relCrdScope = viewMode === "diario" ? "acompanhamento" : "fechamento";
+
+    const { data: realizadoImport } = await filterByEmpresa(
+      supabase
+        .from("crd_realizado")
+        .select("crd_id, month, value, source, import_scope, period_key, week_index")
+        .eq("year", selectedYear),
+      req,
+      "crd_realizado"
+    );
+
+    const latestConsumoWeekByMonth = new Map<number, number>();
+    if (viewMode === "diario") {
+      for (const row of realizadoImport ?? []) {
+        if (String((row as any).source) !== "consumo_interno") continue;
+        if (String((row as any).import_scope || "") !== "acompanhamento") continue;
+        const month = Number((row as any).month);
+        const week = Number((row as any).week_index) || 0;
+        if (!Number.isFinite(month) || month < 1 || month > 12) continue;
+        latestConsumoWeekByMonth.set(month, Math.max(latestConsumoWeekByMonth.get(month) ?? 0, week));
+      }
+    }
+
+    const { data: relCrdRowsRaw } = await filterByEmpresa(
+      supabase
+        .from("rel_crd_rows")
+        .select("month, nivel, codigo, saldo_lanc, import_scope, week_index, period_key")
+        .eq("year", selectedYear)
+        .eq("import_scope", relCrdScope),
+      req,
+      "rel_crd_rows"
+    );
+
+    // Acompanhamento: usa a semana mais recente de cada mês (evita somar S1+S2+…).
+    let relCrdRows = relCrdRowsRaw ?? [];
+    if (viewMode === "diario" && relCrdRows.length > 0) {
+      const latestWeekByMonth = new Map<number, number>();
+      for (const row of relCrdRows) {
+        const month = Number((row as any).month);
+        const week = Number((row as any).week_index) || 0;
+        if (!Number.isFinite(month) || month < 1 || month > 12) continue;
+        latestWeekByMonth.set(month, Math.max(latestWeekByMonth.get(month) ?? 0, week));
+      }
+      relCrdRows = relCrdRows.filter((row) => {
+        const month = Number((row as any).month);
+        const week = Number((row as any).week_index) || 0;
+        return week === (latestWeekByMonth.get(month) ?? week);
+      });
+    }
+
+    const hasRelCrdRows = relCrdRows.length > 0;
+
     for (const row of realizadoImport ?? []) {
       const source = String((row as any).source || "");
-      if (viewMode === "diario" && (source === "rel_crd" || source === "rel_crd_mensal")) continue;
-      if (viewMode === "mensal" && source === "rel_crd_diario") continue;
+      const rowScope = String((row as any).import_scope || "");
+      const isRelCrd =
+        source === "rel_crd" || source === "rel_crd_mensal" || source === "rel_crd_diario";
+      // Quando há linhas do Rel. CRD no escopo, o rematch abaixo substitui essas sources.
+      if (hasRelCrdRows && isRelCrd) continue;
+      if (viewMode === "diario") {
+        if (source === "rel_crd" || source === "rel_crd_mensal") continue;
+        if (rowScope === "fechamento") continue;
+        if (source === "consumo_interno" && rowScope === "acompanhamento") {
+          const month = Number((row as any).month);
+          const week = Number((row as any).week_index) || 0;
+          if (week !== (latestConsumoWeekByMonth.get(month) ?? week)) continue;
+        }
+      } else {
+        if (source === "rel_crd_diario") continue;
+        if (rowScope === "acompanhamento") continue;
+      }
       addRealized(Number((row as any).crd_id), Number((row as any).month), (row as any).value);
+    }
+
+    if (hasRelCrdRows) {
+      const parenToId = new Map<string, number>();
+      const codeToId = new Map<string, number>();
+      for (const c of allCrds ?? []) {
+        const id = Number((c as any).id);
+        if (!Number.isFinite(id)) continue;
+        const code = String((c as any).code ?? "").trim().toLowerCase();
+        if (code) codeToId.set(code, id);
+      }
+      // Nomes dos CRDs ativos (com setor) para match preferencial "(codigo)".
+      for (const c of crdData ?? []) {
+        const id = Number((c as any).id);
+        if (!Number.isFinite(id)) continue;
+        const paren = /\((\d+)\)\s*$/.exec(String((c as any).name ?? "").trim());
+        if (paren) parenToId.set(paren[1], id);
+        const code = String((c as any).code ?? "").trim().toLowerCase();
+        if (code) codeToId.set(code, id);
+      }
+      const resolveCrdId = (codigoRaw: string): number | null => {
+        const codigo = String(codigoRaw ?? "").trim();
+        if (!codigo) return null;
+        if (parenToId.has(codigo)) return parenToId.get(codigo)!;
+        return codeToId.get(codigo.toLowerCase()) ?? null;
+      };
+
+      const maxNivelByMonth = new Map<number, number>();
+      for (const row of relCrdRows ?? []) {
+        const month = Number((row as any).month);
+        if (!Number.isFinite(month) || month < 1 || month > 12) continue;
+        const nivel = Number((row as any).nivel) || 1;
+        maxNivelByMonth.set(month, Math.max(maxNivelByMonth.get(month) ?? 1, nivel));
+      }
+
+      for (const row of relCrdRows ?? []) {
+        const month = Number((row as any).month);
+        if (!Number.isFinite(month) || month < 1 || month > 12) continue;
+        const nivel = Number((row as any).nivel) || 1;
+        if (nivel < (maxNivelByMonth.get(month) ?? 1)) continue;
+        const crdId = resolveCrdId(String((row as any).codigo ?? ""));
+        if (!crdId) continue;
+        addRealized(crdId, month, (row as any).saldo_lanc);
+      }
     }
 
     const rows = (crdData ?? [])
@@ -8486,22 +17881,23 @@ export function createApp() {
     return { months, total };
   };
 
-  const getIndicadorUhs = async (year: number) => {
-    const { data } = await supabase
-      .from("indicadores_parametros")
-      .select("uhs")
-      .eq("year", year)
-      .limit(1);
+  const getIndicadorUhs = async (year: number, empresaKey?: CompanyKey) => {
+    let query = supabase.from("indicadores_parametros").select("uhs").eq("year", year);
+    if (empresaKey) {
+      query = filterByEmpresaKey(query, empresaKey, "indicadores_parametros");
+    }
+    const { data } = await query.limit(1);
     return data?.length ? Number((data[0] as any).uhs) || 172 : 172;
   };
 
   // GET /api/indicadores?year=YYYY  -> realizado + meta (inputs e calculados) + total
   app.get("/api/indicadores", async (req, res) => {
     const year = Number((req.query as any).year) || new Date().getFullYear();
-    const { data, error } = await supabase
-      .from("indicadores_mensais")
-      .select("*")
-      .eq("year", year);
+    const { data, error } = await filterByEmpresa(
+      supabase.from("indicadores_mensais").select("*").eq("year", year),
+      req,
+      "indicadores_mensais"
+    );
     if (error) {
       if (error.message?.toLowerCase().includes("indicadores_mensais")) {
         return res.status(500).json({
@@ -8511,7 +17907,7 @@ export function createApp() {
       console.error("Erro ao carregar indicadores:", error);
       return res.status(500).json({ error: "Erro interno ao carregar indicadores." });
     }
-    const uhs = await getIndicadorUhs(year);
+    const uhs = await getIndicadorUhs(year, empresaKeyOf(req));
     res.json({
       year,
       uhs,
@@ -8520,16 +17916,400 @@ export function createApp() {
     });
   });
 
+  // ====================================================
+  // DASHBOARD DIRETORIA (consolidado — Fase 4.9)
+  // ====================================================
+  app.get("/api/dashboard/diretoria", requireRole("admin", "controle", "diretoria"), async (req, res) => {
+    const now = new Date();
+    const selectedMonth = Number((req.query as any).month) || now.getMonth() + 1;
+    const selectedYear = Number((req.query as any).year) || now.getFullYear();
+    const monthIdx = Math.max(1, Math.min(12, selectedMonth));
+    const prevYear = selectedYear - 1;
+
+    const pickKpis = (monthRow: any, ytdRows: any[]) => {
+      const sum = (key: string) => ytdRows.reduce((s, m) => s + (Number(m?.[key]) || 0), 0);
+      const fatYtd = sum("faturamento");
+      const ebitdaYtd = sum("ebitda");
+      const rlYtd = sum("resultado_liquido");
+      const fatM = Number(monthRow?.faturamento) || 0;
+      const ebitdaM = Number(monthRow?.ebitda) || 0;
+      const rlM = Number(monthRow?.resultado_liquido) || 0;
+      return {
+        mes: {
+          faturamento: fatM,
+          ebitda: ebitdaM,
+          margem_ebitda: fatM > 0 ? ebitdaM / fatM : 0,
+          resultado_liquido: rlM,
+          rl_sobre_faturamento: fatM > 0 ? rlM / fatM : 0,
+        },
+        acumulado: {
+          faturamento: fatYtd,
+          ebitda: ebitdaYtd,
+          margem_ebitda: fatYtd > 0 ? ebitdaYtd / fatYtd : 0,
+          resultado_liquido: rlYtd,
+          rl_sobre_faturamento: fatYtd > 0 ? rlYtd / fatYtd : 0,
+        },
+      };
+    };
+
+    const varPct = (atual: number, base: number) =>
+      base !== 0 ? (atual - base) / Math.abs(base) : atual !== 0 ? 1 : 0;
+
+    const normalizeSector = (value: unknown) =>
+      String(value ?? "")
+        .trim()
+        .toUpperCase()
+        .normalize("NFD")
+        .replace(/\p{Diacritic}/gu, "");
+
+    try {
+      const empresaKey = empresaKeyOf(req);
+      const [{ data: indYear }, { data: indPrev }, uhs, uhsPrev] = await Promise.all([
+        filterByEmpresa(
+          supabase.from("indicadores_mensais").select("*").eq("year", selectedYear),
+          req,
+          "indicadores_mensais"
+        ),
+        filterByEmpresa(
+          supabase.from("indicadores_mensais").select("*").eq("year", prevYear),
+          req,
+          "indicadores_mensais"
+        ),
+        getIndicadorUhs(selectedYear, empresaKey),
+        getIndicadorUhs(prevYear, empresaKey),
+      ]);
+
+      const realizado = buildIndicadorEscopo(indYear ?? [], "realizado", selectedYear, uhs);
+      const meta = buildIndicadorEscopo(indYear ?? [], "meta", selectedYear, uhs);
+      const realizadoPrev = buildIndicadorEscopo(indPrev ?? [], "realizado", prevYear, uhsPrev);
+
+      const ytdReal = realizado.months.slice(0, monthIdx);
+      const ytdMeta = meta.months.slice(0, monthIdx);
+      const ytdPrev = realizadoPrev.months.slice(0, monthIdx);
+      const monthReal = realizado.months[monthIdx - 1];
+      const monthMeta = meta.months[monthIdx - 1];
+      const monthPrev = realizadoPrev.months[monthIdx - 1];
+
+      const kpisReal = pickKpis(monthReal, ytdReal);
+      const kpisMeta = pickKpis(monthMeta, ytdMeta);
+      const kpisPrev = pickKpis(monthPrev, ytdPrev);
+
+      const comparativos = {
+        mensal: {
+          realizado: kpisReal.mes,
+          meta: kpisMeta.mes,
+          ano_anterior: kpisPrev.mes,
+          vs_meta: {
+            faturamento: varPct(kpisReal.mes.faturamento, kpisMeta.mes.faturamento),
+            ebitda: varPct(kpisReal.mes.ebitda, kpisMeta.mes.ebitda),
+            resultado_liquido: varPct(kpisReal.mes.resultado_liquido, kpisMeta.mes.resultado_liquido),
+          },
+          vs_ano_anterior: {
+            faturamento: varPct(kpisReal.mes.faturamento, kpisPrev.mes.faturamento),
+            ebitda: varPct(kpisReal.mes.ebitda, kpisPrev.mes.ebitda),
+            resultado_liquido: varPct(kpisReal.mes.resultado_liquido, kpisPrev.mes.resultado_liquido),
+          },
+        },
+        acumulado: {
+          realizado: kpisReal.acumulado,
+          meta: kpisMeta.acumulado,
+          ano_anterior: kpisPrev.acumulado,
+          vs_meta: {
+            faturamento: varPct(kpisReal.acumulado.faturamento, kpisMeta.acumulado.faturamento),
+            ebitda: varPct(kpisReal.acumulado.ebitda, kpisMeta.acumulado.ebitda),
+            resultado_liquido: varPct(
+              kpisReal.acumulado.resultado_liquido,
+              kpisMeta.acumulado.resultado_liquido
+            ),
+          },
+          vs_ano_anterior: {
+            faturamento: varPct(kpisReal.acumulado.faturamento, kpisPrev.acumulado.faturamento),
+            ebitda: varPct(kpisReal.acumulado.ebitda, kpisPrev.acumulado.ebitda),
+            resultado_liquido: varPct(
+              kpisReal.acumulado.resultado_liquido,
+              kpisPrev.acumulado.resultado_liquido
+            ),
+          },
+        },
+      };
+
+      const monthNamesShort = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
+      const serieMensal = realizado.months.map((m: any, i: number) => ({
+        month: m.month,
+        name: monthNamesShort[i],
+        realizado: Number(m.faturamento) || 0,
+        meta: Number(meta.months[i]?.faturamento) || 0,
+        ebitda: Number(m.ebitda) || 0,
+        resultado_liquido: Number(m.resultado_liquido) || 0,
+      }));
+
+      const { data: contratosRows } = await supabase
+        .from("contratos")
+        .select("id, fornecedor, valor, status, ativo, assinado, vencimento, sectors(name)")
+        .eq("ativo", true)
+        .order("vencimento", { ascending: true, nullsFirst: false })
+        .limit(200);
+
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const in30 = new Date(today);
+      in30.setDate(in30.getDate() + 30);
+
+      const alertasContratos: Array<{
+        id: number;
+        tipo: string;
+        fornecedor: string;
+        valor: number;
+        vencimento: string | null;
+        setor: string | null;
+        mensagem: string;
+      }> = [];
+
+      for (const c of contratosRows ?? []) {
+        const status = String((c as any).status || "");
+        const venc = (c as any).vencimento ? String((c as any).vencimento).slice(0, 10) : null;
+        const fornecedor = String((c as any).fornecedor || "");
+        const valor = Number((c as any).valor) || 0;
+        const setor = (c as any).sectors?.name ? String((c as any).sectors.name) : null;
+        const due = venc ? new Date(`${venc}T00:00:00`) : null;
+        const assinado = Boolean((c as any).assinado);
+
+        if (status === "vencido" || (due && due < today && status === "ativo")) {
+          alertasContratos.push({
+            id: Number((c as any).id),
+            tipo: "vencido",
+            fornecedor,
+            valor,
+            vencimento: venc,
+            setor,
+            mensagem: `Contrato vencido${venc ? ` em ${venc}` : ""}`,
+          });
+        } else if (due && due >= today && due <= in30) {
+          alertasContratos.push({
+            id: Number((c as any).id),
+            tipo: "vence_em_30",
+            fornecedor,
+            valor,
+            vencimento: venc,
+            setor,
+            mensagem: `Vence em ${venc}`,
+          });
+        }
+        if (status === "pendente_assinatura" || (!assinado && status !== "encerrado" && status !== "vencido")) {
+          alertasContratos.push({
+            id: Number((c as any).id),
+            tipo: "pendente_assinatura",
+            fornecedor,
+            valor,
+            vencimento: venc,
+            setor,
+            mensagem: "Pendente de assinatura",
+          });
+        }
+      }
+
+      const { data: semanal } = await supabase
+        .from("painel_controladoria_semanal")
+        .select("*")
+        .order("semana_inicio", { ascending: false })
+        .limit(80);
+
+      const consumoRows = (semanal ?? []).map((r: any) => {
+        const previsto = Number(r.previsto) || 0;
+        const realizadoVal = Number(r.realizado) || 0;
+        const estouro = previsto > 0 && realizadoVal > previsto;
+        return {
+          id: Number(r.id),
+          semana_inicio: r.semana_inicio,
+          item: String(r.item || ""),
+          previsto,
+          realizado: realizadoVal,
+          diferenca: realizadoVal - previsto,
+          estouro,
+          setor_responsavel: r.setor_responsavel ? String(r.setor_responsavel) : null,
+        };
+      });
+
+      const principaisEstouros = [...consumoRows]
+        .filter((r) => r.estouro)
+        .sort((a, b) => b.diferenca - a.diferenca)
+        .slice(0, 8);
+
+      const consumoResumo = {
+        itens: consumoRows.length,
+        estourados: consumoRows.filter((r) => r.estouro).length,
+        total_previsto: consumoRows.reduce((s, r) => s + r.previsto, 0),
+        total_realizado: consumoRows.reduce((s, r) => s + r.realizado, 0),
+        recentes: consumoRows.slice(0, 6),
+      };
+
+      const sectorDefs = [
+        { key: "operacional", label: "Operacional", tabId: "painel-operacional", sectorNames: ["Operacional"] },
+        { key: "ab", label: "A&B", tabId: "painel-ab", sectorNames: ["A&B"] },
+        { key: "hospedagem", label: "Hospedagem", tabId: "painel-hospedagem", sectorNames: ["Hospedagem"] },
+        { key: "spa", label: "SPA", tabId: "painel-spa", sectorNames: [] as string[], keywords: ["SPA"] },
+      ];
+
+      const { data: allSectors } = await filterByEmpresa(
+        supabase.from("sectors").select("id, name"),
+        req,
+        "sectors"
+      );
+      const { data: allCrds } = await filterByEmpresa(
+        supabase.from("crds").select("id, code, name, sector_id, previsto_mes").eq("active", true),
+        req,
+        "crds"
+      );
+      const { rows: monthlyRows } = await fetchMonthlyValuesByYear(selectedYear, empresaKeyOf(req));
+      const { data: realizadoRows } = await filterByEmpresa(
+        supabase.from("crd_realizado").select("crd_id, month, value").eq("year", selectedYear),
+        req,
+        "crd_realizado"
+      );
+
+      const setores = sectorDefs.map((def) => {
+        const sectorIds = new Set<number>();
+        for (const s of allSectors ?? []) {
+          const name = String((s as any).name || "");
+          if (def.sectorNames.some((n) => normalizeSector(n) === normalizeSector(name))) {
+            sectorIds.add(Number((s as any).id));
+          }
+        }
+        let crds = (allCrds ?? []) as any[];
+        if (def.keywords?.length) {
+          crds = crds.filter((c) =>
+            def.keywords!.some((k) =>
+              normalizeSector(`${c.code} ${c.name}`).includes(normalizeSector(k))
+            )
+          );
+        } else if (sectorIds.size) {
+          crds = crds.filter((c) => sectorIds.has(Number(c.sector_id)));
+        } else {
+          crds = [];
+        }
+        const crdIds = new Set(crds.map((c) => Number(c.id)));
+        let previsto = 0;
+        for (const row of monthlyRows ?? []) {
+          const m = Number((row as any).month);
+          if (!crdIds.has(Number((row as any).crd_id)) || m < 1 || m > monthIdx) continue;
+          previsto += Number((row as any).value) || 0;
+        }
+        if (previsto === 0) {
+          for (const c of crds) previsto += (Number(c.previsto_mes) || 0) * monthIdx;
+        }
+        let realizadoVal = 0;
+        for (const row of realizadoRows ?? []) {
+          const m = Number((row as any).month);
+          if (!crdIds.has(Number((row as any).crd_id)) || m < 1 || m > monthIdx) continue;
+          realizadoVal += Number((row as any).value ?? (row as any).amount) || 0;
+        }
+        return {
+          key: def.key,
+          label: def.label,
+          tabId: def.tabId,
+          previsto,
+          realizado: realizadoVal,
+          diferenca: realizadoVal - previsto,
+          estouro: previsto > 0 && realizadoVal > previsto,
+        };
+      });
+
+      const atalhos = [
+        { tabId: "painel-operacional", label: "Gerência Operacional" },
+        { tabId: "painel-ab", label: "A&B" },
+        { tabId: "painel-spa", label: "SPA" },
+        { tabId: "painel-hospedagem", label: "Hospedagem" },
+        { tabId: "painel-nutricionista", label: "Nutricionista" },
+        { tabId: "painel-controladoria", label: "Controladoria" },
+        { tabId: "investimentos", label: "Investimentos" },
+        { tabId: "mensalidades", label: "Mensalidades" },
+        { tabId: "indicadores", label: "Indicadores" },
+        { tabId: "dre", label: "DRE Gerencial" },
+      ];
+
+      const { data: investRows } = await supabase
+        .from("investimentos")
+        .select("id, nome, valor_previsto, valor_lancado, valor_realizado, status, sectors(name)")
+        .neq("status", "cancelado")
+        .order("updated_at", { ascending: false })
+        .limit(100);
+
+      const alertasInvestimentos: Array<{
+        id: number;
+        tipo: string;
+        nome: string;
+        valor_previsto: number;
+        valor_lancado: number;
+        valor_realizado: number;
+        saldo_a_realizar: number;
+        pct_executado: number;
+        setor: string | null;
+        mensagem: string;
+      }> = [];
+
+      for (const inv of investRows ?? []) {
+        const previsto = Number((inv as any).valor_previsto) || 0;
+        const lancado = Number((inv as any).valor_lancado) || 0;
+        const realizado = Number((inv as any).valor_realizado) || 0;
+        const nome = String((inv as any).nome || "");
+        const setor = (inv as any).sectors?.name ? String((inv as any).sectors.name) : null;
+        const saldo = previsto - realizado;
+        const pct = previsto > 0 ? realizado / previsto : 0;
+        if (previsto > 0 && (realizado > previsto + 0.009 || lancado > previsto + 0.009)) {
+          alertasInvestimentos.push({
+            id: Number((inv as any).id),
+            tipo: "estouro_orcamento",
+            nome,
+            valor_previsto: previsto,
+            valor_lancado: lancado,
+            valor_realizado: realizado,
+            saldo_a_realizar: saldo,
+            pct_executado: pct,
+            setor,
+            mensagem:
+              realizado > previsto
+                ? `Realizado acima do previsto (${(pct * 100).toFixed(0)}%)`
+                : "Lançado acima do previsto",
+          });
+        }
+      }
+
+      res.json({
+        month: monthIdx,
+        year: selectedYear,
+        kpis: kpisReal,
+        meta: kpisMeta,
+        comparativos,
+        serieMensal,
+        setores,
+        principaisEstouros,
+        alertas: {
+          contratos: alertasContratos.slice(0, 15),
+          investimentos: alertasInvestimentos.slice(0, 15),
+        },
+        consumo: consumoResumo,
+        atalhos,
+      });
+    } catch (err) {
+      console.error("Erro no dashboard da diretoria:", err);
+      return res.status(500).json({ error: "Não foi possível carregar o dashboard da diretoria." });
+    }
+  });
+
   // GET /api/indicadores/anos  -> anos disponíveis (para o seletor)
-  app.get("/api/indicadores/anos", async (_req, res) => {
-    const { data, error } = await supabase
-      .from("indicadores_mensais")
-      .select("year");
+  app.get("/api/indicadores/anos", async (req, res) => {
+    const { data, error } = await filterByEmpresa(
+      supabase.from("indicadores_mensais").select("year"),
+      req,
+      "indicadores_mensais"
+    );
     if (error) {
       console.error(error);
       return res.status(500).json({ error: "Erro interno ao processar a solicitação." });
     }
-    const years = Array.from(new Set((data ?? []).map((r: any) => Number(r.year)))).sort((a, b) => a - b);
+    const years = Array.from(new Set((data ?? []).map((r: any) => Number(r.year)))).sort(
+      (a: number, b: number) => a - b
+    );
     res.json({ years });
   });
 
@@ -8548,9 +18328,12 @@ export function createApp() {
     const parsed = Number(String(value).replace(",", "."));
     if (!Number.isFinite(parsed)) return res.status(400).json({ error: "valor numérico inválido." });
 
-    const payload: Record<string, any> = {
-      escopo, year: Number(year), month: Number(month), [field]: parsed,
-    };
+    const payload = withEmpresaKey(
+      {
+        escopo, year: Number(year), month: Number(month), [field]: parsed,
+      } as Record<string, any>,
+      req
+    );
     const { error } = await supabase
       .from("indicadores_mensais")
       .upsert(payload, { onConflict: "escopo,year,month" });
@@ -8577,9 +18360,10 @@ export function createApp() {
       const v = Number(String(raw ?? 0).replace(",", "."));
       payload[f] = Number.isFinite(v) ? v : 0;
     }
+    const stamped = withEmpresaKey(payload, req);
     const { error } = await supabase
       .from("indicadores_mensais")
-      .upsert(payload, { onConflict: "escopo,year,month" });
+      .upsert(stamped, { onConflict: "escopo,year,month" });
     if (error) {
       console.error("Erro ao salvar mês de indicadores:", error);
       return res.status(500).json({ error: "Não foi possível salvar o mês." });
@@ -8596,7 +18380,7 @@ export function createApp() {
       return res.status(400).json({ error: "uhs deve ser um inteiro positivo." });
     const { error } = await supabase
       .from("indicadores_parametros")
-      .upsert({ year: Number(year), uhs: uhsNum }, { onConflict: "year" });
+      .upsert(withEmpresaKey({ year: Number(year), uhs: uhsNum }, req), { onConflict: "year" });
     if (error) {
       console.error("Erro ao salvar parâmetro de indicadores:", error);
       return res.status(500).json({ error: "Não foi possível salvar o parâmetro." });
@@ -8614,13 +18398,18 @@ export function createApp() {
     const realizado: Record<string, any> = {};
     const meta: Record<string, any> = {};
     const uhsByYear: Record<string, number> = {};
+    const empresaKey = empresaKeyOf(req);
     for (const y of anos) {
-      const { data, error } = await supabase.from("indicadores_mensais").select("*").eq("year", y);
+      const { data, error } = await filterByEmpresa(
+        supabase.from("indicadores_mensais").select("*").eq("year", y),
+        req,
+        "indicadores_mensais"
+      );
       if (error) {
         console.error("Erro no comparativo de indicadores:", error);
         return res.status(500).json({ error: "Erro ao carregar comparativo." });
       }
-      const uhs = await getIndicadorUhs(y);
+      const uhs = await getIndicadorUhs(y, empresaKey);
       uhsByYear[y] = uhs;
       realizado[y] = buildIndicadorEscopo(data ?? [], "realizado", y, uhs).total;
       meta[y] = buildIndicadorEscopo(data ?? [], "meta", y, uhs).total;
@@ -8646,7 +18435,7 @@ export function createApp() {
 
     // Orçado do ano (editável) a partir de crd_monthly_values, com fallback em previsto_mes.
     const orcadoByKey = new Map<string, number>();
-    const { rows: monthlyRows } = await fetchMonthlyValuesByYear(selectedYear);
+    const { rows: monthlyRows } = await fetchMonthlyValuesByYear(selectedYear, empresaKeyOf(req));
     for (const row of (monthlyRows ?? []) as CrdMonthlyValueRow[]) {
       orcadoByKey.set(`${row.crd_id}:${row.month}`, sanitizeMonthBudget(row.value));
     }
@@ -8711,7 +18500,7 @@ export function createApp() {
     });
   });
 
-  app.patch("/api/orcamento/cell", async (req, res) => {
+  app.patch("/api/orcamento/cell", requireRole("admin"), async (req, res) => {
     const { crd_id, month, year, value } = req.body as {
       crd_id?: number;
       month?: number;
@@ -8813,26 +18602,12 @@ export function createApp() {
       }
 
       // Setores existentes (para criar CRDs faltantes mapeando pela coluna B).
-      const { data: sectorsData } = await supabase.from("sectors").select("id, name");
-      const sectorIdByName = new Map<string, number>();
-      for (const s of sectorsData ?? []) sectorIdByName.set(normalizeName((s as any).name), Number((s as any).id));
+      const empresaSectorCache = sectorCacheFor(empresaKeyOf(req));
+      await empresaSectorCache.reload(true);
 
       const resolveSectorId = async (groupHint: string): Promise<number | null> => {
-        const key = normalizeName(groupHint) || "sem grupo";
-        if (sectorIdByName.has(key)) return sectorIdByName.get(key)!;
-        // Cria o setor caso não exista (ex.: "Diretoria").
-        const niceName = (groupHint || "Sem grupo").trim();
-        const { data: created, error } = await supabase
-          .from("sectors")
-          .insert({ name: niceName, budget_limit: 0 })
-          .select("id")
-          .single();
-        if (error || !created) {
-          console.error("Falha ao criar setor:", niceName, error);
-          return sectorIdByName.get("sem grupo") ?? null;
-        }
-        sectorIdByName.set(key, Number(created.id));
-        return Number(created.id);
+        const resolved = await resolveSector(supabase, { name: groupHint, create: true }, empresaSectorCache);
+        return resolved?.id ?? null;
       };
 
       const upsertRows: Array<{ crd_id: number; year: number; month: number; value: number }> = [];
@@ -8972,10 +18747,11 @@ export function createApp() {
 
   app.get("/api/ajustes", async (req, res) => {
     const year = Number((req.query as any)?.year) || 2026;
-    const { data, error } = await supabase
-      .from("orcamento_ajustes")
-      .select("account_name, month, value")
-      .eq("year", year);
+    const { data, error } = await filterByEmpresa(
+      supabase.from("orcamento_ajustes").select("account_name, month, value").eq("year", year),
+      req,
+      "orcamento_ajustes"
+    );
     if (error) {
       console.error("Erro ao carregar ajustes:", error);
       return res.status(500).json({ error: "Erro interno ao processar a solicitação." });
@@ -9007,7 +18783,7 @@ export function createApp() {
     });
   });
 
-  app.patch("/api/ajustes/cell", async (req, res) => {
+  app.patch("/api/ajustes/cell", requireRole("admin"), async (req, res) => {
     const { account_name, month, year, value } = req.body as {
       account_name?: string;
       month?: number;
@@ -9025,7 +18801,10 @@ export function createApp() {
     const { error } = await supabase
       .from("orcamento_ajustes")
       .upsert(
-        { account_name: name, year: Number(year), month: Number(month), value: sanitizedValue },
+        withEmpresaKey(
+          { account_name: name, year: Number(year), month: Number(month), value: sanitizedValue },
+          req
+        ),
         { onConflict: "account_name,year,month" }
       );
     if (error) {
@@ -9058,9 +18837,13 @@ export function createApp() {
         months.forEach((v, i) => (acc[i] += v));
       }
 
-      const upsertRows: Array<{ account_name: string; year: number; month: number; value: number }> = [];
+      const upsertRows: Array<{ account_name: string; year: number; month: number; value: number; empresa_key: string }> = [];
       for (const [account_name, months] of merged.entries()) {
-        months.forEach((value, i) => upsertRows.push({ account_name, year, month: i + 1, value }));
+        months.forEach((value, i) =>
+          upsertRows.push(
+            withEmpresaKey({ account_name, year, month: i + 1, value }, req)
+          )
+        );
       }
 
       let written = 0;
@@ -9108,6 +18891,11 @@ export function createApp() {
     if (error) { console.error(error); return res.status(500).json({ error: "Erro interno ao processar a solicitação." }); }
     res.json(data);
   });
+
+  // ====================================================
+  // ORÇAMENTO AQUAMANIA (temporada set→ago) — src/aquaOrcamentoRoutes.ts
+  // ====================================================
+  registerAquaOrcamentoRoutes(app);
 
   // Tratador de erros de upload (ex.: arquivo acima do limite) e fallback genérico.
   app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {

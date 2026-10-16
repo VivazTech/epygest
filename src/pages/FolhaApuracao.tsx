@@ -247,7 +247,7 @@ export const FolhaApuracaoPage: React.FC = () => {
       setProcessResumo(json.resumo);
       setMsg(`Apuração concluída em ${new Date(json.resumo?.calculado_em || Date.now()).toLocaleString('pt-BR')}.`);
       await loadApuracao();
-      loadCompetencias();
+      await loadCompetencias();
     } catch (e: any) {
       setError(e?.message || 'Erro ao processar.');
     } finally {
@@ -257,6 +257,11 @@ export const FolhaApuracaoPage: React.FC = () => {
 
   const prontoParaProcessar = Boolean(importStatus?.pronto_para_processar);
   const dadosImportados = Boolean(importStatus?.dados_importados);
+  const podeProcessar =
+    prontoParaProcessar ||
+    Boolean(apuracao) ||
+    Number(importStatus?.lancamentos_detalhe ?? 0) > 0 ||
+    Number(importStatus?.rubricas ?? 0) > 0;
 
   const mapearPendencia = async (p: any, preset: string) => {
     await fetch('/api/folha/apuracao/rubricas/mapear', {
@@ -419,25 +424,28 @@ export const FolhaApuracaoPage: React.FC = () => {
             {['2024', '2025', '2026', '2027'].map((y) => <option key={y} value={y}>{y}</option>)}
           </select>
           {['mensal', 'pendencias', 'conferencia', 'relatorios', 'auditoria'].includes(tab) && (
-            <select value={month} onChange={(e) => setMonth(Number(e.target.value))} className="px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm">
-              {MESES_LABEL.slice(1).map((m, i) => {
-                const comp = competencias.find((c) => c.month === i + 1);
-                const badge = comp?.importado ? (comp.apurado ? ' ✓' : ' ●') : '';
-                return (
-                  <option key={m} value={i + 1}>
-                    {String(i + 1).padStart(2, '0')} · {m}{badge}
-                  </option>
-                );
-              })}
-            </select>
+            <>
+              <select value={month} onChange={(e) => setMonth(Number(e.target.value))} className="px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm">
+                {MESES_LABEL.slice(1).map((m, i) => {
+                  const comp = competencias.find((c) => c.month === i + 1);
+                  const badge = comp?.importado ? (comp.apurado ? ' ✓' : ' ●') : '';
+                  return (
+                    <option key={m} value={i + 1}>
+                      {String(i + 1).padStart(2, '0')} · {m}{badge}
+                    </option>
+                  );
+                })}
+              </select>
+              <span className="text-[10px] text-slate-500 self-center">● importado · ✓ apurado</span>
+            </>
           )}
           {tab === 'mensal' && (
             <>
-              {(prontoParaProcessar || dadosImportados || apuracao) && (
+              {(podeProcessar || dadosImportados) && (
                 <button
                   onClick={() => processar(false)}
-                  disabled={loading || (!prontoParaProcessar && !apuracao)}
-                  title={!prontoParaProcessar && !apuracao ? 'Importe rubricas do extrato antes de processar' : undefined}
+                  disabled={loading || !podeProcessar}
+                  title={!podeProcessar ? 'Importe o extrato antes de processar' : undefined}
                   className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-[#004D40] text-white text-sm font-bold hover:bg-[#003d33] disabled:opacity-60 shadow-md"
                 >
                   {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Calculator className="w-4 h-4" />}
@@ -543,7 +551,8 @@ export const FolhaApuracaoPage: React.FC = () => {
                 <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-5 text-sm text-emerald-900">
                   <p className="font-bold text-base mb-2">Extrato importado — pronto para apurar</p>
                   <p className="mb-3">
-                    {importStatus?.funcionarios ?? 0} funcionário(s), {importStatus?.rubricas ?? 0} rubrica(s)
+                    {importStatus?.funcionarios ?? 0} funcionário(s)
+                    {importStatus?.rubricas ? `, ${importStatus.rubricas} rubrica(s) no resumo` : ''}
                     {importStatus?.lancamentos_detalhe ? `, ${importStatus.lancamentos_detalhe} lançamento(s) por funcionário` : ''}.
                     {importStatus?.proventos_calculados != null && (
                       <> Proventos (cadastro): <b>{formatCurrency(importStatus.proventos_calculados)}</b>.</>
@@ -564,7 +573,7 @@ export const FolhaApuracaoPage: React.FC = () => {
               )}
               {dadosImportados && !prontoParaProcessar && (
                 <div className="bg-amber-50 border border-amber-100 rounded-2xl p-4 text-sm text-amber-900">
-                  Funcionários importados ({importStatus?.funcionarios ?? 0}), mas nenhuma rubrica foi reconhecida no extrato.
+                  Dados importados para este mês, mas o sistema não encontrou rubricas nem lançamentos por funcionário.
                   Reimporte o arquivo em <b>Importação › Extrato Mensal</b>.
                 </div>
               )}

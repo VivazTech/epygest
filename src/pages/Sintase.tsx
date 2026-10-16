@@ -70,8 +70,12 @@ export const SintasePage: React.FC = () => {
         const parsed = JSON.parse(raw);
         setUserRole(String(parsed?.role || 'viewer'));
 
-        const users = await fetch('/api/users').then((res) => res.json()).catch(() => []);
-        const freshUser = (Array.isArray(users) ? users : []).find((u: any) => String(u.id) === String(parsed?.id));
+        // /api/users é só admin. Gestor usa /api/auth/me, que inclui todos os setores vinculados.
+        let freshUser: any = null;
+        const meRes = await fetch('/api/auth/me').catch(() => null);
+        if (meRes?.ok) {
+          freshUser = await meRes.json().catch(() => null);
+        }
         const sourceNames = Array.isArray(freshUser?.sector_names)
           ? freshUser.sector_names
           : (Array.isArray(parsed?.sector_names) ? parsed.sector_names : []);
@@ -191,12 +195,13 @@ export const SintasePage: React.FC = () => {
   };
 
   const startCellEdit = (rowId: number, monthIndex: number, value: number) => {
+    if (userRole !== 'admin') return;
     setEditingCell({ rowId, monthIndex });
     setEditingValue(String(value ?? 0));
   };
 
   const saveCellEdit = async (row: SintaseApiResponse['rows'][number], monthIndex: number) => {
-    if (savingCell) return;
+    if (userRole !== 'admin' || savingCell) return;
     const parsedValue = Number(String(editingValue).replace(',', '.'));
     if (!Number.isFinite(parsedValue)) {
       alert('Digite um valor numérico válido.');
@@ -376,7 +381,7 @@ export const SintasePage: React.FC = () => {
                                       }}
                                       className="w-28 px-2 py-1 text-right bg-white border border-emerald-300 rounded-md"
                                     />
-                                  ) : (
+                                  ) : userRole === 'admin' ? (
                                     <button
                                       onClick={() => startCellEdit(row.id, index, value)}
                                       className="min-w-20 px-2 py-1 rounded hover:bg-emerald-50 transition-colors"
@@ -395,6 +400,19 @@ export const SintasePage: React.FC = () => {
                                         )}
                                       />
                                     </button>
+                                  ) : (
+                                    <ValueTrace
+                                      className="text-xs text-slate-900"
+                                      displayValue={formatCurrency(value || 0)}
+                                      meta={valueTrace.sintase.cell(
+                                        row.crd,
+                                        row.grupo,
+                                        row.detalhado,
+                                        index + 1,
+                                        data?.year ?? Number(year),
+                                        occupancyPercent
+                                      )}
+                                    />
                                   )}
                                 </td>
                               );

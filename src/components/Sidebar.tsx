@@ -28,17 +28,41 @@ import {
   FileCheck,
   TrendingUp,
   Boxes,
-  Building2,
+  CalendarClock,
+  Landmark,
+  BookOpen,
+  Lightbulb,
+  PenLine,
+  ShieldCheck,
+  Percent,
+  Network,
+  Settings2,
+  UserX,
+  UserRound,
+  Clock,
+  Undo2,
+  Store,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
-import { PLANILHAS_RESULTADOS, APURACAO_RECEITA_ITENS, BASE_ORCAMENTO_ITENS, isBaseOrcamentoTab, isRelCrdTab, isRelReqTab, isConsumoInternoTab, isRdsTab, isApuracaoReceitaTab as checkApuracaoReceitaTab, isApuracaoResultadosTab as checkApuracaoResultadosTab } from '../lib/planilhas';
-import { PAINEIS_SETORIAIS, isPainelSetorialTab } from '../lib/paineisSetoriais';
+import { useCompany } from '../context/CompanyContext';
+import { PLANILHAS_RESULTADOS, APURACAO_RECEITA_ITENS, BASE_ORCAMENTO_ITENS, isBaseOrcamentoTab, isRelCrdTab, isRelReqTab, isConsumoInternoTab, isCmvTab, isRdsTab, isApuracaoReceitaTab as checkApuracaoReceitaTab, isApuracaoResultadosTab as checkApuracaoResultadosTab } from '../lib/planilhas';
+import { hasPermission, type RolePermissionRow } from '../lib/permissionCatalog';
 import logoIcon from '../../logoicon2.svg';
+import type { CompanyKey } from '../lib/companies';
 
 const FOLHA_MESES = [
   'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
   'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro',
 ];
+
+const isFolhaRhNavTab = (tab: string) =>
+  tab.startsWith('folha-') ||
+  tab === 'folha-apuracao' ||
+  tab === 'painel-rh' ||
+  tab === 'absenteismo' ||
+  tab === 'turnover' ||
+  tab === 'tangerino-ponto' ||
+  tab === 'emprestimos';
 
 const REL_CRD_MESES = FOLHA_MESES;
 interface SidebarProps {
@@ -51,24 +75,30 @@ interface SidebarProps {
 }
 
 const lancamentosMenuItems = [
-  { id: 'comandas', label: 'Comandas', icon: ClipboardList, roles: ['admin', 'finance', 'controle', 'manager'] },
-  { id: 'lancamentos-manuais', label: 'Lançamentos Manuais', icon: Wallet, roles: ['admin', 'finance', 'controle', 'manager'] },
-  { id: 'requisicoes', label: 'Requisições', icon: Archive, roles: ['admin', 'finance', 'controle', 'manager'] },
-  { id: 'notas', label: 'Notas de Serviço', icon: Receipt, roles: ['admin', 'finance', 'controle', 'manager'] },
-  { id: 'danfe', label: 'DANFE', icon: FileText, roles: ['admin', 'finance', 'controle', 'manager'] },
+  { id: 'comandas', label: 'Comandas', icon: ClipboardList, roles: ['admin', 'finance', 'controle', 'manager', 'estagiario'] },
+  { id: 'lancamentos-manuais', label: 'Lançamentos Manuais', icon: Wallet, roles: ['admin', 'finance', 'controle', 'manager', 'estagiario'] },
+  { id: 'estornos', label: 'Estornos', icon: Undo2, roles: ['admin', 'finance', 'controle', 'manager', 'estagiario'] },
+  { id: 'requisicoes', label: 'Requisições', icon: Archive, roles: ['admin', 'finance', 'controle', 'manager', 'estagiario'] },
+  { id: 'notas', label: 'Notas de Serviço', icon: Receipt, roles: ['admin', 'finance', 'controle', 'manager', 'estagiario'] },
+  { id: 'danfe', label: 'DANFE', icon: FileText, roles: ['admin', 'finance', 'controle', 'manager', 'estagiario'] },
+  { id: 'mensalidades', label: 'Mensalidades', icon: CalendarClock, roles: ['admin', 'finance', 'controle', 'manager', 'diretoria', 'estagiario'] },
 ];
 
 const menuItems = [
-  { id: 'dashboard', label: 'Dashboard Geral', icon: LayoutDashboard, roles: ['admin', 'controle', 'manager', 'viewer'] },
+  { id: 'dashboard', label: 'Dashboard Geral', icon: LayoutDashboard, roles: ['admin', 'controle', 'manager', 'viewer', 'diretoria'] },
   { id: 'analise', label: 'Análise Financeira', icon: BarChart3, roles: ['admin', 'controle', 'manager'] },
-  { id: 'dre', label: 'DRE Gerencial', icon: FileSpreadsheet, roles: ['admin', 'controle'] },
+  { id: 'dre', label: 'DRE Gerencial', icon: FileSpreadsheet, roles: ['admin', 'controle', 'diretoria'] },
   { id: 'planejamento', label: 'Planejamento', icon: Target, roles: ['admin', 'controle', 'manager'] },
   { id: 'importacao', label: 'Importação', icon: PlusCircle, roles: ['admin', 'controle'] },
   { id: 'cadastros', label: 'Cadastros', icon: Database, roles: ['admin', 'controle'] },
   { id: 'prev-real', label: 'Prev x Real Diario', icon: BarChart3, roles: ['admin', 'controle', 'manager'] },
-  { id: 'indicadores', label: 'Indicadores (Números)', icon: TrendingUp, roles: ['admin', 'controle', 'manager'] },
+  { id: 'indicadores', label: 'Indicadores (Números)', icon: TrendingUp, roles: ['admin', 'controle', 'manager', 'diretoria'] },
+  { id: 'investimentos', label: 'Investimentos', icon: Landmark, roles: ['admin', 'controle', 'manager', 'finance', 'diretoria'] },
   { id: 'usuarios', label: 'Usuários', icon: Users, roles: ['admin'] },
+  { id: 'sugestoes', label: 'Sugestões', icon: Lightbulb, roles: ['admin'] },
+  { id: 'nomes-sistema', label: 'Nomes do sistema', icon: PenLine, roles: ['admin'] },
   { id: 'configuracoes', label: 'Configurações', icon: Settings, roles: ['admin'] },
+  { id: 'uml', label: 'UML do Sistema', icon: Network, roles: ['admin'] },
 ];
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -79,31 +109,46 @@ export const Sidebar: React.FC<SidebarProps> = ({
   collapsed,
   onToggleCollapsed
 }) => {
+  const permissions = (user?.permissions || null) as RolePermissionRow[] | null;
+  const role = String(user?.role || '');
+  const canView = (resourceKey: string, fallbackRoles?: string[]) => {
+    if (role === 'admin') return true;
+    if (permissions?.length) return hasPermission(permissions, resourceKey, 'view', role);
+    if (fallbackRoles?.length) return fallbackRoles.includes(role);
+    return false;
+  };
+
   const constructionGroupIds = ['dashboard', 'analise', 'planejamento'];
   const lancamentosGroupIds = lancamentosMenuItems.map((item) => item.id);
-  const adminGroupIds = ['usuarios', 'configuracoes'];
-  const planilhasRoles = ['admin', 'controle'];
-  const baseOrcamentoRoles = ['admin', 'controle', 'manager'];
-  const filteredMenu = menuItems.filter(item => item.roles.includes(user?.role));
-  const lancamentosMenu = lancamentosMenuItems.filter((item) => item.roles.includes(user?.role));
+  const adminGroupIds = ['usuarios', 'sugestoes', 'nomes-sistema', 'configuracoes', 'uml'];
+  const filteredMenu = menuItems.filter((item) => canView(item.id, item.roles));
+  const lancamentosMenu = lancamentosMenuItems.filter((item) => canView(item.id, item.roles));
   const constructionMenu = filteredMenu.filter((item) => constructionGroupIds.includes(item.id));
   const primaryMenu = filteredMenu.filter(
     (item) => !constructionGroupIds.includes(item.id) && !adminGroupIds.includes(item.id)
   );
   const adminMenu = filteredMenu.filter((item) => adminGroupIds.includes(item.id));
-  const showPlanilhas = planilhasRoles.includes(user?.role);
-  const showBaseOrcamento = baseOrcamentoRoles.includes(user?.role);
+  const showPlanilhas = canView('apuracao-resultados', ['admin', 'controle']);
+  const showBaseOrcamento = canView('base-orcamento', ['admin', 'controle', 'manager']);
   const showLancamentos = lancamentosMenu.length > 0;
-  const folhaRoles = ['admin', 'controle'];
-  const showFolha = folhaRoles.includes(user?.role);
-  const comprasRoles = ['admin', 'controle', 'manager'];
-  const showCompras = comprasRoles.includes(user?.role);
+  const showAprovacoes = canView('aprovacoes', ['admin', 'finance', 'controle', 'manager', 'diretoria']);
+  const showFolha = canView('folha', ['admin', 'controle']);
+  const showEmprestimos = canView('emprestimos', ['admin', 'finance', 'controle']);
+  const showFolhaGroup = showFolha || showEmprestimos;
+  const showCompras = canView('compras-ordem', ['admin', 'controle', 'manager']);
   const comprasIds = ['compras-ordem'];
   const [comprasExpanded, setComprasExpanded] = React.useState(comprasIds.includes(activeTab));
-  const painelMenu = PAINEIS_SETORIAIS.filter((p) => p.roles.includes(user?.role));
-  const showPaineis = painelMenu.length > 0;
-  const painelTabIds = painelMenu.map((p) => p.tabId);
-  const [paineisExpanded, setPaineisExpanded] = React.useState(isPainelSetorialTab(activeTab));
+  const vendasIds = ['vendas-pdvs'];
+  const [vendasExpanded, setVendasExpanded] = React.useState(vendasIds.includes(activeTab));
+  const showApuracaoReceita = canView('apuracao-receita', ['admin', 'controle']);
+  const showTutorial = canView('tutorial', [
+    'admin',
+    'finance',
+    'controle',
+    'manager',
+    'viewer',
+    'diretoria',
+  ]);
   const [constructionExpanded, setConstructionExpanded] = React.useState(
     constructionMenu.some((item) => item.id === activeTab)
   );
@@ -116,6 +161,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const isRelCrdActive = isRelCrdTab(activeTab);
   const isRelReqActive = isRelReqTab(activeTab);
   const isConsumoActive = isConsumoInternoTab(activeTab);
+  const isCmvActive = isCmvTab(activeTab);
   const isRdsActive = isRdsTab(activeTab);
   const [planilhasExpanded, setPlanilhasExpanded] = React.useState(isApuracaoResultadosTab);
   const [receitaExpanded, setReceitaExpanded] = React.useState(isApuracaoReceitaTab);
@@ -123,69 +169,175 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [relCrdExpanded, setRelCrdExpanded] = React.useState(isRelCrdActive);
   const [relReqExpanded, setRelReqExpanded] = React.useState(isRelReqActive);
   const [consumoExpanded, setConsumoExpanded] = React.useState(isConsumoActive);
+  const [cmvExpanded, setCmvExpanded] = React.useState(isCmvActive);
   const [rdsExpanded, setRdsExpanded] = React.useState(isRdsActive);
-  const [folhaExpanded, setFolhaExpanded] = React.useState(
-    activeTab.startsWith('folha-') || activeTab === 'folha-apuracao'
+  const [folhaExpanded, setFolhaExpanded] = React.useState(isFolhaRhNavTab(activeTab));
+  const [companyMenuOpen, setCompanyMenuOpen] = React.useState(false);
+  const companyMenuRef = React.useRef<HTMLDivElement | null>(null);
+  const { company, companies, companyKey, setCompanyKey } = useCompany();
+  const showVendas =
+    companyKey === 'aqua' && canView('vendas-pdvs', ['admin', 'finance', 'controle', 'manager', 'diretoria']);
+  const showAquaOrcamento =
+    companyKey === 'aqua' && canView('aqua-orcamento', ['admin', 'finance', 'controle', 'diretoria']);
+
+  React.useEffect(() => {
+    if (!companyMenuOpen) return;
+    const onPointerDown = (event: MouseEvent) => {
+      if (!companyMenuRef.current?.contains(event.target as Node)) {
+        setCompanyMenuOpen(false);
+      }
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setCompanyMenuOpen(false);
+    };
+    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [companyMenuOpen]);
+
+  const selectCompany = (key: CompanyKey) => {
+    setCompanyKey(key);
+    setCompanyMenuOpen(false);
+  };
+
+  type ExpandSetter = React.Dispatch<React.SetStateAction<boolean>>;
+  const menuExpandSetters = React.useMemo<ExpandSetter[]>(
+    () => [
+      setComprasExpanded,
+      setVendasExpanded,
+      setConstructionExpanded,
+      setLancamentosExpanded,
+      setPlanilhasExpanded,
+      setReceitaExpanded,
+      setBaseOrcamentoExpanded,
+      setRelCrdExpanded,
+      setRelReqExpanded,
+      setConsumoExpanded,
+      setCmvExpanded,
+      setRdsExpanded,
+      setFolhaExpanded,
+    ],
+    []
   );
 
   React.useEffect(() => {
-    if (comprasIds.includes(activeTab)) setComprasExpanded(true);
-    if (isPainelSetorialTab(activeTab)) setPaineisExpanded(true);
-    if (constructionMenu.some((item) => item.id === activeTab)) {
-      setConstructionExpanded(true);
-    }
-    if (lancamentosGroupIds.includes(activeTab)) {
-      setLancamentosExpanded(true);
-    }
-    if (isApuracaoResultadosTab) {
-      setPlanilhasExpanded(true);
-    }
-    if (isApuracaoReceitaTab) {
-      setReceitaExpanded(true);
-    }
-    if (isBaseOrcamentoActive) {
-      setBaseOrcamentoExpanded(true);
-    }
-    if (isRelCrdActive) {
-      setRelCrdExpanded(true);
-    }
-    if (isRelReqActive) {
-      setRelReqExpanded(true);
-    }
-    if (isConsumoActive) {
-      setConsumoExpanded(true);
-    }
-    if (isRdsActive) {
-      setRdsExpanded(true);
-      setReceitaExpanded(true);
-    }
-    if (activeTab.startsWith('folha-') || activeTab === 'folha-apuracao') {
-      setFolhaExpanded(true);
-    }
-  }, [activeTab, constructionMenu, lancamentosGroupIds, isApuracaoResultadosTab, isApuracaoReceitaTab, isBaseOrcamentoActive, isRelCrdActive, isRelReqActive, isConsumoActive, isRdsActive]);
+    const isFolhaTab = isFolhaRhNavTab(activeTab);
+    const expandRules: Array<[boolean, ExpandSetter[]]> = [
+      [comprasIds.includes(activeTab), [setComprasExpanded]],
+      [vendasIds.includes(activeTab), [setVendasExpanded]],
+      [constructionMenu.some((item) => item.id === activeTab), [setConstructionExpanded]],
+      [lancamentosGroupIds.includes(activeTab), [setLancamentosExpanded]],
+      [isApuracaoResultadosTab, [setPlanilhasExpanded]],
+      [isApuracaoReceitaTab, [setReceitaExpanded]],
+      [isBaseOrcamentoActive, [setBaseOrcamentoExpanded]],
+      [isRelCrdActive, [setRelCrdExpanded]],
+      [isRelReqActive, [setRelReqExpanded]],
+      [isConsumoActive, [setConsumoExpanded]],
+      [isCmvActive, [setCmvExpanded]],
+      [isRdsActive, [setRdsExpanded, setReceitaExpanded]],
+      [isFolhaTab, [setFolhaExpanded]],
+    ];
+
+    expandRules.forEach(([shouldExpand, setters]) => {
+      if (shouldExpand) setters.forEach((set) => set(true));
+    });
+  }, [activeTab, constructionMenu, lancamentosGroupIds, isApuracaoResultadosTab, isApuracaoReceitaTab, isBaseOrcamentoActive, isRelCrdActive, isRelReqActive, isConsumoActive, isCmvActive, isRdsActive]);
+
+  React.useEffect(() => {
+    const expandAll = () => menuExpandSetters.forEach((set) => set(true));
+    window.addEventListener('vivaz-tutorial-expand', expandAll);
+    return () => window.removeEventListener('vivaz-tutorial-expand', expandAll);
+  }, [menuExpandSetters]);
 
   return (
-    <div className={cn(
-      "bg-[#004D40] text-white h-screen flex flex-col fixed left-0 top-0 z-50 transition-all duration-200",
-      collapsed ? "w-20" : "w-64"
-    )}>
-      <div className="p-6 flex items-center gap-3 border-b border-white/10">
-        <div className="w-10 h-10 bg-white rounded-lg flex items-center justify-center">
-          <img src={logoIcon} alt="Vivaz Cataratas" className="h-6 w-auto" />
-        </div>
-        <div className={cn(collapsed && "hidden")}>
-          <h1 className="font-bold text-lg leading-tight">Budget Vivaz</h1>
-          <p className="text-[10px] opacity-60 uppercase tracking-widest">Vivaz Cataratas</p>
-        </div>
+    <div
+      className={cn(
+        "text-white h-screen flex flex-col fixed left-0 top-0 z-50 transition-all duration-200",
+        collapsed ? "w-20" : "w-64"
+      )}
+      style={{ backgroundColor: company.sidebarBg, color: '#FFFFFF' }}
+    >
+      <div ref={companyMenuRef} className="relative border-b border-white/10">
+        <button
+          type="button"
+          onClick={() => setCompanyMenuOpen((open) => !open)}
+          className={cn(
+            "w-full p-6 flex items-center gap-3 text-left hover:bg-white/5 transition-colors",
+            collapsed && "justify-center px-3"
+          )}
+          title="Trocar de empresa"
+          aria-haspopup="listbox"
+          aria-expanded={companyMenuOpen}
+        >
+          <div className="w-10 h-10 bg-white rounded-lg flex items-center justify-center shrink-0">
+            <img src={logoIcon} alt={company.subtitle} className="h-6 w-auto" />
+          </div>
+          <div className={cn("min-w-0 flex-1", collapsed && "hidden")}>
+            <h1 className="font-bold text-lg leading-tight truncate text-white">{company.budgetTitle}</h1>
+            <p className="text-[10px] uppercase tracking-widest truncate text-white">{company.subtitle}</p>
+          </div>
+          <ChevronDown
+            className={cn(
+              "w-4 h-4 shrink-0 text-white transition-transform",
+              companyMenuOpen && "rotate-180",
+              collapsed && "hidden"
+            )}
+          />
+        </button>
+
+        {companyMenuOpen && (
+          <div
+            role="listbox"
+            aria-label="Trocar de empresa"
+            className={cn(
+              "absolute z-[60] mt-1 rounded-xl border border-white/15 bg-[#0f2f2a] shadow-xl overflow-hidden",
+              collapsed ? "left-2 right-2 top-full" : "left-3 right-3 top-full"
+            )}
+            style={{ backgroundColor: companyKey === 'aqua' ? '#9A3412' : '#005a7d' }}
+          >
+            <p className="px-3 pt-2.5 pb-1 text-[10px] font-bold uppercase tracking-wider text-white">
+              Trocar de empresa
+            </p>
+            {companies.map((item) => {
+              const selected = item.key === companyKey;
+              return (
+                <button
+                  key={item.key}
+                  type="button"
+                  role="option"
+                  aria-selected={selected}
+                  onClick={() => selectCompany(item.key)}
+                  className={cn(
+                    "w-full px-3 py-2.5 text-left text-sm transition-colors flex items-center justify-between gap-2",
+                    selected ? "bg-white/15 text-white" : "text-white hover:bg-white/10 hover:text-white"
+                  )}
+                >
+                  <span className="font-medium truncate">{item.shortName}</span>
+                  {selected ? (
+                    <span className="text-[10px] uppercase tracking-wider text-emerald-300 shrink-0">Atual</span>
+                  ) : null}
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
 
-      <nav className="flex-1 py-6 px-3 space-y-1 overflow-y-auto no-scrollbar">
+      <nav
+        data-tour="sidebar-nav"
+        className="sidebar-nav flex-1 py-6 px-3 space-y-1 overflow-y-auto no-scrollbar text-white"
+        style={{ color: '#FFFFFF' }}
+      >
         {constructionMenu.length > 0 && (
           <div className="space-y-1">
             <button
               onClick={() => setConstructionExpanded((prev) => !prev)}
+              data-tour="group-em-construcao"
               className={cn(
-                "w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group text-white/80 hover:bg-white/5 hover:text-white"
+                "w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group text-white hover:bg-white/5 hover:text-white"
               )}
             >
               <PlugZap className="w-5 h-5 min-w-5 min-h-5 shrink-0 transition-transform duration-200 group-hover:scale-110" />
@@ -204,12 +356,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
             {!collapsed && constructionExpanded && constructionMenu.map((item) => (
               <button
                 key={item.id}
+                data-tour={`nav-${item.id}`}
                 onClick={() => setActiveTab(item.id)}
                 className={cn(
                   "w-full flex items-center gap-3 pl-11 pr-4 py-2.5 rounded-xl transition-all duration-200 group",
                   activeTab === item.id 
-                    ? "bg-emerald-500 text-white shadow-lg shadow-emerald-900/20" 
-                    : "text-white/80 hover:bg-white/5 hover:text-white"
+                    ? company.navActiveClass 
+                    : "text-white hover:bg-white/5 hover:text-white"
                 )}
               >
                 <item.icon className={cn(
@@ -226,11 +379,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <div className="space-y-1">
             <button
               onClick={() => setLancamentosExpanded((prev) => !prev)}
+              data-tour="group-lancamentos"
               className={cn(
                 "w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group",
                 lancamentosGroupIds.includes(activeTab)
                   ? "text-white bg-white/10"
-                  : "text-white/80 hover:bg-white/5 hover:text-white"
+                  : "text-white hover:bg-white/5 hover:text-white"
               )}
             >
               <Layers className="w-5 h-5 min-w-5 min-h-5 shrink-0 transition-transform duration-200 group-hover:scale-110" />
@@ -249,12 +403,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
             {!collapsed && lancamentosExpanded && lancamentosMenu.map((item) => (
               <button
                 key={item.id}
+                data-tour={`nav-${item.id}`}
                 onClick={() => setActiveTab(item.id)}
                 className={cn(
                   "w-full flex items-center gap-3 pl-11 pr-4 py-2 rounded-xl transition-all duration-200 group",
                   activeTab === item.id
-                    ? "bg-emerald-500 text-white shadow-lg shadow-emerald-900/20"
-                    : "text-white/70 hover:bg-white/5 hover:text-white"
+                    ? company.navActiveClass
+                    : "text-white hover:bg-white/5 hover:text-white"
                 )}
                 title={item.label}
               >
@@ -268,15 +423,35 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
         )}
 
+        {showAprovacoes && (
+          <button
+            onClick={() => setActiveTab('aprovacoes')}
+            data-tour="nav-aprovacoes"
+            className={cn(
+              "w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group",
+              activeTab === 'aprovacoes'
+                ? company.navActiveClass
+                : "text-white hover:bg-white/5 hover:text-white"
+            )}
+          >
+            <ShieldCheck className={cn(
+              "w-5 h-5 min-w-5 min-h-5 shrink-0 transition-transform duration-200",
+              activeTab === 'aprovacoes' ? "scale-110" : "group-hover:scale-110"
+            )} />
+            <span className={cn("font-medium text-sm", collapsed && "hidden")}>Aprovações</span>
+          </button>
+        )}
+
         {showCompras && (
           <div className="space-y-1">
             <button
               onClick={() => setComprasExpanded((prev) => !prev)}
+              data-tour="group-compras"
               className={cn(
                 "w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group",
                 comprasIds.includes(activeTab)
                   ? "text-white bg-white/10"
-                  : "text-white/80 hover:bg-white/5 hover:text-white"
+                  : "text-white hover:bg-white/5 hover:text-white"
               )}
             >
               <ShoppingCart className="w-5 h-5 min-w-5 min-h-5 shrink-0 transition-transform duration-200 group-hover:scale-110" />
@@ -294,11 +469,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
             {!collapsed && comprasExpanded && (
               <button
                 onClick={() => setActiveTab('compras-ordem')}
+                data-tour="nav-compras-ordem"
                 className={cn(
                   "w-full flex items-center gap-3 pl-11 pr-4 py-2 rounded-xl transition-all duration-200 group",
                   activeTab === 'compras-ordem'
-                    ? "bg-emerald-500 text-white shadow-lg shadow-emerald-900/20"
-                    : "text-white/70 hover:bg-white/5 hover:text-white"
+                    ? company.navActiveClass
+                    : "text-white hover:bg-white/5 hover:text-white"
                 )}
               >
                 <FileCheck className="w-4 h-4 min-w-4 min-h-4 shrink-0" />
@@ -308,60 +484,77 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
         )}
 
-        {showPaineis && (
+        {showVendas && (
           <div className="space-y-1">
             <button
-              onClick={() => setPaineisExpanded((prev) => !prev)}
+              onClick={() => setVendasExpanded((prev) => !prev)}
+              data-tour="group-vendas"
               className={cn(
                 "w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group",
-                painelTabIds.includes(activeTab)
+                vendasIds.includes(activeTab)
                   ? "text-white bg-white/10"
-                  : "text-white/80 hover:bg-white/5 hover:text-white"
+                  : "text-white hover:bg-white/5 hover:text-white"
               )}
             >
-              <Building2 className="w-5 h-5 min-w-5 min-h-5 shrink-0 transition-transform duration-200 group-hover:scale-110" />
+              <Store className="w-5 h-5 min-w-5 min-h-5 shrink-0 transition-transform duration-200 group-hover:scale-110" />
               <span className={cn("font-medium text-sm flex-1 text-left", collapsed && "hidden")}>
-                Setores
+                Vendas
               </span>
               <ChevronDown
                 className={cn(
                   "w-4 h-4 transition-transform duration-200",
-                  paineisExpanded && "rotate-180",
+                  vendasExpanded && "rotate-180",
                   collapsed && "hidden"
                 )}
               />
             </button>
-            {!collapsed && paineisExpanded && painelMenu.map((item) => (
+            {!collapsed && vendasExpanded && (
               <button
-                key={item.tabId}
-                onClick={() => setActiveTab(item.tabId)}
+                onClick={() => setActiveTab('vendas-pdvs')}
+                data-tour="nav-vendas-pdvs"
                 className={cn(
                   "w-full flex items-center gap-3 pl-11 pr-4 py-2 rounded-xl transition-all duration-200 group",
-                  activeTab === item.tabId
-                    ? "bg-emerald-500 text-white shadow-lg shadow-emerald-900/20"
-                    : "text-white/70 hover:bg-white/5 hover:text-white"
+                  activeTab === 'vendas-pdvs'
+                    ? company.navActiveClass
+                    : "text-white hover:bg-white/5 hover:text-white"
                 )}
-                title={item.label}
               >
-                <Layers className={cn(
-                  "w-4 h-4 min-w-4 min-h-4 shrink-0 transition-transform duration-200",
-                  activeTab === item.tabId ? "scale-110" : "group-hover:scale-110"
-                )} />
-                <span className="font-medium text-xs truncate text-left">{item.shortLabel}</span>
+                <Store className="w-4 h-4 min-w-4 min-h-4 shrink-0" />
+                <span className="font-medium text-xs truncate text-left">PDVs</span>
               </button>
-            ))}
+            )}
           </div>
+        )}
+
+        {showAquaOrcamento && (
+          <button
+            onClick={() => setActiveTab('aqua-orcamento')}
+            data-tour="nav-aqua-orcamento"
+            className={cn(
+              "w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group",
+              activeTab === 'aqua-orcamento'
+                ? company.navActiveClass
+                : "text-white hover:bg-white/5 hover:text-white"
+            )}
+          >
+            <Calculator className={cn(
+              "w-5 h-5 min-w-5 min-h-5 shrink-0 transition-transform duration-200",
+              activeTab === 'aqua-orcamento' ? "scale-110" : "group-hover:scale-110"
+            )} />
+            <span className={cn("font-medium text-sm", collapsed && "hidden")}>Orçamento Aquamania</span>
+          </button>
         )}
 
         {primaryMenu.map((item) => (
           <button
             key={item.id}
+            data-tour={`nav-${item.id}`}
             onClick={() => setActiveTab(item.id)}
             className={cn(
               "w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group",
               activeTab === item.id
-                ? "bg-emerald-500 text-white shadow-lg shadow-emerald-900/20"
-                : "text-white/80 hover:bg-white/5 hover:text-white"
+                ? company.navActiveClass
+                : "text-white hover:bg-white/5 hover:text-white"
             )}
           >
             <item.icon className={cn(
@@ -376,11 +569,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <div className="space-y-1">
             <button
               onClick={() => setBaseOrcamentoExpanded((prev) => !prev)}
+              data-tour="group-base-orcamento"
               className={cn(
                 "w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group",
                 isBaseOrcamentoActive
                   ? "text-white bg-white/10"
-                  : "text-white/80 hover:bg-white/5 hover:text-white"
+                  : "text-white hover:bg-white/5 hover:text-white"
               )}
             >
               <Rows4 className="w-5 h-5 min-w-5 min-h-5 shrink-0 transition-transform duration-200 group-hover:scale-110" />
@@ -401,12 +595,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
             ).map((item) => (
               <button
                 key={item.tabId}
+                data-tour={`nav-${item.tabId}`}
                 onClick={() => setActiveTab(item.tabId)}
                 className={cn(
                   "w-full flex items-center gap-3 pl-11 pr-4 py-2 rounded-xl transition-all duration-200 group",
                   activeTab === item.tabId
-                    ? "bg-emerald-500 text-white shadow-lg shadow-emerald-900/20"
-                    : "text-white/70 hover:bg-white/5 hover:text-white"
+                    ? company.navActiveClass
+                    : "text-white hover:bg-white/5 hover:text-white"
                 )}
                 title={item.nome}
               >
@@ -424,11 +619,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <div className="space-y-1">
             <button
               onClick={() => setPlanilhasExpanded((prev) => !prev)}
+              data-tour="group-resultados"
               className={cn(
                 "w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group",
                 isApuracaoResultadosTab
                   ? "text-white bg-white/10"
-                  : "text-white/80 hover:bg-white/5 hover:text-white"
+                  : "text-white hover:bg-white/5 hover:text-white"
               )}
             >
               <FileSpreadsheet className="w-5 h-5 min-w-5 min-h-5 shrink-0 transition-transform duration-200 group-hover:scale-110" />
@@ -451,12 +647,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   return (
                     <button
                       key={tabId}
+                      data-tour={`nav-${tabId}`}
                       onClick={() => setActiveTab(tabId)}
                       className={cn(
                         "w-full flex items-center gap-3 pl-11 pr-4 py-2 rounded-xl transition-all duration-200 group",
                         activeTab === tabId
-                          ? "bg-emerald-500 text-white shadow-lg shadow-emerald-900/20"
-                          : "text-white/70 hover:bg-white/5 hover:text-white"
+                          ? company.navActiveClass
+                          : "text-white hover:bg-white/5 hover:text-white"
                       )}
                       title={planilha.nome}
                     >
@@ -475,7 +672,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     "w-full flex items-center gap-3 pl-11 pr-4 py-2 rounded-xl transition-all duration-200 group",
                     isRelCrdActive
                       ? "text-white bg-white/10"
-                      : "text-white/70 hover:bg-white/5 hover:text-white"
+                      : "text-white hover:bg-white/5 hover:text-white"
                   )}
                 >
                   <FileCheck className={cn(
@@ -495,11 +692,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   <>
                     <button
                       onClick={() => setActiveTab('rel-crd')}
+                      data-tour="nav-rel-crd"
                       className={cn(
                         "w-full flex items-center gap-3 pl-14 pr-4 py-2 rounded-xl transition-all duration-200 group",
                         activeTab === 'rel-crd'
-                          ? "bg-emerald-500 text-white shadow-lg shadow-emerald-900/20"
-                          : "text-white/70 hover:bg-white/5 hover:text-white"
+                          ? company.navActiveClass
+                          : "text-white hover:bg-white/5 hover:text-white"
                       )}
                     >
                       <Calculator className={cn(
@@ -517,8 +715,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
                           className={cn(
                             "w-full flex items-center gap-3 pl-14 pr-4 py-1.5 rounded-xl transition-all duration-200 group",
                             activeTab === tabId
-                              ? "bg-emerald-500 text-white shadow-lg shadow-emerald-900/20"
-                              : "text-white/60 hover:bg-white/5 hover:text-white"
+                              ? company.navActiveClass
+                              : "text-white hover:bg-white/5 hover:text-white"
                           )}
                         >
                           <CalendarDays className={cn(
@@ -540,7 +738,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     "w-full flex items-center gap-3 pl-11 pr-4 py-2 rounded-xl transition-all duration-200 group",
                     isRelReqActive
                       ? "text-white bg-white/10"
-                      : "text-white/70 hover:bg-white/5 hover:text-white"
+                      : "text-white hover:bg-white/5 hover:text-white"
                   )}
                 >
                   <Layers className={cn(
@@ -560,11 +758,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   <>
                     <button
                       onClick={() => setActiveTab('rel-req')}
+                      data-tour="nav-rel-req"
                       className={cn(
                         "w-full flex items-center gap-3 pl-14 pr-4 py-2 rounded-xl transition-all duration-200 group",
                         activeTab === 'rel-req'
-                          ? "bg-emerald-500 text-white shadow-lg shadow-emerald-900/20"
-                          : "text-white/70 hover:bg-white/5 hover:text-white"
+                          ? company.navActiveClass
+                          : "text-white hover:bg-white/5 hover:text-white"
                       )}
                     >
                       <Calculator className={cn(
@@ -582,8 +781,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
                           className={cn(
                             "w-full flex items-center gap-3 pl-14 pr-4 py-1.5 rounded-xl transition-all duration-200 group",
                             activeTab === tabId
-                              ? "bg-emerald-500 text-white shadow-lg shadow-emerald-900/20"
-                              : "text-white/60 hover:bg-white/5 hover:text-white"
+                              ? company.navActiveClass
+                              : "text-white hover:bg-white/5 hover:text-white"
                           )}
                         >
                           <CalendarDays className={cn(
@@ -605,7 +804,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     "w-full flex items-center gap-3 pl-11 pr-4 py-2 rounded-xl transition-all duration-200 group",
                     isConsumoActive
                       ? "text-white bg-white/10"
-                      : "text-white/70 hover:bg-white/5 hover:text-white"
+                      : "text-white hover:bg-white/5 hover:text-white"
                   )}
                 >
                   <Boxes className={cn(
@@ -625,11 +824,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   <>
                     <button
                       onClick={() => setActiveTab('rel-consumo')}
+                      data-tour="nav-rel-consumo"
                       className={cn(
                         "w-full flex items-center gap-3 pl-14 pr-4 py-2 rounded-xl transition-all duration-200 group",
                         activeTab === 'rel-consumo'
-                          ? "bg-emerald-500 text-white shadow-lg shadow-emerald-900/20"
-                          : "text-white/70 hover:bg-white/5 hover:text-white"
+                          ? company.navActiveClass
+                          : "text-white hover:bg-white/5 hover:text-white"
                       )}
                     >
                       <Calculator className={cn(
@@ -647,8 +847,89 @@ export const Sidebar: React.FC<SidebarProps> = ({
                           className={cn(
                             "w-full flex items-center gap-3 pl-14 pr-4 py-1.5 rounded-xl transition-all duration-200 group",
                             activeTab === tabId
-                              ? "bg-emerald-500 text-white shadow-lg shadow-emerald-900/20"
-                              : "text-white/60 hover:bg-white/5 hover:text-white"
+                              ? company.navActiveClass
+                              : "text-white hover:bg-white/5 hover:text-white"
+                          )}
+                        >
+                          <CalendarDays className={cn(
+                            "w-3.5 h-3.5 min-w-3.5 min-h-3.5 shrink-0",
+                            activeTab === tabId ? "scale-110" : "group-hover:scale-110"
+                          )} />
+                          <span className="font-medium text-[11px] truncate text-left">
+                            {String(idx + 1).padStart(2, '0')} · {mes}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </>
+                )}
+
+                <button
+                  onClick={() => setCmvExpanded((prev) => !prev)}
+                  className={cn(
+                    "w-full flex items-center gap-3 pl-11 pr-4 py-2 rounded-xl transition-all duration-200 group",
+                    isCmvActive
+                      ? "text-white bg-white/10"
+                      : "text-white hover:bg-white/5 hover:text-white"
+                  )}
+                >
+                  <Percent className={cn(
+                    "w-4 h-4 min-w-4 min-h-4 shrink-0 transition-transform duration-200",
+                    isCmvActive ? "scale-110" : "group-hover:scale-110"
+                  )} />
+                  <span className="font-medium text-xs truncate text-left flex-1">CMV</span>
+                  <ChevronDown
+                    className={cn(
+                      "w-3.5 h-3.5 transition-transform duration-200",
+                      cmvExpanded && "rotate-180"
+                    )}
+                  />
+                </button>
+
+                {cmvExpanded && (
+                  <>
+                    <button
+                      onClick={() => setActiveTab('cmv')}
+                      data-tour="nav-cmv"
+                      className={cn(
+                        "w-full flex items-center gap-3 pl-14 pr-4 py-2 rounded-xl transition-all duration-200 group",
+                        activeTab === 'cmv'
+                          ? company.navActiveClass
+                          : "text-white hover:bg-white/5 hover:text-white"
+                      )}
+                    >
+                      <Calculator className={cn(
+                        "w-3.5 h-3.5 min-w-3.5 min-h-3.5 shrink-0",
+                        activeTab === 'cmv' ? "scale-110" : "group-hover:scale-110"
+                      )} />
+                      <span className="font-medium text-xs truncate text-left">Resumo</span>
+                    </button>
+                    <button
+                      onClick={() => setActiveTab('cmv-tarifas')}
+                      className={cn(
+                        "w-full flex items-center gap-3 pl-14 pr-4 py-2 rounded-xl transition-all duration-200 group",
+                        activeTab === 'cmv-tarifas'
+                          ? company.navActiveClass
+                          : "text-white hover:bg-white/5 hover:text-white"
+                      )}
+                    >
+                      <Settings2 className={cn(
+                        "w-3.5 h-3.5 min-w-3.5 min-h-3.5 shrink-0",
+                        activeTab === 'cmv-tarifas' ? "scale-110" : "group-hover:scale-110"
+                      )} />
+                      <span className="font-medium text-xs truncate text-left">Config. CMV</span>
+                    </button>
+                    {REL_CRD_MESES.map((mes, idx) => {
+                      const tabId = `cmv-${idx + 1}`;
+                      return (
+                        <button
+                          key={tabId}
+                          onClick={() => setActiveTab(tabId)}
+                          className={cn(
+                            "w-full flex items-center gap-3 pl-14 pr-4 py-1.5 rounded-xl transition-all duration-200 group",
+                            activeTab === tabId
+                              ? company.navActiveClass
+                              : "text-white hover:bg-white/5 hover:text-white"
                           )}
                         >
                           <CalendarDays className={cn(
@@ -668,15 +949,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
         )}
 
-        {showPlanilhas && (
+        {showApuracaoReceita && (
           <div className="space-y-1">
             <button
               onClick={() => setReceitaExpanded((prev) => !prev)}
+              data-tour="group-receita"
               className={cn(
                 "w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group",
                 isApuracaoReceitaTab
                   ? "text-white bg-white/10"
-                  : "text-white/80 hover:bg-white/5 hover:text-white"
+                  : "text-white hover:bg-white/5 hover:text-white"
               )}
             >
               <TrendingUp className="w-5 h-5 min-w-5 min-h-5 shrink-0 transition-transform duration-200 group-hover:scale-110" />
@@ -699,12 +981,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   return (
                     <button
                       key={tabId}
+                      data-tour={`nav-${tabId}`}
                       onClick={() => setActiveTab(tabId)}
                       className={cn(
                         "w-full flex items-center gap-3 pl-11 pr-4 py-2 rounded-xl transition-all duration-200 group",
                         activeTab === tabId
-                          ? "bg-emerald-500 text-white shadow-lg shadow-emerald-900/20"
-                          : "text-white/70 hover:bg-white/5 hover:text-white"
+                          ? company.navActiveClass
+                          : "text-white hover:bg-white/5 hover:text-white"
                       )}
                       title={item.nome}
                     >
@@ -723,7 +1006,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     "w-full flex items-center gap-3 pl-11 pr-4 py-2 rounded-xl transition-all duration-200 group",
                     isRdsActive
                       ? "text-white bg-white/10"
-                      : "text-white/70 hover:bg-white/5 hover:text-white"
+                      : "text-white hover:bg-white/5 hover:text-white"
                   )}
                 >
                   <ClipboardList className={cn(
@@ -743,11 +1026,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   <>
                     <button
                       onClick={() => setActiveTab('rel-rds')}
+                      data-tour="nav-rel-rds"
                       className={cn(
                         "w-full flex items-center gap-3 pl-14 pr-4 py-2 rounded-xl transition-all duration-200 group",
                         activeTab === 'rel-rds'
-                          ? "bg-emerald-500 text-white shadow-lg shadow-emerald-900/20"
-                          : "text-white/70 hover:bg-white/5 hover:text-white"
+                          ? company.navActiveClass
+                          : "text-white hover:bg-white/5 hover:text-white"
                       )}
                     >
                       <Calculator className={cn(
@@ -765,8 +1049,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
                           className={cn(
                             "w-full flex items-center gap-3 pl-14 pr-4 py-1.5 rounded-xl transition-all duration-200 group",
                             activeTab === tabId
-                              ? "bg-emerald-500 text-white shadow-lg shadow-emerald-900/20"
-                              : "text-white/60 hover:bg-white/5 hover:text-white"
+                              ? company.navActiveClass
+                              : "text-white hover:bg-white/5 hover:text-white"
                           )}
                         >
                           <CalendarDays className={cn(
@@ -786,15 +1070,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
         )}
 
-        {showFolha && (
+        {showFolhaGroup && (
           <div className="space-y-1">
             <button
               onClick={() => setFolhaExpanded((prev) => !prev)}
+              data-tour="group-folha"
               className={cn(
                 "w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group",
-                activeTab.startsWith('folha-') || activeTab === 'folha-apuracao'
+                activeTab.startsWith('folha-') || isFolhaRhNavTab(activeTab)
                   ? "text-white bg-white/10"
-                  : "text-white/80 hover:bg-white/5 hover:text-white"
+                  : "text-white hover:bg-white/5 hover:text-white"
               )}
             >
               <Wallet className="w-5 h-5 min-w-5 min-h-5 shrink-0 transition-transform duration-200 group-hover:scale-110" />
@@ -810,14 +1095,105 @@ export const Sidebar: React.FC<SidebarProps> = ({
               />
             </button>
 
-            {!collapsed && folhaExpanded && (
+            {!collapsed && folhaExpanded && showFolha && (
+              <button
+                onClick={() => setActiveTab('tangerino-ponto')}
+                className={cn(
+                  "w-full flex items-center gap-3 pl-11 pr-4 py-2 rounded-xl transition-all duration-200 group",
+                  activeTab === 'tangerino-ponto'
+                    ? company.navActiveClass
+                    : "text-white hover:bg-white/5 hover:text-white"
+                )}
+              >
+                <Clock className={cn(
+                  "w-4 h-4 min-w-4 min-h-4 shrink-0",
+                  activeTab === 'tangerino-ponto' ? "scale-110" : "group-hover:scale-110"
+                )} />
+                <span className="font-medium text-xs truncate text-left">Tangerino — Ponto</span>
+              </button>
+            )}
+
+            {!collapsed && folhaExpanded && showFolha && (
+              <button
+                onClick={() => setActiveTab('turnover')}
+                className={cn(
+                  "w-full flex items-center gap-3 pl-11 pr-4 py-2 rounded-xl transition-all duration-200 group",
+                  activeTab === 'turnover'
+                    ? company.navActiveClass
+                    : "text-white hover:bg-white/5 hover:text-white"
+                )}
+              >
+                <UserRound className={cn(
+                  "w-4 h-4 min-w-4 min-h-4 shrink-0",
+                  activeTab === 'turnover' ? "scale-110" : "group-hover:scale-110"
+                )} />
+                <span className="font-medium text-xs truncate text-left">Turnover</span>
+              </button>
+            )}
+
+            {!collapsed && folhaExpanded && showFolha && (
+              <button
+                onClick={() => setActiveTab('absenteismo')}
+                className={cn(
+                  "w-full flex items-center gap-3 pl-11 pr-4 py-2 rounded-xl transition-all duration-200 group",
+                  activeTab === 'absenteismo'
+                    ? company.navActiveClass
+                    : "text-white hover:bg-white/5 hover:text-white"
+                )}
+              >
+                <UserX className={cn(
+                  "w-4 h-4 min-w-4 min-h-4 shrink-0",
+                  activeTab === 'absenteismo' ? "scale-110" : "group-hover:scale-110"
+                )} />
+                <span className="font-medium text-xs truncate text-left">Absenteísmo</span>
+              </button>
+            )}
+
+            {!collapsed && folhaExpanded && showEmprestimos && (
+              <button
+                onClick={() => setActiveTab('emprestimos')}
+                className={cn(
+                  "w-full flex items-center gap-3 pl-11 pr-4 py-2 rounded-xl transition-all duration-200 group",
+                  activeTab === 'emprestimos'
+                    ? company.navActiveClass
+                    : "text-white hover:bg-white/5 hover:text-white"
+                )}
+              >
+                <Landmark className={cn(
+                  "w-4 h-4 min-w-4 min-h-4 shrink-0",
+                  activeTab === 'emprestimos' ? "scale-110" : "group-hover:scale-110"
+                )} />
+                <span className="font-medium text-xs truncate text-left">Empréstimos</span>
+              </button>
+            )}
+
+            {!collapsed && folhaExpanded && showFolha && (
+              <button
+                onClick={() => setActiveTab('painel-rh')}
+                className={cn(
+                  "w-full flex items-center gap-3 pl-11 pr-4 py-2 rounded-xl transition-all duration-200 group",
+                  activeTab === 'painel-rh'
+                    ? company.navActiveClass
+                    : "text-white hover:bg-white/5 hover:text-white"
+                )}
+              >
+                <BarChart3 className={cn(
+                  "w-4 h-4 min-w-4 min-h-4 shrink-0",
+                  activeTab === 'painel-rh' ? "scale-110" : "group-hover:scale-110"
+                )} />
+                <span className="font-medium text-xs truncate text-left">Orç. × Real. Folha</span>
+              </button>
+            )}
+
+            {!collapsed && folhaExpanded && showFolha && (
               <button
                 onClick={() => setActiveTab('folha-apuracao')}
+                data-tour="nav-folha-apuracao"
                 className={cn(
                   "w-full flex items-center gap-3 pl-11 pr-4 py-2 rounded-xl transition-all duration-200 group",
                   activeTab === 'folha-apuracao'
-                    ? "bg-emerald-500 text-white shadow-lg shadow-emerald-900/20"
-                    : "text-white/70 hover:bg-white/5 hover:text-white"
+                    ? company.navActiveClass
+                    : "text-white hover:bg-white/5 hover:text-white"
                 )}
               >
                 <Calculator className={cn(
@@ -828,7 +1204,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               </button>
             )}
 
-            {!collapsed && folhaExpanded && FOLHA_MESES.map((mes, idx) => {
+            {!collapsed && folhaExpanded && showFolha && FOLHA_MESES.map((mes, idx) => {
               const tabId = `folha-${idx + 1}`;
               return (
                 <button
@@ -837,8 +1213,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   className={cn(
                     "w-full flex items-center gap-3 pl-11 pr-4 py-2 rounded-xl transition-all duration-200 group",
                     activeTab === tabId
-                      ? "bg-emerald-500 text-white shadow-lg shadow-emerald-900/20"
-                      : "text-white/70 hover:bg-white/5 hover:text-white"
+                      ? company.navActiveClass
+                      : "text-white hover:bg-white/5 hover:text-white"
                   )}
                   title={mes}
                 >
@@ -858,12 +1234,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
         {adminMenu.map((item) => (
           <button
             key={item.id}
+            data-tour={`nav-${item.id}`}
             onClick={() => setActiveTab(item.id)}
             className={cn(
               "w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group",
               activeTab === item.id
-                ? "bg-emerald-500 text-white shadow-lg shadow-emerald-900/20"
-                : "text-white/80 hover:bg-white/5 hover:text-white"
+                ? company.navActiveClass
+                : "text-white hover:bg-white/5 hover:text-white"
             )}
           >
             <item.icon className={cn(
@@ -873,39 +1250,69 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <span className={cn("font-medium text-sm", collapsed && "hidden")}>{item.label}</span>
           </button>
         ))}
+
+        {showTutorial && (
+        <button
+          type="button"
+          data-tour="nav-tutorial"
+          onClick={() => setActiveTab('tutorial')}
+          className={cn(
+            "w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group",
+            activeTab === 'tutorial'
+              ? company.navActiveClass
+              : "text-white hover:bg-white/5 hover:text-white"
+          )}
+        >
+          <BookOpen className={cn(
+            "w-5 h-5 min-w-5 min-h-5 shrink-0 transition-transform duration-200",
+            activeTab === 'tutorial' ? "scale-110" : "group-hover:scale-110"
+          )} />
+          <span className={cn("font-medium text-sm", collapsed && "hidden")}>Tutorial guiado</span>
+        </button>
+        )}
       </nav>
 
-      <div className="p-4 border-t border-white/10 space-y-4">
+      <div className="p-4 border-t border-white/10 space-y-3">
         <div className={cn("flex items-center gap-3 px-2", collapsed && "justify-center")}>
-          <div className="w-10 h-10 rounded-full bg-emerald-800 flex items-center justify-center border border-emerald-400/30">
-            <User className="w-5 h-5 text-emerald-300" />
-          </div>
-          <div className={cn("flex-1 min-w-0", collapsed && "hidden")}>
-            <p className="text-sm font-semibold truncate">{user?.name}</p>
-            <p className="text-[10px] text-white/75 uppercase font-bold tracking-tighter">
-              {user?.role === 'admin' ? 'Administrador' : 
-               user?.role === 'finance' ? 'Financeiro' : 
-               user?.role === 'controle' ? 'Controle' :
-               user?.role === 'manager' ? 'Gestor' : 'Visualizador'}
-            </p>
-          </div>
+          {!collapsed && (
+            <>
+              <div className="w-10 h-10 rounded-full bg-emerald-800 flex items-center justify-center border border-emerald-400/30 shrink-0">
+                <User className="w-5 h-5 text-emerald-300" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold truncate">{user?.name}</p>
+                <p className="text-[10px] text-white uppercase font-bold tracking-tighter truncate">
+                  {user?.role === 'admin' ? 'Administrador' :
+                   user?.role === 'finance' ? 'Financeiro' :
+                   user?.role === 'controle' ? 'Controle' :
+                   user?.role === 'manager' ? 'Gestor' :
+                   user?.role === 'estagiario' ? 'Estagiário' :
+                   user?.role === 'viewer' ? 'Visualizador' :
+                   user?.role === 'diretoria' ? 'Diretoria' :
+                   String(user?.role || '')}
+                </p>
+              </div>
+            </>
+          )}
+          <button
+            type="button"
+            onClick={onToggleCollapsed}
+            className="shrink-0 p-1 rounded-lg text-white hover:bg-white/10 transition-colors"
+            title={collapsed ? 'Expandir menu' : 'Colapsar menu'}
+            aria-label={collapsed ? 'Expandir menu' : 'Colapsar menu'}
+          >
+            {collapsed ? (
+              <PanelLeftOpen className="w-4 h-4" />
+            ) : (
+              <PanelLeftClose className="w-4 h-4" />
+            )}
+          </button>
         </div>
 
         <button
-          onClick={onToggleCollapsed}
-          className={cn(
-            "w-full px-4 py-2 rounded-xl text-xs font-bold bg-white/10 hover:bg-white/15 transition-colors flex items-center justify-center"
-          )}
-          title={collapsed ? 'Expandir menu' : 'Colapsar menu'}
-          aria-label={collapsed ? 'Expandir menu' : 'Colapsar menu'}
-        >
-          {collapsed ? <PanelLeftOpen className="w-4 h-4 shrink-0" /> : <PanelLeftClose className="w-4 h-4 shrink-0" />}
-        </button>
-        
-        <button 
           onClick={onLogout}
           className={cn(
-            "w-full flex items-center px-4 py-3 rounded-xl text-red-300 hover:bg-red-500/10 hover:text-red-200 transition-colors",
+            "w-full flex items-center px-4 py-3 rounded-xl text-red-400 hover:bg-red-500/10 hover:text-red-300 transition-colors",
             collapsed ? "justify-center" : "gap-3"
           )}
         >
