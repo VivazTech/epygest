@@ -1,8 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, Landmark, Plus, RefreshCcw, Trash2, Pencil, X } from 'lucide-react';
+import { AlertTriangle, Landmark, Plus, RefreshCcw, Trash2, Pencil, X, Loader2 } from 'lucide-react';
 import { cn, formatCurrency } from '../lib/utils';
 import { confirmDelete } from '../lib/confirmAction';
 import { SearchableSelect } from '../components/SearchableSelect';
+import { ListPagination, sumAmountsByCurrency } from '../components/ListPagination';
+import { useClientPagination } from '../hooks/useClientPagination';
 import { useSearch } from '../context/SearchContext';
 import { matchesSearch } from '../lib/search';
 
@@ -139,6 +141,12 @@ export const InvestimentosPage: React.FC = () => {
       );
     });
   }, [rows, statusFilter, sectorFilter, onlyEstouro, query]);
+
+  const pagination = useClientPagination(filtered);
+  const filteredAmountTotal = useMemo(
+    () => sumAmountsByCurrency(filtered, (r) => r.valor_previsto),
+    [filtered]
+  );
 
   const counts = useMemo(() => {
     const base = {
@@ -339,7 +347,12 @@ export const InvestimentosPage: React.FC = () => {
             <tbody className="divide-y divide-slate-50">
               {loading && (
                 <tr>
-                  <td colSpan={10} className="px-4 py-10 text-center text-sm text-slate-400">Carregando...</td>
+                  <td colSpan={10} className="px-4 py-14 text-center">
+                    <div className="inline-flex items-center justify-center gap-2 text-slate-400">
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                      <span className="text-sm font-medium">Carregando investimentos...</span>
+                    </div>
+                  </td>
                 </tr>
               )}
               {!loading && filtered.length === 0 && (
@@ -349,7 +362,7 @@ export const InvestimentosPage: React.FC = () => {
                   </td>
                 </tr>
               )}
-              {filtered.map((row) => (
+              {!loading && pagination.pageItems.map((row) => (
                 <tr
                   key={row.id}
                   className={cn(
@@ -412,6 +425,20 @@ export const InvestimentosPage: React.FC = () => {
             </tbody>
           </table>
         </div>
+        {!loading && (
+          <ListPagination
+            page={pagination.page}
+            totalPages={pagination.totalPages}
+            total={pagination.total}
+            from={pagination.from}
+            to={pagination.to}
+            pageSize={pagination.pageSize}
+            onPageChange={pagination.setPage}
+            onPageSizeChange={pagination.setPageSize}
+            label="investimentos"
+            amountTotal={filteredAmountTotal}
+          />
+        )}
       </div>
 
       {formOpen && (

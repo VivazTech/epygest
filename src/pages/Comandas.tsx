@@ -8,7 +8,7 @@ import { launchStatusMeta, LAUNCH_STATUS_FILTER_OPTIONS } from '../lib/launchFlo
 import { CompetenciaFilter, currentCompetencia } from '../components/CompetenciaFilter';
 import { ListPagination } from '../components/ListPagination';
 import { DateBrInput } from '../components/DateBrInput';
-import { parseListResponse, useServerPagination } from '../hooks/useServerPagination';
+import { parseListResponse, useServerListEffect, useServerPagination } from '../hooks/useServerPagination';
 
 type ComandaItemForm = {
   description: string;
@@ -49,7 +49,7 @@ export const ComandasPage: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState('all');
   const pagination = useServerPagination(20);
 
-  const loadData = async (showSpinner = true) => {
+  const loadData = async (showSpinner = true, signal?: AbortSignal) => {
     if (showSpinner) setLoading(true);
     try {
       const params = new URLSearchParams(pagination.queryParams);
@@ -63,11 +63,12 @@ export const ComandasPage: React.FC = () => {
       if (query.trim()) params.set('q', query.trim());
 
       const [comandasRes, locaisRes] = await Promise.all([
-        fetch(`/api/comandas?${params.toString()}`),
-        fetch('/api/pdv-locais'),
+        fetch(`/api/comandas?${params.toString()}`, { signal }),
+        fetch('/api/pdv-locais', { signal }),
       ]);
       const data = await comandasRes.json().catch(() => null);
       const locais = await locaisRes.json().catch(() => null);
+      if (signal?.aborted) return;
 
       if (Array.isArray(locais)) {
         setPdvLocais(locais.map((l: any) => ({ id: Number(l.id), name: String(l.name) })));
@@ -90,12 +91,13 @@ export const ComandasPage: React.FC = () => {
       setComandas(parsed.items);
       pagination.applyMeta({ total: parsed.total });
     } catch (error) {
+      if ((error as any)?.name === 'AbortError') return;
       console.error('Falha ao carregar comandas:', error);
       setComandas([]);
       setPdvLocais([]);
       pagination.applyMeta({ total: 0 });
     } finally {
-      if (showSpinner) setLoading(false);
+      if (!signal?.aborted && showSpinner) setLoading(false);
     }
   };
 
@@ -116,14 +118,8 @@ export const ComandasPage: React.FC = () => {
     loadUser();
   }, []);
 
-  useEffect(() => {
-    pagination.resetPage();
-  }, [statusFilter, competenciaMonth, competenciaYear, dateFrom, dateTo, query, pagination.resetPage]);
-
-  useEffect(() => {
-    loadData();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pagination.page, pagination.pageSize, statusFilter, competenciaMonth, competenciaYear, dateFrom, dateTo, query]);
+  const listFilterKey = [statusFilter, competenciaMonth, competenciaYear, dateFrom, dateTo, query].join('|');
+  useServerListEffect(listFilterKey, pagination, (signal) => loadData(true, signal));
 
   const canSwitchActingProfile = userRole === 'admin';
   const canApproveControl = actingSector === 'controle' && (userRole === 'controle' || userRole === 'admin');

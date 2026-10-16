@@ -10,7 +10,7 @@ import { isDirectDocumentUrl } from '../lib/storagePath';
 import { confirmCancel, confirmDelete } from '../lib/confirmAction';
 import { SearchableSelect } from '../components/SearchableSelect';
 import { CrdListFilter } from '../components/CrdListFilter';
-import { LaunchNumberAmountFilters } from '../components/LaunchNumberAmountFilters';
+import { LaunchNumberAmountFilters, parseAmountFilter } from '../components/LaunchNumberAmountFilters';
 import { buildCrdFilterOptions } from '../lib/crdFilter';
 import {
   canEditLaunchRole,
@@ -21,7 +21,7 @@ import {
 import { CompetenciaFilter, currentCompetencia } from '../components/CompetenciaFilter';
 import { ListPagination } from '../components/ListPagination';
 import { DateBrInput } from '../components/DateBrInput';
-import { parseListResponse, useServerPagination } from '../hooks/useServerPagination';
+import { parseListResponse, useServerListEffect, useServerPagination } from '../hooks/useServerPagination';
 import { hasPermission, type RolePermissionRow } from '../lib/permissionCatalog';
 
 const EMPTY_FORM = {
@@ -122,7 +122,7 @@ export const LancamentosManuaisPage: React.FC = () => {
     }
   };
 
-  const loadData = async (showSpinner = true) => {
+  const loadData = async (showSpinner = true, signal?: AbortSignal) => {
     if (showSpinner) setLoading(true);
     try {
       const params = new URLSearchParams(pagination.queryParams);
@@ -136,20 +136,23 @@ export const LancamentosManuaisPage: React.FC = () => {
       if (issueDateFrom) params.set('issue_from', issueDateFrom);
       if (issueDateTo) params.set('issue_to', issueDateTo);
       if (crdFilter) params.set('crd', crdFilter);
-      if (amountFilter.trim()) params.set('amount', amountFilter.trim());
+      const parsedAmount = parseAmountFilter(amountFilter);
+      if (parsedAmount != null) params.set('amount', String(parsedAmount));
       const searchBits = [query, invoiceNumberFilter].map((s) => s.trim()).filter(Boolean);
       if (searchBits.length) params.set('q', searchBits.join(' '));
 
-      const entriesRes = await fetch(`/api/manual-entries?${params.toString()}`);
+      const entriesRes = await fetch(`/api/manual-entries?${params.toString()}`, { signal });
       const entriesData = await entriesRes.json().catch(() => null);
+      if (signal?.aborted) return;
       const parsed = parseListResponse<any>(entriesData);
       setEntries(parsed.items);
       pagination.applyMeta({ total: parsed.total, totalAmount: parsed.totalAmount ?? null });
-    } catch {
+    } catch (err) {
+      if ((err as any)?.name === 'AbortError') return;
       setEntries([]);
       pagination.applyMeta({ total: 0, totalAmount: 0 });
     } finally {
-      if (showSpinner) setLoading(false);
+      if (!signal?.aborted && showSpinner) setLoading(false);
     }
   };
 
@@ -218,9 +221,7 @@ export const LancamentosManuaisPage: React.FC = () => {
     loadMeta();
   }, []);
 
-  useEffect(() => {
-    pagination.resetPage();
-  }, [
+  const listFilterKey = [
     statusFilter,
     sectorFilter,
     paymentFilter,
@@ -232,27 +233,9 @@ export const LancamentosManuaisPage: React.FC = () => {
     amountFilter,
     query,
     invoiceNumberFilter,
-    pagination.resetPage,
-  ]);
+  ].join('|');
 
-  useEffect(() => {
-    loadData();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- loadData usa filtros + page
-  }, [
-    pagination.page,
-    pagination.pageSize,
-    statusFilter,
-    sectorFilter,
-    paymentFilter,
-    competenciaMonth,
-    competenciaYear,
-    issueDateFrom,
-    issueDateTo,
-    crdFilter,
-    amountFilter,
-    query,
-    invoiceNumberFilter,
-  ]);
+  useServerListEffect(listFilterKey, pagination, (signal) => loadData(true, signal));
 
   const hasGlobalSectorView =
     userRole === 'admin' || userRole === 'finance' || userRole === 'controle';

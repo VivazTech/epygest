@@ -39,7 +39,7 @@ import {
 import { CompetenciaFilter } from '../components/CompetenciaFilter';
 import { ListPagination } from '../components/ListPagination';
 import { DateBrInput } from '../components/DateBrInput';
-import { parseListResponse, useServerPagination } from '../hooks/useServerPagination';
+import { parseListResponse, useServerListEffect, useServerPagination } from '../hooks/useServerPagination';
 
 const EMPTY_INVOICE_FORM = {
   invoice_number: '',
@@ -143,9 +143,7 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
   const [historyRows, setHistoryRows] = useState<any[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
 
-  useEffect(() => {
-    pagination.resetPage();
-  }, [
+  const listFilterKey = [
     selectedMonth,
     selectedYear,
     customDateFrom,
@@ -155,25 +153,43 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
     invoiceNumberFilter,
     listQuery,
     query,
-    pagination.resetPage,
-  ]);
+    mode,
+  ].join('|');
 
-  useEffect(() => {
-    fetchInvoices();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- fetchInvoices usa filtros + page
-  }, [
-    selectedMonth,
-    selectedYear,
-    customDateFrom,
-    customDateTo,
-    pagination.page,
-    pagination.pageSize,
-    crdFilter,
-    amountFilter,
-    invoiceNumberFilter,
-    listQuery,
-    query,
-  ]);
+  useServerListEffect(listFilterKey, pagination, async (signal) => {
+    setLoading(true);
+    try {
+      const params = new URLSearchParams(pagination.queryParams);
+      if (customDateFrom || customDateTo) {
+        if (customDateFrom) params.set('from', customDateFrom);
+        if (customDateTo) params.set('to', customDateTo);
+      } else if (selectedMonth && Number(selectedMonth) >= 1 && Number(selectedMonth) <= 12) {
+        params.set('month', selectedMonth);
+        params.set('year', selectedYear);
+      }
+      if (crdFilter) params.set('crd', crdFilter);
+      params.set('doc_type', isDanfe ? 'danfe' : 'nota');
+      const parsedAmount = parseAmountFilter(amountFilter);
+      if (parsedAmount != null) params.set('amount', String(parsedAmount));
+      const searchBits = [listQuery.trim() ? listQuery : query, invoiceNumberFilter]
+        .map((s) => s.trim())
+        .filter(Boolean);
+      if (searchBits.length) params.set('q', searchBits.join(' '));
+
+      const res = await fetch(`/api/invoices?${params.toString()}`, { signal });
+      const data = await res.json().catch(() => null);
+      if (signal.aborted) return;
+      const parsed = parseListResponse<any>(data);
+      setInvoices(parsed.items);
+      pagination.applyMeta({ total: parsed.total, totalAmount: parsed.totalAmount ?? null });
+    } catch (err) {
+      if ((err as any)?.name === 'AbortError') return;
+      setInvoices([]);
+      pagination.applyMeta({ total: 0, totalAmount: 0 });
+    } finally {
+      if (!signal.aborted) setLoading(false);
+    }
+  });
 
   useEffect(() => {
     fetchSectors(selectedMonth, selectedYear);
@@ -285,6 +301,7 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
       params.set('year', year);
     }
     if (crdFilter) params.set('crd', crdFilter);
+    params.set('doc_type', isDanfe ? 'danfe' : 'nota');
     const parsedAmount = parseAmountFilter(amountFilter);
     if (parsedAmount != null) params.set('amount', String(parsedAmount));
     const searchBits = [listQuery.trim() ? listQuery : query, invoiceNumberFilter]
@@ -905,10 +922,10 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
   );
   const filteredInvoices = sectorVisibleInvoices;
   const filteredAmountTotal = useMemo(() => {
-    if (typeof pagination.totalAmount === 'number') {
+    if (pagination.totalAmount != null && Number.isFinite(pagination.totalAmount)) {
       return formatCurrency(pagination.totalAmount, 'BRL');
     }
-    return '—';
+    return formatCurrency(0, 'BRL');
   }, [pagination.totalAmount]);
   const filteredBudgetSectors = useMemo(
     () => budgetSectors.filter((sector) => matchesSectorVisibilityFilter(sector.id)),

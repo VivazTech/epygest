@@ -9,7 +9,7 @@ import { useToast } from '../context/ToastContext';
 import { isSharedCrdCode } from '../lib/sharedCrds';
 import { SearchableSelect } from '../components/SearchableSelect';
 import { CrdListFilter } from '../components/CrdListFilter';
-import { LaunchNumberAmountFilters } from '../components/LaunchNumberAmountFilters';
+import { LaunchNumberAmountFilters, parseAmountFilter } from '../components/LaunchNumberAmountFilters';
 import { buildCrdFilterOptions } from '../lib/crdFilter';
 import {
   canEditLaunchRole,
@@ -20,7 +20,7 @@ import {
 import { CompetenciaFilter, currentCompetencia } from '../components/CompetenciaFilter';
 import { ListPagination } from '../components/ListPagination';
 import { DateBrInput } from '../components/DateBrInput';
-import { parseListResponse, useServerPagination } from '../hooks/useServerPagination';
+import { parseListResponse, useServerListEffect, useServerPagination } from '../hooks/useServerPagination';
 
 const EMPTY_FORM = {
   crd_id: '',
@@ -59,35 +59,36 @@ export const RequisicoesPage: React.FC = () => {
   const [submitting, setSubmitting] = useState(false);
   const pagination = useServerPagination(20);
 
-  const loadData = (showSpinner = true) => {
+  const loadData = async (showSpinner = true, signal?: AbortSignal) => {
     if (showSpinner) setLoading(true);
-    const params = new URLSearchParams(pagination.queryParams);
-    if (statusFilter !== 'all') params.set('status', statusFilter);
-    if (competenciaMonth) {
-      params.set('month', competenciaMonth);
-      params.set('year', competenciaYear);
-    }
-    if (dateFrom) params.set('from', dateFrom);
-    if (dateTo) params.set('to', dateTo);
-    if (crdFilter) params.set('crd', crdFilter);
-    if (amountFilter.trim()) params.set('amount', amountFilter.trim());
-    const searchBits = [query, invoiceNumberFilter].map((s) => s.trim()).filter(Boolean);
-    if (searchBits.length) params.set('q', searchBits.join(' '));
+    try {
+      const params = new URLSearchParams(pagination.queryParams);
+      if (statusFilter !== 'all') params.set('status', statusFilter);
+      if (competenciaMonth) {
+        params.set('month', competenciaMonth);
+        params.set('year', competenciaYear);
+      }
+      if (dateFrom) params.set('from', dateFrom);
+      if (dateTo) params.set('to', dateTo);
+      if (crdFilter) params.set('crd', crdFilter);
+      const parsedAmount = parseAmountFilter(amountFilter);
+      if (parsedAmount != null) params.set('amount', String(parsedAmount));
+      const searchBits = [query, invoiceNumberFilter].map((s) => s.trim()).filter(Boolean);
+      if (searchBits.length) params.set('q', searchBits.join(' '));
 
-    fetch(`/api/requisitions?${params.toString()}`)
-      .then((res) => res.json())
-      .then((data) => {
-        const parsed = parseListResponse<any>(data);
-        setRequisitions(parsed.items);
-        pagination.applyMeta({ total: parsed.total, totalAmount: parsed.totalAmount ?? null });
-      })
-      .catch(() => {
-        setRequisitions([]);
-        pagination.applyMeta({ total: 0, totalAmount: 0 });
-      })
-      .finally(() => {
-        if (showSpinner) setLoading(false);
-      });
+      const res = await fetch(`/api/requisitions?${params.toString()}`, { signal });
+      const data = await res.json().catch(() => null);
+      if (signal?.aborted) return;
+      const parsed = parseListResponse<any>(data);
+      setRequisitions(parsed.items);
+      pagination.applyMeta({ total: parsed.total, totalAmount: parsed.totalAmount ?? null });
+    } catch (err) {
+      if ((err as any)?.name === 'AbortError') return;
+      setRequisitions([]);
+      pagination.applyMeta({ total: 0, totalAmount: 0 });
+    } finally {
+      if (!signal?.aborted && showSpinner) setLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -126,9 +127,7 @@ export const RequisicoesPage: React.FC = () => {
     fetch('/api/crds').then((res) => res.json()).then(setCrds).catch(() => setCrds([]));
   }, []);
 
-  useEffect(() => {
-    pagination.resetPage();
-  }, [
+  const listFilterKey = [
     statusFilter,
     competenciaMonth,
     competenciaYear,
@@ -138,25 +137,9 @@ export const RequisicoesPage: React.FC = () => {
     amountFilter,
     query,
     invoiceNumberFilter,
-    pagination.resetPage,
-  ]);
+  ].join('|');
 
-  useEffect(() => {
-    loadData();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    pagination.page,
-    pagination.pageSize,
-    statusFilter,
-    competenciaMonth,
-    competenciaYear,
-    dateFrom,
-    dateTo,
-    crdFilter,
-    amountFilter,
-    query,
-    invoiceNumberFilter,
-  ]);
+  useServerListEffect(listFilterKey, pagination, (signal) => loadData(true, signal));
 
   const hasGlobalSectorView =
     userRole === 'admin' || userRole === 'finance' || userRole === 'controle';
