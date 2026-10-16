@@ -256,7 +256,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         "text-white h-screen flex flex-col fixed left-0 top-0 z-50 transition-all duration-200",
         collapsed ? "w-20" : "w-64"
       )}
-      style={{ backgroundColor: company.sidebarBg }}
+      style={{ backgroundColor: company.sidebarBg, color: '#FFFFFF' }}
     >
       <div ref={companyMenuRef} className="relative border-b border-white/10">
         <button
@@ -274,12 +274,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <img src={logoIcon} alt={company.subtitle} className="h-6 w-auto" />
           </div>
           <div className={cn("min-w-0 flex-1", collapsed && "hidden")}>
-            <h1 className="font-bold text-lg leading-tight truncate">{company.budgetTitle}</h1>
-            <p className="text-[10px] opacity-60 uppercase tracking-widest truncate">{company.subtitle}</p>
+            <h1 className="font-bold text-lg leading-tight truncate text-white">{company.budgetTitle}</h1>
+            <p className="text-[10px] uppercase tracking-widest truncate text-white">{company.subtitle}</p>
           </div>
           <ChevronDown
             className={cn(
-              "w-4 h-4 shrink-0 opacity-70 transition-transform",
+              "w-4 h-4 shrink-0 text-white transition-transform",
               companyMenuOpen && "rotate-180",
               collapsed && "hidden"
             )}
@@ -296,7 +296,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             )}
             style={{ backgroundColor: companyKey === 'aqua' ? '#9A3412' : '#005a7d' }}
           >
-            <p className="px-3 pt-2.5 pb-1 text-[10px] font-bold uppercase tracking-wider text-white/45">
+            <p className="px-3 pt-2.5 pb-1 text-[10px] font-bold uppercase tracking-wider text-white">
               Trocar de empresa
             </p>
             {companies.map((item) => {
@@ -310,7 +310,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   onClick={() => selectCompany(item.key)}
                   className={cn(
                     "w-full px-3 py-2.5 text-left text-sm transition-colors flex items-center justify-between gap-2",
-                    selected ? "bg-white/15 text-white" : "text-white/80 hover:bg-white/10 hover:text-white"
+                    selected ? "bg-white/15 text-white" : "text-white hover:bg-white/10 hover:text-white"
                   )}
                 >
                   <span className="font-medium truncate">{item.shortName}</span>
@@ -324,14 +324,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
         )}
       </div>
 
-      <nav data-tour="sidebar-nav" className="flex-1 py-6 px-3 space-y-1 overflow-y-auto no-scrollbar">
+      <nav
+        data-tour="sidebar-nav"
+        className="sidebar-nav flex-1 py-6 px-3 space-y-1 overflow-y-auto no-scrollbar text-white"
+        style={{ color: '#FFFFFF' }}
+      >
         {constructionMenu.length > 0 && (
           <div className="space-y-1">
             <button
               onClick={() => setConstructionExpanded((prev) => !prev)}
               data-tour="group-em-construcao"
               className={cn(
-                "w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group text-white/80 hover:bg-white/5 hover:text-white"
+                "w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group text-white hover:bg-white/5 hover:text-white"
               )}
             >
               <PlugZap className="w-5 h-5 min-w-5 min-h-5 shrink-0 transition-transform duration-200 group-hover:scale-110" />
@@ -356,7 +360,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   "w-full flex items-center gap-3 pl-11 pr-4 py-2.5 rounded-xl transition-all duration-200 group",
                   activeTab === item.id 
                     ? company.navActiveClass 
-                    : "text-white/80 hover:bg-white/5 hover:text-white"
+                    : "text-white hover:bg-white/5 hover:text-white"
                 )}
               >
                 <item.icon className={cn(
@@ -378,7 +382,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 "w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group",
                 lancamentosGroupIds.includes(activeTab)
                   ? "text-white bg-white/10"
-                  : "text-white/80 hover:bg-white/5 hover:text-white"
+                  : "text-white hover:bg-white/5 hover:text-white"
               )}
             >
               <Layers className="w-5 h-5 min-w-5 min-h-5 shrink-0 transition-transform duration-200 group-hover:scale-110" />
@@ -403,7 +407,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   "w-full flex items-center gap-3 pl-11 pr-4 py-2 rounded-xl transition-all duration-200 group",
                   activeTab === item.id
                     ? company.navActiveClass
-                    : "text-white/70 hover:bg-white/5 hover:text-white"
+                    : "text-white hover:bg-white/5 hover:text-white"
                 )}
                 title={item.label}
               >
@@ -425,7 +429,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               "w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group",
               activeTab === 'aprovacoes'
                 ? company.navActiveClass
-                : "text-white/80 hover:bg-white/5 hover:text-white"
+                : "text-white hover:bg-white/5 hover:text-white"
             )}
           >
             <ShieldCheck className={cn(
@@ -445,7 +449,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 "w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group",
                 comprasIds.includes(activeTab)
                   ? "text-white bg-white/10"
-                  : "text-white/80 hover:bg-white/5 hover:text-white"
+                  : "text-white hover:bg-white/5 hover:text-white"
               )}
             >
               <ShoppingCart className="w-5 h-5 min-w-5 min-h-5 shrink-0 transition-transform duration-200 group-hover:scale-110" />
@@ -468,7 +472,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   "w-full flex items-center gap-3 pl-11 pr-4 py-2 rounded-xl transition-all duration-200 group",
                   activeTab === 'compras-ordem'
                     ? company.navActiveClass
-                    : "text-white/70 hover:bg-white/5 hover:text-white"
+                    : "text-white hover:bg-white/5 hover:text-white"
                 )}
               >
                 <FileCheck className="w-4 h-4 min-w-4 min-h-4 shrink-0" />
@@ -487,7 +491,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 "w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group",
                 vendasIds.includes(activeTab)
                   ? "text-white bg-white/10"
-                  : "text-white/80 hover:bg-white/5 hover:text-white"
+                  : "text-white hover:bg-white/5 hover:text-white"
               )}
             >
               <Store className="w-5 h-5 min-w-5 min-h-5 shrink-0 transition-transform duration-200 group-hover:scale-110" />
@@ -510,7 +514,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   "w-full flex items-center gap-3 pl-11 pr-4 py-2 rounded-xl transition-all duration-200 group",
                   activeTab === 'vendas-pdvs'
                     ? company.navActiveClass
-                    : "text-white/70 hover:bg-white/5 hover:text-white"
+                    : "text-white hover:bg-white/5 hover:text-white"
                 )}
               >
                 <Store className="w-4 h-4 min-w-4 min-h-4 shrink-0" />
@@ -529,7 +533,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               "w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group",
               activeTab === item.id
                 ? company.navActiveClass
-                : "text-white/80 hover:bg-white/5 hover:text-white"
+                : "text-white hover:bg-white/5 hover:text-white"
             )}
           >
             <item.icon className={cn(
@@ -549,7 +553,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 "w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group",
                 isBaseOrcamentoActive
                   ? "text-white bg-white/10"
-                  : "text-white/80 hover:bg-white/5 hover:text-white"
+                  : "text-white hover:bg-white/5 hover:text-white"
               )}
             >
               <Rows4 className="w-5 h-5 min-w-5 min-h-5 shrink-0 transition-transform duration-200 group-hover:scale-110" />
@@ -576,7 +580,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   "w-full flex items-center gap-3 pl-11 pr-4 py-2 rounded-xl transition-all duration-200 group",
                   activeTab === item.tabId
                     ? company.navActiveClass
-                    : "text-white/70 hover:bg-white/5 hover:text-white"
+                    : "text-white hover:bg-white/5 hover:text-white"
                 )}
                 title={item.nome}
               >
@@ -599,7 +603,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 "w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group",
                 isApuracaoResultadosTab
                   ? "text-white bg-white/10"
-                  : "text-white/80 hover:bg-white/5 hover:text-white"
+                  : "text-white hover:bg-white/5 hover:text-white"
               )}
             >
               <FileSpreadsheet className="w-5 h-5 min-w-5 min-h-5 shrink-0 transition-transform duration-200 group-hover:scale-110" />
@@ -628,7 +632,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         "w-full flex items-center gap-3 pl-11 pr-4 py-2 rounded-xl transition-all duration-200 group",
                         activeTab === tabId
                           ? company.navActiveClass
-                          : "text-white/70 hover:bg-white/5 hover:text-white"
+                          : "text-white hover:bg-white/5 hover:text-white"
                       )}
                       title={planilha.nome}
                     >
@@ -647,7 +651,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     "w-full flex items-center gap-3 pl-11 pr-4 py-2 rounded-xl transition-all duration-200 group",
                     isRelCrdActive
                       ? "text-white bg-white/10"
-                      : "text-white/70 hover:bg-white/5 hover:text-white"
+                      : "text-white hover:bg-white/5 hover:text-white"
                   )}
                 >
                   <FileCheck className={cn(
@@ -672,7 +676,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         "w-full flex items-center gap-3 pl-14 pr-4 py-2 rounded-xl transition-all duration-200 group",
                         activeTab === 'rel-crd'
                           ? company.navActiveClass
-                          : "text-white/70 hover:bg-white/5 hover:text-white"
+                          : "text-white hover:bg-white/5 hover:text-white"
                       )}
                     >
                       <Calculator className={cn(
@@ -691,7 +695,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             "w-full flex items-center gap-3 pl-14 pr-4 py-1.5 rounded-xl transition-all duration-200 group",
                             activeTab === tabId
                               ? company.navActiveClass
-                              : "text-white/60 hover:bg-white/5 hover:text-white"
+                              : "text-white hover:bg-white/5 hover:text-white"
                           )}
                         >
                           <CalendarDays className={cn(
@@ -713,7 +717,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     "w-full flex items-center gap-3 pl-11 pr-4 py-2 rounded-xl transition-all duration-200 group",
                     isRelReqActive
                       ? "text-white bg-white/10"
-                      : "text-white/70 hover:bg-white/5 hover:text-white"
+                      : "text-white hover:bg-white/5 hover:text-white"
                   )}
                 >
                   <Layers className={cn(
@@ -738,7 +742,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         "w-full flex items-center gap-3 pl-14 pr-4 py-2 rounded-xl transition-all duration-200 group",
                         activeTab === 'rel-req'
                           ? company.navActiveClass
-                          : "text-white/70 hover:bg-white/5 hover:text-white"
+                          : "text-white hover:bg-white/5 hover:text-white"
                       )}
                     >
                       <Calculator className={cn(
@@ -757,7 +761,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             "w-full flex items-center gap-3 pl-14 pr-4 py-1.5 rounded-xl transition-all duration-200 group",
                             activeTab === tabId
                               ? company.navActiveClass
-                              : "text-white/60 hover:bg-white/5 hover:text-white"
+                              : "text-white hover:bg-white/5 hover:text-white"
                           )}
                         >
                           <CalendarDays className={cn(
@@ -779,7 +783,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     "w-full flex items-center gap-3 pl-11 pr-4 py-2 rounded-xl transition-all duration-200 group",
                     isConsumoActive
                       ? "text-white bg-white/10"
-                      : "text-white/70 hover:bg-white/5 hover:text-white"
+                      : "text-white hover:bg-white/5 hover:text-white"
                   )}
                 >
                   <Boxes className={cn(
@@ -804,7 +808,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         "w-full flex items-center gap-3 pl-14 pr-4 py-2 rounded-xl transition-all duration-200 group",
                         activeTab === 'rel-consumo'
                           ? company.navActiveClass
-                          : "text-white/70 hover:bg-white/5 hover:text-white"
+                          : "text-white hover:bg-white/5 hover:text-white"
                       )}
                     >
                       <Calculator className={cn(
@@ -823,7 +827,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             "w-full flex items-center gap-3 pl-14 pr-4 py-1.5 rounded-xl transition-all duration-200 group",
                             activeTab === tabId
                               ? company.navActiveClass
-                              : "text-white/60 hover:bg-white/5 hover:text-white"
+                              : "text-white hover:bg-white/5 hover:text-white"
                           )}
                         >
                           <CalendarDays className={cn(
@@ -845,7 +849,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     "w-full flex items-center gap-3 pl-11 pr-4 py-2 rounded-xl transition-all duration-200 group",
                     isCmvActive
                       ? "text-white bg-white/10"
-                      : "text-white/70 hover:bg-white/5 hover:text-white"
+                      : "text-white hover:bg-white/5 hover:text-white"
                   )}
                 >
                   <Percent className={cn(
@@ -870,7 +874,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         "w-full flex items-center gap-3 pl-14 pr-4 py-2 rounded-xl transition-all duration-200 group",
                         activeTab === 'cmv'
                           ? company.navActiveClass
-                          : "text-white/70 hover:bg-white/5 hover:text-white"
+                          : "text-white hover:bg-white/5 hover:text-white"
                       )}
                     >
                       <Calculator className={cn(
@@ -885,7 +889,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         "w-full flex items-center gap-3 pl-14 pr-4 py-2 rounded-xl transition-all duration-200 group",
                         activeTab === 'cmv-tarifas'
                           ? company.navActiveClass
-                          : "text-white/70 hover:bg-white/5 hover:text-white"
+                          : "text-white hover:bg-white/5 hover:text-white"
                       )}
                     >
                       <Settings2 className={cn(
@@ -904,7 +908,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             "w-full flex items-center gap-3 pl-14 pr-4 py-1.5 rounded-xl transition-all duration-200 group",
                             activeTab === tabId
                               ? company.navActiveClass
-                              : "text-white/60 hover:bg-white/5 hover:text-white"
+                              : "text-white hover:bg-white/5 hover:text-white"
                           )}
                         >
                           <CalendarDays className={cn(
@@ -933,7 +937,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 "w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group",
                 isApuracaoReceitaTab
                   ? "text-white bg-white/10"
-                  : "text-white/80 hover:bg-white/5 hover:text-white"
+                  : "text-white hover:bg-white/5 hover:text-white"
               )}
             >
               <TrendingUp className="w-5 h-5 min-w-5 min-h-5 shrink-0 transition-transform duration-200 group-hover:scale-110" />
@@ -962,7 +966,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         "w-full flex items-center gap-3 pl-11 pr-4 py-2 rounded-xl transition-all duration-200 group",
                         activeTab === tabId
                           ? company.navActiveClass
-                          : "text-white/70 hover:bg-white/5 hover:text-white"
+                          : "text-white hover:bg-white/5 hover:text-white"
                       )}
                       title={item.nome}
                     >
@@ -981,7 +985,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     "w-full flex items-center gap-3 pl-11 pr-4 py-2 rounded-xl transition-all duration-200 group",
                     isRdsActive
                       ? "text-white bg-white/10"
-                      : "text-white/70 hover:bg-white/5 hover:text-white"
+                      : "text-white hover:bg-white/5 hover:text-white"
                   )}
                 >
                   <ClipboardList className={cn(
@@ -1006,7 +1010,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         "w-full flex items-center gap-3 pl-14 pr-4 py-2 rounded-xl transition-all duration-200 group",
                         activeTab === 'rel-rds'
                           ? company.navActiveClass
-                          : "text-white/70 hover:bg-white/5 hover:text-white"
+                          : "text-white hover:bg-white/5 hover:text-white"
                       )}
                     >
                       <Calculator className={cn(
@@ -1025,7 +1029,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             "w-full flex items-center gap-3 pl-14 pr-4 py-1.5 rounded-xl transition-all duration-200 group",
                             activeTab === tabId
                               ? company.navActiveClass
-                              : "text-white/60 hover:bg-white/5 hover:text-white"
+                              : "text-white hover:bg-white/5 hover:text-white"
                           )}
                         >
                           <CalendarDays className={cn(
@@ -1054,7 +1058,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 "w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group",
                 activeTab.startsWith('folha-') || isFolhaRhNavTab(activeTab)
                   ? "text-white bg-white/10"
-                  : "text-white/80 hover:bg-white/5 hover:text-white"
+                  : "text-white hover:bg-white/5 hover:text-white"
               )}
             >
               <Wallet className="w-5 h-5 min-w-5 min-h-5 shrink-0 transition-transform duration-200 group-hover:scale-110" />
@@ -1077,7 +1081,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   "w-full flex items-center gap-3 pl-11 pr-4 py-2 rounded-xl transition-all duration-200 group",
                   activeTab === 'tangerino-ponto'
                     ? company.navActiveClass
-                    : "text-white/70 hover:bg-white/5 hover:text-white"
+                    : "text-white hover:bg-white/5 hover:text-white"
                 )}
               >
                 <Clock className={cn(
@@ -1095,7 +1099,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   "w-full flex items-center gap-3 pl-11 pr-4 py-2 rounded-xl transition-all duration-200 group",
                   activeTab === 'turnover'
                     ? company.navActiveClass
-                    : "text-white/70 hover:bg-white/5 hover:text-white"
+                    : "text-white hover:bg-white/5 hover:text-white"
                 )}
               >
                 <UserRound className={cn(
@@ -1113,7 +1117,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   "w-full flex items-center gap-3 pl-11 pr-4 py-2 rounded-xl transition-all duration-200 group",
                   activeTab === 'absenteismo'
                     ? company.navActiveClass
-                    : "text-white/70 hover:bg-white/5 hover:text-white"
+                    : "text-white hover:bg-white/5 hover:text-white"
                 )}
               >
                 <UserX className={cn(
@@ -1131,7 +1135,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   "w-full flex items-center gap-3 pl-11 pr-4 py-2 rounded-xl transition-all duration-200 group",
                   activeTab === 'emprestimos'
                     ? company.navActiveClass
-                    : "text-white/70 hover:bg-white/5 hover:text-white"
+                    : "text-white hover:bg-white/5 hover:text-white"
                 )}
               >
                 <Landmark className={cn(
@@ -1149,7 +1153,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   "w-full flex items-center gap-3 pl-11 pr-4 py-2 rounded-xl transition-all duration-200 group",
                   activeTab === 'painel-rh'
                     ? company.navActiveClass
-                    : "text-white/70 hover:bg-white/5 hover:text-white"
+                    : "text-white hover:bg-white/5 hover:text-white"
                 )}
               >
                 <BarChart3 className={cn(
@@ -1168,7 +1172,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   "w-full flex items-center gap-3 pl-11 pr-4 py-2 rounded-xl transition-all duration-200 group",
                   activeTab === 'folha-apuracao'
                     ? company.navActiveClass
-                    : "text-white/70 hover:bg-white/5 hover:text-white"
+                    : "text-white hover:bg-white/5 hover:text-white"
                 )}
               >
                 <Calculator className={cn(
@@ -1189,7 +1193,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     "w-full flex items-center gap-3 pl-11 pr-4 py-2 rounded-xl transition-all duration-200 group",
                     activeTab === tabId
                       ? company.navActiveClass
-                      : "text-white/70 hover:bg-white/5 hover:text-white"
+                      : "text-white hover:bg-white/5 hover:text-white"
                   )}
                   title={mes}
                 >
@@ -1215,7 +1219,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               "w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group",
               activeTab === item.id
                 ? company.navActiveClass
-                : "text-white/80 hover:bg-white/5 hover:text-white"
+                : "text-white hover:bg-white/5 hover:text-white"
             )}
           >
             <item.icon className={cn(
@@ -1235,7 +1239,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             "w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group",
             activeTab === 'tutorial'
               ? company.navActiveClass
-              : "text-white/80 hover:bg-white/5 hover:text-white"
+              : "text-white hover:bg-white/5 hover:text-white"
           )}
         >
           <BookOpen className={cn(
@@ -1254,7 +1258,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
           <div className={cn("flex-1 min-w-0", collapsed && "hidden")}>
             <p className="text-sm font-semibold truncate">{user?.name}</p>
-            <p className="text-[10px] text-white/75 uppercase font-bold tracking-tighter truncate">
+            <p className="text-[10px] text-white uppercase font-bold tracking-tighter truncate">
               {user?.role === 'admin' ? 'Administrador' :
                user?.role === 'finance' ? 'Financeiro' :
                user?.role === 'controle' ? 'Controle' :

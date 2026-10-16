@@ -37,6 +37,10 @@ import {
   canEditLaunchRole,
   isInvoiceFlowEditableBeforeControl,
 } from '../lib/launchFlow';
+import { CompetenciaFilter } from '../components/CompetenciaFilter';
+import { ListPagination, sumAmountsByCurrency } from '../components/ListPagination';
+import { DateBrInput } from '../components/DateBrInput';
+import { useClientPagination } from '../hooks/useClientPagination';
 
 const EMPTY_INVOICE_FORM = {
   invoice_number: '',
@@ -69,9 +73,10 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
   const now = new Date();
   const initialMonth = (() => {
     const saved = localStorage.getItem('invoices:selectedMonth');
+    if (saved === '') return '';
     return saved && Number(saved) >= 1 && Number(saved) <= 12
       ? String(Number(saved))
-      : String(now.getMonth() + 1);
+      : '';
   })();
   const initialYear = (() => {
     const saved = localStorage.getItem('invoices:selectedYear');
@@ -85,6 +90,14 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
   const [sectors, setSectors] = useState<any[]>([]);
   const [selectedMonth, setSelectedMonth] = useState(initialMonth);
   const [selectedYear, setSelectedYear] = useState(initialYear);
+  const budgetMonthLabel =
+    selectedMonth && Number(selectedMonth) >= 1 && Number(selectedMonth) <= 12
+      ? String(selectedMonth).padStart(2, '0')
+      : String(now.getMonth() + 1).padStart(2, '0');
+  const budgetMonthNum =
+    selectedMonth && Number(selectedMonth) >= 1 && Number(selectedMonth) <= 12
+      ? Number(selectedMonth)
+      : now.getMonth() + 1;
   const [customDateFrom, setCustomDateFrom] = useState(initialDateFrom);
   const [customDateTo, setCustomDateTo] = useState(initialDateTo);
   const [paymentMethods, setPaymentMethods] = useState<any[]>([]);
@@ -234,7 +247,7 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
     if (from || to) {
       if (from) params.set('from', from);
       if (to) params.set('to', to);
-    } else {
+    } else if (month && Number(month) >= 1 && Number(month) <= 12) {
       params.set('month', month);
       params.set('year', year);
     }
@@ -246,8 +259,14 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
 
   const fetchSectors = (month = selectedMonth, year = selectedYear) => {
     const params = new URLSearchParams();
-    params.set('month', month);
-    params.set('year', year);
+    // Cards de orçamento precisam de um mês; se competência = Todos, usa o mês atual.
+    const budgetMonth =
+      month && Number(month) >= 1 && Number(month) <= 12
+        ? month
+        : String(now.getMonth() + 1);
+    const budgetYear = year || String(now.getFullYear());
+    params.set('month', budgetMonth);
+    params.set('year', budgetYear);
     fetch(`/api/sectors?${params.toString()}`)
       .then(res => res.json())
       .then(data => setSectors(Array.isArray(data) ? data : []))
@@ -368,6 +387,8 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
   };
 
   const isDueDateInSelectedCompetency = () => {
+    // Competência "Todos": não alerta por mês.
+    if (!selectedMonth || Number(selectedMonth) < 1 || Number(selectedMonth) > 12) return true;
     const [dueYear, dueMonth] = formData.due_date.split('-');
     return (
       String(Number(dueMonth)) === String(Number(selectedMonth)) &&
@@ -873,6 +894,16 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
       }),
     [sectorVisibleInvoices, searchText, crdFilter, invoiceNumberFilter, amountFilter, crdMetaBySectorCode]
   );
+  const pagination = useClientPagination(filteredInvoices);
+  const filteredAmountTotal = useMemo(
+    () =>
+      sumAmountsByCurrency(
+        filteredInvoices.filter((invoice) => canSeeSectorValues(invoice.sector_id)),
+        (invoice) => invoice.amount,
+        (invoice) => invoice.currency
+      ),
+    [filteredInvoices, allowedSectorIds, requesterSectorId, userRole]
+  );
   const filteredBudgetSectors = useMemo(
     () => budgetSectors.filter((sector) => matchesSectorVisibilityFilter(sector.id)),
     [budgetSectors, visibleSectorIdSet]
@@ -991,52 +1022,34 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
       </div>
 
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 space-y-4">
-        <div className="flex flex-wrap items-center gap-3">
-          <span className="text-xs font-bold uppercase tracking-wider text-slate-500">Competência</span>
-          <select
-            value={selectedMonth}
-            onChange={(e) => setSelectedMonth(e.target.value)}
-            className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
-          >
-            {Array.from({ length: 12 }, (_, idx) => {
-              const monthNumber = idx + 1;
-              return (
-                <option key={monthNumber} value={String(monthNumber)}>
-                  {String(monthNumber).padStart(2, '0')}
-                </option>
-              );
-            })}
-          </select>
-          <input
-            type="number"
-            min={2000}
-            max={2100}
-            value={selectedYear}
-            onChange={(e) => setSelectedYear(e.target.value)}
-            className="w-28 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
-          />
-          <span className="text-xs text-slate-400">Orçamento usa esta competência.</span>
-        </div>
+        <CompetenciaFilter
+          month={selectedMonth}
+          year={selectedYear}
+          onMonthChange={setSelectedMonth}
+          onYearChange={setSelectedYear}
+          allowAll
+          hint="Lista filtra pelo vencimento. Em 'Todos', mostra todas as notas; o orçamento dos cards usa o mês atual."
+        />
 
         <div className="flex flex-wrap items-center gap-3 border-t border-slate-100 pt-4">
           <span className="text-xs font-bold uppercase tracking-wider text-slate-500">Provisão</span>
           <label className="flex items-center gap-2 text-xs text-slate-600">
-            <span className="font-medium">De</span>
-            <input
-              type="date"
+            <span className="font-medium shrink-0">De</span>
+            <DateBrInput
               value={customDateFrom}
-              onChange={(e) => setCustomDateFrom(e.target.value)}
-              className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+              onChange={setCustomDateFrom}
+              suggestYear={Number(selectedYear) || new Date().getFullYear()}
+              className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm w-[11.5rem]"
             />
           </label>
           <label className="flex items-center gap-2 text-xs text-slate-600">
-            <span className="font-medium">Até</span>
-            <input
-              type="date"
+            <span className="font-medium shrink-0">Até</span>
+            <DateBrInput
               value={customDateTo}
               min={customDateFrom || undefined}
-              onChange={(e) => setCustomDateTo(e.target.value)}
-              className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+              onChange={setCustomDateTo}
+              suggestYear={Number(selectedYear) || new Date().getFullYear()}
+              className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm w-[11.5rem]"
             />
           </label>
           {(customDateFrom || customDateTo) && (
@@ -1118,12 +1131,12 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
                   <>
                     <ValueTrace
                       displayValue={formatCurrency(sector.pending_amount || 0)}
-                      meta={valueTrace.sectors.pendingAmount(sector.name, Number(selectedMonth), Number(selectedYear))}
+                      meta={valueTrace.sectors.pendingAmount(sector.name, budgetMonthNum, Number(selectedYear))}
                     /> <span className="text-slate-300 font-normal">/ <ValueTrace
                       displayValue={formatCurrency(getSectorBudget(sector))}
                       meta={valueTrace.sectors.budgetMonth(
                         sector.name,
-                        Number(selectedMonth),
+                        budgetMonthNum,
                         Number(selectedYear),
                         Number(sector.occupancy_percent ?? 100)
                       )}
@@ -1141,7 +1154,7 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
                   <ValueTrace
                     className="font-semibold text-slate-700"
                     displayValue={formatCurrency(sector.pending_invoices || 0)}
-                    meta={valueTrace.sectors.pendingInvoices(sector.name, Number(selectedMonth), Number(selectedYear))}
+                    meta={valueTrace.sectors.pendingInvoices(sector.name, budgetMonthNum, Number(selectedYear))}
                   />
                 </p>
                 <p>
@@ -1149,7 +1162,7 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
                   <ValueTrace
                     className="font-semibold text-slate-700"
                     displayValue={formatCurrency(sector.pending_requisitions || 0)}
-                    meta={valueTrace.sectors.pendingRequisitions(sector.name, Number(selectedMonth), Number(selectedYear))}
+                    meta={valueTrace.sectors.pendingRequisitions(sector.name, budgetMonthNum, Number(selectedYear))}
                   />
                 </p>
                 <p>
@@ -1157,17 +1170,17 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
                   <ValueTrace
                     className="font-semibold text-slate-700"
                     displayValue={formatCurrency(sector.pending_manual_entries || 0)}
-                    meta={valueTrace.sectors.pendingManualEntries(sector.name, Number(selectedMonth), Number(selectedYear))}
+                    meta={valueTrace.sectors.pendingManualEntries(sector.name, budgetMonthNum, Number(selectedYear))}
                   />
                 </p>
                 <p>
-                  Orçamento da Síntase ({String(selectedMonth).padStart(2, '0')}/{selectedYear}):{' '}
+                  Orçamento da Síntase ({budgetMonthLabel}/{selectedYear}):{' '}
                   <ValueTrace
                     className="font-semibold text-slate-700"
                     displayValue={formatCurrency(getSectorBudget(sector))}
                     meta={valueTrace.sectors.budgetMonth(
                       sector.name,
-                      Number(selectedMonth),
+                      budgetMonthNum,
                       Number(selectedYear),
                       Number(sector.occupancy_percent ?? 100)
                     )}
@@ -1287,7 +1300,7 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
                   </td>
                 </tr>
               )}
-              {filteredInvoices.map((invoice) => (
+              {pagination.pageItems.map((invoice) => (
                 <tr key={invoice.id} className="hover:bg-slate-50/50 transition-colors group">
                   <td className="px-6 py-4 text-xs font-mono font-bold text-emerald-800">{invoice.protocol || '—'}</td>
                   <td className="px-6 py-4">
@@ -1548,6 +1561,18 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
             </tbody>
           </table>
         </div>
+        <ListPagination
+          page={pagination.page}
+          totalPages={pagination.totalPages}
+          total={pagination.total}
+          from={pagination.from}
+          to={pagination.to}
+          pageSize={pagination.pageSize}
+          onPageChange={pagination.setPage}
+          onPageSizeChange={pagination.setPageSize}
+          label="notas"
+          amountTotal={filteredAmountTotal}
+        />
       </div>
 
       {showModal && (
@@ -1912,7 +1937,7 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
                   </span>
                   ) está fora da competência selecionada (
                   <span className="font-semibold text-slate-800">
-                    {String(selectedMonth).padStart(2, '0')}/{selectedYear}
+                    {budgetMonthLabel}/{selectedYear}
                   </span>
                   ). O lançamento pode não aparecer na listagem atual. Deseja continuar mesmo assim?
                 </p>
@@ -2071,19 +2096,19 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1.5">
                   <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Vencimento (de)</label>
-                  <input
-                    type="date"
+                  <DateBrInput
                     value={reportFilters.from}
-                    onChange={(e) => setReportFilters((p) => ({ ...p, from: e.target.value }))}
+                    onChange={(from) => setReportFilters((p) => ({ ...p, from }))}
+                    suggestYear={Number(selectedYear) || new Date().getFullYear()}
                     className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm"
                   />
                 </div>
                 <div className="space-y-1.5">
                   <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Vencimento (até)</label>
-                  <input
-                    type="date"
+                  <DateBrInput
                     value={reportFilters.to}
-                    onChange={(e) => setReportFilters((p) => ({ ...p, to: e.target.value }))}
+                    onChange={(to) => setReportFilters((p) => ({ ...p, to }))}
+                    suggestYear={Number(selectedYear) || new Date().getFullYear()}
                     className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm"
                   />
                 </div>

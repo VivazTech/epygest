@@ -22,6 +22,10 @@ import {
   LAUNCH_STATUS_FILTER_OPTIONS,
   matchesDatePeriod,
 } from '../lib/launchFlow';
+import { CompetenciaFilter, currentCompetencia, matchesCompetencia } from '../components/CompetenciaFilter';
+import { ListPagination, sumAmountsByCurrency } from '../components/ListPagination';
+import { DateBrInput } from '../components/DateBrInput';
+import { useClientPagination } from '../hooks/useClientPagination';
 import { hasPermission, type RolePermissionRow } from '../lib/permissionCatalog';
 
 const EMPTY_FORM = {
@@ -46,6 +50,10 @@ export const EstornosPage: React.FC = () => {
   const [invoiceNumberFilter, setInvoiceNumberFilter] = useState('');
   const [amountFilter, setAmountFilter] = useState('');
   const [sectorFilter, setSectorFilter] = useState('all');
+  const initialCompetencia = currentCompetencia();
+  const [competenciaMonth, setCompetenciaMonth] = useState('');
+  const [competenciaYear, setCompetenciaYear] = useState(initialCompetencia.year);
+  const currentYear = new Date().getFullYear();
   const [issueDateFrom, setIssueDateFrom] = useState('');
   const [issueDateTo, setIssueDateTo] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -387,6 +395,7 @@ export const EstornosPage: React.FC = () => {
       scopedEntries.filter((entry) => {
         if (sectorFilter !== 'all' && String(entry.sector_id) !== String(sectorFilter)) return false;
         if (statusFilter !== 'all' && String(entry.status || '') !== statusFilter) return false;
+        if (!matchesCompetencia(entry.date || entry.issue_date, competenciaMonth, competenciaYear)) return false;
         if (!matchesDatePeriod(entry.issue_date, issueDateFrom, issueDateTo)) return false;
         if (!matchesCrdCodeFilter(crdFilter, entry.crd_code, entry.crd_name)) return false;
         if (!matchesInvoiceNumberFilter(invoiceNumberFilter, entry.protocol, entry.description, entry.provider_name)) {
@@ -416,10 +425,19 @@ export const EstornosPage: React.FC = () => {
       invoiceNumberFilter,
       amountFilter,
       sectorFilter,
+      competenciaMonth,
+      competenciaYear,
       issueDateFrom,
       issueDateTo,
       statusFilter,
     ]
+  );
+
+  const pagination = useClientPagination(filteredEntries);
+
+  const filteredAmountTotal = useMemo(
+    () => `−${sumAmountsByCurrency(filteredEntries, (e) => e.amount)}`,
+    [filteredEntries]
   );
 
   const openTotal = useMemo(
@@ -480,7 +498,15 @@ export const EstornosPage: React.FC = () => {
       </div>
 
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 space-y-4">
-        <div className="flex flex-wrap items-end gap-4">
+        <CompetenciaFilter
+          month={competenciaMonth}
+          year={competenciaYear}
+          onMonthChange={setCompetenciaMonth}
+          onYearChange={setCompetenciaYear}
+          allowAll
+          hint="Filtra pela data de lançamento. Em 'Todos', a lista mostra todos os períodos."
+        />
+        <div className="flex flex-wrap items-end gap-4 border-t border-slate-100 pt-4">
           <div>
             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Estornos em aberto / aprovados</p>
             <p className="text-xl font-extrabold text-amber-700 mt-1">
@@ -515,20 +541,20 @@ export const EstornosPage: React.FC = () => {
           </div>
           <div>
             <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Emissão de</label>
-            <input
-              type="date"
+            <DateBrInput
               value={issueDateFrom}
-              onChange={(e) => setIssueDateFrom(e.target.value)}
+              onChange={setIssueDateFrom}
+              suggestYear={currentYear}
               className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm"
             />
           </div>
           <div>
             <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Emissão até</label>
-            <input
-              type="date"
+            <DateBrInput
               value={issueDateTo}
               min={issueDateFrom || undefined}
-              onChange={(e) => setIssueDateTo(e.target.value)}
+              onChange={setIssueDateTo}
+              suggestYear={currentYear}
               className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm"
             />
           </div>
@@ -547,7 +573,8 @@ export const EstornosPage: React.FC = () => {
         </div>
       </div>
 
-      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-x-auto">
+      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+        <div className="overflow-x-auto">
         <table className="w-full text-left border-collapse">
           <thead>
             <tr className="bg-slate-50/50">
@@ -571,7 +598,7 @@ export const EstornosPage: React.FC = () => {
                 </td>
               </tr>
             )}
-            {filteredEntries.map((entry) => {
+            {pagination.pageItems.map((entry) => {
               const meta = statusMeta(entry.status);
               const edited = Number(entry.edit_count || 0) > 0;
               return (
@@ -732,6 +759,19 @@ export const EstornosPage: React.FC = () => {
             })}
           </tbody>
         </table>
+        </div>
+        <ListPagination
+          page={pagination.page}
+          totalPages={pagination.totalPages}
+          total={pagination.total}
+          from={pagination.from}
+          to={pagination.to}
+          pageSize={pagination.pageSize}
+          onPageChange={pagination.setPage}
+          onPageSizeChange={pagination.setPageSize}
+          label="estornos"
+          amountTotal={filteredAmountTotal}
+        />
       </div>
 
       {showModal && (

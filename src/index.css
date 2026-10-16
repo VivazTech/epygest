@@ -81,6 +81,14 @@
   }
 }
 
+/* Menu lateral: fonte branca absoluta em Vivaz e Aquamania */
+.sidebar-nav,
+.sidebar-nav button,
+.sidebar-nav span,
+.sidebar-nav svg {
+  color: #FFFFFF !important;
+}
+
 /* =========================================================
    Marca dinâmica (Vivaz azul / Aquamania laranja)
    emerald + #004D40 -> tokens --brand-*

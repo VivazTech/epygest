@@ -6,6 +6,10 @@ import { useSearch } from '../context/SearchContext';
 import { useToast } from '../context/ToastContext';
 import { matchesSearch } from '../lib/search';
 import { launchStatusMeta, LAUNCH_STATUS_FILTER_OPTIONS, matchesDatePeriod } from '../lib/launchFlow';
+import { CompetenciaFilter, currentCompetencia, matchesCompetencia } from '../components/CompetenciaFilter';
+import { ListPagination } from '../components/ListPagination';
+import { DateBrInput } from '../components/DateBrInput';
+import { useClientPagination } from '../hooks/useClientPagination';
 
 type ComandaItemForm = {
   description: string;
@@ -36,6 +40,10 @@ export const ComandasPage: React.FC = () => {
   const [actingSector, setActingSector] = useState<'requester' | 'controle' | 'financeiro'>('requester');
   const [form, setForm] = useState({ ...EMPTY_FORM, items: [emptyItem()] });
   const [showModal, setShowModal] = useState(false);
+  const initialCompetencia = currentCompetencia();
+  const [competenciaMonth, setCompetenciaMonth] = useState('');
+  const [competenciaYear, setCompetenciaYear] = useState(initialCompetencia.year);
+  const currentYear = new Date().getFullYear();
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -207,6 +215,7 @@ export const ComandasPage: React.FC = () => {
     () =>
       comandas.filter((comanda) => {
         if (statusFilter !== 'all' && String(comanda.status || '') !== statusFilter) return false;
+        if (!matchesCompetencia(comanda.consumed_at, competenciaMonth, competenciaYear)) return false;
         if (!matchesDatePeriod(comanda.consumed_at, dateFrom, dateTo)) return false;
         return matchesSearch(
           query,
@@ -221,8 +230,10 @@ export const ComandasPage: React.FC = () => {
           ...(comanda.items ?? []).flatMap((item: any) => [item.description, item.quantity])
         );
       }),
-    [comandas, query, dateFrom, dateTo, statusFilter]
+    [comandas, query, competenciaMonth, competenciaYear, dateFrom, dateTo, statusFilter]
   );
+
+  const pagination = useClientPagination(filteredComandas);
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
@@ -267,23 +278,32 @@ export const ComandasPage: React.FC = () => {
         </div>
       )}
 
-      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 grid grid-cols-1 md:grid-cols-4 gap-3">
+      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 space-y-4">
+        <CompetenciaFilter
+          month={competenciaMonth}
+          year={competenciaYear}
+          onMonthChange={setCompetenciaMonth}
+          onYearChange={setCompetenciaYear}
+          allowAll
+          hint="Filtra pela data de consumo. Em 'Todos', a lista mostra todos os períodos."
+        />
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-3 border-t border-slate-100 pt-4">
         <div>
           <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Período de</label>
-          <input
-            type="date"
+          <DateBrInput
             value={dateFrom}
-            onChange={(e) => setDateFrom(e.target.value)}
+            onChange={setDateFrom}
+            suggestYear={currentYear}
             className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm"
           />
         </div>
         <div>
           <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Período até</label>
-          <input
-            type="date"
+          <DateBrInput
             value={dateTo}
             min={dateFrom || undefined}
-            onChange={(e) => setDateTo(e.target.value)}
+            onChange={setDateTo}
+            suggestYear={currentYear}
             className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm"
           />
         </div>
@@ -314,9 +334,11 @@ export const ComandasPage: React.FC = () => {
             </button>
           </div>
         )}
+        </div>
       </div>
 
-      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-x-auto">
+      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+        <div className="overflow-x-auto">
         <table className="w-full text-left border-collapse">
           <thead>
             <tr className="bg-slate-50/50">
@@ -338,7 +360,7 @@ export const ComandasPage: React.FC = () => {
                 </td>
               </tr>
             )}
-            {filteredComandas.map((comanda) => {
+            {pagination.pageItems.map((comanda) => {
               const meta = statusLabel(comanda.status);
               return (
                 <tr key={comanda.id} className="hover:bg-slate-50/50 transition-colors align-top">
@@ -449,6 +471,18 @@ export const ComandasPage: React.FC = () => {
             })}
           </tbody>
         </table>
+        </div>
+        <ListPagination
+          page={pagination.page}
+          totalPages={pagination.totalPages}
+          total={pagination.total}
+          from={pagination.from}
+          to={pagination.to}
+          pageSize={pagination.pageSize}
+          onPageChange={pagination.setPage}
+          onPageSizeChange={pagination.setPageSize}
+          label="comandas"
+        />
       </div>
 
       {showModal && (

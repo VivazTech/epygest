@@ -10,6 +10,9 @@ import {
   matchesInvoiceNumberFilter,
 } from '../components/LaunchNumberAmountFilters';
 import { buildCrdFilterOptions, matchesCrdCodeFilter } from '../lib/crdFilter';
+import { CompetenciaFilter, currentCompetencia, matchesCompetencia } from '../components/CompetenciaFilter';
+import { ListPagination, sumAmountsByCurrency } from '../components/ListPagination';
+import { useClientPagination } from '../hooks/useClientPagination';
 import { useSearch } from '../context/SearchContext';
 import { matchesSearch } from '../lib/search';
 
@@ -91,6 +94,9 @@ export const MensalidadesPage: React.FC = () => {
   const [crds, setCrds] = useState<Array<{ id: number; code: string; name: string; sector_id: number | null }>>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const initialCompetencia = currentCompetencia();
+  const [competenciaMonth, setCompetenciaMonth] = useState('');
+  const [competenciaYear, setCompetenciaYear] = useState(initialCompetencia.year);
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [sectorFilter, setSectorFilter] = useState('');
   const [crdFilter, setCrdFilter] = useState('');
@@ -209,6 +215,7 @@ export const MensalidadesPage: React.FC = () => {
       if (statusFilter !== 'all' && r.status !== statusFilter) return false;
       if (sectorFilter && String(r.sector_id) !== sectorFilter) return false;
       if (onlyAlerts && !r.alerta_vencimento) return false;
+      if (!matchesCompetencia(r.vencimento, competenciaMonth, competenciaYear)) return false;
       const crdCode = crds.find((c) => c.id === r.crd_id)?.code;
       if (!matchesCrdCodeFilter(crdFilter, crdCode, r.crd_label)) return false;
       if (!matchesInvoiceNumberFilter(invoiceNumberFilter, r.fornecedor, r.observacoes, r.responsavel)) {
@@ -226,7 +233,27 @@ export const MensalidadesPage: React.FC = () => {
         r.valor
       );
     });
-  }, [rows, statusFilter, sectorFilter, onlyAlerts, query, crdFilter, crds, invoiceNumberFilter, amountFilter]);
+  }, [rows, statusFilter, sectorFilter, onlyAlerts, query, crdFilter, crds, invoiceNumberFilter, amountFilter, competenciaMonth, competenciaYear]);
+
+  const filteredLancamentos = useMemo(
+    () =>
+      lancamentos.filter((l) =>
+        matchesCompetencia(l.competencia, competenciaMonth, competenciaYear)
+      ),
+    [lancamentos, competenciaMonth, competenciaYear]
+  );
+
+  const pagination = useClientPagination(filtered);
+  const lancamentosPagination = useClientPagination(filteredLancamentos);
+
+  const filteredAmountTotal = useMemo(
+    () => sumAmountsByCurrency(filtered, (r) => r.valor),
+    [filtered]
+  );
+  const filteredLancamentosAmountTotal = useMemo(
+    () => sumAmountsByCurrency(filteredLancamentos, (l) => l.valor),
+    [filteredLancamentos]
+  );
 
   const counts = useMemo(() => {
     const base = {
@@ -408,7 +435,16 @@ export const MensalidadesPage: React.FC = () => {
       )}
 
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-        <div className="p-4 border-b border-slate-50 flex flex-wrap items-end gap-2">
+        <div className="p-4 border-b border-slate-50 space-y-3">
+          <CompetenciaFilter
+            month={competenciaMonth}
+            year={competenciaYear}
+            onMonthChange={setCompetenciaMonth}
+            onYearChange={setCompetenciaYear}
+            allowAll
+            hint="Contratos pelo vencimento; pagamentos pela competência. Em 'Todos', mostra todos os períodos."
+          />
+          <div className="flex flex-wrap items-end gap-2 border-t border-slate-100 pt-3">
           <div>
             <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 block">Status</label>
             <select
@@ -453,6 +489,7 @@ export const MensalidadesPage: React.FC = () => {
             />
             Só alertas de vencimento
           </label>
+          </div>
         </div>
 
         <div className="overflow-x-auto">
@@ -484,7 +521,7 @@ export const MensalidadesPage: React.FC = () => {
                   </td>
                 </tr>
               )}
-              {filtered.map((row) => (
+              {pagination.pageItems.map((row) => (
                 <tr
                   key={row.id}
                   className={cn(
@@ -591,9 +628,21 @@ export const MensalidadesPage: React.FC = () => {
             </tbody>
           </table>
         </div>
+        <ListPagination
+          page={pagination.page}
+          totalPages={pagination.totalPages}
+          total={pagination.total}
+          from={pagination.from}
+          to={pagination.to}
+          pageSize={pagination.pageSize}
+          onPageChange={pagination.setPage}
+          onPageSizeChange={pagination.setPageSize}
+          label="contratos"
+          amountTotal={filteredAmountTotal}
+        />
       </div>
 
-      {lancamentos.length > 0 && (
+      {filteredLancamentos.length > 0 && (
         <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
           <div className="px-4 py-3 border-b border-slate-50">
             <h3 className="text-sm font-bold text-slate-900">Lançamentos de pagamento</h3>
@@ -611,7 +660,7 @@ export const MensalidadesPage: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50">
-                {lancamentos.map((l) => {
+                {lancamentosPagination.pageItems.map((l) => {
                   const meta = FLOW_STATUS_LABELS[l.status] || { label: l.status, classes: 'bg-slate-100 text-slate-700' };
                   return (
                     <tr key={l.id} className="hover:bg-slate-50/60">
@@ -630,6 +679,18 @@ export const MensalidadesPage: React.FC = () => {
               </tbody>
             </table>
           </div>
+          <ListPagination
+            page={lancamentosPagination.page}
+            totalPages={lancamentosPagination.totalPages}
+            total={lancamentosPagination.total}
+            from={lancamentosPagination.from}
+            to={lancamentosPagination.to}
+            pageSize={lancamentosPagination.pageSize}
+            onPageChange={lancamentosPagination.setPage}
+            onPageSizeChange={lancamentosPagination.setPageSize}
+            label="lançamentos"
+            amountTotal={filteredLancamentosAmountTotal}
+          />
         </div>
       )}
 

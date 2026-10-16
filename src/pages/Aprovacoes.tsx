@@ -7,6 +7,7 @@ import {
   XCircle,
   Upload,
   FileCheck,
+  Loader2,
 } from 'lucide-react';
 import { cn, formatCurrency, formatDate } from '../lib/utils';
 import { useSearch } from '../context/SearchContext';
@@ -17,6 +18,9 @@ import {
   matchesAmountFilter,
   matchesInvoiceNumberFilter,
 } from '../components/LaunchNumberAmountFilters';
+import { DateBrInput } from '../components/DateBrInput';
+import { ListPagination } from '../components/ListPagination';
+import { useClientPagination } from '../hooks/useClientPagination';
 import { isDirectDocumentUrl } from '../lib/storagePath';
 import { confirmCancel } from '../lib/confirmAction';
 import {
@@ -45,6 +49,7 @@ export const AprovacoesPage: React.FC = () => {
   const [typeFilter, setTypeFilter] = useState('all');
   const [sectorFilter, setSectorFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('pending');
+  const currentYear = new Date().getFullYear();
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [invoiceNumberFilter, setInvoiceNumberFilter] = useState('');
@@ -183,6 +188,16 @@ export const AprovacoesPage: React.FC = () => {
       }),
     [scopedItems, query, invoiceNumberFilter, amountFilter]
   );
+
+  const pagination = useClientPagination(filteredItems);
+
+  const filteredAmountTotal = useMemo(() => {
+    const sum = filteredItems.reduce((acc, item) => {
+      const value = Number(item.amount) || 0;
+      return acc + (item.type === 'estorno' ? -value : value);
+    }, 0);
+    return formatCurrency(sum);
+  }, [filteredItems]);
 
   const metrics = useMemo(() => {
     const base = scopedItems;
@@ -776,20 +791,22 @@ export const AprovacoesPage: React.FC = () => {
           <option value="done">Concluídos</option>
           <option value="cancelled">Cancelados / encerrados</option>
         </select>
-        <input
-          type="date"
-          value={dateFrom}
-          onChange={(e) => setDateFrom(e.target.value)}
-          className="px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm"
-          title="Data inicial"
-        />
-        <input
-          type="date"
-          value={dateTo}
-          onChange={(e) => setDateTo(e.target.value)}
-          className="px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm"
-          title="Data final"
-        />
+        <div title="Data inicial">
+          <DateBrInput
+            value={dateFrom}
+            onChange={setDateFrom}
+            suggestYear={currentYear}
+            className="px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm w-[11.5rem]"
+          />
+        </div>
+        <div title="Data final">
+          <DateBrInput
+            value={dateTo}
+            onChange={setDateTo}
+            suggestYear={currentYear}
+            className="px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm w-[11.5rem]"
+          />
+        </div>
         <div className="md:col-span-5">
           <LaunchNumberAmountFilters
             invoiceNumber={invoiceNumberFilter}
@@ -800,7 +817,8 @@ export const AprovacoesPage: React.FC = () => {
         </div>
       </div>
 
-      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-x-auto">
+      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+        <div className="overflow-x-auto">
         <table className="w-full text-left border-collapse">
           <thead>
             <tr className="bg-slate-50/50">
@@ -818,8 +836,11 @@ export const AprovacoesPage: React.FC = () => {
           <tbody className="divide-y divide-slate-50">
             {loading && (
               <tr>
-                <td colSpan={9} className="px-6 py-10 text-center text-sm text-slate-400">
-                  Carregando lançamentos...
+                <td colSpan={9} className="px-6 py-14 text-center">
+                  <div className="inline-flex items-center justify-center gap-2 text-slate-400">
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                    <span className="text-sm font-medium">Carregando lançamentos...</span>
+                  </div>
                 </td>
               </tr>
             )}
@@ -831,7 +852,7 @@ export const AprovacoesPage: React.FC = () => {
               </tr>
             )}
             {!loading &&
-              filteredItems.map((item) => {
+              pagination.pageItems.map((item) => {
                 const meta = statusMeta(item);
                 return (
                   <tr key={item.key} className="hover:bg-slate-50/50 transition-colors align-top">
@@ -950,6 +971,21 @@ export const AprovacoesPage: React.FC = () => {
               })}
           </tbody>
         </table>
+        </div>
+        {!loading && (
+          <ListPagination
+            page={pagination.page}
+            totalPages={pagination.totalPages}
+            total={pagination.total}
+            from={pagination.from}
+            to={pagination.to}
+            pageSize={pagination.pageSize}
+            onPageChange={pagination.setPage}
+            onPageSizeChange={pagination.setPageSize}
+            label="lançamentos"
+            amountTotal={filteredAmountTotal}
+          />
+        )}
       </div>
 
       {receiptModal && (

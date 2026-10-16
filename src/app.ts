@@ -4640,12 +4640,13 @@ export function createApp() {
       const dateFrom = from || to!;
       const dateTo = to || from!;
       query = applyProvisionDateRange(query, dateFrom, dateTo);
-    } else {
-      const selectedMonth = Number(month) || now.getMonth() + 1;
+    } else if (month && Number(month) >= 1 && Number(month) <= 12) {
+      const selectedMonth = Number(month);
       const selectedYear = Number(year) || now.getFullYear();
       const { dateFrom, dateTo } = getMonthDateRange(selectedYear, selectedMonth);
       query = applyProvisionDateRange(query, dateFrom, dateTo);
     }
+    // Sem month/from/to: retorna todas as notas (competência "Todos").
 
     const { data, error } = await query;
 

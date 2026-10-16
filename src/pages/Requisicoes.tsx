@@ -23,6 +23,10 @@ import {
   LAUNCH_STATUS_FILTER_OPTIONS,
   matchesDatePeriod,
 } from '../lib/launchFlow';
+import { CompetenciaFilter, currentCompetencia, matchesCompetencia } from '../components/CompetenciaFilter';
+import { ListPagination, sumAmountsByCurrency } from '../components/ListPagination';
+import { DateBrInput } from '../components/DateBrInput';
+import { useClientPagination } from '../hooks/useClientPagination';
 
 const EMPTY_FORM = {
   crd_id: '',
@@ -40,6 +44,10 @@ export const RequisicoesPage: React.FC = () => {
   const [crdFilter, setCrdFilter] = useState('');
   const [invoiceNumberFilter, setInvoiceNumberFilter] = useState('');
   const [amountFilter, setAmountFilter] = useState('');
+  const initialCompetencia = currentCompetencia();
+  const [competenciaMonth, setCompetenciaMonth] = useState('');
+  const [competenciaYear, setCompetenciaYear] = useState(initialCompetencia.year);
+  const currentYear = new Date().getFullYear();
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -265,6 +273,7 @@ export const RequisicoesPage: React.FC = () => {
     () =>
       scopedRequisitions.filter((r) => {
         if (statusFilter !== 'all' && String(r.status || '') !== statusFilter) return false;
+        if (!matchesCompetencia(r.date, competenciaMonth, competenciaYear)) return false;
         if (!matchesDatePeriod(r.date, dateFrom, dateTo)) return false;
         if (!matchesCrdCodeFilter(crdFilter, r.crd_code, r.crd_name)) return false;
         if (!matchesInvoiceNumberFilter(invoiceNumberFilter, r.protocol, r.description, r.provider_name)) {
@@ -284,7 +293,14 @@ export const RequisicoesPage: React.FC = () => {
           r.status
         );
       }),
-    [scopedRequisitions, query, crdFilter, invoiceNumberFilter, amountFilter, dateFrom, dateTo, statusFilter]
+    [scopedRequisitions, query, crdFilter, invoiceNumberFilter, amountFilter, competenciaMonth, competenciaYear, dateFrom, dateTo, statusFilter]
+  );
+
+  const pagination = useClientPagination(filteredRequisitions);
+
+  const filteredAmountTotal = useMemo(
+    () => sumAmountsByCurrency(filteredRequisitions, (r) => r.amount),
+    [filteredRequisitions]
   );
 
   const crdFilterOptions = useMemo(() => buildCrdFilterOptions(crds), [crds]);
@@ -322,7 +338,15 @@ export const RequisicoesPage: React.FC = () => {
       </div>
 
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 space-y-4">
-        <div className="flex flex-wrap items-end gap-4">
+        <CompetenciaFilter
+          month={competenciaMonth}
+          year={competenciaYear}
+          onMonthChange={setCompetenciaMonth}
+          onYearChange={setCompetenciaYear}
+          allowAll
+          hint="Filtra pela data da requisição. Em 'Todos', a lista mostra todos os períodos."
+        />
+        <div className="flex flex-wrap items-end gap-4 border-t border-slate-100 pt-4">
           <CrdListFilter value={crdFilter} onChange={setCrdFilter} options={crdFilterOptions} />
           <LaunchNumberAmountFilters
             invoiceNumber={invoiceNumberFilter}
@@ -335,20 +359,20 @@ export const RequisicoesPage: React.FC = () => {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           <div>
             <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Vencimento de</label>
-            <input
-              type="date"
+            <DateBrInput
               value={dateFrom}
-              onChange={(e) => setDateFrom(e.target.value)}
+              onChange={setDateFrom}
+              suggestYear={currentYear}
               className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm"
             />
           </div>
           <div>
             <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Vencimento até</label>
-            <input
-              type="date"
+            <DateBrInput
               value={dateTo}
               min={dateFrom || undefined}
-              onChange={(e) => setDateTo(e.target.value)}
+              onChange={setDateTo}
+              suggestYear={currentYear}
               className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm"
             />
           </div>
@@ -367,7 +391,8 @@ export const RequisicoesPage: React.FC = () => {
         </div>
       </div>
 
-      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-x-auto">
+      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+        <div className="overflow-x-auto">
         <table className="w-full text-left border-collapse">
           <thead>
             <tr className="bg-slate-50/50">
@@ -389,7 +414,7 @@ export const RequisicoesPage: React.FC = () => {
                 </td>
               </tr>
             )}
-            {filteredRequisitions.map((r) => {
+            {pagination.pageItems.map((r) => {
               const meta = statusLabel(r.status);
               const edited = Number(r.edit_count || 0) > 0;
               return (
@@ -525,6 +550,19 @@ export const RequisicoesPage: React.FC = () => {
             })}
           </tbody>
         </table>
+        </div>
+        <ListPagination
+          page={pagination.page}
+          totalPages={pagination.totalPages}
+          total={pagination.total}
+          from={pagination.from}
+          to={pagination.to}
+          pageSize={pagination.pageSize}
+          onPageChange={pagination.setPage}
+          onPageSizeChange={pagination.setPageSize}
+          label="requisições"
+          amountTotal={filteredAmountTotal}
+        />
       </div>
 
       {showModal && (

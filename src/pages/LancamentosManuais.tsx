@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Plus, Archive, XCircle, Trash2, BadgeCheck, RotateCcw, Upload, FileCheck, Paperclip, Pencil, History } from 'lucide-react';
+import { Plus, Archive, XCircle, Trash2, BadgeCheck, RotateCcw, Upload, FileCheck, Paperclip, Pencil, History, Loader2 } from 'lucide-react';
 import { cn, formatCurrency, formatCurrencyInput, formatDate, getCurrencyMeta, parseCurrencyInputDigits } from '../lib/utils';
 import { ValueTrace } from '../components/ValueTrace';
 import { valueTrace } from '../lib/valueTraceMeta';
@@ -24,6 +24,10 @@ import {
   LAUNCH_STATUS_FILTER_OPTIONS,
   matchesDatePeriod,
 } from '../lib/launchFlow';
+import { CompetenciaFilter, currentCompetencia, matchesCompetencia } from '../components/CompetenciaFilter';
+import { ListPagination, sumAmountsByCurrency } from '../components/ListPagination';
+import { DateBrInput } from '../components/DateBrInput';
+import { useClientPagination } from '../hooks/useClientPagination';
 import { hasPermission, type RolePermissionRow } from '../lib/permissionCatalog';
 
 const EMPTY_FORM = {
@@ -54,6 +58,7 @@ export const LancamentosManuaisPage: React.FC = () => {
   const { query } = useSearch();
   const { showSuccess } = useToast();
   const [entries, setEntries] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
   const [sectors, setSectors] = useState<any[]>([]);
   const [crds, setCrds] = useState<any[]>([]);
   const [paymentMethods, setPaymentMethods] = useState<any[]>([]);
@@ -63,6 +68,11 @@ export const LancamentosManuaisPage: React.FC = () => {
   const [amountFilter, setAmountFilter] = useState('');
   const [sectorFilter, setSectorFilter] = useState('all');
   const [paymentFilter, setPaymentFilter] = useState('all');
+  const initialCompetencia = currentCompetencia();
+  // Abre sem filtro de mês (Todos) para listar os lançamentos; usuário pode restringir depois.
+  const [competenciaMonth, setCompetenciaMonth] = useState('');
+  const [competenciaYear, setCompetenciaYear] = useState(initialCompetencia.year);
+  const currentYear = new Date().getFullYear();
   const [issueDateFrom, setIssueDateFrom] = useState('');
   const [issueDateTo, setIssueDateTo] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -93,7 +103,8 @@ export const LancamentosManuaisPage: React.FC = () => {
     [paymentMethods]
   );
 
-  const loadData = async () => {
+  const loadData = async (showSpinner = true) => {
+    if (showSpinner) setLoading(true);
     try {
       const [entriesRes, sectorsRes, crdsRes, pmRes, curRes] = await Promise.all([
         fetch('/api/manual-entries'),
@@ -118,6 +129,8 @@ export const LancamentosManuaisPage: React.FC = () => {
       setCrds([]);
       setPaymentMethods([]);
       setCurrencies([]);
+    } finally {
+      if (showSpinner) setLoading(false);
     }
   };
 
@@ -304,7 +317,7 @@ export const LancamentosManuaisPage: React.FC = () => {
         );
       }
       closeModal();
-      loadData();
+      loadData(false);
     } finally {
       setSubmitting(false);
     }
@@ -424,7 +437,7 @@ export const LancamentosManuaisPage: React.FC = () => {
       open: userRole === 'manager' ? 'Aprovado pelo gestor e enviado ao Controle.' : 'Lançamento devolvido para análise.',
     };
     showSuccess(messages[status] || 'Status atualizado.');
-    loadData();
+    loadData(false);
   };
 
   const deleteEntry = async (entry: any) => {
@@ -444,7 +457,7 @@ export const LancamentosManuaisPage: React.FC = () => {
       return;
     }
     showSuccess('Lançamento manual excluído com sucesso.');
-    loadData();
+    loadData(false);
   };
 
   const filteredEntries = useMemo(
@@ -453,6 +466,7 @@ export const LancamentosManuaisPage: React.FC = () => {
         if (sectorFilter !== 'all' && String(entry.sector_id) !== String(sectorFilter)) return false;
         if (paymentFilter !== 'all' && String(entry.payment_method || '') !== paymentFilter) return false;
         if (statusFilter !== 'all' && String(entry.status || '') !== statusFilter) return false;
+        if (!matchesCompetencia(entry.date || entry.issue_date, competenciaMonth, competenciaYear)) return false;
         if (!matchesDatePeriod(entry.issue_date, issueDateFrom, issueDateTo)) return false;
         if (!matchesCrdCodeFilter(crdFilter, entry.crd_code, entry.crd_name)) return false;
         if (!matchesInvoiceNumberFilter(invoiceNumberFilter, entry.protocol, entry.document_number, entry.description, entry.provider_name)) {
@@ -488,10 +502,19 @@ export const LancamentosManuaisPage: React.FC = () => {
       amountFilter,
       sectorFilter,
       paymentFilter,
+      competenciaMonth,
+      competenciaYear,
       issueDateFrom,
       issueDateTo,
       statusFilter,
     ]
+  );
+
+  const pagination = useClientPagination(filteredEntries);
+
+  const filteredAmountTotal = useMemo(
+    () => sumAmountsByCurrency(filteredEntries, (e) => e.amount, (e) => e.currency),
+    [filteredEntries]
   );
 
   const openTotal = useMemo(
@@ -552,7 +575,15 @@ export const LancamentosManuaisPage: React.FC = () => {
       </div>
 
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 space-y-4">
-        <div className="flex flex-wrap items-end gap-4">
+        <CompetenciaFilter
+          month={competenciaMonth}
+          year={competenciaYear}
+          onMonthChange={setCompetenciaMonth}
+          onYearChange={setCompetenciaYear}
+          allowAll
+          hint="Filtra pela data de lançamento. Em 'Todos', a lista mostra todos os períodos."
+        />
+        <div className="flex flex-wrap items-end gap-4 border-t border-slate-100 pt-4">
           <div>
             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Em aberto / aprovados (visíveis)</p>
             <p className="text-xl font-extrabold text-slate-900 mt-1">
@@ -603,20 +634,20 @@ export const LancamentosManuaisPage: React.FC = () => {
           </div>
           <div>
             <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Emissão de</label>
-            <input
-              type="date"
+            <DateBrInput
               value={issueDateFrom}
-              onChange={(e) => setIssueDateFrom(e.target.value)}
+              onChange={setIssueDateFrom}
+              suggestYear={currentYear}
               className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm"
             />
           </div>
           <div>
             <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Emissão até</label>
-            <input
-              type="date"
+            <DateBrInput
               value={issueDateTo}
               min={issueDateFrom || undefined}
-              onChange={(e) => setIssueDateTo(e.target.value)}
+              onChange={setIssueDateTo}
+              suggestYear={currentYear}
               className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm"
             />
           </div>
@@ -635,7 +666,8 @@ export const LancamentosManuaisPage: React.FC = () => {
         </div>
       </div>
 
-      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-x-auto">
+      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+        <div className="overflow-x-auto">
         <table className="w-full text-left border-collapse">
           <thead>
             <tr className="bg-slate-50/50">
@@ -653,14 +685,24 @@ export const LancamentosManuaisPage: React.FC = () => {
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-50">
-            {filteredEntries.length === 0 && (
+            {loading && (
+              <tr>
+                <td colSpan={11} className="px-6 py-14 text-center">
+                  <div className="inline-flex items-center justify-center gap-2 text-slate-400">
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                    <span className="text-sm font-medium">Carregando lançamentos...</span>
+                  </div>
+                </td>
+              </tr>
+            )}
+            {!loading && filteredEntries.length === 0 && (
               <tr>
                 <td colSpan={11} className="px-6 py-10 text-center text-sm text-slate-400">
                   {crdFilter ? `Nenhum lançamento com CRD ${crdFilter}.` : 'Nenhum lançamento manual encontrado.'}
                 </td>
               </tr>
             )}
-            {filteredEntries.map((entry) => {
+            {!loading && pagination.pageItems.map((entry) => {
               const meta = statusMeta(entry.status);
               const edited = Number(entry.edit_count || 0) > 0;
               return (
@@ -710,9 +752,9 @@ export const LancamentosManuaisPage: React.FC = () => {
                       </span>
                     ) : null}
                   </td>
-                  <td className="px-6 py-4 text-sm text-slate-600">{entry.issue_date || '—'}</td>
-                  <td className="px-6 py-4 text-sm text-slate-600">{entry.date}</td>
-                  <td className="px-6 py-4 text-sm text-slate-600">{entry.due_date || '—'}</td>
+                  <td className="px-6 py-4 text-sm text-slate-600">{formatDate(entry.issue_date)}</td>
+                  <td className="px-6 py-4 text-sm text-slate-600">{formatDate(entry.date)}</td>
+                  <td className="px-6 py-4 text-sm text-slate-600">{formatDate(entry.due_date)}</td>
                   <td className="px-6 py-4">
                     {entry.file_path ? (
                       <button
@@ -839,6 +881,19 @@ export const LancamentosManuaisPage: React.FC = () => {
             })}
           </tbody>
         </table>
+        </div>
+        <ListPagination
+          page={pagination.page}
+          totalPages={pagination.totalPages}
+          total={pagination.total}
+          from={pagination.from}
+          to={pagination.to}
+          pageSize={pagination.pageSize}
+          onPageChange={pagination.setPage}
+          onPageSizeChange={pagination.setPageSize}
+          label="lançamentos"
+          amountTotal={filteredAmountTotal}
+        />
       </div>
 
       {showModal && (
@@ -964,31 +1019,28 @@ export const LancamentosManuaisPage: React.FC = () => {
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                   <div className="space-y-1.5">
                     <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Data de emissão</label>
-                    <input
+                    <DateBrInput
                       required
-                      type="date"
                       value={form.issue_date}
-                      onChange={(e) => setForm((p) => ({ ...p, issue_date: e.target.value }))}
+                      onChange={(issue_date) => setForm((p) => ({ ...p, issue_date }))}
                       className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
                     />
                   </div>
                   <div className="space-y-1.5">
                     <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Data de lançamento</label>
-                    <input
+                    <DateBrInput
                       required
-                      type="date"
                       value={form.date}
-                      onChange={(e) => setForm((p) => ({ ...p, date: e.target.value }))}
+                      onChange={(date) => setForm((p) => ({ ...p, date }))}
                       className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
                     />
                   </div>
                   <div className="space-y-1.5">
                     <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Data de vencimento</label>
-                    <input
+                    <DateBrInput
                       required
-                      type="date"
                       value={form.due_date}
-                      onChange={(e) => setForm((p) => ({ ...p, due_date: e.target.value }))}
+                      onChange={(due_date) => setForm((p) => ({ ...p, due_date }))}
                       className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
                     />
                   </div>

@@ -68,7 +68,7 @@ export const COMPANIES: CompanyProfile[] = [
     budgetTitle: 'Budget Vivaz',
     subtitle: 'Vivaz Cataratas',
     sidebarBg: '#0077a8',
-    navActiveClass: 'bg-emerald-500 text-white shadow-lg shadow-emerald-900/20',
+    navActiveClass: 'bg-emerald-500 text-white shadow-lg shadow-emerald-900/20 !text-[#FFFFFF]',
     theme: COMPANY_THEMES.vivaz,
   },
   {
@@ -77,7 +77,7 @@ export const COMPANIES: CompanyProfile[] = [
     budgetTitle: 'Budget Aqua',
     subtitle: 'Aquamania',
     sidebarBg: '#C2410C',
-    navActiveClass: 'bg-orange-500 text-white shadow-lg shadow-orange-950/30',
+    navActiveClass: 'bg-orange-500 text-white shadow-lg shadow-orange-950/30 !text-[#FFFFFF]',
     theme: COMPANY_THEMES.aqua,
   },
 ];
