@@ -55,7 +55,14 @@ import {
 } from "./lib/permissionCatalog.js";
 import { logImportHistory } from "./lib/importHistory.js";
 import { registerAquaOrcamentoRoutes } from "./aquaOrcamentoRoutes.js";
-import { PROTOCOL_PREFIX, invoiceProtocolPrefix } from "./lib/launchProtocol.js";
+import {
+  PROTOCOL_PREFIX,
+  inferInvoiceDocTypeFromNumber,
+  invoiceDocTypeLabel,
+  invoiceProtocolPrefix,
+  resolveInvoiceDocType,
+  type InvoiceDocType,
+} from "./lib/launchProtocol.js";
 import { findInvoiceDuplicate, type InvoiceDuplicateRow } from "./lib/invoiceDuplicate.js";
 import { buildPeriodKey, parseImportPeriodInput, type ImportScope } from "./lib/importPeriod.js";
 import { computeCmv, toCmvInputs } from "./lib/cmv.js";
@@ -4051,10 +4058,8 @@ export function createApp() {
   // ====================================================
   // APROVAÇÕES (visão unificada — Controle / Financeiro)
   // ====================================================
-  const inferInvoiceDocType = (invoice: { invoice_number?: unknown }) => {
-    const digits = String(invoice.invoice_number ?? "").replace(/\D/g, "");
-    return digits.length === 44 ? "danfe" : "nota";
-  };
+  const inferInvoiceDocType = (invoice: { invoice_number?: unknown; doc_type?: unknown }) =>
+    resolveInvoiceDocType(invoice);
 
   const isPendingApprovalItem = (item: {
     type: string;
@@ -4992,7 +4997,8 @@ export function createApp() {
     }
     // Sem month/from/to: retorna todas as notas (competência "Todos").
 
-    // DANFE vs serviço: inferido pelo nº da nota (44 dígitos). Com doc_type, filtra antes de paginar.
+    // DANFE vs serviço: doc_type gravado na edição; senão, nº da nota com 44 dígitos.
+    // Com doc_type na query, filtra antes de paginar.
     const docTypeRaw = String(doc_type || "").trim().toLowerCase();
     const docTypeFilter =
       docTypeRaw === "danfe" || docTypeRaw === "nota" || docTypeRaw === "servico"
@@ -5015,8 +5021,7 @@ export function createApp() {
       );
     }
 
-    // Com filtro DANFE/nota, precisa carregar o conjunto filtrável e paginar em memória
-    // (não há coluna doc_type — classificação é pelo nº com 44 dígitos).
+    // Com filtro DANFE/nota, pagina em memória: doc_type nulo ainda depende do nº da nota.
     if (pag.enabled && !docTypeFilter) {
       query = query.range(pag.from, pag.to);
     } else if (docTypeFilter) {
@@ -5631,7 +5636,7 @@ export function createApp() {
     const {
       invoice_number, provider_name, amount, issue_date, due_date,
       sector_id, file_path, boleto_file_path, boleto_file_paths, natureza,
-      crd, payment_method, pix_key, currency, description,
+      crd, payment_method, pix_key, currency, description, doc_type,
     } = req.body;
 
     const resolvedNumber = String(invoice_number || "").trim();
@@ -5648,6 +5653,17 @@ export function createApp() {
     const resolvedFile = String(file_path || "").trim() || null;
     const resolvedDescription = String(description || "").trim() || null;
     const boletoPaths = collectBoletoPaths({ boleto_file_path, boleto_file_paths });
+    const rawDocType = String(doc_type ?? "").trim().toLowerCase();
+    const explicitDocType: InvoiceDocType | null =
+      rawDocType === "danfe" ? "danfe" : rawDocType === "nota" || rawDocType === "servico" ? "nota" : null;
+    const currentDocType = resolveInvoiceDocType(invoice);
+    const nextDocType = explicitDocType ?? currentDocType;
+    // Grava a lista só quando ela deixa de coincidir com a classificação atual
+    // ou com o número da nota. Edição dos demais campos segue sem a coluna.
+    const shouldPersistDocType =
+      explicitDocType != null &&
+      (explicitDocType !== currentDocType ||
+        explicitDocType !== inferInvoiceDocTypeFromNumber(resolvedNumber));
 
     if (!resolvedNumber || !resolvedProvider || !Number.isFinite(resolvedAmount) || resolvedAmount < 0) {
       return res.status(400).json({ error: "Número, fornecedor e valor são obrigatórios." });
@@ -5697,6 +5713,12 @@ export function createApp() {
     }
 
     const candidates: Array<{ field: string; label: string; from: string; to: string }> = [
+      {
+        field: "doc_type",
+        label: "Lista",
+        from: invoiceDocTypeLabel(currentDocType),
+        to: invoiceDocTypeLabel(nextDocType),
+      },
       { field: "invoice_number", label: "Número", from: asText(invoice.invoice_number), to: resolvedNumber },
       { field: "provider_name", label: "Fornecedor", from: asText(invoice.provider_name), to: resolvedProvider },
       { field: "description", label: "Descrição", from: asText(invoice.description), to: asText(resolvedDescription) },
@@ -5747,6 +5769,7 @@ export function createApp() {
           pix_key: resolvedPix,
           currency: resolvedCurrency,
           description: resolvedDescription,
+          ...(shouldPersistDocType ? { doc_type: explicitDocType } : {}),
           edit_count: Number(invoice.edit_count || 0) + 1,
           last_edited_at: nowIso,
         })
@@ -5758,6 +5781,12 @@ export function createApp() {
 
     if (error) {
       console.error(error);
+      const message = String((error as { message?: string }).message || "");
+      if (shouldPersistDocType && /doc_type/i.test(message)) {
+        return res.status(500).json({
+          error: "A coluna de lista ainda não existe. Execute sql/84_invoices_doc_type.sql no Supabase.",
+        });
+      }
       return res.status(500).json({ error: "Não foi possível salvar a edição." });
     }
 

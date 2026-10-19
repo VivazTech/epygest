@@ -37,6 +37,7 @@ import {
   canEditLaunchRole,
   isInvoiceFlowEditableBeforeControl,
 } from '../lib/launchFlow';
+import { resolveInvoiceDocType } from '../lib/launchProtocol';
 import { CompetenciaFilter } from '../components/CompetenciaFilter';
 import { ListPagination } from '../components/ListPagination';
 import { DateBrInput } from '../components/DateBrInput';
@@ -57,6 +58,7 @@ const EMPTY_INVOICE_FORM = {
   pix_key: '',
   currency: 'BRL',
   description: '',
+  doc_type: '',
 };
 
 export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'servico' }) => {
@@ -428,6 +430,7 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
       pix_key: String(invoice.pix_key || ''),
       currency: String(invoice.currency || 'BRL'),
       description: String(invoice.description || ''),
+      doc_type: resolveInvoiceDocType(invoice),
     });
     setInvoicePdfName(invoice.file_path ? 'PDF anexado' : '');
     setBoletos(paths.length ? paths.map((path, index) => ({ path, name: `Boleto ${index + 1}` })) : [{ path: '', name: '' }]);
@@ -467,12 +470,14 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
     const boletoPaths = semBoleto ? [] : boletos.map((b) => b.path).filter(Boolean);
     setSubmittingInvoice(true);
     const isEdit = Boolean(editingInvoice?.id);
+    const { doc_type, ...invoiceFields } = formData;
     try {
       const response = await fetch(isEdit ? `/api/invoices/${editingInvoice.id}` : '/api/invoices', {
         method: isEdit ? 'PATCH' : 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          ...formData,
+          ...invoiceFields,
+          ...(isEdit && (doc_type === 'danfe' || doc_type === 'nota') ? { doc_type } : {}),
           amount: parseFloat(formData.amount),
           sector_id: parseInt(formData.sector_id),
           boleto_file_path: boletoPaths[0] || '',
@@ -1719,6 +1724,23 @@ export const Invoices: React.FC<{ mode?: 'servico' | 'danfe' }> = ({ mode = 'ser
             
             <form onSubmit={handleSubmit} className="flex flex-col min-h-0 flex-1">
               <div className="p-6 space-y-4 overflow-y-auto flex-1 min-h-0">
+              {editingInvoice && (
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Lista</label>
+                  <select
+                    required
+                    value={formData.doc_type}
+                    onChange={(e) => setFormData({ ...formData, doc_type: e.target.value })}
+                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+                  >
+                    <option value="danfe">DANFE</option>
+                    <option value="nota">Nota Fiscal de Serviço</option>
+                  </select>
+                  <p className="text-[11px] text-slate-400">
+                    O lançamento passa para a lista escolhida. O fluxo de aprovação não muda.
+                  </p>
+                </div>
+              )}
               <div className="space-y-1.5">
                 <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">
                   PDF da Nota Fiscal
