@@ -216,6 +216,47 @@ export const CadastrosPage: React.FC = () => {
   ];
 
   const createCadastro = async () => {
+    // CRD usa newCrdForm — não validar newKey/newName (campos de moedas/formas de pagamento).
+    if (activeTab === 'crd') {
+      if (!newCrdForm.natureza || !newCrdForm.code.trim() || !newCrdForm.name.trim() || !newCrdForm.sector_id) {
+        alert('Preencha código, nome e setor do CRD.');
+        return;
+      }
+      setSavingCrd(true);
+      try {
+        const res = await fetch('/api/crds', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            natureza: newCrdForm.natureza,
+            code: newCrdForm.code.trim(),
+            name: newCrdForm.name.trim(),
+            sector_id: parseInt(newCrdForm.sector_id),
+            active: true,
+          })
+        });
+        if (!res.ok) {
+          const data = await res.json();
+          alert(data.error || 'Erro ao cadastrar');
+          return;
+        }
+        const createdSectorId = Number(newCrdForm.sector_id);
+        setNewCrdForm({
+          natureza: 'O',
+          code: '',
+          name: '',
+          sector_id: '',
+        });
+        if (Number.isFinite(createdSectorId)) {
+          setExpandedGroups((prev) => new Set(prev).add(createdSectorId));
+        }
+        refreshCrds();
+      } finally {
+        setSavingCrd(false);
+      }
+      return;
+    }
+
     if (!newName.trim() || !newKey.trim()) {
       alert('Preencha código e nome.');
       return;
@@ -250,40 +291,6 @@ export const CadastrosPage: React.FC = () => {
       setNewKey('');
       setNewName('');
       fetch('/api/currencies').then(res => res.json()).then(data => setCurrencies(Array.isArray(data) ? data : []));
-      return;
-    }
-    if (activeTab === 'crd') {
-      if (!newCrdForm.natureza || !newCrdForm.code.trim() || !newCrdForm.name.trim() || !newCrdForm.sector_id) {
-        alert('Preencha código, nome e setor do CRD.');
-        return;
-      }
-      const res = await fetch('/api/crds', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          natureza: newCrdForm.natureza,
-          code: newCrdForm.code.trim(),
-          name: newCrdForm.name.trim(),
-          sector_id: parseInt(newCrdForm.sector_id),
-          active: true,
-        })
-      });
-      if (!res.ok) {
-        const data = await res.json();
-        alert(data.error || 'Erro ao cadastrar');
-        return;
-      }
-      const createdSectorId = Number(newCrdForm.sector_id);
-      setNewCrdForm({
-        natureza: 'O',
-        code: '',
-        name: '',
-        sector_id: '',
-      });
-      if (Number.isFinite(createdSectorId)) {
-        setExpandedGroups((prev) => new Set(prev).add(createdSectorId));
-      }
-      refreshCrds();
     }
   };
 
@@ -989,10 +996,12 @@ export const CadastrosPage: React.FC = () => {
                 {sectors.map((s: any) => <option key={s.id} value={s.id}>{s.code ? `${s.code} — ${s.name}` : s.name}</option>)}
               </select>
               <button
+                type="button"
                 onClick={createCadastro}
-                className="px-4 py-2 bg-[#004D40] text-white font-bold rounded-xl hover:bg-[#003d33] transition-colors"
+                disabled={savingCrd}
+                className="px-4 py-2 bg-[#004D40] text-white font-bold rounded-xl hover:bg-[#003d33] transition-colors disabled:opacity-60"
               >
-                Adicionar
+                {savingCrd ? 'Salvando...' : 'Adicionar'}
               </button>
               <label className={cn(
                 "inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-slate-200 bg-white text-sm font-bold text-slate-700 cursor-pointer hover:bg-slate-50 transition-colors",
