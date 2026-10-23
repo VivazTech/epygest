@@ -30,7 +30,7 @@ export const PERMISSION_RESOURCES: PermissionResource[] = [
   { key: 'indicadores', label: 'Indicadores (Números)', group: 'Menu principal', actions: ['view'] },
   { key: 'investimentos', label: 'Investimentos', group: 'Menu principal', actions: ['view', 'create', 'edit', 'delete'] },
   { key: 'usuarios', label: 'Usuários / Permissões', group: 'Menu principal', actions: ['view', 'create', 'edit', 'delete'] },
-  { key: 'sugestoes', label: 'Sugestões', group: 'Menu principal', actions: ['view'] },
+  { key: 'sugestoes', label: 'Sugestões e Novos módulos', group: 'Menu principal', actions: ['view'] },
   { key: 'nomes-sistema', label: 'Nomes do sistema', group: 'Menu principal', actions: ['view'] },
   { key: 'configuracoes', label: 'Configurações', group: 'Menu principal', actions: ['view', 'edit'] },
 
@@ -117,6 +117,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, Partial<Record<string, Per
   admin: Object.fromEntries(PERMISSION_RESOURCES.map((r) => [r.key, r.actions])),
   finance: {
     investimentos: ['view'],
+    sugestoes: ['view'],
     aprovacoes: ['view', 'edit'],
     emprestimos: ['view', 'edit'],
     comandas: ['view', 'create', 'edit'],
@@ -142,6 +143,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, Partial<Record<string, Per
     'prev-real': ['view'],
     indicadores: ['view'],
     investimentos: ['view'],
+    sugestoes: ['view'],
     comandas: ['view', 'create', 'edit'],
     'lancamentos-manuais': ['view', 'create', 'edit'],
     estornos: ['view', 'create', 'edit'],
@@ -163,6 +165,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, Partial<Record<string, Per
   },
   estagiario: {
     dashboard: ['view'],
+    sugestoes: ['view'],
     comandas: ['view', 'create', 'edit'],
     'lancamentos-manuais': ['view', 'create', 'edit'],
     estornos: ['view', 'create', 'edit'],
@@ -174,6 +177,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, Partial<Record<string, Per
   },
   viewer: {
     dashboard: ['view'],
+    sugestoes: ['view'],
     tutorial: ['view'],
   },
   diretoria: {
@@ -181,6 +185,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<string, Partial<Record<string, Per
     dre: ['view'],
     indicadores: ['view'],
     investimentos: ['view'],
+    sugestoes: ['view'],
     mensalidades: ['view'],
     aprovacoes: ['view'],
     'painel-operacional': ['view'],

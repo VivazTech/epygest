@@ -1567,20 +1567,58 @@ export function createApp() {
   });
 
   // ====================================================
-  // SUGESTÕES DOS USUÁRIOS
+  // SUGESTÕES E NOVOS MÓDULOS
   // ====================================================
+  const SUGGESTION_STATUSES = new Set(["todo", "in_progress", "waiting_info", "done"]);
+  const SUGGESTION_KINDS = new Set(["suggestion", "module_request"]);
+  const SUGGESTION_COMPANY_SCOPES = new Set(["vivaz", "aqua", "both"]);
+  const SUGGESTION_SELECT =
+    "id, user_id, user_name, user_email, user_role, message, page_tab, page_label, created_at, done, done_at, image_path, image_name, kind, title, company_scope, file_label, file_path, file_name, how_it_should_work, answers, status";
+
+  const normalizeSuggestionStatus = (row: any) => {
+    const status = String(row?.status || "").trim();
+    if (SUGGESTION_STATUSES.has(status)) return status;
+    return row?.done ? "done" : "todo";
+  };
+
   app.post("/api/suggestions", async (req, res) => {
+    const kindRaw = String(req.body?.kind || "suggestion").trim();
+    const kind = SUGGESTION_KINDS.has(kindRaw) ? kindRaw : "suggestion";
+    const isModule = kind === "module_request";
     const message = String(req.body?.message || "").trim();
+    const howItShouldWork = String(req.body?.how_it_should_work || "").trim();
+    const title = String(req.body?.title || "").trim().slice(0, 200);
     const page_tab = String(req.body?.page_tab || "").trim().slice(0, 120) || null;
     const page_label = String(req.body?.page_label || "").trim().slice(0, 240) || null;
     const rawImagePath = String(req.body?.image_path || "").trim();
     const rawImageName = String(req.body?.image_name || "").trim().slice(0, 255);
+    const rawFilePath = String(req.body?.file_path || "").trim();
+    const rawFileName = String(req.body?.file_name || "").trim().slice(0, 255);
+    const fileLabel = String(req.body?.file_label || "").trim().slice(0, 500);
+    const companyScopeRaw = String(req.body?.company_scope || "").trim();
+    const company_scope = SUGGESTION_COMPANY_SCOPES.has(companyScopeRaw) ? companyScopeRaw : null;
+    const answers =
+      req.body?.answers && typeof req.body.answers === "object" && !Array.isArray(req.body.answers)
+        ? req.body.answers
+        : {};
 
-    if (message.length < 5) {
-      return res.status(400).json({ error: "Escreva uma sugestão com pelo menos algumas palavras." });
+    const detailText = isModule ? howItShouldWork || message : message;
+    const minLen = isModule ? 150 : 5;
+    if (detailText.length < minLen) {
+      return res.status(400).json({
+        error: isModule
+          ? "Descreva como deve funcionar com no mínimo 150 caracteres."
+          : "Escreva uma sugestão com pelo menos algumas palavras.",
+      });
     }
-    if (message.length > 4000) {
-      return res.status(400).json({ error: "A sugestão deve ter no máximo 4000 caracteres." });
+    if (detailText.length > 8000) {
+      return res.status(400).json({ error: "O texto deve ter no máximo 8000 caracteres." });
+    }
+    if (isModule && !title) {
+      return res.status(400).json({ error: "Informe o nome do módulo ou função." });
+    }
+    if (isModule && !company_scope) {
+      return res.status(400).json({ error: "Informe se é para Vivaz, Aqua ou ambos." });
     }
 
     let imagePath: string | null = null;
@@ -1592,6 +1630,17 @@ export function createApp() {
       }
       imagePath = objectPath;
       imageName = rawImageName || null;
+    }
+
+    let filePath: string | null = null;
+    let fileName: string | null = null;
+    if (rawFilePath) {
+      const objectPath = normalizeStorageObjectPath(rawFilePath);
+      if (!objectPath || !objectPath.startsWith("suggestions/")) {
+        return res.status(400).json({ error: "Arquivo inválido." });
+      }
+      filePath = objectPath;
+      fileName = rawFileName || null;
     }
 
     const userId = req.user?.id;
@@ -1606,39 +1655,69 @@ export function createApp() {
         user_name: userRow?.name || req.user?.name || null,
         user_email: userRow?.email || req.user?.email || null,
         user_role: userRow?.role || req.user?.role || null,
-        message,
+        message: detailText,
         page_tab,
         page_label,
         image_path: imagePath,
         image_name: imageName,
+        kind,
+        title: title || null,
+        company_scope,
+        file_label: fileLabel || null,
+        file_path: filePath,
+        file_name: fileName,
+        how_it_should_work: isModule ? howItShouldWork || detailText : null,
+        answers,
+        status: "todo",
+        done: false,
+        done_at: null,
       })
-      .select("id, created_at")
+      .select("id, created_at, status, kind")
       .single();
 
     if (error) {
       console.error("Erro ao salvar sugestão:", error);
       return res.status(500).json({
-        error: "Não foi possível salvar a sugestão. Verifique a migration sql/28_user_suggestions.sql.",
+        error:
+          "Não foi possível salvar. Verifique as migrations sql/28_user_suggestions.sql e sql/84_user_suggestions_modules.sql.",
       });
     }
 
-    res.status(201).json({ id: data.id, created_at: data.created_at });
+    res.status(201).json({ id: data.id, created_at: data.created_at, status: data.status, kind: data.kind });
   });
 
-  app.get("/api/suggestions", requireRole("admin"), async (_req, res) => {
-    const { data, error } = await supabase
+  app.get("/api/suggestions", async (req, res) => {
+    const role = String(req.user?.role || "");
+    const isAdmin = role === "admin";
+    let query = supabase
       .from("user_suggestions")
-      .select("id, user_id, user_name, user_email, user_role, message, page_tab, page_label, created_at, done, done_at, image_path, image_name")
+      .select(SUGGESTION_SELECT)
       .order("created_at", { ascending: false })
       .limit(500);
 
+    if (!isAdmin) {
+      const userId = Number(req.user?.id);
+      if (!Number.isFinite(userId)) {
+        return res.status(403).json({ error: "Não autorizado." });
+      }
+      query = query.eq("user_id", userId);
+    }
+
+    const { data, error } = await query;
     if (error) {
       console.error("Erro ao listar sugestões:", error);
       return res.status(500).json({
-        error: "Não foi possível carregar as sugestões. Verifique a migration sql/28_user_suggestions.sql.",
+        error:
+          "Não foi possível carregar. Verifique as migrations sql/28_user_suggestions.sql e sql/84_user_suggestions_modules.sql.",
       });
     }
-    res.json(data ?? []);
+    res.json(
+      (data ?? []).map((row: any) => ({
+        ...row,
+        status: normalizeSuggestionStatus(row),
+        done: normalizeSuggestionStatus(row) === "done",
+      }))
+    );
   });
 
   app.patch("/api/suggestions/:id", requireRole("admin"), async (req, res) => {
@@ -1646,15 +1725,27 @@ export function createApp() {
     if (!Number.isFinite(id) || id <= 0) {
       return res.status(400).json({ error: "Sugestão inválida." });
     }
-    const done = Boolean(req.body?.done);
+
+    let status = String(req.body?.status || "").trim();
+    if (!status && req.body?.done != null) {
+      status = Boolean(req.body.done) ? "done" : "todo";
+    }
+    if (!SUGGESTION_STATUSES.has(status)) {
+      return res.status(400).json({
+        error: "Status inválido. Use: todo, in_progress, waiting_info ou done.",
+      });
+    }
+
+    const done = status === "done";
     const { data, error } = await supabase
       .from("user_suggestions")
       .update({
+        status,
         done,
         done_at: done ? new Date().toISOString() : null,
       })
       .eq("id", id)
-      .select("id, done, done_at")
+      .select("id, status, done, done_at")
       .maybeSingle();
 
     if (error) {
@@ -1662,7 +1753,7 @@ export function createApp() {
       return res.status(500).json({ error: "Não foi possível atualizar a sugestão." });
     }
     if (!data) return res.status(404).json({ error: "Sugestão não encontrada." });
-    res.json(data);
+    res.json({ ...data, status: normalizeSuggestionStatus(data) });
   });
 
   app.post("/api/suggestions/image", upload.single("image"), async (req, res) => {
@@ -1700,20 +1791,61 @@ export function createApp() {
     }
   });
 
-  app.get("/api/suggestions/:id/image-url", requireRole("admin"), async (req, res) => {
-    const { data, error } = await supabase
-      .from("user_suggestions")
-      .select("id, image_path")
-      .eq("id", Number(req.params.id))
-      .maybeSingle();
+  app.post("/api/suggestions/file", upload.single("file"), async (req, res) => {
+    if (!req.file) return res.status(400).json({ error: "Arquivo não enviado" });
+    const mime = String(req.file.mimetype || "");
+    const ext = path.extname(req.file.originalname || "").toLowerCase();
+    const allowedExt = [".xlsx", ".xls", ".csv", ".pdf", ".png", ".jpg", ".jpeg", ".webp"];
+    if (!allowedExt.includes(ext)) {
+      if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+      return res.status(400).json({
+        error: "Formato inválido. Envie planilha (XLSX/CSV), PDF ou imagem.",
+      });
+    }
+    const safeExt = ext.replace(".", "") || "bin";
+    try {
+      const fileBuffer = fs.readFileSync(req.file.path);
+      const storagePath = await uploadDocument(
+        fileBuffer,
+        "suggestions",
+        safeExt,
+        mime || "application/octet-stream"
+      );
+      res.json({
+        file_path: storagePath,
+        file_name: String(req.file.originalname || `arquivo.${safeExt}`).slice(0, 255),
+      });
+    } catch (error) {
+      console.error("Erro ao salvar arquivo da sugestão:", error);
+      res.status(500).json({ error: "Não foi possível salvar o arquivo." });
+    } finally {
+      if (req.file?.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+    }
+  });
 
+  app.get("/api/suggestions/:id/image-url", async (req, res) => {
+    const id = Number(req.params.id);
+    const role = String(req.user?.role || "");
+    const isAdmin = role === "admin";
+    let query = supabase
+      .from("user_suggestions")
+      .select("id, user_id, image_path, file_path")
+      .eq("id", id);
+    if (!isAdmin) query = query.eq("user_id", Number(req.user?.id));
+
+    const { data, error } = await query.maybeSingle();
     if (error) {
       console.error(error);
-      return res.status(500).json({ error: "Erro ao buscar a imagem." });
+      return res.status(500).json({ error: "Erro ao buscar o anexo." });
     }
-    if (!data) return res.status(404).json({ error: "Sugestão não encontrada" });
-    const rawPath = String((data as { image_path?: string }).image_path || "");
-    if (!rawPath) return res.status(404).json({ error: "Imagem não anexada" });
+    if (!data) return res.status(404).json({ error: "Registro não encontrado" });
+
+    const kind = String(req.query.kind || "image");
+    const rawPath =
+      kind === "file"
+        ? String((data as { file_path?: string }).file_path || "")
+        : String((data as { image_path?: string }).image_path || "");
+    if (!rawPath) return res.status(404).json({ error: "Anexo não encontrado" });
 
     const result = await createSignedDocumentUrl(rawPath);
     if (!("url" in result)) {

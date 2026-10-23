@@ -31,7 +31,7 @@ const STATIC_LABELS: Record<string, string> = {
   investimentos: 'Investimentos',
   usuarios: 'Usuários',
   configuracoes: 'Configurações',
-  sugestoes: 'Sugestões',
+  sugestoes: 'Sugestões e Novos módulos',
   uml: 'UML do Sistema',
   comandas: 'Comandas',
   'lancamentos-manuais': 'Lançamentos Manuais',

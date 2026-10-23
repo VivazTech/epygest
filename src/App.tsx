@@ -922,7 +922,7 @@ function AppShell({
                 : activeTab === 'tutorial'
                 ? 'Tutorial guiado'
                 : activeTab === 'sugestoes'
-                ? 'Sugestões'
+                ? 'Sugestões e Novos módulos'
                 : activeTab === 'nomes-sistema'
                 ? 'Nomes do sistema'
                 : activeTab === 'uml'
