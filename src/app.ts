@@ -16255,7 +16255,7 @@ export function createApp() {
         "Autorizado — Diretoria\nEdilson Andrade",
       ]);
       divider();
-      drawSigRow(["Supervisora ADM — Vanderléia de Lima", "Controller — Elton Roque"], 20);
+      drawSigRow(["Encarregada Financeira — Vanderléia de Lima", "Controller — Elton Roque"], 20);
 
       ensureSpace(16);
       doc.fillColor(GRAY).fontSize(7).font("Helvetica")
