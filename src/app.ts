@@ -1572,13 +1572,54 @@ export function createApp() {
   const SUGGESTION_STATUSES = new Set(["todo", "in_progress", "waiting_info", "done"]);
   const SUGGESTION_KINDS = new Set(["suggestion", "module_request"]);
   const SUGGESTION_COMPANY_SCOPES = new Set(["vivaz", "aqua", "both"]);
+  const SUGGESTION_MAX_ATTACHMENTS = 10;
   const SUGGESTION_SELECT =
-    "id, user_id, user_name, user_email, user_role, message, page_tab, page_label, created_at, done, done_at, image_path, image_name, kind, title, company_scope, file_label, file_path, file_name, how_it_should_work, answers, status";
+    "id, user_id, user_name, user_email, user_role, message, page_tab, page_label, created_at, done, done_at, image_path, image_name, kind, title, company_scope, file_label, file_path, file_name, file_attachments, image_attachments, how_it_should_work, answers, status";
 
   const normalizeSuggestionStatus = (row: any) => {
     const status = String(row?.status || "").trim();
     if (SUGGESTION_STATUSES.has(status)) return status;
     return row?.done ? "done" : "todo";
+  };
+
+  const parseSuggestionAttachments = (raw: unknown, fallbackPath?: string, fallbackName?: string) => {
+    const items: Array<{ path: string; name: string }> = [];
+    const seen = new Set<string>();
+    const push = (pathRaw: unknown, nameRaw?: unknown) => {
+      const objectPath = normalizeStorageObjectPath(String(pathRaw || "").trim());
+      if (!objectPath || !objectPath.startsWith("suggestions/") || seen.has(objectPath)) return;
+      seen.add(objectPath);
+      items.push({
+        path: objectPath,
+        name: String(nameRaw || "arquivo").trim().slice(0, 255) || "arquivo",
+      });
+    };
+    if (Array.isArray(raw)) {
+      for (const entry of raw) {
+        if (!entry || typeof entry !== "object") continue;
+        push((entry as any).path ?? (entry as any).file_path ?? (entry as any).image_path, (entry as any).name ?? (entry as any).file_name ?? (entry as any).image_name);
+        if (items.length >= SUGGESTION_MAX_ATTACHMENTS) break;
+      }
+    }
+    if (!items.length && fallbackPath) push(fallbackPath, fallbackName);
+    return items.slice(0, SUGGESTION_MAX_ATTACHMENTS);
+  };
+
+  const normalizeSuggestionRow = (row: any) => {
+    const status = normalizeSuggestionStatus(row);
+    const file_attachments = parseSuggestionAttachments(row?.file_attachments, row?.file_path, row?.file_name);
+    const image_attachments = parseSuggestionAttachments(row?.image_attachments, row?.image_path, row?.image_name);
+    return {
+      ...row,
+      status,
+      done: status === "done",
+      file_attachments,
+      image_attachments,
+      file_path: file_attachments[0]?.path ?? row?.file_path ?? null,
+      file_name: file_attachments[0]?.name ?? row?.file_name ?? null,
+      image_path: image_attachments[0]?.path ?? row?.image_path ?? null,
+      image_name: image_attachments[0]?.name ?? row?.image_name ?? null,
+    };
   };
 
   app.post("/api/suggestions", async (req, res) => {
@@ -1621,27 +1662,27 @@ export function createApp() {
       return res.status(400).json({ error: "Informe se é para Vivaz, Aqua ou ambos." });
     }
 
-    let imagePath: string | null = null;
-    let imageName: string | null = null;
-    if (rawImagePath) {
-      const objectPath = normalizeStorageObjectPath(rawImagePath);
-      if (!objectPath || !objectPath.startsWith("suggestions/")) {
-        return res.status(400).json({ error: "Imagem inválida." });
-      }
-      imagePath = objectPath;
-      imageName = rawImageName || null;
+    const fileAttachments = parseSuggestionAttachments(
+      req.body?.file_attachments ?? req.body?.files,
+      rawFilePath,
+      rawFileName
+    );
+    const imageAttachments = parseSuggestionAttachments(
+      req.body?.image_attachments ?? req.body?.images,
+      rawImagePath,
+      rawImageName
+    );
+    if (Array.isArray(req.body?.file_attachments) && req.body.file_attachments.length > SUGGESTION_MAX_ATTACHMENTS) {
+      return res.status(400).json({ error: `Máximo de ${SUGGESTION_MAX_ATTACHMENTS} arquivos.` });
+    }
+    if (Array.isArray(req.body?.image_attachments) && req.body.image_attachments.length > SUGGESTION_MAX_ATTACHMENTS) {
+      return res.status(400).json({ error: `Máximo de ${SUGGESTION_MAX_ATTACHMENTS} imagens.` });
     }
 
-    let filePath: string | null = null;
-    let fileName: string | null = null;
-    if (rawFilePath) {
-      const objectPath = normalizeStorageObjectPath(rawFilePath);
-      if (!objectPath || !objectPath.startsWith("suggestions/")) {
-        return res.status(400).json({ error: "Arquivo inválido." });
-      }
-      filePath = objectPath;
-      fileName = rawFileName || null;
-    }
+    const filePath = fileAttachments[0]?.path ?? null;
+    const fileName = fileAttachments[0]?.name ?? null;
+    const imagePath = imageAttachments[0]?.path ?? null;
+    const imageName = imageAttachments[0]?.name ?? null;
 
     const userId = req.user?.id;
     const { data: userRow } = userId
@@ -1666,6 +1707,8 @@ export function createApp() {
         file_label: fileLabel || null,
         file_path: filePath,
         file_name: fileName,
+        file_attachments: fileAttachments,
+        image_attachments: imageAttachments,
         how_it_should_work: isModule ? howItShouldWork || detailText : null,
         answers,
         status: "todo",
@@ -1679,7 +1722,7 @@ export function createApp() {
       console.error("Erro ao salvar sugestão:", error);
       return res.status(500).json({
         error:
-          "Não foi possível salvar. Verifique as migrations sql/28_user_suggestions.sql e sql/84_user_suggestions_modules.sql.",
+          "Não foi possível salvar. Verifique as migrations sql/28_user_suggestions.sql, sql/84_user_suggestions_modules.sql e sql/86_user_suggestions_attachments.sql.",
       });
     }
 
@@ -1708,16 +1751,10 @@ export function createApp() {
       console.error("Erro ao listar sugestões:", error);
       return res.status(500).json({
         error:
-          "Não foi possível carregar. Verifique as migrations sql/28_user_suggestions.sql e sql/84_user_suggestions_modules.sql.",
+          "Não foi possível carregar. Verifique as migrations sql/28_user_suggestions.sql, sql/84_user_suggestions_modules.sql e sql/86_user_suggestions_attachments.sql.",
       });
     }
-    res.json(
-      (data ?? []).map((row: any) => ({
-        ...row,
-        status: normalizeSuggestionStatus(row),
-        done: normalizeSuggestionStatus(row) === "done",
-      }))
-    );
+    res.json((data ?? []).map((row: any) => normalizeSuggestionRow(row)));
   });
 
   app.patch("/api/suggestions/:id", requireRole("admin"), async (req, res) => {
@@ -1829,7 +1866,7 @@ export function createApp() {
     const isAdmin = role === "admin";
     let query = supabase
       .from("user_suggestions")
-      .select("id, user_id, image_path, file_path")
+      .select("id, user_id, image_path, file_path, file_attachments, image_attachments")
       .eq("id", id);
     if (!isAdmin) query = query.eq("user_id", Number(req.user?.id));
 
@@ -1840,11 +1877,32 @@ export function createApp() {
     }
     if (!data) return res.status(404).json({ error: "Registro não encontrado" });
 
+    const requestedPath = normalizeStorageObjectPath(String(req.query.path || "").trim());
     const kind = String(req.query.kind || "image");
-    const rawPath =
-      kind === "file"
-        ? String((data as { file_path?: string }).file_path || "")
-        : String((data as { image_path?: string }).image_path || "");
+    const files = parseSuggestionAttachments(
+      (data as any).file_attachments,
+      (data as any).file_path,
+      (data as any).file_name
+    );
+    const images = parseSuggestionAttachments(
+      (data as any).image_attachments,
+      (data as any).image_path,
+      (data as any).image_name
+    );
+    const allowed = new Set([...files, ...images].map((item) => item.path));
+
+    let rawPath = "";
+    if (requestedPath) {
+      if (!allowed.has(requestedPath)) {
+        return res.status(404).json({ error: "Anexo não encontrado" });
+      }
+      rawPath = requestedPath;
+    } else {
+      rawPath =
+        kind === "file"
+          ? String(files[0]?.path || (data as { file_path?: string }).file_path || "")
+          : String(images[0]?.path || (data as { image_path?: string }).image_path || "");
+    }
     if (!rawPath) return res.status(404).json({ error: "Anexo não encontrado" });
 
     const result = await createSignedDocumentUrl(rawPath);

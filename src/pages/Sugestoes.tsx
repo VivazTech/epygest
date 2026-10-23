@@ -32,15 +32,29 @@ type SuggestionRow = {
   done_at?: string | null;
   image_path?: string | null;
   image_name?: string | null;
+  image_attachments?: Array<{ path: string; name: string }> | null;
   kind?: SuggestionKind;
   title?: string | null;
   company_scope?: 'vivaz' | 'aqua' | 'both' | null;
   file_label?: string | null;
   file_path?: string | null;
   file_name?: string | null;
+  file_attachments?: Array<{ path: string; name: string }> | null;
   how_it_should_work?: string | null;
   answers?: Record<string, string> | null;
   status?: SuggestionStatus;
+};
+
+const collectAttachments = (
+  list: Array<{ path: string; name: string }> | null | undefined,
+  fallbackPath?: string | null,
+  fallbackName?: string | null
+) => {
+  if (Array.isArray(list) && list.length) {
+    return list.filter((item) => item?.path);
+  }
+  if (fallbackPath) return [{ path: fallbackPath, name: fallbackName || 'arquivo' }];
+  return [];
 };
 
 const STATUS_META: Record<SuggestionStatus, { label: string; classes: string }> = {
@@ -197,9 +211,11 @@ export const SugestoesPage: React.FC = () => {
     }
   };
 
-  const openAttachment = async (row: SuggestionRow, kind: 'image' | 'file') => {
+  const openAttachment = async (row: SuggestionRow, kind: 'image' | 'file', path?: string) => {
     try {
-      const res = await fetch(`/api/suggestions/${row.id}/image-url?kind=${kind}`);
+      const params = new URLSearchParams({ kind });
+      if (path) params.set('path', path);
+      const res = await fetch(`/api/suggestions/${row.id}/image-url?${params.toString()}`);
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data?.url) throw new Error(data?.error || 'Anexo indisponível');
       window.open(data.url, '_blank', 'noopener');
@@ -217,6 +233,8 @@ export const SugestoesPage: React.FC = () => {
     const preview = body.length > 160 && !expanded ? `${body.slice(0, 160).trim()}…` : body;
     const busy = updatingId === row.id;
     const answers = row.answers && typeof row.answers === 'object' ? row.answers : {};
+    const imageItems = collectAttachments(row.image_attachments, row.image_path, row.image_name);
+    const fileItems = collectAttachments(row.file_attachments, row.file_path, row.file_name);
 
     return (
       <tr key={row.id} className="border-b border-slate-50 hover:bg-slate-50/60 align-top">
@@ -276,26 +294,28 @@ export const SugestoesPage: React.FC = () => {
             </div>
           )}
           <div className="mt-2 flex flex-wrap gap-2">
-            {row.image_path && (
+            {imageItems.map((item, idx) => (
               <button
+                key={`img-${item.path}`}
                 type="button"
-                onClick={() => openAttachment(row, 'image')}
+                onClick={() => openAttachment(row, 'image', item.path)}
                 className="inline-flex items-center gap-1.5 text-xs font-bold text-blue-700 bg-blue-50 px-2 py-1 rounded-lg hover:bg-blue-100"
               >
                 <ImageIcon className="w-3.5 h-3.5" />
-                {row.image_name || 'Ver print'}
+                {item.name || `Print ${idx + 1}`}
               </button>
-            )}
-            {row.file_path && (
+            ))}
+            {fileItems.map((item, idx) => (
               <button
+                key={`file-${item.path}`}
                 type="button"
-                onClick={() => openAttachment(row, 'file')}
+                onClick={() => openAttachment(row, 'file', item.path)}
                 className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-700 bg-slate-100 px-2 py-1 rounded-lg hover:bg-slate-200"
               >
                 <FileText className="w-3.5 h-3.5" />
-                {row.file_name || 'Arquivo modelo'}
+                {item.name || `Arquivo ${idx + 1}`}
               </button>
-            )}
+            ))}
           </div>
         </td>
         <td className="px-5 py-4">

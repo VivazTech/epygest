@@ -21,6 +21,9 @@ const EMPTY_ANSWERS = {
 };
 
 const MIN_DETAIL = 150;
+const MAX_ATTACHMENTS = 10;
+
+type AttachmentItem = { path: string; name: string; preview?: string };
 
 export const SUGGESTION_OPEN_EVENT = 'vivaz-open-suggestion';
 export const SUGGESTION_SAVED_EVENT = 'vivaz-suggestion-saved';
@@ -41,11 +44,8 @@ export const SuggestionFab: React.FC<SuggestionFabProps> = ({ activeTab }) => {
   const [answers, setAnswers] = useState(EMPTY_ANSWERS);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState('');
-  const [imagePath, setImagePath] = useState('');
-  const [imageName, setImageName] = useState('');
-  const [imagePreview, setImagePreview] = useState('');
-  const [filePath, setFilePath] = useState('');
-  const [fileName, setFileName] = useState('');
+  const [images, setImages] = useState<AttachmentItem[]>([]);
+  const [files, setFiles] = useState<AttachmentItem[]>([]);
   const [uploadingImage, setUploadingImage] = useState(false);
   const [uploadingFile, setUploadingFile] = useState(false);
   const [dragging, setDragging] = useState(false);
@@ -56,19 +56,30 @@ export const SuggestionFab: React.FC<SuggestionFabProps> = ({ activeTab }) => {
   const detailText = isModule ? howItShouldWork : message;
   const detailLen = detailText.trim().length;
 
-  const clearImage = useCallback(() => {
-    setImagePreview((prev) => {
-      if (prev) URL.revokeObjectURL(prev);
-      return '';
+  const clearImages = useCallback(() => {
+    setImages((prev) => {
+      prev.forEach((item) => {
+        if (item.preview) URL.revokeObjectURL(item.preview);
+      });
+      return [];
     });
-    setImagePath('');
-    setImageName('');
   }, []);
 
-  const clearMapFile = useCallback(() => {
-    setFilePath('');
-    setFileName('');
+  const clearMapFiles = useCallback(() => {
+    setFiles([]);
   }, []);
+
+  const removeImage = (path: string) => {
+    setImages((prev) => {
+      const target = prev.find((item) => item.path === path);
+      if (target?.preview) URL.revokeObjectURL(target.preview);
+      return prev.filter((item) => item.path !== path);
+    });
+  };
+
+  const removeMapFile = (path: string) => {
+    setFiles((prev) => prev.filter((item) => item.path !== path));
+  };
 
   const resetForm = () => {
     setKind('suggestion');
@@ -78,8 +89,8 @@ export const SuggestionFab: React.FC<SuggestionFabProps> = ({ activeTab }) => {
     setHowItShouldWork('');
     setMessage('');
     setAnswers(EMPTY_ANSWERS);
-    clearImage();
-    clearMapFile();
+    clearImages();
+    clearMapFiles();
     setError('');
   };
 
@@ -97,17 +108,36 @@ export const SuggestionFab: React.FC<SuggestionFabProps> = ({ activeTab }) => {
     setUploadingImage(true);
     setError('');
     try {
+      let blocked = false;
+      setImages((prev) => {
+        if (prev.length >= MAX_ATTACHMENTS) {
+          blocked = true;
+          return prev;
+        }
+        return prev;
+      });
+      if (blocked) {
+        setError(`Máximo de ${MAX_ATTACHMENTS} imagens.`);
+        return;
+      }
       const payload = new FormData();
       payload.append('image', file);
       const res = await fetch('/api/suggestions/image', { method: 'POST', body: payload });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || 'Não foi possível enviar a imagem.');
-      setImagePreview((prev) => {
-        if (prev) URL.revokeObjectURL(prev);
-        return URL.createObjectURL(file);
+      const path = String(data.image_path || '');
+      if (!path) throw new Error('Não foi possível enviar a imagem.');
+      setImages((prev) => {
+        if (prev.length >= MAX_ATTACHMENTS || prev.some((item) => item.path === path)) return prev;
+        return [
+          ...prev,
+          {
+            path,
+            name: data.image_name || file.name || 'print.png',
+            preview: URL.createObjectURL(file),
+          },
+        ];
       });
-      setImagePath(data.image_path || '');
-      setImageName(data.image_name || file.name || 'print.png');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Não foi possível enviar a imagem.');
     } finally {
@@ -119,21 +149,56 @@ export const SuggestionFab: React.FC<SuggestionFabProps> = ({ activeTab }) => {
     setUploadingFile(true);
     setError('');
     try {
+      let blocked = false;
+      setFiles((prev) => {
+        if (prev.length >= MAX_ATTACHMENTS) {
+          blocked = true;
+          return prev;
+        }
+        return prev;
+      });
+      if (blocked) {
+        setError(`Máximo de ${MAX_ATTACHMENTS} arquivos.`);
+        return;
+      }
       const payload = new FormData();
       payload.append('file', file);
       const res = await fetch('/api/suggestions/file', { method: 'POST', body: payload });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || 'Não foi possível enviar o arquivo.');
-      setFilePath(data.file_path || '');
-      setFileName(data.file_name || file.name);
-      if (!fileLabel.trim()) setFileLabel(file.name);
+      const path = String(data.file_path || '');
+      if (!path) throw new Error('Não foi possível enviar o arquivo.');
+      setFiles((prev) => {
+        if (prev.length >= MAX_ATTACHMENTS || prev.some((item) => item.path === path)) return prev;
+        return [...prev, { path, name: data.file_name || file.name }];
+      });
+      setFileLabel((prev) => prev.trim() || file.name);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Não foi possível enviar o arquivo.');
     } finally {
       setUploadingFile(false);
     }
-  }, [fileLabel]);
+  }, []);
 
+  const uploadMapFiles = useCallback(
+    async (list: FileList | File[]) => {
+      const selected = Array.from(list || []);
+      for (const file of selected) {
+        await uploadMapFile(file);
+      }
+    },
+    [uploadMapFile]
+  );
+
+  const uploadImages = useCallback(
+    async (list: FileList | File[]) => {
+      const selected = Array.from(list || []).filter((file) => file.type.startsWith('image/'));
+      for (const file of selected) {
+        await uploadImage(file);
+      }
+    },
+    [uploadImage]
+  );
   useEffect(() => {
     const onOpen = (event: Event) => {
       const detail = (event as CustomEvent<{ kind?: RequestKind }>).detail;
@@ -205,15 +270,17 @@ export const SuggestionFab: React.FC<SuggestionFabProps> = ({ activeTab }) => {
           title: title.trim() || null,
           company_scope: companyScope || null,
           file_label: fileLabel.trim() || null,
-          file_path: filePath || null,
-          file_name: fileName || null,
+          file_attachments: files.map(({ path, name }) => ({ path, name })),
+          file_path: files[0]?.path || null,
+          file_name: files[0]?.name || null,
           how_it_should_work: isModule ? howItShouldWork.trim() : null,
           message: isModule ? howItShouldWork.trim() : message.trim(),
           answers: isModule ? answers : {},
           page_tab: activeTab,
           page_label: pageLabel,
-          image_path: imagePath || null,
-          image_name: imageName || null,
+          image_attachments: images.map(({ path, name }) => ({ path, name })),
+          image_path: images[0]?.path || null,
+          image_name: images[0]?.name || null,
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -370,7 +437,7 @@ export const SuggestionFab: React.FC<SuggestionFabProps> = ({ activeTab }) => {
 
                   <div>
                     <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 block">
-                      Arquivo que precisa ser mapeado
+                      Arquivo(s) que precisa(m) ser mapeado(s)
                     </label>
                     <input
                       value={fileLabel}
@@ -379,40 +446,54 @@ export const SuggestionFab: React.FC<SuggestionFabProps> = ({ activeTab }) => {
                       placeholder="Ex.: planilha mensal de vendas, PDF do fornecedor..."
                       className={fieldClass}
                     />
-                    <div className="mt-2 flex flex-wrap items-center gap-2">
-                      <button
-                        type="button"
-                        disabled={sending || uploadingFile}
-                        onClick={() => mapFileInputRef.current?.click()}
-                        className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-200 bg-slate-50 text-xs font-bold text-slate-700 hover:bg-slate-100 disabled:opacity-60"
-                      >
-                        {uploadingFile ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileUp className="w-3.5 h-3.5" />}
-                        Anexar arquivo modelo
-                      </button>
-                      {fileName && (
-                        <span className="text-xs text-slate-600 truncate max-w-[220px]" title={fileName}>
-                          {fileName}
-                          <button
-                            type="button"
-                            className="ml-2 text-red-600 font-bold hover:underline"
-                            onClick={clearMapFile}
-                            disabled={sending}
-                          >
-                            Remover
-                          </button>
+                    <div className="mt-2 space-y-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          disabled={sending || uploadingFile || files.length >= MAX_ATTACHMENTS}
+                          onClick={() => mapFileInputRef.current?.click()}
+                          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-200 bg-slate-50 text-xs font-bold text-slate-700 hover:bg-slate-100 disabled:opacity-60"
+                        >
+                          {uploadingFile ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileUp className="w-3.5 h-3.5" />}
+                          Anexar arquivos modelo
+                        </button>
+                        <span className="text-[11px] text-slate-400">
+                          {files.length}/{MAX_ATTACHMENTS} · pode selecionar vários de uma vez
                         </span>
+                        <input
+                          ref={mapFileInputRef}
+                          type="file"
+                          multiple
+                          accept=".xlsx,.xls,.csv,.pdf,image/png,image/jpeg,image/webp"
+                          className="hidden"
+                          onChange={(e) => {
+                            if (e.target.files?.length) void uploadMapFiles(e.target.files);
+                            e.target.value = '';
+                          }}
+                        />
+                      </div>
+                      {files.length > 0 && (
+                        <ul className="space-y-1.5">
+                          {files.map((item) => (
+                            <li
+                              key={item.path}
+                              className="flex items-center justify-between gap-2 rounded-lg bg-slate-50 border border-slate-100 px-2.5 py-1.5"
+                            >
+                              <span className="text-xs text-slate-700 truncate" title={item.name}>
+                                {item.name}
+                              </span>
+                              <button
+                                type="button"
+                                className="text-[11px] text-red-600 font-bold hover:underline shrink-0"
+                                onClick={() => removeMapFile(item.path)}
+                                disabled={sending}
+                              >
+                                Remover
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
                       )}
-                      <input
-                        ref={mapFileInputRef}
-                        type="file"
-                        accept=".xlsx,.xls,.csv,.pdf,image/png,image/jpeg,image/webp"
-                        className="hidden"
-                        onChange={(e) => {
-                          const file = e.target.files?.[0];
-                          if (file) void uploadMapFile(file);
-                          e.target.value = '';
-                        }}
-                      />
                     </div>
                   </div>
 
@@ -524,70 +605,68 @@ export const SuggestionFab: React.FC<SuggestionFabProps> = ({ activeTab }) => {
                 onDrop={(e) => {
                   e.preventDefault();
                   setDragging(false);
-                  const file = e.dataTransfer.files?.[0];
-                  if (file) void uploadImage(file);
+                  if (e.dataTransfer.files?.length) void uploadImages(e.dataTransfer.files);
                 }}
                 className={cn(
-                  'rounded-xl border border-dashed p-3 transition-colors',
+                  'rounded-xl border border-dashed p-3 transition-colors space-y-2',
                   dragging ? 'border-emerald-400 bg-emerald-50' : 'border-slate-200 bg-slate-50/60'
                 )}
               >
-                {imagePreview ? (
-                  <div className="flex items-start gap-3">
-                    <img
-                      src={imagePreview}
-                      alt={imageName || 'Print anexado'}
-                      className="w-20 h-20 object-cover rounded-lg border border-slate-100 shrink-0"
-                    />
-                    <div className="min-w-0 flex-1">
-                      <p className="text-xs font-bold text-slate-700 truncate">{imageName || 'Print'}</p>
-                      <div className="flex items-center gap-2 mt-2">
-                        <button
-                          type="button"
-                          disabled={uploadingImage || sending}
-                          onClick={() => fileInputRef.current?.click()}
-                          className="text-[11px] font-bold text-[#004D40] hover:underline"
-                        >
-                          Trocar
-                        </button>
-                        <button
-                          type="button"
-                          disabled={uploadingImage || sending}
-                          onClick={clearImage}
-                          className="text-[11px] font-bold text-red-600 hover:underline"
-                        >
-                          Remover
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                ) : (
-                  <button
-                    type="button"
-                    disabled={uploadingImage || sending}
-                    onClick={() => fileInputRef.current?.click()}
-                    className="w-full flex items-center justify-center gap-2 text-xs text-slate-600 py-1"
-                  >
-                    {uploadingImage ? (
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                    ) : (
-                      <ImagePlus className="w-4 h-4 text-emerald-700" />
-                    )}
-                    <span>
-                      {uploadingImage
-                        ? 'Enviando imagem...'
-                        : 'Cole um print (Ctrl+V) ou importe uma imagem (opcional)'}
-                    </span>
-                  </button>
+                {images.length > 0 && (
+                  <ul className="space-y-2">
+                    {images.map((item) => (
+                      <li key={item.path} className="flex items-start gap-3">
+                        {item.preview ? (
+                          <img
+                            src={item.preview}
+                            alt={item.name || 'Print anexado'}
+                            className="w-16 h-16 object-cover rounded-lg border border-slate-100 shrink-0"
+                          />
+                        ) : (
+                          <div className="w-16 h-16 rounded-lg bg-slate-100 border border-slate-100 shrink-0" />
+                        )}
+                        <div className="min-w-0 flex-1">
+                          <p className="text-xs font-bold text-slate-700 truncate">{item.name || 'Print'}</p>
+                          <button
+                            type="button"
+                            disabled={uploadingImage || sending}
+                            onClick={() => removeImage(item.path)}
+                            className="mt-1 text-[11px] font-bold text-red-600 hover:underline"
+                          >
+                            Remover
+                          </button>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
                 )}
+                <button
+                  type="button"
+                  disabled={uploadingImage || sending || images.length >= MAX_ATTACHMENTS}
+                  onClick={() => fileInputRef.current?.click()}
+                  className="w-full flex items-center justify-center gap-2 text-xs text-slate-600 py-1"
+                >
+                  {uploadingImage ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <ImagePlus className="w-4 h-4 text-emerald-700" />
+                  )}
+                  <span>
+                    {uploadingImage
+                      ? 'Enviando imagem...'
+                      : images.length
+                        ? `Adicionar outra imagem (${images.length}/${MAX_ATTACHMENTS})`
+                        : 'Cole prints (Ctrl+V) ou importe imagens (opcional)'}
+                  </span>
+                </button>
                 <input
                   ref={fileInputRef}
                   type="file"
+                  multiple
                   accept="image/png,image/jpeg,image/webp,image/gif"
                   className="hidden"
                   onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (file) void uploadImage(file);
+                    if (e.target.files?.length) void uploadImages(e.target.files);
                     e.target.value = '';
                   }}
                 />
