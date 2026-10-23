@@ -22,6 +22,13 @@ const EMPTY_ANSWERS = {
 
 const MIN_DETAIL = 150;
 
+export const SUGGESTION_OPEN_EVENT = 'vivaz-open-suggestion';
+export const SUGGESTION_SAVED_EVENT = 'vivaz-suggestion-saved';
+
+export const openSuggestionModal = (kind: RequestKind = 'suggestion') => {
+  window.dispatchEvent(new CustomEvent(SUGGESTION_OPEN_EVENT, { detail: { kind } }));
+};
+
 export const SuggestionFab: React.FC<SuggestionFabProps> = ({ activeTab }) => {
   const { showSuccess } = useToast();
   const [open, setOpen] = useState(false);
@@ -128,6 +135,20 @@ export const SuggestionFab: React.FC<SuggestionFabProps> = ({ activeTab }) => {
   }, [fileLabel]);
 
   useEffect(() => {
+    const onOpen = (event: Event) => {
+      const detail = (event as CustomEvent<{ kind?: RequestKind }>).detail;
+      const nextKind = detail?.kind === 'module_request' ? 'module_request' : 'suggestion';
+      resetForm();
+      setKind(nextKind);
+      setOpen(true);
+    };
+    window.addEventListener(SUGGESTION_OPEN_EVENT, onOpen as EventListener);
+    return () => window.removeEventListener(SUGGESTION_OPEN_EVENT, onOpen as EventListener);
+    // resetForm is stable enough for open-from-page trigger
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') closeModal();
@@ -203,6 +224,7 @@ export const SuggestionFab: React.FC<SuggestionFabProps> = ({ activeTab }) => {
       resetForm();
       setOpen(false);
       showSuccess(isModule ? 'Pedido de módulo enviado. Você pode acompanhar em Sugestões e Novos módulos.' : 'Sugestão enviada. Obrigado!');
+      window.dispatchEvent(new CustomEvent(SUGGESTION_SAVED_EVENT, { detail: { kind } }));
     } catch {
       setError('Erro de conexão ao enviar.');
     } finally {

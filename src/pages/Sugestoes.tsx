@@ -6,12 +6,14 @@ import {
   Image as ImageIcon,
   Lightbulb,
   Loader2,
+  Plus,
   Search,
   User,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useSearch } from '../context/SearchContext';
 import { matchesSearch } from '../lib/search';
+import { openSuggestionModal, SUGGESTION_SAVED_EVENT } from '../components/SuggestionFab';
 
 type SuggestionStatus = 'todo' | 'in_progress' | 'waiting_info' | 'done';
 type SuggestionKind = 'suggestion' | 'module_request';
@@ -122,6 +124,14 @@ export const SugestoesPage: React.FC = () => {
     } catch {
       setIsAdmin(false);
     }
+  }, []);
+
+  useEffect(() => {
+    const onSaved = () => {
+      void load();
+    };
+    window.addEventListener(SUGGESTION_SAVED_EVENT, onSaved);
+    return () => window.removeEventListener(SUGGESTION_SAVED_EVENT, onSaved);
   }, []);
 
   const searchQuery = localQuery.trim() || globalQuery;
@@ -352,10 +362,20 @@ export const SugestoesPage: React.FC = () => {
               : 'Acompanhe seus pedidos de sugestão e de novos módulos.'}
           </p>
         </div>
-        <p className="text-xs font-bold uppercase tracking-widest text-slate-400">
-          {openRows.length} em andamento
-          {doneRows.length > 0 ? ` · ${doneRows.length} feito${doneRows.length === 1 ? '' : 's'}` : ''}
-        </p>
+        <div className="flex flex-col items-stretch sm:items-end gap-2">
+          <button
+            type="button"
+            onClick={() => openSuggestionModal('module_request')}
+            className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-[#004D40] text-white text-sm font-bold hover:bg-[#003d33] transition-colors shadow-sm"
+          >
+            <Plus className="w-4 h-4" />
+            Solicitar novo módulo
+          </button>
+          <p className="text-xs font-bold uppercase tracking-widest text-slate-400">
+            {openRows.length} em andamento
+            {doneRows.length > 0 ? ` · ${doneRows.length} feito${doneRows.length === 1 ? '' : 's'}` : ''}
+          </p>
+        </div>
       </div>
 
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 space-y-3">
