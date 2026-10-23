@@ -80,6 +80,7 @@ import {
   initialLaunchStatus,
   isInvoiceFlowEditableBeforeControl,
   isLaunchStatusEditableBeforeControl,
+  launchStatusUpdate,
   validateLaunchFlowStatus,
 } from "./lib/launchFlow.js";
 import {
@@ -2912,7 +2913,7 @@ export function createApp() {
     if (validation.ok === false) return res.status(validation.status).json({ error: validation.error });
 
     const { error } = await scopeByEmpresa(
-      supabase.from("requisitions").update({ status }).eq("id", id),
+      supabase.from("requisitions").update(launchStatusUpdate(status, req.user)).eq("id", id),
       req
     );
     if (error) {
@@ -3516,7 +3517,7 @@ export function createApp() {
     if (validation.ok === false) return res.status(validation.status).json({ error: validation.error });
 
     const { error } = await scopeByEmpresa(
-      supabase.from("manual_entries").update({ status }).eq("id", id),
+      supabase.from("manual_entries").update(launchStatusUpdate(status, req.user)).eq("id", id),
       req
     );
     if (error) {
@@ -3969,7 +3970,7 @@ export function createApp() {
     if (validation.ok === false) return res.status(validation.status).json({ error: validation.error });
 
     const { error } = await scopeByEmpresa(
-      supabase.from("estornos").update({ status }).eq("id", id),
+      supabase.from("estornos").update(launchStatusUpdate(status, req.user)).eq("id", id),
       req
     );
     if (error) {
@@ -4084,6 +4085,25 @@ export function createApp() {
     return false;
   };
 
+  const approvalPendingStage = (item: {
+    type: string;
+    status: string;
+    flow_stage?: string | null;
+  }): "gestor" | "controle" | "financeiro" | null => {
+    if (item.type === "nota" || item.type === "danfe") {
+      if (item.status === "paid") return null;
+      const flow = item.flow_stage || "control_pending";
+      if (flow === "manager_pending") return "gestor";
+      if (flow === "control_pending") return "controle";
+      if (flow === "control_approved") return "financeiro";
+      return null;
+    }
+    if (item.status === "pending_manager") return "gestor";
+    if (item.status === "open") return "controle";
+    if (item.status === "approved") return "financeiro";
+    return null;
+  };
+
   app.get("/api/aprovacoes", requireRole("admin", "controle", "finance", "manager", "diretoria"), async (req, res) => {
     const q = req.query as {
       type?: string;
@@ -4121,6 +4141,9 @@ export function createApp() {
     }) => {
       if (statusFilter === "all") return true;
       if (statusFilter === "pending") return isPendingApprovalItem(item);
+      if (statusFilter === "pending_gestor") return approvalPendingStage(item) === "gestor";
+      if (statusFilter === "pending_controle") return approvalPendingStage(item) === "controle";
+      if (statusFilter === "pending_financeiro") return approvalPendingStage(item) === "financeiro";
       if (statusFilter === "done") {
         if (item.type === "manual" || item.type === "estorno") return item.status === "posted";
         if (item.type === "nota" || item.type === "danfe") {
@@ -4140,6 +4163,19 @@ export function createApp() {
         if (item.type === "mensalidade" || item.type === "ordem") return item.status === "cancelled";
       }
       return true;
+    };
+
+    const paidByFilter = Number((req.query as { paid_by?: string }).paid_by);
+    const paidByOptions = new Map<number, string>();
+    const admit = (item: any, row: any) => {
+      const paidById = Number(row?.paid_by_user_id);
+      item.paid_by_user_id = Number.isFinite(paidById) && paidById > 0 ? paidById : null;
+      item.paid_by_user_name = row?.paid_by_user_name ?? null;
+      if (item.paid_by_user_id != null) {
+        paidByOptions.set(item.paid_by_user_id, String(item.paid_by_user_name || `Usuário #${item.paid_by_user_id}`));
+      }
+      if (Number.isFinite(paidByFilter) && paidByFilter > 0 && item.paid_by_user_id !== paidByFilter) return false;
+      return matchesSector(item.sector_id, item.type) && inDateRange(item.reference_date) && matchesStatus(item);
     };
 
     try {
@@ -4242,9 +4278,7 @@ export function createApp() {
               : null,
           vencimento: row.due_date ? String(row.due_date).slice(0, 10) : null,
         };
-        if (!matchesSector(item.sector_id, item.type)) continue;
-        if (!inDateRange(item.reference_date)) continue;
-        if (!matchesStatus(item)) continue;
+        if (!admit(item, row)) continue;
         items.push(item);
       }
 
@@ -4276,9 +4310,7 @@ export function createApp() {
               : null,
           vencimento: row.due_date ? String(row.due_date).slice(0, 10) : null,
         };
-        if (!matchesSector(item.sector_id, item.type)) continue;
-        if (!inDateRange(item.reference_date)) continue;
-        if (!matchesStatus(item)) continue;
+        if (!admit(item, row)) continue;
         items.push(item);
       }
 
@@ -4310,9 +4342,7 @@ export function createApp() {
               : null,
           vencimento: null,
         };
-        if (!matchesSector(item.sector_id, item.type)) continue;
-        if (!inDateRange(item.reference_date)) continue;
-        if (!matchesStatus(item)) continue;
+        if (!admit(item, row)) continue;
         items.push(item);
       }
 
@@ -4343,9 +4373,7 @@ export function createApp() {
           fornecedor: row.provider_name ? String(row.provider_name) : null,
           vencimento: row.due_date ? String(row.due_date).slice(0, 10) : null,
         };
-        if (!matchesSector(item.sector_id, item.type)) continue;
-        if (!inDateRange(item.reference_date)) continue;
-        if (!matchesStatus(item)) continue;
+        if (!admit(item, row)) continue;
         items.push(item);
       }
 
@@ -4403,9 +4431,7 @@ export function createApp() {
             fornecedor: row.provider_name ? String(row.provider_name) : null,
             vencimento: null,
           };
-          if (!matchesSector(item.sector_id, item.type)) continue;
-          if (!inDateRange(item.reference_date)) continue;
-          if (!matchesStatus(item)) continue;
+          if (!admit(item, row)) continue;
           items.push(item);
         }
       }
@@ -4439,9 +4465,7 @@ export function createApp() {
           fornecedor: contrato?.fornecedor ? String(contrato.fornecedor) : null,
           vencimento,
         };
-        if (!matchesSector(item.sector_id, item.type)) continue;
-        if (!inDateRange(item.reference_date)) continue;
-        if (!matchesStatus(item)) continue;
+        if (!admit(item, row)) continue;
         items.push(item);
       }
 
@@ -4480,6 +4504,7 @@ export function createApp() {
         boleto: "Boleto",
         pix: "PIX",
         transferencia: "Transferência",
+        permuta: "Permuta",
       };
 
       for (const row of ordemRows) {
@@ -4526,9 +4551,7 @@ export function createApp() {
           boleto_file_path: row.boleto_file_path ?? null,
           boleto_file_name: row.boleto_file_name ?? null,
         };
-        if (!matchesSector(item.sector_id, item.type)) continue;
-        if (!inDateRange(item.reference_date)) continue;
-        if (!matchesStatus(item)) continue;
+        if (!admit(item, row)) continue;
         items.push(item);
       }
 
@@ -4584,6 +4607,7 @@ export function createApp() {
             i.crd_code,
             i.crd_name,
             i.user_name,
+            i.paid_by_user_name,
             i.fornecedor,
             i.amount,
             i.status,
@@ -4601,20 +4625,12 @@ export function createApp() {
           acc[i.type] = (acc[i.type] || 0) + 1;
           return acc;
         }, {}),
-        pending_gestor: items.filter((i) => {
-          if (i.type === "manual" || i.type === "estorno" || i.type === "requisicao" || i.type === "comanda") {
-            return i.status === "pending_manager";
-          }
-          if (i.type === "nota" || i.type === "danfe") return (i.flow_stage || "") === "manager_pending";
-          return false;
-        }).length,
-        pending_controle: items.filter((i) => isPendingApprovalItem(i) && i.status !== "pending_manager").length,
-        pending_financeiro: items.filter((i) => {
-          if (i.type === "manual" || i.type === "estorno") return i.status === "approved";
-          if (i.type === "nota" || i.type === "danfe") return (i.flow_stage || "") === "control_approved";
-          if (i.type === "comanda" || i.type === "requisicao") return i.status === "approved";
-          return false;
-        }).length,
+        pending_gestor: items.filter((i) => approvalPendingStage(i) === "gestor").length,
+        pending_controle: items.filter((i) => approvalPendingStage(i) === "controle").length,
+        pending_financeiro: items.filter((i) => approvalPendingStage(i) === "financeiro").length,
+        paid_by_options: [...paidByOptions.entries()]
+          .map(([id, name]) => ({ id, name }))
+          .sort((a, b) => a.name.localeCompare(b.name, "pt-BR")),
         pending_diretoria: items.filter((i) => Number(i.amount) > DIRETORIA_AMOUNT_THRESHOLD).length,
         total_valor: sumAmounts(items, (i) => i.amount, (i) => (i.type === "estorno" ? -1 : 1)),
       };
@@ -4951,7 +4967,7 @@ export function createApp() {
     if (validation.ok === false) return res.status(validation.status).json({ error: validation.error });
 
     const { error } = await scopeByEmpresa(
-      supabase.from("comandas").update({ status }).eq("id", id),
+      supabase.from("comandas").update(launchStatusUpdate(status, req.user)).eq("id", id),
       req
     );
     if (error) {
@@ -5931,6 +5947,8 @@ export function createApp() {
           flow_stage: "paid",
           paid_at: new Date().toISOString(),
           paid_by_sector: actorSector || "FINANCEIRO",
+          paid_by_user_id: Number.isFinite(Number(req.user?.id)) ? Number(req.user?.id) : null,
+          paid_by_user_name: req.user?.name || req.user?.email || null,
           payment_receipt_path: payment_receipt_path || null,
         }).eq("id", id),
         req
@@ -15871,7 +15889,7 @@ export function createApp() {
     if (validation.ok === false) return res.status(validation.status).json({ error: validation.error });
 
     const { error } = await scopeByEmpresa(
-      supabase.from("ordens_compra").update({ status }).eq("id", id),
+      supabase.from("ordens_compra").update(launchStatusUpdate(status, req.user)).eq("id", id),
       req
     );
     if (error) {
@@ -16185,6 +16203,7 @@ export function createApp() {
           ["C/C", b.conta_corrente],
         ]);
       }
+      if (b.pagamento === "permuta") checkRow("Permuta (sem pagamento financeiro)", true);
 
       // ── OBS ─────────────────────────────────────────────────────────────
       if (b.observacao) {
@@ -16374,7 +16393,7 @@ export function createApp() {
         materiais_crd_id: idOrNull(b.materiais_crd_id),
         valor: valorOrdem,
         faturamento: faturamento === "nf_recibo" || faturamento === "recibo" ? faturamento : null,
-        pagamento: pagamento === "cartao" || pagamento === "avista" || pagamento === "boleto" || pagamento === "pix" || pagamento === "transferencia"
+        pagamento: pagamento === "cartao" || pagamento === "avista" || pagamento === "boleto" || pagamento === "pix" || pagamento === "transferencia" || pagamento === "permuta"
           ? pagamento
           : null,
         pix_chave: pagamento === "pix" ? textOrNull(b.pix_chave) : null,
@@ -16757,7 +16776,7 @@ export function createApp() {
     if (validation.ok === false) return res.status(validation.status).json({ error: validation.error });
 
     const { error } = await scopeByEmpresa(
-      supabase.from("contrato_lancamentos").update({ status }).eq("id", id),
+      supabase.from("contrato_lancamentos").update(launchStatusUpdate(status, req.user)).eq("id", id),
       req
     );
     if (error) {

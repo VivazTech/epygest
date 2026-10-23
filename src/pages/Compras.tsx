@@ -12,7 +12,7 @@ import { confirmCancel } from '../lib/confirmAction';
 type Tab = 'ordem' | 'aprovacao';
 
 type FaturamentoTipo = 'nf_recibo' | 'recibo' | '';
-type PagamentoTipo = 'cartao' | 'avista' | 'boleto' | 'pix' | 'transferencia' | '';
+type PagamentoTipo = 'cartao' | 'avista' | 'boleto' | 'pix' | 'transferencia' | 'permuta' | '';
 
 const MAX_ANEXOS = 6;
 const MAX_ANEXO_BYTES = 10 * 1024 * 1024;
@@ -80,6 +80,7 @@ const PAGAMENTO_LABEL: Record<string, string> = {
   boleto: 'Boleto',
   pix: 'PIX',
   transferencia: 'Transferência',
+  permuta: 'Permuta',
 };
 
 const EMPTY_FORM: OrdemForm = {
@@ -893,6 +894,12 @@ export const ComprasPage: React.FC = () => {
                   checked={form.pagamento === 'transferencia'}
                   onChange={() => setVal('pagamento', 'transferencia')}
                   label="Transferência bancária"
+                />
+                <RadioCard
+                  checked={form.pagamento === 'permuta'}
+                  onChange={() => setVal('pagamento', 'permuta')}
+                  label="Permuta"
+                  description="Nota referente a permuta, sem pagamento financeiro"
                 />
               </div>
 

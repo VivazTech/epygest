@@ -47,6 +47,7 @@ const FALLBACK_PAYMENT_METHODS = [
   { id: 'boleto', key: 'boleto', name: 'Boleto', active: true },
   { id: 'cartao_credito', key: 'cartao_credito', name: 'Cartão de crédito', active: true },
   { id: 'dinheiro', key: 'dinheiro', name: 'Dinheiro', active: true },
+  { id: 'permuta', key: 'permuta', name: 'Permuta', active: true },
 ];
 
 export const LancamentosManuaisPage: React.FC = () => {

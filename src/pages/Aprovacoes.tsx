@@ -44,6 +44,7 @@ export const AprovacoesPage: React.FC = () => {
     pending_financeiro?: number;
     pending_diretoria?: number;
     total_valor?: number;
+    paid_by_options?: Array<{ id: number; name: string }>;
   } | null>(null);
   const pagination = useServerPagination(20);
   const [userRole, setUserRole] = useState('viewer');
@@ -53,6 +54,7 @@ export const AprovacoesPage: React.FC = () => {
   const [typeFilter, setTypeFilter] = useState('all');
   const [sectorFilter, setSectorFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('pending');
+  const [paidByFilter, setPaidByFilter] = useState('all');
   const currentYear = new Date().getFullYear();
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
@@ -87,6 +89,7 @@ export const AprovacoesPage: React.FC = () => {
       if (dateFrom) params.set('from', dateFrom);
       if (dateTo) params.set('to', dateTo);
       if (statusFilter !== 'all') params.set('status', statusFilter);
+      if (paidByFilter !== 'all') params.set('paid_by', paidByFilter);
       if (viewTab === 'diretoria') params.set('diretoria', '1');
       if (query.trim()) params.set('q', query.trim());
       if (invoiceNumberFilter.trim()) params.set('invoice_number', invoiceNumberFilter.trim());
@@ -118,6 +121,7 @@ export const AprovacoesPage: React.FC = () => {
     dateFrom,
     dateTo,
     statusFilter,
+    paidByFilter,
     viewTab,
     query,
     invoiceNumberFilter,
@@ -142,8 +146,10 @@ export const AprovacoesPage: React.FC = () => {
           )
         );
         setAllowedSectorIds(sectorIds);
-        if (role === 'finance') setActingSector('financeiro');
-        else if (role === 'manager') setActingSector('gestor');
+        if (role === 'finance') {
+          setActingSector('financeiro');
+          setStatusFilter('pending_financeiro');
+        } else if (role === 'manager') setActingSector('gestor');
         else if (role === 'diretoria') {
           setActingSector('diretoria');
           setViewTab('diretoria');
@@ -175,6 +181,7 @@ export const AprovacoesPage: React.FC = () => {
     dateFrom,
     dateTo,
     statusFilter,
+    paidByFilter,
     viewTab,
     query,
     invoiceNumberFilter,
@@ -202,6 +209,20 @@ export const AprovacoesPage: React.FC = () => {
   }, [summary, pagination.total, pagination.totalAmount]);
 
   const diretoriaCount = metrics.pendingDiretoria;
+
+  const paidByOptions = useMemo(() => {
+    const options = Array.isArray(summary?.paid_by_options) ? summary.paid_by_options : [];
+    if (paidByFilter !== 'all' && !options.some((opt) => String(opt.id) === paidByFilter)) {
+      return [...options, { id: Number(paidByFilter), name: `Usuário #${paidByFilter}` }];
+    }
+    return options;
+  }, [summary, paidByFilter]);
+
+  const kpiFilterClass = (active: boolean) =>
+    cn(
+      'bg-white rounded-2xl border shadow-sm p-4 text-left transition-colors hover:border-slate-300',
+      active ? 'border-slate-900 ring-1 ring-slate-900' : 'border-slate-100'
+    );
 
   const updateManualStatus = async (id: number, status: 'open' | 'approved' | 'posted' | 'cancelled') => {
     if (status === 'cancelled' && !confirmCancel('este lançamento manual')) return;
@@ -658,7 +679,11 @@ export const AprovacoesPage: React.FC = () => {
         {canSwitchActingProfile && (
           <select
             value={actingSector}
-            onChange={(e) => setActingSector(e.target.value as AprovacaoActingSector)}
+            onChange={(e) => {
+              const next = e.target.value as AprovacaoActingSector;
+              setActingSector(next);
+              if (next === 'financeiro') setStatusFilter('pending_financeiro');
+            }}
             className="px-3 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-semibold text-slate-700 shadow-sm self-start"
           >
             <option value="gestor">Atuar como Gestor</option>
@@ -714,22 +739,37 @@ export const AprovacoesPage: React.FC = () => {
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4">
+        <button
+          type="button"
+          onClick={() => setStatusFilter('pending_gestor')}
+          className={kpiFilterClass(statusFilter === 'pending_gestor')}
+        >
           <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Pendentes Gestor</p>
           <p className="text-2xl font-extrabold text-violet-700 mt-1">{metrics.pendingGestor}</p>
-        </div>
-        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4">
+        </button>
+        <button
+          type="button"
+          onClick={() => setStatusFilter('pending_controle')}
+          className={kpiFilterClass(statusFilter === 'pending_controle')}
+        >
           <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Pendentes Controle</p>
           <p className="text-2xl font-extrabold text-orange-600 mt-1">{metrics.pendingControle}</p>
-        </div>
-        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4">
-          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-            {viewTab === 'diretoria' ? 'Acima de R$ 800' : 'Pendentes Financeiro'}
-          </p>
-          <p className={cn('text-2xl font-extrabold mt-1', viewTab === 'diretoria' ? 'text-cyan-700' : 'text-blue-600')}>
-            {viewTab === 'diretoria' ? metrics.pendingDiretoria : metrics.pendingFinanceiro}
-          </p>
-        </div>
+        </button>
+        {viewTab === 'diretoria' ? (
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4">
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Acima de R$ 800</p>
+            <p className="text-2xl font-extrabold mt-1 text-cyan-700">{metrics.pendingDiretoria}</p>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setStatusFilter('pending_financeiro')}
+            className={kpiFilterClass(statusFilter === 'pending_financeiro')}
+          >
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Pendentes Financeiro</p>
+            <p className="text-2xl font-extrabold mt-1 text-blue-600">{metrics.pendingFinanceiro}</p>
+          </button>
+        )}
         <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4">
           <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Itens listados</p>
           <p className="text-2xl font-extrabold text-slate-900 mt-1">{metrics.total}</p>
@@ -740,7 +780,7 @@ export const AprovacoesPage: React.FC = () => {
         </div>
       </div>
 
-      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 grid grid-cols-1 md:grid-cols-5 gap-3">
+      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 grid grid-cols-1 md:grid-cols-3 xl:grid-cols-6 gap-3">
         <select
           value={typeFilter}
           onChange={(e) => setTypeFilter(e.target.value)}
@@ -766,9 +806,23 @@ export const AprovacoesPage: React.FC = () => {
           className="px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm"
         >
           <option value="all">Todos os status</option>
-          <option value="pending">Pendentes</option>
+          <option value="pending">Pendentes (todas as etapas)</option>
+          <option value="pending_gestor">Pendentes Gestor</option>
+          <option value="pending_controle">Pendentes Controle</option>
+          <option value="pending_financeiro">Pendentes Financeiro</option>
           <option value="done">Concluídos</option>
           <option value="cancelled">Cancelados / encerrados</option>
+        </select>
+        <select
+          value={paidByFilter}
+          onChange={(e) => setPaidByFilter(e.target.value)}
+          className="px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+          title="Usuário do Financeiro que deu a baixa"
+        >
+          <option value="all">Baixado por: todos</option>
+          {paidByOptions.map((opt) => (
+            <option key={opt.id} value={String(opt.id)}>Baixado por: {opt.name}</option>
+          ))}
         </select>
         <div title="Data inicial">
           <DateBrInput
@@ -786,7 +840,7 @@ export const AprovacoesPage: React.FC = () => {
             className="px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm w-[11.5rem]"
           />
         </div>
-        <div className="md:col-span-5">
+        <div className="md:col-span-3 xl:col-span-6">
           <LaunchNumberAmountFilters
             invoiceNumber={invoiceNumberFilter}
             onInvoiceNumberChange={setInvoiceNumberFilter}
@@ -905,6 +959,9 @@ export const AprovacoesPage: React.FC = () => {
                     ) : null}
                     {item.user_name ? (
                       <p className="text-[10px] text-slate-400">por {item.user_name}</p>
+                    ) : null}
+                    {item.paid_by_user_name ? (
+                      <p className="text-[10px] text-emerald-700 font-semibold">Baixado por {item.paid_by_user_name}</p>
                     ) : null}
                     {exceedsDiretoriaThreshold(item.amount) ? (
                       <p className="text-[10px] font-bold uppercase tracking-wider text-cyan-700">
@@ -1113,6 +1170,11 @@ export const AprovacoesPage: React.FC = () => {
                       >
                         {meta.label}
                       </span>
+                      {item.paid_by_user_name ? (
+                        <span className="block mt-1 text-[10px] text-slate-500 whitespace-nowrap">
+                          por {item.paid_by_user_name}
+                        </span>
+                      ) : null}
                     </td>
                     <td className="px-6 py-4">
                       <div className="flex justify-end gap-2">{renderActions(item)}</div>

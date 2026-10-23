@@ -73,6 +73,20 @@ export function matchesDatePeriod(dateValue: unknown, from: string, to: string) 
   return true;
 }
 
+/** Campos gravados ao mudar o status; na baixa (posted) registra quem baixou. */
+export function launchStatusUpdate(
+  status: string,
+  user: { id?: number | string | null; name?: string | null; email?: string | null } | null | undefined
+): Record<string, unknown> {
+  if (status !== 'posted') return { status };
+  const userId = Number(user?.id);
+  return {
+    status,
+    paid_by_user_id: Number.isFinite(userId) ? userId : null,
+    paid_by_user_name: user?.name || user?.email || null,
+  };
+}
+
 export function validateLaunchFlowStatus(
   role: string,
   current: string,

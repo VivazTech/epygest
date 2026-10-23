@@ -40,6 +40,8 @@ export type AprovacaoItem = {
   assinado?: boolean;
   alerta_vencimento?: boolean;
   items_count?: number;
+  paid_by_user_id?: number | null;
+  paid_by_user_name?: string | null;
 };
 
 /** Limiar: valores acima de R$ 800 exigem revisão da Diretoria (R$ 800,01 já entra). */
